@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "app/release_profile.h"
+#include "comms/ble_companion.h"
 #include "comms/connectivity_boot_guard.h"
 #include "comms/wifi_retry_policy.h"
 #include "freertos/FreeRTOS.h"
@@ -71,11 +72,7 @@ static bool build_wifi_enabled(void)
 
 static bool build_ble_enabled(void)
 {
-#ifdef CONFIG_BT_ENABLED
-    return true;
-#else
-    return false;
-#endif
+    return d1l_ble_companion_build_enabled();
 }
 
 static bool release_wifi_user_control_available(void)
@@ -96,17 +93,6 @@ static d1l_wifi_retry_policy_t wifi_policy_snapshot(void)
     snapshot = s_wifi_policy;
     portEXIT_CRITICAL(&s_wifi_policy_lock);
     return snapshot;
-}
-
-static const char *ble_runtime_state(bool desired, bool build_enabled)
-{
-    if (!desired) {
-        return "off";
-    }
-    if (!build_enabled) {
-        return "build_disabled";
-    }
-    return "pairing_pending_stack";
 }
 
 static void set_wifi_last_error(const char *reason)
@@ -941,6 +927,8 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     const bool ble_available = release_ble_available();
     const bool observer_available = d1l_release_feature_available(
         D1L_RELEASE_FEATURE_OBSERVER_MQTT);
+    d1l_ble_companion_status_t ble_status = {0};
+    d1l_ble_companion_status(&ble_status);
     const d1l_wifi_retry_policy_t policy = wifi_policy_snapshot();
     d1l_connectivity_boot_guard_record_t boot_guard;
     d1l_connectivity_boot_guard_decision_t boot_decision;
@@ -979,7 +967,8 @@ static void fill_status(d1l_connectivity_status_t *out_status)
         wifi_available && boot_guard_recovered;
     out_status->wifi_crash_loop_detected =
         wifi_available && boot_decision.crash_loop_detected;
-    out_status->ble_stack_active = false;
+    out_status->ble_stack_active =
+        ble_available && ble_status.stack_initialized;
     out_status->wifi_profile_saved =
         wifi_available && settings.wifi_profile_saved;
     out_status->wifi_password_saved =
@@ -991,8 +980,8 @@ static void fill_status(d1l_connectivity_status_t *out_status)
             d1l_wifi_runtime_state_name(policy.state) : "off";
     out_status->ble_state = !ble_available ?
         "unsupported_in_release_profile" :
-        ble_runtime_state(settings.ble_companion_enabled,
-                          out_status->ble_build_enabled);
+        !settings.ble_companion_enabled ? "off" :
+        (ble_status.state ? ble_status.state : "error");
     snprintf(out_status->wifi_ssid, sizeof(out_status->wifi_ssid), "%s",
              wifi_available ? settings.wifi_ssid : "");
     out_status->wifi_ip = wifi_available ? s_wifi_ip : "";
@@ -1030,6 +1019,7 @@ static void fill_status(d1l_connectivity_status_t *out_status)
 
 esp_err_t d1l_connectivity_prepare_reboot(void)
 {
+    const esp_err_t ble_ret = d1l_ble_companion_prepare_reboot();
     portENTER_CRITICAL(&s_wifi_policy_lock);
     d1l_wifi_retry_policy_cancel(&s_wifi_policy);
     portEXIT_CRITICAL(&s_wifi_policy_lock);
@@ -1040,14 +1030,14 @@ esp_err_t d1l_connectivity_prepare_reboot(void)
      * that handler without changing the persisted Wi-Fi setting or profile. */
     if (s_wifi_initialized) {
         if (s_wifi_control_lock && !take_wifi_control()) {
-            return ESP_FAIL;
+            return ble_ret == ESP_OK ? ESP_FAIL : ble_ret;
         }
         esp_err_t ret = esp_wifi_stop();
         if (s_wifi_control_lock) {
             give_wifi_control();
         }
         if (ret != ESP_OK) {
-            return ret;
+            return ble_ret == ESP_OK ? ret : ble_ret;
         }
     }
 #endif
@@ -1055,7 +1045,7 @@ esp_err_t d1l_connectivity_prepare_reboot(void)
     s_wifi_connected = false;
     s_wifi_connecting = false;
     s_wifi_ip[0] = '\0';
-    return ESP_OK;
+    return ble_ret;
 }
 
 esp_err_t d1l_connectivity_init(void)
@@ -1098,6 +1088,19 @@ esp_err_t d1l_connectivity_init(void)
     if (settings.wifi_enabled && !build_wifi_enabled()) {
         set_wifi_last_error("build_disabled");
         return ESP_OK;
+    }
+    if (settings.ble_companion_enabled) {
+        if (!build_ble_enabled()) {
+            return ESP_OK;
+        }
+        const esp_err_t ble_ret = d1l_ble_companion_start();
+        if (ble_ret != ESP_OK) {
+            d1l_settings_t safe_settings = {0};
+            safe_settings.ble_companion_enabled = false;
+            (void)d1l_settings_update_fields(
+                &safe_settings, D1L_SETTINGS_UPDATE_BLE_ENABLED);
+            return ble_ret;
+        }
     }
 #ifdef CONFIG_ESP_WIFI_ENABLED
     if (settings.wifi_enabled && settings.wifi_profile_saved) {
@@ -1515,6 +1518,10 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
     }
 
     settings.ble_companion_enabled = false;
+    ret = d1l_ble_companion_stop();
+    if (ret != ESP_OK) {
+        return ret;
+    }
 #ifdef CONFIG_ESP_WIFI_ENABLED
     ret = mark_boot_guard_active(D1L_CONNECTIVITY_SUBSYSTEM_WIFI);
     if (ret != ESP_OK) {
@@ -1598,8 +1605,9 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
 #endif
     }
 #ifdef CONFIG_ESP_WIFI_ENABLED
-    /* BLE transport is not a supported production runtime in this release.
-     * WP-20 must add symmetric boot handling before it can arm this guard. */
+    /* This guard currently records Wi-Fi crash recovery only. Clear that
+     * Wi-Fi-specific marker before starting the independently fail-closed BLE
+     * foundation. */
     esp_err_t boot_guard_ret = ESP_OK;
     if (enabled) {
         boot_guard_ret = clear_boot_guard();
@@ -1610,6 +1618,17 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
     if (boot_guard_ret != ESP_OK) {
         set_wifi_last_error("boot_guard_unavailable");
         return boot_guard_ret;
+    }
+    if (!enabled) {
+        return d1l_ble_companion_stop();
+    }
+    const esp_err_t start_ret = d1l_ble_companion_start();
+    if (start_ret != ESP_OK) {
+        d1l_settings_t safe_settings = {0};
+        safe_settings.ble_companion_enabled = false;
+        const esp_err_t rollback_ret = d1l_settings_update_fields(
+            &safe_settings, D1L_SETTINGS_UPDATE_BLE_ENABLED);
+        return rollback_ret == ESP_OK ? start_ret : rollback_ret;
     }
     return ESP_OK;
 }

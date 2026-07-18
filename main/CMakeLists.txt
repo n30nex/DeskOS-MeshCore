@@ -19,6 +19,8 @@ idf_component_register(
         "comms/connectivity_boot_guard.c"
         "comms/connectivity_manager.c"
         "comms/wifi_retry_policy.c"
+        "comms/ble_companion.c"
+        "comms/ble_companion_queue.c"
         "comms/companion_3byte.c"
         "comms/usb_command_parser.c"
         "comms/usb_console.c"
@@ -116,6 +118,7 @@ idf_component_register(
         "ui"
     REQUIRES
         bsp
+        bt
         bootloader_support
         driver
         esp_timer

@@ -63,7 +63,9 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "D1L_WIFI_RETRY_MAX_WINDOW_MS 300000U" in policy_header
     assert "D1L_WIFI_RETRY_MAX_ATTEMPTS 8U" in policy_header
     assert "D1L_WIFI_CONTROL_LOCK_TIMEOUT_MS 10000U" in source
-    assert "pairing_pending_stack" in source
+    assert "d1l_ble_companion_start()" in source
+    assert "d1l_ble_companion_stop()" in source
+    assert "d1l_ble_companion_status(&ble_status)" in source
     assert "d1l_settings_save_wifi_profile(ssid, password)" in source
     assert "d1l_settings_clear_wifi_profile()" in source
     assert "ESP_NETIF_DEFAULT_WIFI_STA()" in source
@@ -83,7 +85,7 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "WIFI_STORAGE_RAM" in source
     assert "ESP_ERR_NOT_SUPPORTED" in source
     assert "CONFIG_ESP_WIFI_ENABLED" in source
-    assert "CONFIG_BT_ENABLED" in source
+    assert "d1l_ble_companion_build_enabled()" in source
     assert "esp_wifi" in cmake
     assert "esp_netif" in cmake
     assert "esp_event" in cmake
@@ -91,7 +93,8 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert '"comms/connectivity_boot_guard.c"' in cmake
     assert '"comms/wifi_retry_policy.c"' in cmake
     assert "CONFIG_ESP_WIFI_ENABLED=y" in defaults
-    assert "CONFIG_BT_ENABLED=n" in defaults
+    assert "CONFIG_BT_ENABLED=y" in defaults
+    assert "CONFIG_BT_NIMBLE_ENABLED=y" in defaults
     assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y" in defaults
     assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y" in defaults
 
@@ -101,14 +104,15 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     ]
     assert "if (s_wifi_initialized)" in reset
     assert "esp_wifi_stop()" in reset
-    assert "return ret" in reset
+    assert "return ble_ret == ESP_OK ? ret : ble_ret" in reset
     assert "s_wifi_started = false" in reset
     assert "s_wifi_connected = false" in reset
     assert "s_wifi_connecting = false" in reset
     assert "s_wifi_ip[0] = '\\0'" in reset
-    assert "return ESP_OK" in reset
+    assert "return ble_ret" in reset
     assert "d1l_settings" not in reset
     assert "esp_wifi_deinit" not in reset
+    assert "d1l_ble_companion_prepare_reboot()" in reset
 
     connect = source[
         source.index("esp_err_t d1l_connectivity_wifi_connect"):
@@ -161,7 +165,7 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
     assert "mark_boot_guard_active" not in boot_recovery
     assert '"boot_recovery_wifi_crash_loop"' in boot_recovery
     assert '"boot_guard_unavailable"' in boot_recovery
-    assert "safe_settings" not in boot_recovery
+    assert "safe_settings.wifi_enabled" not in boot_recovery
     assert "d1l_settings_save" not in boot_recovery.split("#ifdef CONFIG_ESP_WIFI_ENABLED", 1)[1]
     assert "esp_event_handler_instance_unregister" in source
     assert "esp_wifi_deinit()" in source
