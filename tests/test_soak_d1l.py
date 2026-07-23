@@ -921,6 +921,97 @@ def test_active_listener_flow_requires_exact_counters_and_12_hex_sender():
     )[0] is False
 
 
+def test_active_listener_flow_accepts_only_exact_remote_peer_binding():
+    rf = soak_d1l.rf_acceptance
+    config = rf.remote_peer_config()
+    d1l_public_key = rf.DEFAULT_D1L_PUBLIC_KEY
+
+    def status(
+        *,
+        rx: int,
+        tx: int,
+        replies: int,
+        rx_at: str,
+        tx_at: str,
+    ) -> dict:
+        return {
+            "run_id": "pi5-peer-run",
+            "service": "openclaw-radio-listener",
+            "serial": {
+                "port": rf.REMOTE_PEER_DEVICE,
+                "mesh_connected": True,
+                "public_key": rf.REMOTE_PEER_PUBLIC_KEY,
+            },
+            "mesh": {
+                "last_rx_sender": d1l_public_key[:12],
+                "last_rx_kind": "dm",
+                "last_tx_kind": "dm",
+                "last_rx_at": rx_at,
+                "last_tx_at": tx_at,
+            },
+            "counters": {
+                "rx_dm_total": rx,
+                "tx_dm_total": tx,
+                "local_fast_reply_total": replies,
+                "tx_dm_ack_miss_total": 2,
+            },
+        }
+
+    before = status(
+        rx=10,
+        tx=20,
+        replies=30,
+        rx_at="before-rx",
+        tx_at="before-tx",
+    )
+    after = status(
+        rx=16,
+        tx=26,
+        replies=36,
+        rx_at="after-rx",
+        tx_at="after-tx",
+    )
+    arguments = {
+        "successful_send_count": 6,
+        "d1l_public_key": d1l_public_key,
+        "peer_fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+        "peer_public_key": rf.REMOTE_PEER_PUBLIC_KEY,
+        "minimum_send_count": 6,
+        "remote_config": config,
+    }
+
+    ok, deltas = soak_d1l.active_listener_flow_ok(
+        before,
+        after,
+        **arguments,
+    )
+
+    assert ok is True
+    assert deltas["rx_dm_total"] == 6
+
+    wrong_device = json.loads(json.dumps(after))
+    wrong_device["serial"]["port"] = "/dev/krab-other"
+    assert (
+        soak_d1l.active_listener_flow_ok(
+            before,
+            wrong_device,
+            **arguments,
+        )[0]
+        is False
+    )
+
+    disconnected = json.loads(json.dumps(after))
+    disconnected["serial"]["mesh_connected"] = False
+    assert (
+        soak_d1l.active_listener_flow_ok(
+            before,
+            disconnected,
+            **arguments,
+        )[0]
+        is False
+    )
+
+
 def test_openclaw_active_soak_text_and_send_floor_are_fail_fast():
     assert soak_d1l.listener_test_text_ok("Core acceptance TEST 1")
     assert soak_d1l.listener_test_text_ok("core_soak_test")
@@ -1257,3 +1348,187 @@ def test_main_rejects_malformed_expected_firmware_commit(monkeypatch):
         soak_d1l.main()
 
     assert exc_info.value.code == 2
+
+
+def test_soak_report_collision_prevents_serial_and_peer_access(
+    tmp_path,
+    monkeypatch,
+):
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        soak_d1l,
+        "__file__",
+        str(tmp_path / "scripts" / "soak_d1l.py"),
+    )
+    report_path = tmp_path / "soak-report.json"
+    report_path.write_bytes(b"sentinel")
+    calls = []
+
+    def unexpected_hardware(**_kwargs):
+        calls.append(True)
+        raise AssertionError("report collision must fail before hardware")
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "run_serial_soak",
+        unexpected_hardware,
+    )
+    monkeypatch.setattr(
+        soak_d1l.rf_acceptance,
+        "run_remote_peer_operation",
+        unexpected_hardware,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "soak_d1l.py",
+            "--port",
+            "COM12",
+            "--expected-firmware-commit",
+            "a" * 40,
+            "--github-run-id",
+            "1",
+            "--github-run-attempt",
+            "1",
+            "--out",
+            str(report_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        soak_d1l.main()
+
+    assert exc_info.value.code == 2
+    assert calls == []
+    assert report_path.read_bytes() == b"sentinel"
+
+
+def test_soak_dry_run_writes_the_exclusively_reserved_report(
+    tmp_path,
+    monkeypatch,
+):
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        soak_d1l,
+        "__file__",
+        str(tmp_path / "scripts" / "soak_d1l.py"),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "stamp_report",
+        lambda report, _root: report,
+    )
+    report_path = tmp_path / "soak-dry-run.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "soak_d1l.py",
+            "--dry-run",
+            "--out",
+            str(report_path),
+        ],
+    )
+
+    assert soak_d1l.main() == 0
+    report = json.loads(report_path.read_text(encoding="ascii"))
+    assert report["mode"] == "dry-run"
+    assert report["hardware_required"] is False
+    assert report_path.read_bytes().endswith(b"\n")
+
+
+def test_soak_peer_sidecar_collision_prevents_serial_and_ssh(
+    tmp_path,
+    monkeypatch,
+):
+    rf = soak_d1l.rf_acceptance
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        soak_d1l,
+        "__file__",
+        str(tmp_path / "scripts" / "soak_d1l.py"),
+    )
+    real_datetime = soak_d1l.datetime
+
+    class FixedDateTime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime(
+                2026,
+                7,
+                23,
+                17,
+                0,
+                0,
+                123456,
+                tzinfo=tz,
+            )
+
+    monkeypatch.setattr(soak_d1l, "datetime", FixedDateTime)
+    monkeypatch.setitem(sys.modules, "serial", object())
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    config = rf.remote_peer_config()
+    peer_report = {
+        "controlled_peer": {
+            "evidence_source": rf.REMOTE_PEER_EVIDENCE_SOURCE,
+            "port": None,
+            "fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+            **config,
+        },
+        "controlled_peer_adapter": rf.REMOTE_PEER_ADAPTER,
+        "d1l_public_key": rf.DEFAULT_D1L_PUBLIC_KEY,
+    }
+    monkeypatch.setattr(
+        soak_d1l,
+        "qualified_controlled_peer_receipt",
+        lambda **_kwargs: (peer_report, {"path": "rf.json"}),
+    )
+    external_calls = []
+
+    def unexpected_external(*_args, **_kwargs):
+        external_calls.append(True)
+        raise AssertionError("collision must fail before external I/O")
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        unexpected_external,
+    )
+    monkeypatch.setattr(
+        rf,
+        "capture_remote_peer_status",
+        unexpected_external,
+    )
+    capture_dir = tmp_path / "artifacts" / "soak" / "rf-peer"
+    capture_dir.mkdir(parents=True)
+    token = (
+        "core-soak-aaaaaaaaaaaa-1-1-"
+        "20260723T170000123456Z"
+    )
+    collision = capture_dir / f"{token}_peer_after.json"
+    collision.write_bytes(b"sentinel")
+
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        run_soak_for_timeout_test(
+            active_dm_fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+            active_dm_text="core soak test",
+            active_interval_sec=10.0,
+            expected_firmware_commit="a" * 40,
+            github_run_id="1",
+            workflow_run_attempt="1",
+            controlled_peer_receipt=tmp_path / "rf.json",
+            peer_capture_dir=capture_dir,
+        )
+
+    assert external_calls == []
+    assert collision.read_bytes() == b"sentinel"
+    assert not (capture_dir / f"{token}_peer_before.json").exists()

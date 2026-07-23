@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import os
 import re
+import subprocess
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 try:
     from artifact_metadata import git_metadata, stamp_report
@@ -34,6 +37,524 @@ RADIO_LISTENER_CONTACT_NAME = "CoreTestPeer"
 RADIO_LISTENER_STATUS_PATH = Path(
     r"F:\openclaw\runtime\workspace\radio_listener.status.json"
 )
+REMOTE_PEER_EVIDENCE_SOURCE = "remote_peer_status_ssh"
+REMOTE_PEER_ADAPTER = "pi5_unix_control_socket"
+REMOTE_PEER_SSH_HOST = "neonx@192.168.0.24"
+REMOTE_PEER_HOSTNAME = "neopi5"
+REMOTE_PEER_STATUS_PATH = (
+    "/opt/canadaverse/com15-responder/data/radio_listener.status.json"
+)
+REMOTE_PEER_CONTROL_SOCKET = (
+    "/run/canadaverse-control/com15/control.sock"
+)
+REMOTE_PEER_DEVICE = "/dev/krab-t-echo"
+REMOTE_PEER_PUBLIC_KEY = (
+    "024999dedfd26763c5606169c3ebd34e05a9475cf78220a81078b5dd27caca44"
+)
+REMOTE_PEER_FINGERPRINT = REMOTE_PEER_PUBLIC_KEY[:16].upper()
+REMOTE_PEER_MAX_STATUS_AGE_SEC = 120.0
+REMOTE_PEER_MAX_STATUS_BYTES = 1024 * 1024
+REMOTE_PEER_MAX_CONTROL_BYTES = 64 * 1024
+REMOTE_PEER_SSH_TIMEOUT_SEC = 45.0
+REMOTE_PEER_HELPER_SCHEMA = 1
+REMOTE_PEER_FORBIDDEN_DEVICE = "/dev/krab-" + "com" + str(11)
+
+
+class RemotePeerError(RuntimeError):
+    """A bounded, operator-facing remote controlled-peer failure."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+REMOTE_PEER_HELPER = r"""
+import base64
+import hashlib
+import json
+import os
+import socket
+import stat
+import sys
+
+SCHEMA = 1
+MAX_INPUT = 32768
+MAX_STATUS = 1048576
+MAX_CONTROL = 65536
+
+def emit(value):
+    sys.stdout.write(json.dumps(value, separators=(",", ":"), sort_keys=True) + "\n")
+    sys.stdout.flush()
+
+def fail(code, message):
+    emit({
+        "schema": SCHEMA,
+        "ok": False,
+        "operation": None,
+        "result": None,
+        "error": {"code": code, "message": str(message)[:240]},
+    })
+
+def absolute_path(value, name):
+    if (
+        not isinstance(value, str)
+        or not value.startswith("/")
+        or len(value) > 512
+        or any(ord(char) < 32 for char in value)
+    ):
+        raise ValueError(name + " must be a bounded absolute POSIX path")
+    parts = value.split("/")
+    if any(part in (".", "..") for part in parts):
+        raise ValueError(name + " cannot contain dot segments")
+    return value
+
+def read_regular_file(path):
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("status path is not a regular file")
+        if before.st_size < 2 or before.st_size > MAX_STATUS:
+            raise ValueError("status file size is outside the bounded range")
+        chunks = []
+        remaining = MAX_STATUS + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(fd)
+        if len(raw) > MAX_STATUS:
+            raise ValueError("status file exceeds the bounded range")
+        if (
+            before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or len(raw) != before.st_size
+        ):
+            raise ValueError("status file changed during capture")
+        return raw, after.st_mtime_ns
+    finally:
+        os.close(fd)
+
+try:
+    request_raw = sys.stdin.buffer.read(MAX_INPUT + 1)
+    if len(request_raw) > MAX_INPUT:
+        raise ValueError("request exceeds the bounded input size")
+    request = json.loads(request_raw.decode("utf-8"))
+    if not isinstance(request, dict) or set(request) != {
+        "schema", "operation", "status_path", "control_socket", "request_b64"
+    }:
+        raise ValueError("request has an invalid envelope")
+    if request.get("schema") != SCHEMA:
+        raise ValueError("request schema is unsupported")
+    operation = request.get("operation")
+    status_path = absolute_path(request.get("status_path"), "status_path")
+    control_socket = absolute_path(request.get("control_socket"), "control_socket")
+    if operation == "capture_status":
+        if request.get("request_b64") is not None:
+            raise ValueError("capture_status cannot include a control request")
+        raw, mtime_ns = read_regular_file(status_path)
+        result = {
+            "path": status_path,
+            "size": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "mtime_ns": mtime_ns,
+            "hostname": socket.gethostname(),
+            "raw_b64": base64.b64encode(raw).decode("ascii"),
+        }
+    elif operation == "send_control":
+        encoded = request.get("request_b64")
+        if not isinstance(encoded, str):
+            raise ValueError("send_control requires request_b64")
+        raw_request = base64.b64decode(encoded.encode("ascii"), validate=True)
+        if (
+            not raw_request.endswith(b"\n")
+            or len(raw_request) < 3
+            or len(raw_request) > 16384
+        ):
+            raise ValueError("control request is not bounded newline JSON")
+        socket_stat = os.lstat(control_socket)
+        if not stat.S_ISSOCK(socket_stat.st_mode):
+            raise ValueError("control_socket is not a Unix socket")
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(40.0)
+        try:
+            client.connect(control_socket)
+            client.sendall(raw_request)
+            client.shutdown(socket.SHUT_WR)
+            chunks = []
+            total = 0
+            while True:
+                chunk = client.recv(min(8192, MAX_CONTROL + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > MAX_CONTROL:
+                    raise ValueError("control response exceeds the bounded size")
+                if b"\n" in chunk:
+                    break
+            raw_response = b"".join(chunks)
+        finally:
+            client.close()
+        if (
+            not raw_response.endswith(b"\n")
+            or raw_response.count(b"\n") != 1
+            or len(raw_response) > MAX_CONTROL
+        ):
+            raise ValueError("control response is not one bounded newline JSON object")
+        result = {
+            "socket_path": control_socket,
+            "hostname": socket.gethostname(),
+            "request_size": len(raw_request),
+            "request_sha256": hashlib.sha256(raw_request).hexdigest(),
+            "response_size": len(raw_response),
+            "response_sha256": hashlib.sha256(raw_response).hexdigest(),
+            "response_b64": base64.b64encode(raw_response).decode("ascii"),
+        }
+    else:
+        raise ValueError("operation is unsupported")
+    emit({
+        "schema": SCHEMA,
+        "ok": True,
+        "operation": operation,
+        "result": result,
+        "error": None,
+    })
+except Exception as exc:
+    fail(type(exc).__name__, exc)
+"""
+REMOTE_PEER_HELPER_COMMAND = (
+    'python3 -c "import base64;'
+    "exec(base64.b64decode('"
+    + base64.b64encode(REMOTE_PEER_HELPER.encode("utf-8")).decode("ascii")
+    + "'))\""
+)
+
+
+class EvidenceReservation:
+    """One exclusively created evidence file kept open through capture."""
+
+    def __init__(
+        self,
+        *,
+        root: Path,
+        path: Path,
+        label: str,
+    ) -> None:
+        self.root = root.resolve(strict=True)
+        candidate = path if path.is_absolute() else self.root / path
+        self.path = Path(os.path.abspath(os.fspath(candidate)))
+        self.label = label
+        self.fd: int | None = None
+        self.written = False
+        self.external_io_started = False
+        self._reserve()
+
+    def _reserve(self) -> None:
+        try:
+            relative = self.path.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError(
+                f"{self.label} evidence path must stay inside the repository"
+            ) from exc
+        if not relative.parts:
+            raise ValueError(f"{self.label} evidence path cannot be the root")
+        if any(
+            ":" in part or any(ord(char) < 32 for char in part)
+            for part in relative.parts
+        ):
+            raise ValueError(
+                f"{self.label} evidence path contains an unsafe component"
+            )
+        self._assert_safe_parents(require_exists=False)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._assert_safe_parents(require_exists=True)
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            self.fd = os.open(self.path, flags, 0o600)
+        except FileExistsError as exc:
+            raise ValueError(
+                f"refusing to overwrite reserved evidence: {self.path}"
+            ) from exc
+        try:
+            self._assert_path_identity()
+            self._write_marker(
+                state="reserved_before_external_io",
+                external_io_started=False,
+            )
+        except Exception:
+            self._close()
+            try:
+                self.path.unlink()
+            except OSError:
+                pass
+            raise
+
+    def _assert_safe_parents(self, *, require_exists: bool) -> None:
+        relative = self.path.relative_to(self.root)
+        cursor = self.root
+        if is_link_or_reparse(cursor):
+            raise ValueError(
+                f"{self.label} repository root cannot be a link/reparse point"
+            )
+        for part in relative.parts[:-1]:
+            cursor /= part
+            lexically_exists = os.path.lexists(cursor)
+            if lexically_exists and is_link_or_reparse(cursor):
+                raise ValueError(
+                    f"{self.label} evidence parent cannot be a link/reparse point"
+                )
+            if cursor.exists() and not cursor.is_dir():
+                raise ValueError(
+                    f"{self.label} evidence parent must be a directory"
+                )
+            if require_exists and not cursor.is_dir():
+                raise ValueError(
+                    f"{self.label} evidence parent was not created"
+                )
+
+    def _assert_path_identity(self) -> None:
+        if self.fd is None:
+            raise ValueError(f"{self.label} evidence reservation is closed")
+        self._assert_safe_parents(require_exists=True)
+        if is_link_or_reparse(self.path):
+            raise ValueError(
+                f"{self.label} evidence path cannot be a link/reparse point"
+            )
+        path_stat = os.lstat(self.path)
+        if not os.path.samestat(os.fstat(self.fd), path_stat):
+            raise ValueError(
+                f"{self.label} evidence reservation identity changed"
+            )
+        resolved = self.path.resolve(strict=True)
+        resolved.relative_to(self.root)
+
+    def _write_raw(self, raw: bytes) -> None:
+        if self.fd is None:
+            raise ValueError(f"{self.label} evidence reservation is closed")
+        self._assert_path_identity()
+        os.lseek(self.fd, 0, os.SEEK_SET)
+        os.ftruncate(self.fd, 0)
+        offset = 0
+        while offset < len(raw):
+            written = os.write(self.fd, raw[offset:])
+            if written <= 0:
+                raise OSError("evidence write made no progress")
+            offset += written
+        os.fsync(self.fd)
+        self._assert_path_identity()
+        stat_result = os.fstat(self.fd)
+        if stat_result.st_size != len(raw):
+            raise OSError(
+                f"{self.label} evidence size changed during write"
+            )
+
+    def _marker_bytes(
+        self,
+        *,
+        state: str,
+        external_io_started: bool,
+        error_type: str | None = None,
+    ) -> bytes:
+        marker = {
+            "schema": 1,
+            "kind": "sigui_evidence_reservation",
+            "state": state,
+            "label": self.label,
+            "path": self.path.relative_to(self.root).as_posix(),
+            "external_io_started": external_io_started,
+            "transmission_may_have_occurred": external_io_started,
+            "error_type": error_type,
+        }
+        return (
+            json.dumps(marker, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        ).encode("ascii")
+
+    def _write_marker(
+        self,
+        *,
+        state: str,
+        external_io_started: bool,
+        error_type: str | None = None,
+    ) -> None:
+        self._write_raw(
+            self._marker_bytes(
+                state=state,
+                external_io_started=external_io_started,
+                error_type=error_type,
+            )
+        )
+
+    def mark_external_io_started(self) -> None:
+        if self.written:
+            return
+        self._write_marker(
+            state="reserved_external_io_may_follow",
+            external_io_started=True,
+        )
+        self.external_io_started = True
+
+    def mark_incomplete(self, error_type: str) -> None:
+        if self.written:
+            return
+        try:
+            self._write_marker(
+                state="incomplete_external_io_may_have_occurred",
+                external_io_started=True,
+                error_type=error_type[:96],
+            )
+        except Exception:
+            # The pre-I/O marker remains the fail-closed evidence when a
+            # post-I/O disk failure prevents a more specific marker.
+            pass
+        self.external_io_started = True
+
+    def write_bytes(self, raw: bytes) -> None:
+        if self.written:
+            raise ValueError(
+                f"{self.label} evidence reservation was already written"
+            )
+        self._write_raw(raw)
+        self.written = True
+
+    def receipt(
+        self,
+        *,
+        raw: bytes,
+        source_path: str,
+        source_host: str | None = None,
+        transport: str | None = None,
+        extra: dict | None = None,
+    ) -> dict:
+        if not self.written:
+            raise ValueError(
+                f"{self.label} evidence reservation is not complete"
+            )
+        self._assert_path_identity()
+        digest = hashlib.sha256(raw).hexdigest()
+        if (
+            self.path.stat().st_size != len(raw)
+            or sha256_file(self.path) != digest
+        ):
+            raise ValueError(
+                f"{self.label} evidence bytes changed after capture"
+            )
+        receipt = {
+            "path": self.path.relative_to(self.root).as_posix(),
+            "size": len(raw),
+            "sha256": digest,
+            "source_path": source_path,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if source_host is not None:
+            receipt["source_host"] = source_host
+        if transport is not None:
+            receipt["transport"] = transport
+        if extra:
+            receipt.update(extra)
+        return receipt
+
+    def cleanup_if_safe(self) -> None:
+        if self.written or self.external_io_started:
+            return
+        try:
+            self._assert_path_identity()
+            self._close()
+            self.path.unlink()
+        except (OSError, RuntimeError, ValueError):
+            self._close()
+
+    def _close(self) -> None:
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+    def close(self) -> None:
+        self._close()
+
+
+class EvidenceBundle:
+    """A group of evidence files reserved before any external operation."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.resolve(strict=True)
+        self.files: dict[str, EvidenceReservation] = {}
+        self.external_io_started = False
+
+    def reserve(
+        self, name: str, path: Path, *, label: str | None = None
+    ) -> EvidenceReservation:
+        if self.external_io_started:
+            raise ValueError(
+                "cannot reserve additional evidence after external I/O started"
+            )
+        if name in self.files:
+            raise ValueError(f"duplicate evidence reservation {name}")
+        try:
+            reservation = EvidenceReservation(
+                root=self.root,
+                path=path,
+                label=label or name,
+            )
+        except Exception:
+            self.cleanup_if_safe()
+            raise
+        self.files[name] = reservation
+        return reservation
+
+    def get(self, name: str) -> EvidenceReservation:
+        if name not in self.files:
+            raise ValueError(f"missing evidence reservation {name}")
+        return self.files[name]
+
+    def mark_external_io_started(self) -> None:
+        if self.external_io_started:
+            return
+        for reservation in self.files.values():
+            reservation.mark_external_io_started()
+        self.external_io_started = True
+
+    def mark_incomplete(self, exc: BaseException) -> None:
+        if not self.external_io_started:
+            return
+        for reservation in self.files.values():
+            reservation.mark_incomplete(type(exc).__name__)
+
+    def cleanup_if_safe(self) -> None:
+        if self.external_io_started:
+            return
+        for reservation in self.files.values():
+            reservation.cleanup_if_safe()
+
+    def close(self) -> None:
+        for reservation in self.files.values():
+            reservation.close()
+
+    def __enter__(self) -> "EvidenceBundle":
+        return self
+
+    def __exit__(self, exc_type, exc, _traceback) -> bool:
+        if exc is not None:
+            if self.external_io_started:
+                self.mark_incomplete(exc)
+            else:
+                self.cleanup_if_safe()
+        self.close()
+        return False
 
 
 def utc_stamp() -> str:
@@ -63,6 +584,345 @@ def exact_commit(value: object) -> str | None:
     if re.fullmatch(r"[0-9a-f]{40}", normalized) is None:
         return None
     return normalized
+
+
+def validate_safe_token(
+    value: object,
+    *,
+    max_length: int = 96,
+) -> str:
+    if not isinstance(value, str):
+        raise ValueError("RF token must be a string")
+    if (
+        not value
+        or len(value) > max_length
+        or len(value.encode("utf-8")) > max_length
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value) is None
+    ):
+        raise ValueError(
+            f"RF token must be 1-{max_length} ASCII letters, digits, dots, "
+            "underscores, or hyphens and cannot contain whitespace or "
+            "console metacharacters"
+        )
+    return value
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON number {value!r} is not allowed")
+
+
+def _object_without_duplicate_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        value[key] = item
+    return value
+
+
+def strict_json_object(raw: bytes, label: str) -> dict:
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{label} is not valid UTF-8") from exc
+    try:
+        value = json.loads(
+            decoded,
+            object_pairs_hook=_object_without_duplicate_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not strict JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return value
+
+
+def _bounded_posix_path(value: object, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.startswith("/")
+        or len(value) > 512
+        or any(ord(char) < 32 for char in value)
+    ):
+        raise ValueError(f"{label} must be a bounded absolute POSIX path")
+    path = PurePosixPath(value)
+    if (
+        any(part in {".", ".."} for part in value.split("/"))
+        or str(path) != value
+    ):
+        raise ValueError(f"{label} cannot contain dot segments")
+    return value
+
+
+def validate_ssh_host(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("controlled-peer SSH host is required")
+    host = value.strip()
+    if (
+        not host
+        or len(host) > 255
+        or host.startswith("-")
+        or any(ord(char) < 33 or ord(char) > 126 for char in host)
+        or re.fullmatch(
+            r"(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}@)?"
+            r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252}[A-Za-z0-9])?",
+            host,
+        )
+        is None
+    ):
+        raise ValueError(
+            "controlled-peer SSH host must be a bounded user@host or host name"
+        )
+    if host != REMOTE_PEER_SSH_HOST:
+        raise ValueError(
+            "remote controlled-peer SSH target must be exactly "
+            f"{REMOTE_PEER_SSH_HOST}"
+        )
+    return host
+
+
+def validate_remote_peer_config(config: object) -> dict:
+    if not isinstance(config, dict):
+        raise ValueError("remote controlled-peer configuration is required")
+    expected_keys = {
+        "ssh_host",
+        "hostname",
+        "status_path",
+        "control_socket",
+        "device",
+        "public_key",
+        "max_status_age_sec",
+    }
+    if set(config) != expected_keys:
+        raise ValueError("remote controlled-peer configuration has invalid fields")
+    ssh_host = validate_ssh_host(config.get("ssh_host"))
+    hostname = config.get("hostname")
+    if hostname != REMOTE_PEER_HOSTNAME:
+        raise ValueError(
+            "remote controlled-peer hostname must be exactly "
+            f"{REMOTE_PEER_HOSTNAME}"
+        )
+    status_path = _bounded_posix_path(
+        config.get("status_path"), "controlled-peer status path"
+    )
+    control_socket = _bounded_posix_path(
+        config.get("control_socket"), "controlled-peer control socket"
+    )
+    if status_path != REMOTE_PEER_STATUS_PATH:
+        raise ValueError(
+            "remote controlled-peer status path must be exactly "
+            f"{REMOTE_PEER_STATUS_PATH}"
+        )
+    if control_socket != REMOTE_PEER_CONTROL_SOCKET:
+        raise ValueError(
+            "remote controlled-peer control socket must be exactly "
+            f"{REMOTE_PEER_CONTROL_SOCKET}"
+        )
+    device = _bounded_posix_path(
+        config.get("device"), "controlled-peer device"
+    )
+    forbidden = {
+        item.casefold()
+        for item in (*FORBIDDEN_PORTS, REMOTE_PEER_FORBIDDEN_DEVICE)
+    }
+    if device.casefold() in forbidden:
+        raise ValueError(f"refusing forbidden controlled-peer device {device}")
+    if device != REMOTE_PEER_DEVICE:
+        raise ValueError(
+            "remote controlled-peer device must be exactly "
+            f"{REMOTE_PEER_DEVICE}"
+        )
+    public_key = exact_public_key(config.get("public_key"))
+    if public_key is None:
+        raise ValueError(
+            "remote controlled-peer public key must be exactly 64 hex"
+        )
+    if public_key != REMOTE_PEER_PUBLIC_KEY:
+        raise ValueError("remote controlled-peer public key does not match the pin")
+    max_age = config.get("max_status_age_sec")
+    if (
+        isinstance(max_age, bool)
+        or not isinstance(max_age, (int, float))
+        or not 1.0 <= float(max_age) <= REMOTE_PEER_MAX_STATUS_AGE_SEC
+    ):
+        raise ValueError(
+            "remote controlled-peer status age must be between 1 and "
+            f"{REMOTE_PEER_MAX_STATUS_AGE_SEC:g} seconds"
+        )
+    return {
+        "ssh_host": ssh_host,
+        "hostname": hostname,
+        "status_path": status_path,
+        "control_socket": control_socket,
+        "device": device,
+        "public_key": public_key,
+        "max_status_age_sec": float(max_age),
+    }
+
+
+def remote_peer_config(
+    *,
+    ssh_host: str = REMOTE_PEER_SSH_HOST,
+    hostname: str = REMOTE_PEER_HOSTNAME,
+    status_path: str = REMOTE_PEER_STATUS_PATH,
+    control_socket: str = REMOTE_PEER_CONTROL_SOCKET,
+    device: str = REMOTE_PEER_DEVICE,
+    public_key: str = REMOTE_PEER_PUBLIC_KEY,
+    max_status_age_sec: float = REMOTE_PEER_MAX_STATUS_AGE_SEC,
+) -> dict:
+    return validate_remote_peer_config(
+        {
+            "ssh_host": ssh_host,
+            "hostname": hostname,
+            "status_path": status_path,
+            "control_socket": control_socket,
+            "device": device,
+            "public_key": public_key,
+            "max_status_age_sec": max_status_age_sec,
+        }
+    )
+
+
+def _remote_peer_request(config: dict, operation: str, raw: bytes | None) -> bytes:
+    request = {
+        "schema": REMOTE_PEER_HELPER_SCHEMA,
+        "operation": operation,
+        "status_path": config["status_path"],
+        "control_socket": config["control_socket"],
+        "request_b64": (
+            base64.b64encode(raw).decode("ascii")
+            if raw is not None
+            else None
+        ),
+    }
+    return json.dumps(
+        request,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def run_remote_peer_operation(
+    config: dict,
+    operation: str,
+    *,
+    control_request: bytes | None = None,
+    timeout_sec: float = REMOTE_PEER_SSH_TIMEOUT_SEC,
+) -> dict:
+    config = validate_remote_peer_config(config)
+    if operation not in {"capture_status", "send_control"}:
+        raise ValueError("unsupported remote controlled-peer operation")
+    if (operation == "capture_status") != (control_request is None):
+        raise ValueError("remote controlled-peer operation payload mismatch")
+    argv = [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=8",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "LogLevel=ERROR",
+        config["ssh_host"],
+        REMOTE_PEER_HELPER_COMMAND,
+    ]
+    try:
+        completed = subprocess.run(
+            argv,
+            input=_remote_peer_request(
+                config, operation, control_request
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_sec,
+            check=False,
+            shell=False,
+        )
+    except FileNotFoundError as exc:
+        raise RemotePeerError(
+            "ssh_unavailable", "OpenSSH client executable was not found"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RemotePeerError(
+            "ssh_timeout",
+            "remote controlled-peer operation exceeded its bounded timeout",
+        ) from exc
+    stderr = completed.stderr.decode("utf-8", errors="replace")
+    if completed.returncode != 0:
+        if "permission denied" in stderr.casefold():
+            raise RemotePeerError(
+                "ssh_auth_failed",
+                "noninteractive SSH authentication failed; supply ephemeral "
+                "authorized access before RF acceptance",
+            )
+        raise RemotePeerError(
+            "ssh_failed",
+            "remote controlled-peer SSH command failed with exit code "
+            f"{completed.returncode}",
+        )
+    if len(completed.stdout) > (REMOTE_PEER_MAX_STATUS_BYTES * 2):
+        raise RemotePeerError(
+            "ssh_response_too_large",
+            "remote controlled-peer response exceeded the bounded size",
+        )
+    try:
+        envelope = strict_json_object(
+            completed.stdout, "remote controlled-peer response"
+        )
+    except ValueError as exc:
+        raise RemotePeerError("ssh_invalid_response", str(exc)) from exc
+    error = envelope.get("error")
+    if not (
+        set(envelope)
+        == {"schema", "ok", "operation", "result", "error"}
+        and envelope.get("schema") == REMOTE_PEER_HELPER_SCHEMA
+        and isinstance(envelope.get("ok"), bool)
+        and envelope.get("operation") in {operation, None}
+        and isinstance(error, (dict, type(None)))
+    ):
+        raise RemotePeerError(
+            "ssh_invalid_response",
+            "remote controlled-peer response envelope is invalid",
+        )
+    if envelope.get("ok") is not True:
+        if not (
+            envelope.get("operation") is None
+            and envelope.get("result") is None
+            and isinstance(error, dict)
+            and set(error) == {"code", "message"}
+            and isinstance(error.get("code"), str)
+            and bool(error["code"])
+            and isinstance(error.get("message"), str)
+        ):
+            raise RemotePeerError(
+                "ssh_invalid_response",
+                "remote controlled-peer failure response is invalid",
+            )
+        code = (
+            str(error.get("code") or "remote_operation_failed")
+            if isinstance(error, dict)
+            else "remote_operation_failed"
+        )
+        raise RemotePeerError(
+            code,
+            "remote controlled-peer operation failed closed",
+        )
+    if not (
+        envelope.get("operation") == operation
+        and isinstance(envelope.get("result"), dict)
+        and error is None
+    ):
+        raise RemotePeerError(
+            "ssh_invalid_response",
+            "remote controlled-peer success response is incomplete",
+        )
+    return envelope["result"]
 
 
 def enforce_port_policy(port: str, peer_port: str | None = None) -> tuple[str, str | None]:
@@ -180,17 +1040,18 @@ def new_exact_listener_reply(
     before: dict | None,
     after: dict | None,
     fingerprint: str,
+    expected_text: str = RADIO_LISTENER_REPLY,
 ) -> bool:
     before_rows = {
         json.dumps(entry, sort_keys=True, separators=(",", ":"))
         for entry in entries(before)
         if entry.get("direction") == "rx"
-        and entry.get("text") == RADIO_LISTENER_REPLY
+        and entry.get("text") == expected_text
         and entry_matches_fingerprint(before, entry, fingerprint)
     }
     return any(
         entry.get("direction") == "rx"
-        and entry.get("text") == RADIO_LISTENER_REPLY
+        and entry.get("text") == expected_text
         and entry_matches_fingerprint(after, entry, fingerprint)
         and json.dumps(entry, sort_keys=True, separators=(",", ":"))
         not in before_rows
@@ -202,41 +1063,480 @@ def capture_peer_status(
     source_path: Path,
     capture_path: Path,
     root: Path,
+    *,
+    reservation: EvidenceReservation | None = None,
 ) -> tuple[dict, dict]:
     raw = source_path.read_bytes()
-    value = json.loads(raw.decode("utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError("controlled-peer status must be a JSON object")
-    root_resolved = root.resolve(strict=True)
-    capture_path = capture_path.resolve(strict=False)
-    try:
-        capture_path.relative_to(root_resolved)
-    except ValueError as exc:
-        raise ValueError("controlled-peer capture must stay inside root") from exc
-    cursor = capture_path.parent
-    while cursor != root_resolved:
-        if cursor.exists() and is_link_or_reparse(cursor):
-            raise ValueError(
-                "controlled-peer capture parent cannot be a link/reparse point"
-            )
-        cursor = cursor.parent
-    capture_path.parent.mkdir(parents=True, exist_ok=True)
-    if capture_path.exists():
-        raise ValueError(
-            f"refusing to overwrite controlled-peer capture: {capture_path}"
+    value = strict_json_object(raw, "controlled-peer status")
+    receipt = capture_peer_bytes(
+        raw,
+        capture_path,
+        root,
+        source_path=str(source_path.resolve()),
+        reservation=reservation,
+    )
+    return value, receipt
+
+
+def capture_peer_bytes(
+    raw: bytes,
+    capture_path: Path,
+    root: Path,
+    *,
+    source_path: str,
+    source_host: str | None = None,
+    transport: str | None = None,
+    extra: dict | None = None,
+    reservation: EvidenceReservation | None = None,
+) -> dict:
+    owned_bundle: EvidenceBundle | None = None
+    if reservation is None:
+        owned_bundle = EvidenceBundle(root)
+        reservation = owned_bundle.reserve(
+            "capture",
+            capture_path,
+            label="controlled-peer capture",
         )
-    capture_path.write_bytes(raw)
-    resolved = capture_path.resolve(strict=True)
-    resolved.relative_to(root_resolved)
-    if is_link_or_reparse(resolved):
-        raise ValueError("controlled-peer capture cannot be a link/reparse point")
-    return value, {
-        "path": resolved.relative_to(root_resolved).as_posix(),
-        "size": resolved.stat().st_size,
-        "sha256": sha256_file(resolved),
-        "source_path": str(source_path.resolve()),
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+    elif reservation.path != capture_path.resolve(strict=False):
+        raise ValueError(
+            "controlled-peer capture path does not match its reservation"
+        )
+    try:
+        reservation.write_bytes(raw)
+        return reservation.receipt(
+            raw=raw,
+            source_path=source_path,
+            source_host=source_host,
+            transport=transport,
+            extra=extra,
+        )
+    except Exception as exc:
+        if owned_bundle is not None:
+            owned_bundle.mark_incomplete(exc)
+        raise
+    finally:
+        if owned_bundle is not None:
+            owned_bundle.close()
+
+
+def parse_aware_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _fresh_timestamp(
+    value: object,
+    observed_at: datetime,
+    max_age_sec: float,
+) -> tuple[bool, float | None]:
+    parsed = parse_aware_timestamp(value)
+    if parsed is None:
+        return False, None
+    age = (observed_at - parsed).total_seconds()
+    return -30.0 <= age <= max_age_sec, age
+
+
+def validate_remote_peer_status(
+    status: object,
+    config: dict,
+    *,
+    observed_at: datetime | None = None,
+) -> dict:
+    config = validate_remote_peer_config(config)
+    observed = observed_at or datetime.now(timezone.utc)
+    if observed.tzinfo is None or observed.utcoffset() is None:
+        raise ValueError("remote status observation time must be timezone-aware")
+    value = status if isinstance(status, dict) else {}
+    status_fresh, status_age = _fresh_timestamp(
+        value.get("status_written_at"),
+        observed,
+        config["max_status_age_sec"],
+    )
+    fetch_fresh, fetch_age = _fresh_timestamp(
+        get_path(value, "mesh", "last_fetch_ok_at"),
+        observed,
+        config["max_status_age_sec"],
+    )
+    public_key = exact_public_key(
+        get_path(value, "serial", "public_key")
+    )
+    serial_device = get_path(value, "serial", "port")
+    forbidden = {
+        item.casefold()
+        for item in (*FORBIDDEN_PORTS, REMOTE_PEER_FORBIDDEN_DEVICE)
     }
+    device_non_forbidden = (
+        isinstance(serial_device, str)
+        and serial_device.casefold() not in forbidden
+    )
+    checks = {
+        "service_identity": value.get("service")
+        == "openclaw-radio-listener",
+        "run_identity": isinstance(value.get("run_id"), str)
+        and bool(value["run_id"]),
+        "device_exact": serial_device == config["device"],
+        "device_non_forbidden": device_non_forbidden,
+        "mesh_connected": get_path(
+            value, "serial", "mesh_connected"
+        )
+        is True,
+        "public_key_exact": public_key == config["public_key"],
+        "self_prefix_exact": str(
+            get_path(value, "serial", "self_prefix") or ""
+        ).casefold()
+        == config["public_key"][:12].casefold(),
+        "fingerprint_exact": public_key_fingerprint(public_key or "")
+        == REMOTE_PEER_FINGERPRINT,
+        "startup_self_test_enabled": get_path(
+            value, "startup_self_test", "enabled"
+        )
+        is True,
+        "startup_self_test_ok": get_path(
+            value, "startup_self_test", "ok"
+        )
+        is True,
+        "status_timestamp_fresh": status_fresh,
+        "mesh_fetch_timestamp_fresh": fetch_fresh,
+    }
+    return {
+        "ok": all(checks.values()),
+        "observed_at": observed.astimezone(timezone.utc).isoformat(),
+        "max_status_age_sec": config["max_status_age_sec"],
+        "status_age_sec": status_age,
+        "mesh_fetch_age_sec": fetch_age,
+        "checks": checks,
+    }
+
+
+def _capture_remote_peer_status_reserved(
+    config: dict,
+    capture_path: Path,
+    root: Path,
+    *,
+    reservation: EvidenceReservation,
+    evidence_bundle: EvidenceBundle,
+) -> tuple[dict, dict, dict]:
+    config = validate_remote_peer_config(config)
+    if not evidence_bundle.external_io_started:
+        raise ValueError(
+            "remote status reservation must belong to an external-I/O bundle"
+        )
+    result = run_remote_peer_operation(config, "capture_status")
+    try:
+        raw = base64.b64decode(
+            str(result.get("raw_b64") or "").encode("ascii"),
+            validate=True,
+        )
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise RemotePeerError(
+            "remote_status_invalid",
+            "remote status capture has invalid base64",
+        ) from exc
+    digest = hashlib.sha256(raw).hexdigest()
+    if not (
+        result.get("path") == config["status_path"]
+        and result.get("size") == len(raw)
+        and result.get("sha256") == digest
+        and isinstance(result.get("mtime_ns"), int)
+        and not isinstance(result.get("mtime_ns"), bool)
+        and result.get("hostname") == config["hostname"]
+        and 1 <= len(raw) <= REMOTE_PEER_MAX_STATUS_BYTES
+    ):
+        raise RemotePeerError(
+            "remote_status_invalid",
+            "remote status capture metadata does not match its raw bytes",
+        )
+    try:
+        status = strict_json_object(raw, "remote controlled-peer status")
+    except ValueError as exc:
+        raise RemotePeerError("remote_status_invalid", str(exc)) from exc
+    receipt = capture_peer_bytes(
+        raw,
+        capture_path,
+        root,
+        source_path=config["status_path"],
+        source_host=config["ssh_host"],
+        transport="ssh",
+        extra={
+            "source_hostname": result["hostname"],
+            "remote_mtime_ns": result["mtime_ns"],
+            "remote_sha256": digest,
+        },
+        reservation=reservation,
+    )
+    observed_at = parse_aware_timestamp(receipt["captured_at"])
+    validation = validate_remote_peer_status(
+        status,
+        config,
+        observed_at=observed_at,
+    )
+    if validation["ok"] is not True:
+        raise RemotePeerError(
+            "remote_status_not_ready",
+            "remote controlled-peer status failed identity/readiness checks",
+        )
+    return status, receipt, validation
+
+
+def capture_remote_peer_status(
+    config: dict,
+    capture_path: Path,
+    root: Path,
+    *,
+    reservation: EvidenceReservation | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
+) -> tuple[dict, dict, dict]:
+    if reservation is not None:
+        if evidence_bundle is None:
+            raise ValueError(
+                "remote status reservation requires its evidence bundle"
+            )
+        return _capture_remote_peer_status_reserved(
+            config,
+            capture_path,
+            root,
+            reservation=reservation,
+            evidence_bundle=evidence_bundle,
+        )
+    if evidence_bundle is not None:
+        raise ValueError(
+            "remote status evidence bundle requires a reservation"
+        )
+    with EvidenceBundle(root) as owned_bundle:
+        owned_reservation = owned_bundle.reserve(
+            "remote_status",
+            capture_path,
+            label="remote controlled-peer status",
+        )
+        owned_bundle.mark_external_io_started()
+        return _capture_remote_peer_status_reserved(
+            config,
+            capture_path,
+            root,
+            reservation=owned_reservation,
+            evidence_bundle=owned_bundle,
+        )
+
+
+def remote_control_request(
+    d1l_public_key: object,
+    token: object,
+) -> tuple[dict, bytes]:
+    target = exact_public_key(d1l_public_key)
+    if target is None:
+        raise ValueError("remote DM target must be an exact 64-hex public key")
+    token = validate_safe_token(token, max_length=128)
+    request_id = "sigui-rf-" + hashlib.sha256(
+        (target + "\0" + token).encode("utf-8")
+    ).hexdigest()[:24]
+    request = {
+        "id": request_id,
+        "op": "radio.send_dm",
+        "params": {"target": target, "text": token},
+    }
+    raw = (
+        json.dumps(
+            request,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+    return request, raw
+
+
+def validate_remote_control_exchange(
+    request_raw: bytes,
+    response_raw: bytes,
+    *,
+    d1l_public_key: object,
+    token: object,
+) -> dict:
+    expected_request, expected_raw = remote_control_request(
+        d1l_public_key, token
+    )
+    try:
+        request = strict_json_object(
+            request_raw.rstrip(b"\n"), "remote control request"
+        )
+        response = strict_json_object(
+            response_raw.rstrip(b"\n"), "remote control response"
+        )
+    except ValueError:
+        request = {}
+        response = {}
+    target = exact_public_key(d1l_public_key)
+    delivery = (
+        get_path(response, "result", "delivery", default={})
+        if isinstance(response, dict)
+        else {}
+    )
+    delivery = delivery if isinstance(delivery, dict) else {}
+    checks = {
+        "request_raw_exact": request_raw == expected_raw,
+        "request_object_exact": request == expected_request,
+        "response_newline_exact": response_raw.endswith(b"\n")
+        and response_raw.count(b"\n") == 1,
+        "response_id_exact": response.get("id")
+        == expected_request["id"],
+        "response_op_exact": response.get("op") == "radio.send_dm",
+        "response_ok": response.get("ok") is True,
+        "response_not_cached": response.get("cached") is False,
+        "response_error_clear": response.get("error") is None,
+        "target_exact": str(
+            get_path(response, "result", "target") or ""
+        ).casefold()
+        == str(target or "")[:12].casefold(),
+        "utf8_bytes_exact": get_path(
+            response, "result", "utf8_bytes"
+        )
+        == len(str(token or "").encode("utf-8")),
+        "delivery_acknowledged": delivery.get("acknowledged") is True,
+        "delivery_event_present": delivery.get("event") is not None
+        and str(delivery.get("event")).upper() != "ERROR",
+        "delivery_payload_present": "payload" in delivery,
+    }
+    return {
+        "ok": all(checks.values()),
+        "request": request,
+        "response": response,
+        "request_sha256": hashlib.sha256(request_raw).hexdigest(),
+        "response_sha256": hashlib.sha256(response_raw).hexdigest(),
+        "checks": checks,
+    }
+
+
+def send_remote_peer_dm(
+    config: dict,
+    *,
+    d1l_public_key: str,
+    token: str,
+    request_capture_path: Path,
+    response_capture_path: Path,
+    root: Path,
+    request_reservation: EvidenceReservation | None = None,
+    response_reservation: EvidenceReservation | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
+) -> dict:
+    config = validate_remote_peer_config(config)
+    request, request_raw = remote_control_request(
+        d1l_public_key, token
+    )
+    owned_bundle: EvidenceBundle | None = None
+    if request_reservation is None or response_reservation is None:
+        if request_reservation is not None or response_reservation is not None:
+            raise ValueError(
+                "remote control request/response reservations must be paired"
+            )
+        owned_bundle = EvidenceBundle(root)
+        request_reservation = owned_bundle.reserve(
+            "request",
+            request_capture_path,
+            label="remote control request",
+        )
+        response_reservation = owned_bundle.reserve(
+            "response",
+            response_capture_path,
+            label="remote control response",
+        )
+        owned_bundle.mark_external_io_started()
+    elif evidence_bundle is None or not evidence_bundle.external_io_started:
+        raise ValueError(
+            "remote control reservations must belong to an external-I/O bundle"
+        )
+    try:
+        result = run_remote_peer_operation(
+            config,
+            "send_control",
+            control_request=request_raw,
+        )
+        try:
+            response_raw = base64.b64decode(
+                str(result.get("response_b64") or "").encode("ascii"),
+                validate=True,
+            )
+        except (ValueError, UnicodeEncodeError) as exc:
+            raise RemotePeerError(
+                "remote_control_invalid",
+                "remote control response has invalid base64",
+            ) from exc
+        request_digest = hashlib.sha256(request_raw).hexdigest()
+        response_digest = hashlib.sha256(response_raw).hexdigest()
+        if not (
+            result.get("socket_path") == config["control_socket"]
+            and result.get("hostname") == config["hostname"]
+            and result.get("request_size") == len(request_raw)
+            and result.get("request_sha256") == request_digest
+            and result.get("response_size") == len(response_raw)
+            and result.get("response_sha256") == response_digest
+            and 1 <= len(response_raw) <= REMOTE_PEER_MAX_CONTROL_BYTES
+        ):
+            raise RemotePeerError(
+                "remote_control_invalid",
+                "remote control exchange metadata does not match its raw bytes",
+            )
+        request_receipt = capture_peer_bytes(
+            request_raw,
+            request_capture_path,
+            root,
+            source_path=config["control_socket"],
+            source_host=config["ssh_host"],
+            transport="ssh-unix-socket-request",
+            extra={"source_hostname": result["hostname"]},
+            reservation=request_reservation,
+        )
+        response_receipt = capture_peer_bytes(
+            response_raw,
+            response_capture_path,
+            root,
+            source_path=config["control_socket"],
+            source_host=config["ssh_host"],
+            transport="ssh-unix-socket-response",
+            extra={"source_hostname": result["hostname"]},
+            reservation=response_reservation,
+        )
+        validation = validate_remote_control_exchange(
+            request_raw,
+            response_raw,
+            d1l_public_key=d1l_public_key,
+            token=token,
+        )
+        if validation["ok"] is not True:
+            raise RemotePeerError(
+                "remote_control_delivery_failed",
+                "remote radio.send_dm did not return exact acknowledged delivery",
+            )
+        return {
+            "op": "radio.send_dm",
+            "socket_path": config["control_socket"],
+            "request_id": request["id"],
+            "request": request,
+            "response": validation["response"],
+            "request_receipt": request_receipt,
+            "response_receipt": response_receipt,
+            "request_sha256": validation["request_sha256"],
+            "response_sha256": validation["response_sha256"],
+            "validation": validation,
+        }
+    except Exception as exc:
+        if owned_bundle is not None:
+            owned_bundle.mark_incomplete(exc)
+        raise
+    finally:
+        if owned_bundle is not None:
+            owned_bundle.close()
 
 
 def contains_token(value, token: str) -> bool:
@@ -274,6 +1574,214 @@ def listener_sender_matches(
         and isinstance(sender, str)
         and re.fullmatch(r"[0-9A-Fa-f]{12}", sender) is not None
         and sender.upper() == public_key[:12].upper()
+    )
+
+
+def remote_peer_flow_validation(
+    *,
+    before: dict,
+    after: dict,
+    before_validation: dict,
+    after_validation: dict,
+    d1l_public_key: str,
+    control: dict,
+) -> dict:
+    before_written = parse_aware_timestamp(before.get("status_written_at"))
+    after_written = parse_aware_timestamp(after.get("status_written_at"))
+    deltas = {
+        name: counter_delta(before, after, name)
+        for name in (
+            "rx_dm_total",
+            "tx_dm_total",
+            "local_fast_reply_total",
+            "tx_dm_ack_miss_total",
+        )
+    }
+    tx_delta = deltas["tx_dm_total"]
+    fast_reply_delta = deltas["local_fast_reply_total"]
+    control_validation = (
+        control.get("validation")
+        if isinstance(control, dict)
+        and isinstance(control.get("validation"), dict)
+        else {}
+    )
+    checks = {
+        "before_status_ready": before_validation.get("ok") is True,
+        "after_status_ready": after_validation.get("ok") is True,
+        "same_run_identity": isinstance(before.get("run_id"), str)
+        and bool(before["run_id"])
+        and before.get("run_id") == after.get("run_id"),
+        "same_peer_public_key": exact_public_key(
+            get_path(before, "serial", "public_key")
+        )
+        == REMOTE_PEER_PUBLIC_KEY
+        and exact_public_key(get_path(after, "serial", "public_key"))
+        == REMOTE_PEER_PUBLIC_KEY,
+        "status_time_advanced": before_written is not None
+        and after_written is not None
+        and after_written >= before_written,
+        "one_d1l_dm_received": deltas["rx_dm_total"] == 1,
+        "peer_dm_send_observed": isinstance(tx_delta, int)
+        and not isinstance(tx_delta, bool)
+        and 1 <= tx_delta <= 2,
+        "fast_reply_bounded": isinstance(fast_reply_delta, int)
+        and not isinstance(fast_reply_delta, bool)
+        and 0 <= fast_reply_delta <= 1,
+        "peer_tx_exactly_control_plus_fast_reply": isinstance(tx_delta, int)
+        and not isinstance(tx_delta, bool)
+        and isinstance(fast_reply_delta, int)
+        and not isinstance(fast_reply_delta, bool)
+        and tx_delta == 1 + fast_reply_delta,
+        "no_ack_miss_delta": deltas["tx_dm_ack_miss_total"] == 0,
+        "d1l_sender_exact": listener_sender_matches(
+            after, d1l_public_key
+        ),
+        "last_rx_is_dm": get_path(after, "mesh", "last_rx_kind")
+        == "dm",
+        "last_tx_is_control_dm": get_path(
+            after, "mesh", "last_tx_kind"
+        )
+        == "control_dm",
+        "rx_timestamp_advanced": get_path(
+            before, "mesh", "last_rx_at"
+        )
+        != get_path(after, "mesh", "last_rx_at"),
+        "tx_timestamp_advanced": get_path(
+            before, "mesh", "last_tx_at"
+        )
+        != get_path(after, "mesh", "last_tx_at"),
+        "control_delivery_acknowledged": control_validation.get("ok")
+        is True,
+    }
+    return {"ok": all(checks.values()), "checks": checks, "deltas": deltas}
+
+
+def remote_control_semantic_ok(
+    control: object,
+    *,
+    d1l_public_key: object,
+    token: object,
+    control_socket: object = REMOTE_PEER_CONTROL_SOCKET,
+) -> bool:
+    if not isinstance(control, dict):
+        return False
+    try:
+        expected_request, _ = remote_control_request(
+            d1l_public_key, token
+        )
+    except ValueError:
+        return False
+    response = control.get("response")
+    response = response if isinstance(response, dict) else {}
+    delivery = get_path(response, "result", "delivery", default={})
+    delivery = delivery if isinstance(delivery, dict) else {}
+    target = exact_public_key(d1l_public_key)
+    validation = control.get("validation")
+    validation = validation if isinstance(validation, dict) else {}
+    validation_checks = validation.get("checks")
+    return (
+        control.get("op") == "radio.send_dm"
+        and control.get("socket_path") == control_socket
+        and control.get("request_id") == expected_request["id"]
+        and control.get("request") == expected_request
+        and response.get("id") == expected_request["id"]
+        and response.get("op") == "radio.send_dm"
+        and response.get("ok") is True
+        and response.get("cached") is False
+        and response.get("error") is None
+        and str(get_path(response, "result", "target") or "").casefold()
+        == str(target or "")[:12].casefold()
+        and get_path(response, "result", "utf8_bytes")
+        == len(str(token or "").encode("utf-8"))
+        and delivery.get("acknowledged") is True
+        and delivery.get("event") is not None
+        and str(delivery.get("event")).upper() != "ERROR"
+        and "payload" in delivery
+        and isinstance(control.get("request_receipt"), dict)
+        and isinstance(control.get("response_receipt"), dict)
+        and isinstance(control.get("request_sha256"), str)
+        and re.fullmatch(
+            r"[0-9a-f]{64}", control["request_sha256"]
+        )
+        is not None
+        and isinstance(control.get("response_sha256"), str)
+        and re.fullmatch(
+            r"[0-9a-f]{64}", control["response_sha256"]
+        )
+        is not None
+        and validation.get("ok") is True
+        and isinstance(validation_checks, dict)
+        and bool(validation_checks)
+        and all(value is True for value in validation_checks.values())
+    )
+
+
+def remote_peer_report_shape_ok(data: object) -> bool:
+    if not isinstance(data, dict):
+        return False
+    peer = data.get("controlled_peer")
+    remote = data.get("controlled_peer_remote")
+    if not isinstance(peer, dict) or not isinstance(remote, dict):
+        return False
+    try:
+        config = validate_remote_peer_config(
+            {
+                "ssh_host": peer.get("ssh_host"),
+                "hostname": peer.get("hostname"),
+                "status_path": peer.get("status_path"),
+                "control_socket": peer.get("control_socket"),
+                "device": peer.get("device"),
+                "public_key": peer.get("public_key"),
+                "max_status_age_sec": peer.get(
+                    "max_status_age_sec"
+                ),
+            }
+        )
+    except ValueError:
+        return False
+    before_validation = remote.get("before_validation")
+    after_validation = remote.get("after_validation")
+    flow = remote.get("flow")
+    before_checks = (
+        before_validation.get("checks")
+        if isinstance(before_validation, dict)
+        else None
+    )
+    after_checks = (
+        after_validation.get("checks")
+        if isinstance(after_validation, dict)
+        else None
+    )
+    flow_checks = (
+        flow.get("checks") if isinstance(flow, dict) else None
+    )
+    return (
+        peer.get("evidence_source") == REMOTE_PEER_EVIDENCE_SOURCE
+        and peer.get("port") is None
+        and peer.get("fingerprint") == REMOTE_PEER_FINGERPRINT
+        and config["public_key"] == REMOTE_PEER_PUBLIC_KEY
+        and data.get("controlled_peer_adapter") == REMOTE_PEER_ADAPTER
+        and isinstance(before_validation, dict)
+        and before_validation.get("ok") is True
+        and isinstance(before_checks, dict)
+        and bool(before_checks)
+        and all(value is True for value in before_checks.values())
+        and isinstance(after_validation, dict)
+        and after_validation.get("ok") is True
+        and isinstance(after_checks, dict)
+        and bool(after_checks)
+        and all(value is True for value in after_checks.values())
+        and isinstance(flow, dict)
+        and flow.get("ok") is True
+        and isinstance(flow_checks, dict)
+        and bool(flow_checks)
+        and all(value is True for value in flow_checks.values())
+        and remote_control_semantic_ok(
+            data.get("controlled_peer_control"),
+            d1l_public_key=data.get("d1l_public_key"),
+            token=data.get("inbound_token"),
+            control_socket=config["control_socket"],
+        )
     )
 
 
@@ -467,6 +1975,7 @@ def correlated_listener_transaction(
     final_route: dict | None,
     outbound_token: str,
     fingerprint: str,
+    inbound_text: str = RADIO_LISTENER_REPLY,
 ) -> dict:
     new_messages = new_entries_by_seq(
         baseline_messages, final_messages
@@ -487,7 +1996,7 @@ def correlated_listener_transaction(
         row
         for row in new_messages
         if row.get("direction") == "rx"
-        and row.get("text") == RADIO_LISTENER_REPLY
+        and row.get("text") == inbound_text
         and entry_matches_fingerprint(
             final_messages, row, fingerprint
         )
@@ -670,7 +2179,14 @@ def dry_run_report(
     expected_commit: str | None = None,
     github_run_id: str | None = None,
     workflow_run_attempt: str | None = None,
+    remote_peer: dict | None = None,
 ) -> dict:
+    token = validate_safe_token(token)
+    remote_config = (
+        validate_remote_peer_config(remote_peer)
+        if remote_peer is not None
+        else None
+    )
     outbound_token = f"{token}_out"
     inbound_token = f"{token}_in"
     direct_token = f"{token}_direct"
@@ -697,16 +2213,36 @@ def dry_run_report(
             ]
         )
     commands.extend(["packets", f"routes trace {fingerprint}", "health"])
-    controlled_peer = {
-        "fingerprint": fingerprint,
-        "evidence_source": (
-            "explicit_peer_status"
-            if peer_status_path is not None and peer_port is not None
-            else "d1l_bidirectional_rf"
-        ),
-        "port": peer_port,
-        "status_path": str(peer_status_path) if peer_status_path is not None else None,
-    }
+    if remote_config is not None:
+        controlled_peer = {
+            "fingerprint": fingerprint,
+            "evidence_source": REMOTE_PEER_EVIDENCE_SOURCE,
+            "port": None,
+            "status_path": remote_config["status_path"],
+            "ssh_host": remote_config["ssh_host"],
+            "hostname": remote_config["hostname"],
+            "control_socket": remote_config["control_socket"],
+            "device": remote_config["device"],
+            "public_key": remote_config["public_key"],
+            "max_status_age_sec": remote_config[
+                "max_status_age_sec"
+            ],
+        }
+    else:
+        controlled_peer = {
+            "fingerprint": fingerprint,
+            "evidence_source": (
+                "explicit_peer_status"
+                if peer_status_path is not None and peer_port is not None
+                else "d1l_bidirectional_rf"
+            ),
+            "port": peer_port,
+            "status_path": (
+                str(peer_status_path)
+                if peer_status_path is not None
+                else None
+            ),
+        }
     return {
         "schema": RF_FULL_ACCEPTANCE_SCHEMA,
         "mode": "dry-run-rf-full-acceptance",
@@ -723,6 +2259,20 @@ def dry_run_report(
         "formats_sd": False,
         "port": port,
         "controlled_peer": controlled_peer,
+        "controlled_peer_adapter": (
+            REMOTE_PEER_ADAPTER if remote_config is not None else None
+        ),
+        "controlled_peer_control_plan": (
+            {
+                "op": "radio.send_dm",
+                "socket_path": remote_config["control_socket"],
+                "target": public_key,
+                "text": inbound_token,
+                "transport": "ssh-stdin-json",
+            }
+            if remote_config is not None
+            else None
+        ),
         "target_fingerprint": fingerprint,
         "d1l_public_key": public_key,
         "token": token,
@@ -743,7 +2293,11 @@ def dry_run_report(
         "inbound_token": inbound_token,
         "direct_token": direct_token,
         "expected_identity_fingerprint": public_key_fingerprint(public_key),
-        "discord_command": discord_command(public_key, inbound_token),
+        "discord_command": (
+            None
+            if remote_config is not None
+            else discord_command(public_key, inbound_token)
+        ),
         "public_rf_transmit": False,
         "commands": commands,
         "ok": True,
@@ -769,17 +2323,29 @@ def build_report(
     peer_after_receipt: dict | None = None,
     github_run_id: str | None = None,
     workflow_run_attempt: str | None = None,
+    remote_peer: dict | None = None,
+    remote_before_validation: dict | None = None,
+    remote_after_validation: dict | None = None,
+    remote_control: dict | None = None,
 ) -> dict:
+    token = validate_safe_token(token)
     outbound_token = f"{token}_out"
     inbound_token = f"{token}_in"
     direct_token = f"{token}_direct"
-    listener_mode = (
+    remote_config = (
+        validate_remote_peer_config(remote_peer)
+        if remote_peer is not None
+        else None
+    )
+    remote_mode = remote_config is not None
+    listener_mode = remote_mode or (
         peer_port == RADIO_LISTENER_PORT
         and (
             get_path(peer_before, "service") == "openclaw-radio-listener"
             or get_path(peer_after, "service") == "openclaw-radio-listener"
         )
     )
+    inbound_text = inbound_token if remote_mode else RADIO_LISTENER_REPLY
     outbound_text = (
         f"core acceptance test {outbound_token}"
         if listener_mode
@@ -848,8 +2414,39 @@ def build_report(
     commands = [str(step.get("command", "")) for step in steps]
     identity_fingerprint = str(identity_result.get("fingerprint") or "").upper()
     expected_identity = public_key_fingerprint(public_key)
-    peer_status_requested = peer_status_path is not None or peer_port is not None
-    if listener_mode:
+    peer_status_requested = (
+        remote_mode
+        or peer_status_path is not None
+        or peer_port is not None
+    )
+    if remote_mode:
+        remote_flow = remote_peer_flow_validation(
+            before=peer_before or {},
+            after=peer_after or {},
+            before_validation=remote_before_validation or {},
+            after_validation=remote_after_validation or {},
+            d1l_public_key=public_key,
+            control=remote_control or {},
+        )
+        peer_status_ok = bool(
+            remote_before_validation
+            and remote_before_validation.get("ok") is True
+            and remote_after_validation
+            and remote_after_validation.get("ok") is True
+            and peer_public_key == remote_config["public_key"]
+            and peer_after_public_key == remote_config["public_key"]
+        )
+        rx_dm_delta = remote_flow["deltas"]["rx_dm_total"]
+        tx_dm_delta = remote_flow["deltas"]["tx_dm_total"]
+        fast_reply_delta = remote_flow["deltas"][
+            "local_fast_reply_total"
+        ]
+        ack_miss_delta = remote_flow["deltas"][
+            "tx_dm_ack_miss_total"
+        ]
+        peer_counter_ok = remote_flow["ok"] is True
+    elif listener_mode:
+        remote_flow = None
         peer_status_ok = (
             radio_listener_connected(peer_before, peer_port, fingerprint)
             and radio_listener_connected(peer_after, peer_port, fingerprint)
@@ -879,6 +2476,7 @@ def build_report(
             != get_path(peer_after, "mesh", "last_tx_at")
         )
     else:
+        remote_flow = None
         peer_status_ok = (
             normalize_port(
                 get_path(peer_before, "serial", "active_port")
@@ -917,6 +2515,7 @@ def build_report(
                 baseline_messages_result,
                 messages_result,
                 fingerprint,
+                inbound_text,
             )
             if listener_mode
             else messages_have_inbound_token(
@@ -934,6 +2533,7 @@ def build_report(
             final_route=route_result,
             outbound_token=outbound_token,
             fingerprint=fingerprint,
+            inbound_text=inbound_text,
         )
         if listener_mode
         else None
@@ -1017,17 +2617,37 @@ def build_report(
         checks["exact_candidate"] = firmware_identity_matches(
             version_result, expected_commit
         )
-    controlled_peer = {
-        "fingerprint": fingerprint,
-        "evidence_source": (
-            "explicit_peer_status"
-            if peer_status_requested
-            else "d1l_bidirectional_rf"
-        ),
-        "port": peer_port,
-        "status_path": str(peer_status_path) if peer_status_path is not None else None,
-    }
-    if listener_mode:
+    if remote_mode:
+        controlled_peer = {
+            "fingerprint": fingerprint,
+            "evidence_source": REMOTE_PEER_EVIDENCE_SOURCE,
+            "port": None,
+            "status_path": remote_config["status_path"],
+            "ssh_host": remote_config["ssh_host"],
+            "hostname": remote_config["hostname"],
+            "control_socket": remote_config["control_socket"],
+            "device": remote_config["device"],
+            "public_key": remote_config["public_key"],
+            "max_status_age_sec": remote_config[
+                "max_status_age_sec"
+            ],
+        }
+    else:
+        controlled_peer = {
+            "fingerprint": fingerprint,
+            "evidence_source": (
+                "explicit_peer_status"
+                if peer_status_requested
+                else "d1l_bidirectional_rf"
+            ),
+            "port": peer_port,
+            "status_path": (
+                str(peer_status_path)
+                if peer_status_path is not None
+                else None
+            ),
+        }
+    if listener_mode and not remote_mode:
         controlled_peer["public_key"] = peer_public_key
     return {
         "schema": RF_FULL_ACCEPTANCE_SCHEMA,
@@ -1051,7 +2671,11 @@ def build_report(
         "baud": baud,
         "controlled_peer": controlled_peer,
         "controlled_peer_adapter": (
-            RADIO_LISTENER_PROFILE if listener_mode else "meshcorebot"
+            REMOTE_PEER_ADAPTER
+            if remote_mode
+            else RADIO_LISTENER_PROFILE
+            if listener_mode
+            else "meshcorebot"
         ),
         "target_fingerprint": fingerprint,
         "d1l_public_key": public_key,
@@ -1075,10 +2699,14 @@ def build_report(
         "firmware_identity_ok": checks.get("exact_candidate"),
         "outbound_token": outbound_token,
         "inbound_token": (
-            RADIO_LISTENER_REPLY if listener_mode else inbound_token
+            inbound_text if listener_mode else inbound_token
         ),
         "direct_token": direct_token,
-        "discord_command": discord_command(public_key, inbound_token),
+        "discord_command": (
+            None
+            if remote_mode
+            else discord_command(public_key, inbound_token)
+        ),
         "public_rf_transmit": False,
         "inbound_seen_at": inbound_seen_at,
         "controlled_peer_before": status_snapshot(peer_before),
@@ -1091,6 +2719,18 @@ def build_report(
             "local_fast_reply_total": fast_reply_delta,
             "tx_dm_ack_miss_total": ack_miss_delta,
         },
+        "controlled_peer_remote": (
+            {
+                "before_validation": remote_before_validation,
+                "after_validation": remote_after_validation,
+                "flow": remote_flow,
+            }
+            if remote_mode
+            else None
+        ),
+        "controlled_peer_control": (
+            remote_control if remote_mode else None
+        ),
         "transaction_correlation": transaction_correlation,
         "controlled_peer_contact_setup": {
             "name": RADIO_LISTENER_CONTACT_NAME,
@@ -1122,7 +2762,7 @@ def send_acceptance_command(ser, command: str, timeout: float, retries: int = 1)
     return result
 
 
-def run_hardware(
+def _run_hardware_reserved(
     *,
     port: str,
     baud: int,
@@ -1139,17 +2779,26 @@ def run_hardware(
     github_run_id: str,
     workflow_run_attempt: str,
     peer_capture_dir: Path | None = None,
+    remote_peer: dict | None = None,
+    evidence_bundle: EvidenceBundle,
 ) -> dict:
     try:
         import serial
     except ImportError as exc:
         raise SystemExit("pyserial is required: python -m pip install pyserial") from exc
 
+    token = validate_safe_token(token)
     root = Path(__file__).resolve().parents[1]
     source_git = git_metadata(root)
     outbound_token = f"{token}_out"
     inbound_token = f"{token}_in"
     direct_token = f"{token}_direct"
+    remote_config = (
+        validate_remote_peer_config(remote_peer)
+        if remote_peer is not None
+        else None
+    )
+    remote_mode = remote_config is not None
     normalized_commit = exact_commit(expected_commit)
     if normalized_commit is None:
         raise ValueError("expected_commit must be an exact 40-character hexadecimal SHA")
@@ -1160,6 +2809,11 @@ def run_hardware(
     ):
         raise ValueError(
             "RF acceptance requires exact D1L public key and peer fingerprint"
+        )
+    if remote_mode and str(fingerprint).upper() != REMOTE_PEER_FINGERPRINT:
+        raise ValueError(
+            "remote controlled-peer fingerprint must match its exact "
+            "pinned public key"
         )
     if (
         not str(github_run_id).isdigit()
@@ -1179,12 +2833,23 @@ def run_hardware(
             "RF acceptance must run from the exact clean candidate source"
         )
     port, peer_port = enforce_port_policy(port, peer_port)
-    if peer_status_path is None or peer_port is None:
+    if remote_mode and (
+        peer_status_path is not None or peer_port is not None
+    ):
+        raise ValueError(
+            "remote and local controlled-peer modes are mutually exclusive"
+        )
+    if (
+        not remote_mode
+        and (peer_status_path is None or peer_port is None)
+    ):
         raise ValueError(
             "hardware RF acceptance requires an explicitly assigned "
             "controlled-peer status path and port"
         )
     if (
+        not remote_mode
+        and
         peer_port == RADIO_LISTENER_PORT
         and peer_status_path.resolve()
         != RADIO_LISTENER_STATUS_PATH.resolve()
@@ -1197,6 +2862,9 @@ def run_hardware(
     peer_before = None
     peer_before_receipt = None
     peer_after_receipt = None
+    remote_before_validation = None
+    remote_after_validation = None
+    remote_control = None
     inbound_seen_at = None
     capture_dir = (
         peer_capture_dir
@@ -1205,6 +2873,33 @@ def run_hardware(
     safe_token = re.sub(r"[^A-Za-z0-9_.-]", "_", token)
     before_capture = capture_dir / f"{safe_token}_peer_before.json"
     after_capture = capture_dir / f"{safe_token}_peer_after.json"
+    request_capture = capture_dir / f"{safe_token}_peer_request.jsonl"
+    response_capture = capture_dir / f"{safe_token}_peer_response.jsonl"
+    before_reservation = evidence_bundle.reserve(
+        "peer_before",
+        before_capture,
+        label="controlled-peer before status",
+    )
+    after_reservation = evidence_bundle.reserve(
+        "peer_after",
+        after_capture,
+        label="controlled-peer after status",
+    )
+    if remote_mode:
+        request_reservation = evidence_bundle.reserve(
+            "peer_request",
+            request_capture,
+            label="controlled-peer UDS request",
+        )
+        response_reservation = evidence_bundle.reserve(
+            "peer_response",
+            response_capture,
+            label="controlled-peer UDS response",
+        )
+    else:
+        request_reservation = None
+        response_reservation = None
+    evidence_bundle.mark_external_io_started()
 
     def run_command(ser, command: str, command_timeout: float | None = None) -> dict:
         result = send_acceptance_command(ser, command, command_timeout or timeout)
@@ -1245,16 +2940,35 @@ def run_hardware(
                 "device_sd_history_mode": version.get("sd_history_mode"),
                 "firmware_identity_required": True,
                 "firmware_identity_ok": False,
-                "controlled_peer": {
-                    "fingerprint": fingerprint,
-                    "evidence_source": "explicit_peer_status",
-                    "port": peer_port,
-                    "status_path": (
-                        str(peer_status_path)
-                        if peer_status_path is not None
-                        else None
-                    ),
-                },
+                "controlled_peer": (
+                    {
+                        "fingerprint": fingerprint,
+                        "evidence_source": REMOTE_PEER_EVIDENCE_SOURCE,
+                        "port": None,
+                        "status_path": remote_config["status_path"],
+                        "ssh_host": remote_config["ssh_host"],
+                        "hostname": remote_config["hostname"],
+                        "control_socket": remote_config[
+                            "control_socket"
+                        ],
+                        "device": remote_config["device"],
+                        "public_key": remote_config["public_key"],
+                        "max_status_age_sec": remote_config[
+                            "max_status_age_sec"
+                        ],
+                    }
+                    if remote_mode
+                    else {
+                        "fingerprint": fingerprint,
+                        "evidence_source": "explicit_peer_status",
+                        "port": peer_port,
+                        "status_path": (
+                            str(peer_status_path)
+                            if peer_status_path is not None
+                            else None
+                        ),
+                    }
+                ),
                 "checks": {
                     "exact_candidate": False,
                     "no_public_commands": True,
@@ -1262,14 +2976,32 @@ def run_hardware(
                 "steps": steps,
                 "ok": False,
             }
-        peer_before, peer_before_receipt = capture_peer_status(
-            peer_status_path,
-            before_capture,
-            root,
-        )
-        listener_mode = peer_port == RADIO_LISTENER_PORT
-        if listener_mode and not radio_listener_connected(
-            peer_before, peer_port, fingerprint
+        if remote_mode:
+            (
+                peer_before,
+                peer_before_receipt,
+                remote_before_validation,
+            ) = capture_remote_peer_status(
+                remote_config,
+                before_capture,
+                root,
+                reservation=before_reservation,
+                evidence_bundle=evidence_bundle,
+            )
+        else:
+            peer_before, peer_before_receipt = capture_peer_status(
+                peer_status_path,
+                before_capture,
+                root,
+                reservation=before_reservation,
+            )
+        listener_mode = remote_mode or peer_port == RADIO_LISTENER_PORT
+        if (
+            not remote_mode
+            and listener_mode
+            and not radio_listener_connected(
+                peer_before, peer_port, fingerprint
+            )
         ):
             raise ValueError(
                 "COM15 OpenClaw listener status/public-key identity is not ready"
@@ -1317,12 +3049,29 @@ def run_hardware(
             )
             time.sleep(2.0)
             run_command(ser, f"packets search {outbound_token}")
+        if remote_mode:
+            remote_control = send_remote_peer_dm(
+                remote_config,
+                d1l_public_key=public_key,
+                token=inbound_token,
+                request_capture_path=request_capture,
+                response_capture_path=response_capture,
+                root=root,
+                request_reservation=request_reservation,
+                response_reservation=response_reservation,
+                evidence_bundle=evidence_bundle,
+            )
         deadline = time.time() + wait_sec
         while time.time() < deadline:
             messages = run_command(ser, f"messages dm {fingerprint}")
             inbound_found = (
                 new_exact_listener_reply(
-                    baseline_messages, messages, fingerprint
+                    baseline_messages,
+                    messages,
+                    fingerprint,
+                    inbound_token
+                    if remote_mode
+                    else RADIO_LISTENER_REPLY,
                 )
                 if listener_mode
                 else messages_have_inbound_token(
@@ -1349,7 +3098,7 @@ def run_hardware(
         run_command(ser, f"routes trace {fingerprint}")
         run_command(ser, "health")
 
-    if peer_port == RADIO_LISTENER_PORT:
+    if not remote_mode and peer_port == RADIO_LISTENER_PORT:
         status_deadline = time.time() + max(10.0, wait_sec)
         while time.time() < status_deadline:
             candidate = read_json(peer_status_path)
@@ -1363,11 +3112,25 @@ def run_hardware(
             ):
                 break
             time.sleep(max(0.25, poll_sec))
-    peer_after, peer_after_receipt = capture_peer_status(
-        peer_status_path,
-        after_capture,
-        root,
-    )
+    if remote_mode:
+        (
+            peer_after,
+            peer_after_receipt,
+            remote_after_validation,
+        ) = capture_remote_peer_status(
+            remote_config,
+            after_capture,
+            root,
+            reservation=after_reservation,
+            evidence_bundle=evidence_bundle,
+        )
+    else:
+        peer_after, peer_after_receipt = capture_peer_status(
+            peer_status_path,
+            after_capture,
+            root,
+            reservation=after_reservation,
+        )
     return build_report(
         port=port,
         baud=baud,
@@ -1386,7 +3149,33 @@ def run_hardware(
         peer_after_receipt=peer_after_receipt,
         github_run_id=str(github_run_id),
         workflow_run_attempt=str(workflow_run_attempt),
+        remote_peer=remote_config,
+        remote_before_validation=remote_before_validation,
+        remote_after_validation=remote_after_validation,
+        remote_control=remote_control,
     )
+
+
+def run_hardware(
+    *,
+    evidence_bundle: EvidenceBundle | None = None,
+    **kwargs,
+) -> dict:
+    root = Path(__file__).resolve().parents[1]
+    if evidence_bundle is not None:
+        if evidence_bundle.root != root.resolve(strict=True):
+            raise ValueError(
+                "RF evidence bundle is bound to a different repository"
+            )
+        return _run_hardware_reserved(
+            evidence_bundle=evidence_bundle,
+            **kwargs,
+        )
+    with EvidenceBundle(root) as owned_bundle:
+        return _run_hardware_reserved(
+            evidence_bundle=owned_bundle,
+            **kwargs,
+        )
 
 
 def default_out_path(report: dict) -> Path:
@@ -1397,15 +3186,77 @@ def default_out_path(report: dict) -> Path:
     return Path("artifacts") / "hardware" / port / f"rf_full_acceptance_{token}.json"
 
 
-def write_report(report: dict, out_path: Path | None) -> Path:
+def planned_report_path(
+    *,
+    root: Path,
+    out_path: Path | None,
+    dry_run: bool,
+    port: str,
+    token: str,
+) -> Path:
+    if out_path is not None:
+        candidate = out_path if out_path.is_absolute() else root / out_path
+    elif dry_run:
+        candidate = (
+            root
+            / "artifacts"
+            / "smoke"
+            / f"d1l-rf-full-acceptance-dry-run-{utc_stamp()}.json"
+        )
+    else:
+        safe_token = validate_safe_token(token)
+        candidate = (
+            root
+            / "artifacts"
+            / "hardware"
+            / port.lower()
+            / f"rf_full_acceptance_{safe_token}.json"
+        )
+    root_resolved = root.resolve(strict=True)
+    lexical = Path(os.path.abspath(os.fspath(candidate)))
+    try:
+        lexical.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError(
+            "RF acceptance report must stay inside the repository"
+        ) from exc
+    return lexical
+
+
+def write_report(
+    report: dict,
+    out_path: Path | None,
+    *,
+    reservation: EvidenceReservation | None = None,
+) -> Path:
     root = Path(__file__).resolve().parents[1]
     path = out_path or default_out_path(report)
     if not path.is_absolute():
         path = root / path
     stamp_report(report, root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    return path
+    raw = (json.dumps(report, indent=2) + "\n").encode("utf-8")
+    owned_bundle: EvidenceBundle | None = None
+    if reservation is None:
+        owned_bundle = EvidenceBundle(root)
+        reservation = owned_bundle.reserve(
+            "report",
+            path,
+            label="RF acceptance report",
+        )
+    elif reservation.path != path.resolve(strict=False):
+        raise ValueError(
+            "RF acceptance report path does not match its reservation"
+        )
+    try:
+        reservation.write_bytes(raw)
+        return reservation.path
+    except Exception as exc:
+        if owned_bundle is not None:
+            owned_bundle.mark_incomplete(exc)
+        raise
+    finally:
+        if owned_bundle is not None:
+            owned_bundle.close()
 
 
 def main() -> int:
@@ -1415,7 +3266,9 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--wait-sec", type=float, default=90.0)
     parser.add_argument("--poll-sec", type=float, default=3.0)
-    parser.add_argument("--fingerprint", default=os.environ.get("D1L_DM_TARGET", DEFAULT_TARGET_FINGERPRINT))
+    parser.add_argument(
+        "--fingerprint", default=os.environ.get("D1L_DM_TARGET")
+    )
     parser.add_argument("--d1l-public-key", default=os.environ.get("D1L_PUBLIC_KEY", DEFAULT_D1L_PUBLIC_KEY))
     parser.add_argument(
         "--peer-status",
@@ -1429,6 +3282,31 @@ def main() -> int:
         dest="peer_port",
         default=os.environ.get("MESH_PEER_PORT"),
     )
+    parser.add_argument(
+        "--peer-ssh-host",
+        default=os.environ.get("MESH_PEER_SSH_HOST"),
+    )
+    parser.add_argument(
+        "--peer-remote-status",
+        default=os.environ.get("MESH_PEER_REMOTE_STATUS_PATH"),
+    )
+    parser.add_argument(
+        "--peer-control-socket",
+        default=os.environ.get("MESH_PEER_CONTROL_SOCKET"),
+    )
+    parser.add_argument(
+        "--peer-device",
+        default=os.environ.get("MESH_PEER_DEVICE"),
+    )
+    parser.add_argument(
+        "--peer-public-key",
+        default=os.environ.get("MESH_PEER_PUBLIC_KEY"),
+    )
+    parser.add_argument(
+        "--peer-max-status-age-sec",
+        type=float,
+        default=None,
+    )
     parser.add_argument("--token", default=None)
     parser.add_argument("--commit", default=None)
     parser.add_argument("--github-run-id")
@@ -1438,18 +3316,84 @@ def main() -> int:
     parser.add_argument("--out")
     args = parser.parse_args()
 
-    token = args.token or default_token(args.commit)
+    try:
+        token = validate_safe_token(
+            args.token or default_token(args.commit)
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    remote_options = (
+        args.peer_remote_status,
+        args.peer_control_socket,
+        args.peer_device,
+        args.peer_public_key,
+        args.peer_max_status_age_sec,
+    )
+    if args.peer_ssh_host:
+        if args.peer_status or args.peer_port:
+            parser.error(
+                "Remote --peer-ssh-host mode cannot be combined with "
+                "local --peer-status/--peer-port"
+            )
+        try:
+            remote_config = remote_peer_config(
+                ssh_host=args.peer_ssh_host,
+                status_path=(
+                    args.peer_remote_status
+                    or REMOTE_PEER_STATUS_PATH
+                ),
+                control_socket=(
+                    args.peer_control_socket
+                    or REMOTE_PEER_CONTROL_SOCKET
+                ),
+                device=args.peer_device or REMOTE_PEER_DEVICE,
+                public_key=(
+                    args.peer_public_key or REMOTE_PEER_PUBLIC_KEY
+                ),
+                max_status_age_sec=(
+                    args.peer_max_status_age_sec
+                    if args.peer_max_status_age_sec is not None
+                    else REMOTE_PEER_MAX_STATUS_AGE_SEC
+                ),
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+    else:
+        remote_config = None
+        if any(value is not None for value in remote_options):
+            parser.error(
+                "Remote peer path/device options require "
+                "--peer-ssh-host"
+            )
+    fingerprint = str(
+        args.fingerprint
+        or (
+            REMOTE_PEER_FINGERPRINT
+            if remote_config is not None
+            else DEFAULT_TARGET_FINGERPRINT
+        )
+    ).upper()
+    if (
+        remote_config is not None
+        and fingerprint != REMOTE_PEER_FINGERPRINT
+    ):
+        parser.error(
+            "Remote peer fingerprint must match the pinned public key"
+        )
     if bool(args.peer_status) != bool(args.peer_port):
         parser.error("--peer-status and --peer-port must be supplied together")
     peer_status_path = Path(args.peer_status) if args.peer_status else None
     if args.port:
         try:
-            port, peer_port = enforce_port_policy(args.port, args.peer_port)
+            port, peer_port = enforce_port_policy(
+                args.port,
+                None if remote_config is not None else args.peer_port,
+            )
         except ValueError as exc:
             parser.error(str(exc))
     elif args.dry_run:
         port = D1L_REQUIRED_PORT
-        if args.peer_port:
+        if args.peer_port and remote_config is None:
             try:
                 _, peer_port = enforce_port_policy(D1L_REQUIRED_PORT, args.peer_port)
             except ValueError as exc:
@@ -1473,48 +3417,85 @@ def main() -> int:
             "hardware RF acceptance requires positive --github-run-id "
             "and --github-run-attempt"
         )
-    if not args.dry_run and (peer_status_path is None or peer_port is None):
+    if (
+        not args.dry_run
+        and remote_config is None
+        and (peer_status_path is None or peer_port is None)
+    ):
         parser.error(
             "Hardware RF acceptance requires --peer-status and --peer-port for "
             "the explicitly assigned controlled peer"
         )
-    if args.dry_run:
-        report = dry_run_report(
-            port=port,
-            peer_status_path=peer_status_path,
-            peer_port=peer_port,
-            fingerprint=args.fingerprint,
-            public_key=args.d1l_public_key,
-            token=token,
-            send_outbound=not args.skip_outbound,
-            expected_commit=args.commit,
-            github_run_id=args.github_run_id,
-            workflow_run_attempt=args.github_run_attempt,
+    root = Path(__file__).resolve().parents[1]
+    planned_out = planned_report_path(
+        root=root,
+        out_path=Path(args.out) if args.out else None,
+        dry_run=args.dry_run,
+        port=port,
+        token=token,
+    )
+    with EvidenceBundle(root) as evidence_bundle:
+        report_reservation = evidence_bundle.reserve(
+            "report",
+            planned_out,
+            label="RF acceptance report",
         )
-    else:
-        if peer_status_path is not None and not peer_status_path.exists():
-            parser.error(f"Controlled-peer status file not found: {peer_status_path}")
-        report = run_hardware(
-            port=port,
-            baud=args.baud,
-            timeout=args.timeout,
-            wait_sec=args.wait_sec,
-            poll_sec=args.poll_sec,
-            peer_status_path=peer_status_path,
-            peer_port=peer_port,
-            fingerprint=args.fingerprint,
-            public_key=args.d1l_public_key,
-            token=token,
-            send_outbound=not args.skip_outbound,
-            expected_commit=normalized_commit,
-            github_run_id=str(args.github_run_id),
-            workflow_run_attempt=str(args.github_run_attempt),
-        )
+        if args.dry_run:
+            report = dry_run_report(
+                port=port,
+                peer_status_path=peer_status_path,
+                peer_port=peer_port,
+                fingerprint=fingerprint,
+                public_key=args.d1l_public_key,
+                token=token,
+                send_outbound=not args.skip_outbound,
+                expected_commit=args.commit,
+                github_run_id=args.github_run_id,
+                workflow_run_attempt=args.github_run_attempt,
+                remote_peer=remote_config,
+            )
+        else:
+            if peer_status_path is not None and not peer_status_path.exists():
+                parser.error(
+                    f"Controlled-peer status file not found: {peer_status_path}"
+                )
+            report = run_hardware(
+                port=port,
+                baud=args.baud,
+                timeout=args.timeout,
+                wait_sec=args.wait_sec,
+                poll_sec=args.poll_sec,
+                peer_status_path=peer_status_path,
+                peer_port=peer_port,
+                fingerprint=fingerprint,
+                public_key=args.d1l_public_key,
+                token=token,
+                send_outbound=not args.skip_outbound,
+                expected_commit=normalized_commit,
+                github_run_id=str(args.github_run_id),
+                workflow_run_attempt=str(args.github_run_attempt),
+                remote_peer=remote_config,
+                evidence_bundle=evidence_bundle,
+            )
 
-    written = write_report(report, Path(args.out) if args.out else None)
+        written = write_report(
+            report,
+            planned_out,
+            reservation=report_reservation,
+        )
     print(json.dumps({"ok": report["ok"], "out": str(written), "mode": report["mode"]}, indent=2))
     if report.get("mode") == "dry-run-rf-full-acceptance":
-        print(f"Controlled-peer inbound command: {report['discord_command']}")
+        if report.get("discord_command"):
+            print(
+                "Controlled-peer inbound command: "
+                f"{report['discord_command']}"
+            )
+        elif report.get("controlled_peer_control_plan"):
+            print(
+                "Controlled-peer inbound plan: "
+                "SSH to the pinned Pi peer and send one exact "
+                "radio.send_dm request through its Unix socket"
+            )
     return 0 if report["ok"] else 1
 
 

@@ -2110,6 +2110,473 @@ def reboot_persistence_gate(
     )
 
 
+def remote_rf_gate(
+    data: dict,
+    path: Path | None,
+    root: Path,
+    commit: str,
+    sd_history_mode: str,
+    run_id: str,
+    run_attempt: str,
+) -> CoreGate:
+    peer = data.get("controlled_peer")
+    peer = peer if isinstance(peer, dict) else {}
+    control = data.get("controlled_peer_control")
+    control = control if isinstance(control, dict) else {}
+    remote = data.get("controlled_peer_remote")
+    remote = remote if isinstance(remote, dict) else {}
+    try:
+        config = rf_acceptance.validate_remote_peer_config(
+            {
+                "ssh_host": peer.get("ssh_host"),
+                "hostname": peer.get("hostname"),
+                "status_path": peer.get("status_path"),
+                "control_socket": peer.get("control_socket"),
+                "device": peer.get("device"),
+                "public_key": peer.get("public_key"),
+                "max_status_age_sec": peer.get(
+                    "max_status_age_sec"
+                ),
+            }
+        )
+        config_ok = True
+    except (TypeError, ValueError):
+        config = None
+        config_ok = False
+
+    before_path, before_file_ok = _verified_file_row(
+        data.get("controlled_peer_before_receipt"), root
+    )
+    after_path, after_file_ok = _verified_file_row(
+        data.get("controlled_peer_after_receipt"), root
+    )
+    request_path, request_file_ok = _verified_file_row(
+        control.get("request_receipt"), root
+    )
+    response_path, response_file_ok = _verified_file_row(
+        control.get("response_receipt"), root
+    )
+    try:
+        before_raw_bytes = (
+            before_path.read_bytes() if before_path is not None else b""
+        )
+        after_raw_bytes = (
+            after_path.read_bytes() if after_path is not None else b""
+        )
+        request_raw = (
+            request_path.read_bytes() if request_path is not None else b""
+        )
+        response_raw = (
+            response_path.read_bytes()
+            if response_path is not None
+            else b""
+        )
+        before_raw = rf_acceptance.strict_json_object(
+            before_raw_bytes, "remote peer before status"
+        )
+        after_raw = rf_acceptance.strict_json_object(
+            after_raw_bytes, "remote peer after status"
+        )
+        raw_parse_ok = True
+    except (OSError, TypeError, ValueError):
+        before_raw = {}
+        after_raw = {}
+        request_raw = b""
+        response_raw = b""
+        raw_parse_ok = False
+
+    before_row = data.get("controlled_peer_before_receipt")
+    after_row = data.get("controlled_peer_after_receipt")
+    before_row = before_row if isinstance(before_row, dict) else {}
+    after_row = after_row if isinstance(after_row, dict) else {}
+    before_observed = rf_acceptance.parse_aware_timestamp(
+        before_row.get("captured_at")
+    )
+    after_observed = rf_acceptance.parse_aware_timestamp(
+        after_row.get("captured_at")
+    )
+    if config is not None and before_observed is not None:
+        before_validation = rf_acceptance.validate_remote_peer_status(
+            before_raw, config, observed_at=before_observed
+        )
+    else:
+        before_validation = {"ok": False, "checks": {}}
+    if config is not None and after_observed is not None:
+        after_validation = rf_acceptance.validate_remote_peer_status(
+            after_raw, config, observed_at=after_observed
+        )
+    else:
+        after_validation = {"ok": False, "checks": {}}
+
+    d1l_public_key = rf_acceptance.exact_public_key(
+        data.get("d1l_public_key")
+    )
+    try:
+        token = rf_acceptance.validate_safe_token(data.get("token"))
+    except ValueError:
+        token = ""
+    outbound_token = f"{token}_out"
+    inbound_token = f"{token}_in"
+    fingerprint = str(data.get("target_fingerprint") or "").upper()
+    peer_public_key = rf_acceptance.exact_public_key(
+        rf_acceptance.get_path(before_raw, "serial", "public_key")
+    )
+    import_command = (
+        rf_acceptance.contact_import_command(peer_public_key)
+        if peer_public_key is not None
+        else ""
+    )
+    outbound_text = f"core acceptance test {outbound_token}"
+    outbound_command = (
+        f"mesh send dm {fingerprint} {outbound_text}"
+    )
+    message_command = f"messages dm {fingerprint}"
+    steps = data.get("steps")
+    steps = steps if isinstance(steps, list) else []
+    commands = [
+        str(step.get("command") or "")
+        for step in steps
+        if isinstance(step, dict)
+    ]
+    structure_ok = (
+        len(steps) >= 17
+        and all(isinstance(step, dict) for step in steps)
+        and commands[:10]
+        == [
+            "version",
+            "identity status",
+            "contacts",
+            import_command,
+            "contacts",
+            message_command,
+            "packets",
+            f"routes trace {fingerprint}",
+            outbound_command,
+            f"packets search {outbound_token}",
+        ]
+        and commands[-6:]
+        == [
+            "packets",
+            f"routes trace {fingerprint}",
+            message_command,
+            "packets",
+            f"routes trace {fingerprint}",
+            "health",
+        ]
+        and all(
+            command == message_command for command in commands[10:-6]
+        )
+        and commands.count(outbound_command) == 1
+        and sum(
+            command.strip().lower().startswith("mesh send dm ")
+            for command in commands
+        )
+        == 1
+        and not any(
+            command.strip().lower().startswith("mesh send public ")
+            for command in commands
+        )
+    )
+    results = [
+        step.get("result", {}) if isinstance(step, dict) else {}
+        for step in steps
+    ]
+    version = results[0] if len(results) > 0 else {}
+    identity = results[1] if len(results) > 1 else {}
+    contacts_before = results[2] if len(results) > 2 else {}
+    import_result = results[3] if len(results) > 3 else {}
+    contacts_after = results[4] if len(results) > 4 else {}
+    baseline_messages = results[5] if len(results) > 5 else {}
+    baseline_packets = results[6] if len(results) > 6 else {}
+    baseline_route = results[7] if len(results) > 7 else {}
+    outbound_result = results[8] if len(results) > 8 else {}
+    outbound_packets = results[9] if len(results) > 9 else {}
+    final_messages = results[-4] if len(results) >= 4 else {}
+    final_packets = results[-3] if len(results) >= 3 else {}
+    final_route = results[-2] if len(results) >= 2 else {}
+    final_health = results[-1] if results else {}
+
+    control_validation = (
+        rf_acceptance.validate_remote_control_exchange(
+            request_raw,
+            response_raw,
+            d1l_public_key=d1l_public_key,
+            token=inbound_token,
+        )
+        if d1l_public_key is not None and token
+        else {"ok": False, "checks": {}}
+    )
+    control_exact = (
+        request_file_ok
+        and response_file_ok
+        and request_path is not None
+        and response_path is not None
+        and request_path != response_path
+        and control_validation.get("ok") is True
+        and control.get("op") == "radio.send_dm"
+        and config is not None
+        and control.get("socket_path") == config["control_socket"]
+        and control.get("request_id")
+        == control_validation.get("request", {}).get("id")
+        and control.get("request")
+        == control_validation.get("request")
+        and control.get("response")
+        == control_validation.get("response")
+        and control.get("request_sha256")
+        == control_validation.get("request_sha256")
+        and control.get("response_sha256")
+        == control_validation.get("response_sha256")
+        and control.get("validation") == control_validation
+    )
+    flow = rf_acceptance.remote_peer_flow_validation(
+        before=before_raw,
+        after=after_raw,
+        before_validation=before_validation,
+        after_validation=after_validation,
+        d1l_public_key=d1l_public_key or "",
+        control={
+            **control,
+            "validation": control_validation,
+        },
+    )
+    remote_exact = (
+        remote.get("before_validation") == before_validation
+        and remote.get("after_validation") == after_validation
+        and remote.get("flow") == flow
+        and data.get("controlled_peer_counter_deltas")
+        == flow.get("deltas")
+    )
+
+    def status_source_exact(row: dict) -> bool:
+        return (
+            config is not None
+            and row.get("source_path") == config["status_path"]
+            and row.get("source_host") == config["ssh_host"]
+            and row.get("source_hostname") == config["hostname"]
+            and row.get("transport") == "ssh"
+            and row.get("remote_sha256") == row.get("sha256")
+            and isinstance(row.get("remote_mtime_ns"), int)
+            and not isinstance(row.get("remote_mtime_ns"), bool)
+        )
+
+    def control_source_exact(row: object, transport: str) -> bool:
+        return (
+            isinstance(row, dict)
+            and config is not None
+            and row.get("source_path") == config["control_socket"]
+            and row.get("source_host") == config["ssh_host"]
+            and row.get("source_hostname") == config["hostname"]
+            and row.get("transport") == transport
+        )
+
+    source_rows_ok = (
+        status_source_exact(before_row)
+        and status_source_exact(after_row)
+        and control_source_exact(
+            control.get("request_receipt"),
+            "ssh-unix-socket-request",
+        )
+        and control_source_exact(
+            control.get("response_receipt"),
+            "ssh-unix-socket-response",
+        )
+    )
+    raw_status_ok = (
+        raw_parse_ok
+        and before_file_ok
+        and after_file_ok
+        and before_path is not None
+        and after_path is not None
+        and before_path != after_path
+        and data.get("controlled_peer_before")
+        == rf_acceptance.status_snapshot(before_raw)
+        and data.get("controlled_peer_after")
+        == rf_acceptance.status_snapshot(after_raw)
+        and before_validation.get("ok") is True
+        and after_validation.get("ok") is True
+        and peer_public_key == rf_acceptance.REMOTE_PEER_PUBLIC_KEY
+        and rf_acceptance.exact_public_key(
+            rf_acceptance.get_path(
+                after_raw, "serial", "public_key"
+            )
+        )
+        == rf_acceptance.REMOTE_PEER_PUBLIC_KEY
+    )
+    contact_setup = data.get("controlled_peer_contact_setup")
+    contact_setup = (
+        contact_setup if isinstance(contact_setup, dict) else {}
+    )
+    contact_ok = (
+        peer_public_key is not None
+        and rf_acceptance.contact_import_ok(
+            import_result, peer_public_key, fingerprint
+        )
+        and rf_acceptance.contacts_has_exact_peer(
+            contacts_after, peer_public_key, fingerprint
+        )
+        and contact_setup
+        == {
+            "name": rf_acceptance.RADIO_LISTENER_CONTACT_NAME,
+            "public_key": peer_public_key,
+            "fingerprint": fingerprint,
+            "import_command": import_command,
+            "before": contacts_before,
+            "import_result": import_result,
+            "after": contacts_after,
+        }
+    )
+    d1l_fingerprint = rf_acceptance.public_key_fingerprint(
+        d1l_public_key or ""
+    )
+    identity_ok = (
+        d1l_public_key is not None
+        and d1l_fingerprint is not None
+        and identity.get("ok") is True
+        and rf_acceptance.exact_public_key(
+            identity.get("public_key")
+        )
+        == d1l_public_key
+        and str(identity.get("fingerprint") or "").upper()
+        == d1l_fingerprint
+        and data.get("expected_identity_fingerprint")
+        == d1l_fingerprint
+        and data.get("identity_fingerprint") == d1l_fingerprint
+    )
+    outbound_ok = (
+        outbound_result.get("ok") is True
+        and rf_acceptance.contains_token(
+            outbound_packets, outbound_token
+        )
+    )
+    inbound_ok = rf_acceptance.new_exact_listener_reply(
+        baseline_messages,
+        final_messages,
+        fingerprint,
+        inbound_token,
+    )
+    transaction_correlation = (
+        rf_acceptance.correlated_listener_transaction(
+            baseline_messages=baseline_messages,
+            final_messages=final_messages,
+            baseline_packets=baseline_packets,
+            final_packets=final_packets,
+            baseline_route=baseline_route,
+            final_route=final_route,
+            outbound_token=outbound_token,
+            fingerprint=fingerprint,
+            inbound_text=inbound_token,
+        )
+    )
+    ack_ok = (
+        transaction_correlation.get("ack_path_ok") is True
+        and data.get("transaction_correlation")
+        == transaction_correlation
+    )
+    route_ok = (
+        transaction_correlation.get("direct_route_ok") is True
+        and data.get("transaction_correlation")
+        == transaction_correlation
+    )
+    derived_checks = {
+        "identity_public_key_matches": identity_ok,
+        "controlled_peer_observed": raw_status_ok
+        and flow.get("ok") is True,
+        "controlled_peer_status_connected": raw_status_ok
+        and flow.get("ok") is True
+        and control_exact,
+        "controlled_peer_contact_ready": contact_ok,
+        "outbound_dm": outbound_ok,
+        "inbound_dm": inbound_ok,
+        "ack_path": ack_ok,
+        "direct_route": route_ok,
+        "health_ready": _profile_ready_health_result(
+            final_health, commit, sd_history_mode
+        ),
+        "no_public_commands": structure_ok,
+        "exact_candidate": _profile_version_result(
+            version, commit, sd_history_mode
+        ),
+    }
+    checks_ok = (
+        data.get("checks") == derived_checks
+        and all(derived_checks.values())
+    )
+    peer_binding_ok = (
+        config_ok
+        and config is not None
+        and peer.get("evidence_source")
+        == rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
+        and peer.get("port") is None
+        and peer.get("fingerprint")
+        == rf_acceptance.REMOTE_PEER_FINGERPRINT
+        and peer.get("public_key")
+        == rf_acceptance.REMOTE_PEER_PUBLIC_KEY
+        and data.get("controlled_peer_adapter")
+        == rf_acceptance.REMOTE_PEER_ADAPTER
+    )
+    ok = (
+        real_evidence(data)
+        and data.get("schema")
+        == rf_acceptance.RF_FULL_ACCEPTANCE_SCHEMA
+        and data.get("mode") == "rf-full-acceptance"
+        and data.get("ok") is True
+        and data.get("execution_complete") is True
+        and data.get("closure_eligible") is True
+        and data.get("physical_observed") is True
+        and data.get("port") == D1L_CORE_PORT
+        and exact_candidate_fields(data, commit)
+        and str(data.get("github_actions_run")) == str(run_id)
+        and str(data.get("workflow_run_attempt")) == str(run_attempt)
+        and data.get("device_idf_version") == EXPECTED_IDF_VERSION
+        and data.get("device_release_profile") == CORE_RELEASE_PROFILE
+        and data.get("device_sd_history_mode") == sd_history_mode
+        and checks_ok
+        and structure_ok
+        and source_rows_ok
+        and raw_status_ok
+        and remote_exact
+        and flow.get("ok") is True
+        and control_exact
+        and contact_ok
+        and transaction_correlation.get("ok") is True
+        and peer_binding_ok
+        and rf_acceptance.remote_peer_report_shape_ok(data)
+        and data.get("outbound_token") == outbound_token
+        and data.get("inbound_token") == inbound_token
+        and isinstance(data.get("inbound_seen_at"), str)
+        and bool(data["inbound_seen_at"])
+        and data.get("dm_rf_tx") is True
+        and data.get("public_rf_tx") is False
+        and data.get("formats_sd") is False
+    )
+    evidence = (
+        path_text(path, root)
+        + path_text(before_path, root)
+        + path_text(after_path, root)
+        + path_text(request_path, root)
+        + path_text(response_path, root)
+    )
+    return CoreGate(
+        "controlled_bidirectional_rf_dm",
+        ok,
+        "Controlled-peer outbound/inbound DM, ACK/PATH, direct route, and health pass",
+        evidence,
+        {
+            "checks_ok": checks_ok,
+            "derived_checks": derived_checks,
+            "command_structure_ok": structure_ok,
+            "raw_status_ok": raw_status_ok,
+            "peer_flow_ok": flow.get("ok") is True,
+            "control_exchange_ok": control_exact,
+            "contact_setup_ok": contact_ok,
+            "source_rows_ok": source_rows_ok,
+            "peer_binding_ok": peer_binding_ok,
+            "counter_deltas": flow.get("deltas"),
+            "transaction_correlation": transaction_correlation,
+        },
+    )
+
+
 def rf_gate(
     path: Path | None,
     root: Path,
@@ -2119,6 +2586,21 @@ def rf_gate(
     run_attempt: str,
 ) -> CoreGate:
     data = read_json(path)
+    peer_row = data.get("controlled_peer")
+    if (
+        isinstance(peer_row, dict)
+        and peer_row.get("evidence_source")
+        == rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
+    ):
+        return remote_rf_gate(
+            data,
+            path,
+            root,
+            commit,
+            sd_history_mode,
+            run_id,
+            run_attempt,
+        )
     before_path, before_file_ok = _verified_file_row(
         data.get("controlled_peer_before_receipt"), root
     )
@@ -2850,15 +3332,73 @@ def active_soak_peer_flow_ok(
     after_path, after_file_ok = _verified_file_row(
         data.get("controlled_peer_after_receipt"), root
     )
-    before = read_json(before_path)
-    after = read_json(after_path)
     before_row = data.get("controlled_peer_before_receipt")
     after_row = data.get("controlled_peer_after_receipt")
+    before_row = before_row if isinstance(before_row, dict) else {}
+    after_row = after_row if isinstance(after_row, dict) else {}
+    peer = rf.get("controlled_peer")
+    peer = peer if isinstance(peer, dict) else {}
+    remote_mode = (
+        peer.get("evidence_source")
+        == rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
+    )
+    remote_config: dict | None = None
+    if remote_mode:
+        try:
+            remote_config = rf_acceptance.validate_remote_peer_config(
+                {
+                    "ssh_host": peer.get("ssh_host"),
+                    "hostname": peer.get("hostname"),
+                    "status_path": peer.get("status_path"),
+                    "control_socket": peer.get("control_socket"),
+                    "device": peer.get("device"),
+                    "public_key": peer.get("public_key"),
+                    "max_status_age_sec": peer.get(
+                        "max_status_age_sec"
+                    ),
+                }
+            )
+        except (TypeError, ValueError):
+            remote_config = None
+
+    try:
+        if remote_mode:
+            before = rf_acceptance.strict_json_object(
+                before_path.read_bytes() if before_path else b"",
+                "remote active-soak peer before status",
+            )
+            after = rf_acceptance.strict_json_object(
+                after_path.read_bytes() if after_path else b"",
+                "remote active-soak peer after status",
+            )
+        else:
+            before = read_json(before_path)
+            after = read_json(after_path)
+        raw_parse_ok = True
+    except (OSError, TypeError, ValueError):
+        before = {}
+        after = {}
+        raw_parse_ok = False
+
     canonical_status = rf_acceptance.RADIO_LISTENER_STATUS_PATH.resolve()
 
     def canonical_source(row: object) -> bool:
         if not isinstance(row, dict):
             return False
+        if remote_mode:
+            return (
+                remote_config is not None
+                and row.get("source_path")
+                == remote_config["status_path"]
+                and row.get("source_host")
+                == remote_config["ssh_host"]
+                and row.get("source_hostname")
+                == remote_config["hostname"]
+                and row.get("transport") == "ssh"
+                and row.get("remote_sha256") == row.get("sha256")
+                and isinstance(row.get("remote_mtime_ns"), int)
+                and not isinstance(row.get("remote_mtime_ns"), bool)
+            )
         source = row.get("source_path")
         try:
             return (
@@ -2880,8 +3420,37 @@ def active_soak_peer_flow_ok(
     expected_send_count = soak_runner.expected_active_send_count(
         data.get("duration_sec"), data.get("active_interval_sec")
     )
-    peer = rf.get("controlled_peer")
-    peer = peer if isinstance(peer, dict) else {}
+    before_observed = rf_acceptance.parse_aware_timestamp(
+        before_row.get("captured_at")
+    )
+    after_observed = rf_acceptance.parse_aware_timestamp(
+        after_row.get("captured_at")
+    )
+    if (
+        remote_config is not None
+        and before_observed is not None
+        and after_observed is not None
+    ):
+        before_validation = rf_acceptance.validate_remote_peer_status(
+            before,
+            remote_config,
+            observed_at=before_observed,
+        )
+        after_validation = rf_acceptance.validate_remote_peer_status(
+            after,
+            remote_config,
+            observed_at=after_observed,
+        )
+        remote_validation_ok = (
+            before_validation.get("ok") is True
+            and after_validation.get("ok") is True
+            and before_observed <= after_observed
+        )
+    else:
+        before_validation = None
+        after_validation = None
+        remote_validation_ok = not remote_mode
+
     flow_ok, deltas = soak_runner.active_listener_flow_ok(
         before,
         after,
@@ -2890,7 +3459,16 @@ def active_soak_peer_flow_ok(
         peer_fingerprint=str(rf.get("target_fingerprint") or ""),
         peer_public_key=peer.get("public_key"),
         minimum_send_count=expected_send_count or sys.maxsize,
+        remote_config=remote_config if remote_mode else None,
     )
+    controlled_peer_remote = data.get("controlled_peer_remote")
+    if remote_mode:
+        remote_report_exact = controlled_peer_remote == {
+            "before_validation": before_validation,
+            "after_validation": after_validation,
+        }
+    else:
+        remote_report_exact = controlled_peer_remote in (None, {})
     report_exact = (
         data.get("controlled_peer_before")
         == rf_acceptance.status_snapshot(before)
@@ -2902,9 +3480,11 @@ def active_soak_peer_flow_ok(
         and data.get("controlled_peer_expected_send_count")
         == expected_send_count
         and data.get("controlled_peer_flow_ok") is True
+        and remote_report_exact
     )
     files_exact = (
-        before_file_ok
+        raw_parse_ok
+        and before_file_ok
         and after_file_ok
         and before_path is not None
         and after_path is not None
@@ -2912,19 +3492,8 @@ def active_soak_peer_flow_ok(
         and canonical_source(before_row)
         and canonical_source(after_row)
     )
-    try:
-        peer_status_exact = (
-            Path(str(peer.get("status_path"))).resolve()
-            == canonical_status
-        )
-    except (OSError, RuntimeError, ValueError):
-        peer_status_exact = False
-    binding_exact = (
-        rf.get("controlled_peer_adapter")
-        == rf_acceptance.RADIO_LISTENER_PROFILE
-        and peer.get("port") == rf_acceptance.RADIO_LISTENER_PORT
-        and peer_status_exact
-        and data.get("active_dm_fingerprint")
+    common_binding = (
+        data.get("active_dm_fingerprint")
         == rf.get("target_fingerprint")
         and soak_runner.listener_test_text_ok(data.get("active_dm_text"))
         and rf_acceptance.exact_public_key(peer.get("public_key"))
@@ -2932,11 +3501,41 @@ def active_soak_peer_flow_ok(
         and rf_acceptance.exact_public_key(rf.get("d1l_public_key"))
         is not None
     )
+    if remote_mode:
+        binding_exact = (
+            common_binding
+            and remote_config is not None
+            and rf.get("controlled_peer_adapter")
+            == rf_acceptance.REMOTE_PEER_ADAPTER
+            and peer.get("port") is None
+            and remote_config["device"]
+            == rf_acceptance.REMOTE_PEER_DEVICE
+            and remote_config["public_key"]
+            == rf_acceptance.REMOTE_PEER_PUBLIC_KEY
+            and peer.get("fingerprint")
+            == rf_acceptance.REMOTE_PEER_FINGERPRINT
+        )
+    else:
+        try:
+            peer_status_exact = (
+                Path(str(peer.get("status_path"))).resolve()
+                == canonical_status
+            )
+        except (OSError, RuntimeError, ValueError):
+            peer_status_exact = False
+        binding_exact = (
+            common_binding
+            and rf.get("controlled_peer_adapter")
+            == rf_acceptance.RADIO_LISTENER_PROFILE
+            and peer.get("port") == rf_acceptance.RADIO_LISTENER_PORT
+            and peer_status_exact
+        )
     ok = (
         files_exact
         and binding_exact
         and report_exact
         and flow_ok
+        and remote_validation_ok
         and expected_send_count is not None
         and successful_send_count >= max(6, expected_send_count)
     )
@@ -2952,6 +3551,10 @@ def active_soak_peer_flow_ok(
         "report_exact": report_exact,
         "binding_exact": binding_exact,
         "flow_ok": flow_ok,
+        "remote_mode": remote_mode,
+        "remote_status_validation_ok": remote_validation_ok,
+        "remote_before_validation": before_validation,
+        "remote_after_validation": after_validation,
     }
 
 

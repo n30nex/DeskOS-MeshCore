@@ -208,10 +208,49 @@ def qualified_controlled_peer_receipt(
         if isinstance(data, dict)
         else None
     )
-    try:
-        peer_status_path = Path(str(peer.get("status_path"))).resolve()
-    except (OSError, RuntimeError, TypeError, ValueError):
-        peer_status_path = None
+    evidence_source = (
+        peer.get("evidence_source")
+        if isinstance(peer, dict)
+        else None
+    )
+    local_peer_ok = False
+    remote_peer_ok = False
+    if evidence_source == "explicit_peer_status":
+        try:
+            peer_status_path = Path(
+                str(peer.get("status_path"))
+            ).resolve()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            peer_status_path = None
+        local_peer_ok = (
+            data.get("controlled_peer_adapter")
+            == rf_acceptance.RADIO_LISTENER_PROFILE
+            and peer.get("port") == rf_acceptance.RADIO_LISTENER_PORT
+            and peer_status_path
+            == rf_acceptance.RADIO_LISTENER_STATUS_PATH.resolve()
+        )
+    elif (
+        evidence_source
+        == rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
+    ):
+        remote_peer_ok = (
+            data.get("controlled_peer_adapter")
+            == rf_acceptance.REMOTE_PEER_ADAPTER
+            and peer.get("port") is None
+            and peer.get("ssh_host")
+            == rf_acceptance.REMOTE_PEER_SSH_HOST
+            and peer.get("hostname")
+            == rf_acceptance.REMOTE_PEER_HOSTNAME
+            and peer.get("status_path")
+            == rf_acceptance.REMOTE_PEER_STATUS_PATH
+            and peer.get("control_socket")
+            == rf_acceptance.REMOTE_PEER_CONTROL_SOCKET
+            and peer.get("device")
+            == rf_acceptance.REMOTE_PEER_DEVICE
+            and peer.get("public_key")
+            == rf_acceptance.REMOTE_PEER_PUBLIC_KEY
+            and rf_acceptance.remote_peer_report_shape_ok(data)
+        )
     if not (
         isinstance(data, dict)
         and data.get("mode") == "rf-full-acceptance"
@@ -220,14 +259,10 @@ def qualified_controlled_peer_receipt(
         and exact_commit(data.get("expected_firmware_commit")) == commit
         and str(data.get("github_actions_run")) == str(run_id)
         and str(data.get("workflow_run_attempt")) == str(run_attempt)
-        and data.get("controlled_peer_adapter")
-        == "openclaw_radio_listener"
         and data.get("target_fingerprint") == fingerprint
         and isinstance(peer, dict)
         and peer.get("fingerprint") == fingerprint
-        and peer.get("port") == "COM15"
-        and peer_status_path
-        == rf_acceptance.RADIO_LISTENER_STATUS_PATH.resolve()
+        and (local_peer_ok or remote_peer_ok)
         and peer_public_key is not None
         and rf_acceptance.public_key_fingerprint(peer_public_key)
         == fingerprint
@@ -274,6 +309,7 @@ def active_listener_flow_ok(
     peer_fingerprint: str,
     peer_public_key: object,
     minimum_send_count: int = 1,
+    remote_config: dict | None = None,
 ) -> tuple[bool, dict[str, int | None]]:
     deltas = {
         field: rf_acceptance.counter_delta(before, after, field)
@@ -301,6 +337,44 @@ def active_listener_flow_ok(
         and rf_acceptance.public_key_fingerprint(expected_peer_key)
         == peer_fingerprint
     )
+    if remote_config is not None:
+        try:
+            normalized_remote = (
+                rf_acceptance.validate_remote_peer_config(
+                    remote_config
+                )
+            )
+        except ValueError:
+            normalized_remote = None
+        continuity_binding_ok = (
+            normalized_remote is not None
+            and rf_acceptance.get_path(before, "serial", "port")
+            == normalized_remote["device"]
+            and rf_acceptance.get_path(after, "serial", "port")
+            == normalized_remote["device"]
+            and rf_acceptance.get_path(
+                before, "serial", "mesh_connected"
+            )
+            is True
+            and rf_acceptance.get_path(
+                after, "serial", "mesh_connected"
+            )
+            is True
+            and expected_peer_key == normalized_remote["public_key"]
+        )
+    else:
+        continuity_binding_ok = (
+            rf_acceptance.radio_listener_connected(
+                before,
+                rf_acceptance.RADIO_LISTENER_PORT,
+                peer_fingerprint,
+            )
+            and rf_acceptance.radio_listener_connected(
+                after,
+                rf_acceptance.RADIO_LISTENER_PORT,
+                peer_fingerprint,
+            )
+        )
     continuity_ok = (
         isinstance(before, dict)
         and isinstance(after, dict)
@@ -309,16 +383,7 @@ def active_listener_flow_ok(
         and bool(before.get("run_id"))
         and before.get("service") == after.get("service")
         and before.get("service") == "openclaw-radio-listener"
-        and rf_acceptance.radio_listener_connected(
-            before,
-            rf_acceptance.RADIO_LISTENER_PORT,
-            peer_fingerprint,
-        )
-        and rf_acceptance.radio_listener_connected(
-            after,
-            rf_acceptance.RADIO_LISTENER_PORT,
-            peer_fingerprint,
-        )
+        and continuity_binding_ok
     )
     counters_ok = (
         count_ok
@@ -882,7 +947,7 @@ def dry_run_report(
     }
 
 
-def run_serial_soak(
+def _run_serial_soak_reserved(
     *,
     port: str,
     baud: int,
@@ -910,6 +975,7 @@ def run_serial_soak(
     expected_sd_history_mode: str | None = None,
     controlled_peer_receipt: Path | None = None,
     peer_capture_dir: Path | None = None,
+    evidence_bundle: rf_acceptance.EvidenceBundle,
 ) -> dict:
     root = Path(__file__).resolve().parents[1]
     normalized_commit = (
@@ -992,6 +1058,11 @@ def run_serial_soak(
     peer_successful_send_count: int | None = None
     peer_expected_send_count: int | None = None
     peer_flow_ok: bool | None = None
+    remote_peer_config: dict | None = None
+    peer_remote_before_validation: dict | None = None
+    peer_remote_after_validation: dict | None = None
+    peer_before_reservation: rf_acceptance.EvidenceReservation | None = None
+    peer_after_reservation: rf_acceptance.EvidenceReservation | None = None
     after_capture: Path | None = None
     if active_command is not None and release_bound:
         if controlled_peer_receipt is None or normalized_commit is None:
@@ -1008,7 +1079,7 @@ def run_serial_soak(
         )
         if not listener_test_text_ok(active_dm_text):
             raise ValueError(
-                "COM15 OpenClaw active soak DM text must contain the "
+                "controlled-peer active soak DM text must contain the "
                 "case-insensitive word 'test'"
             )
         peer_expected_send_count = expected_active_send_count(
@@ -1020,6 +1091,23 @@ def run_serial_soak(
                 "send-count floor"
             )
         peer = peer_receipt["controlled_peer"]
+        if (
+            peer.get("evidence_source")
+            == rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
+        ):
+            remote_peer_config = rf_acceptance.validate_remote_peer_config(
+                {
+                    "ssh_host": peer.get("ssh_host"),
+                    "hostname": peer.get("hostname"),
+                    "status_path": peer.get("status_path"),
+                    "control_socket": peer.get("control_socket"),
+                    "device": peer.get("device"),
+                    "public_key": peer.get("public_key"),
+                    "max_status_age_sec": peer.get(
+                        "max_status_age_sec"
+                    ),
+                }
+            )
         capture_dir = (
             peer_capture_dir
             or root / "artifacts" / "soak" / "rf-peer"
@@ -1032,32 +1120,75 @@ def run_serial_soak(
         safe_token = re.sub(r"[^A-Za-z0-9_.-]", "_", capture_token)
         before_capture = capture_dir / f"{safe_token}_peer_before.json"
         after_capture = capture_dir / f"{safe_token}_peer_after.json"
-        peer_before, peer_before_receipt = rf_acceptance.capture_peer_status(
-            rf_acceptance.RADIO_LISTENER_STATUS_PATH,
+        peer_before_reservation = evidence_bundle.reserve(
+            "soak_peer_before",
             before_capture,
-            root,
+            label="active-soak controlled-peer before status",
         )
+        peer_after_reservation = evidence_bundle.reserve(
+            "soak_peer_after",
+            after_capture,
+            label="active-soak controlled-peer after status",
+        )
+        evidence_bundle.mark_external_io_started()
+        if remote_peer_config is not None:
+            (
+                peer_before,
+                peer_before_receipt,
+                peer_remote_before_validation,
+            ) = rf_acceptance.capture_remote_peer_status(
+                remote_peer_config,
+                before_capture,
+                root,
+                reservation=peer_before_reservation,
+                evidence_bundle=evidence_bundle,
+            )
+        else:
+            (
+                peer_before,
+                peer_before_receipt,
+            ) = rf_acceptance.capture_peer_status(
+                rf_acceptance.RADIO_LISTENER_STATUS_PATH,
+                before_capture,
+                root,
+                reservation=peer_before_reservation,
+            )
         expected_peer_key = rf_acceptance.exact_public_key(
             peer.get("public_key")
         )
-        if not (
+        identity_ready = (
             expected_peer_key is not None
-            and rf_acceptance.radio_listener_connected(
-                peer_before,
-                rf_acceptance.RADIO_LISTENER_PORT,
-                str(active_dm_fingerprint).upper(),
-            )
             and rf_acceptance.exact_public_key(
                 rf_acceptance.get_path(
                     peer_before, "serial", "public_key"
                 )
             )
             == expected_peer_key
-        ):
+            and rf_acceptance.public_key_fingerprint(expected_peer_key)
+            == str(active_dm_fingerprint).upper()
+        )
+        if remote_peer_config is not None:
+            identity_ready = (
+                identity_ready
+                and peer_remote_before_validation is not None
+                and peer_remote_before_validation.get("ok") is True
+            )
+        else:
+            identity_ready = (
+                identity_ready
+                and rf_acceptance.radio_listener_connected(
+                    peer_before,
+                    rf_acceptance.RADIO_LISTENER_PORT,
+                    str(active_dm_fingerprint).upper(),
+                )
+            )
+        if not identity_ready:
             raise ValueError(
-                "COM15 OpenClaw listener status/public-key identity is not "
+                "controlled-peer status/public-key identity is not "
                 "ready for active soak"
             )
+    if not evidence_bundle.external_io_started:
+        evidence_bundle.mark_external_io_started()
     samples: list[dict] = []
     active_events: list[dict] = []
     setup_events: list[dict] = []
@@ -1209,11 +1340,28 @@ def run_serial_soak(
             or peer_before_receipt is None
         ):
             raise ValueError("active soak peer capture state is incomplete")
-        peer_after, peer_after_receipt = rf_acceptance.capture_peer_status(
-            rf_acceptance.RADIO_LISTENER_STATUS_PATH,
-            after_capture,
-            root,
-        )
+        if remote_peer_config is not None:
+            (
+                peer_after,
+                peer_after_receipt,
+                peer_remote_after_validation,
+            ) = rf_acceptance.capture_remote_peer_status(
+                remote_peer_config,
+                after_capture,
+                root,
+                reservation=peer_after_reservation,
+                evidence_bundle=evidence_bundle,
+            )
+        else:
+            (
+                peer_after,
+                peer_after_receipt,
+            ) = rf_acceptance.capture_peer_status(
+                rf_acceptance.RADIO_LISTENER_STATUS_PATH,
+                after_capture,
+                root,
+                reservation=peer_after_reservation,
+            )
         peer_successful_send_count = sum(
             1
             for event in active_events
@@ -1231,6 +1379,7 @@ def run_serial_soak(
                 "public_key"
             ),
             minimum_send_count=peer_expected_send_count or 1,
+            remote_config=remote_peer_config,
         )
 
     ended_at = datetime.now(timezone.utc)
@@ -1319,6 +1468,14 @@ def run_serial_soak(
         "controlled_peer_after": rf_acceptance.status_snapshot(peer_after),
         "controlled_peer_before_receipt": peer_before_receipt,
         "controlled_peer_after_receipt": peer_after_receipt,
+        "controlled_peer_remote": (
+            {
+                "before_validation": peer_remote_before_validation,
+                "after_validation": peer_remote_after_validation,
+            }
+            if remote_peer_config is not None
+            else None
+        ),
         "controlled_peer_counter_deltas": peer_counter_deltas,
         "controlled_peer_successful_send_count": (
             peer_successful_send_count
@@ -1345,6 +1502,28 @@ def run_serial_soak(
         "active_events": active_events,
         "samples": samples,
     }
+
+
+def run_serial_soak(
+    *,
+    evidence_bundle: rf_acceptance.EvidenceBundle | None = None,
+    **kwargs,
+) -> dict:
+    root = Path(__file__).resolve().parents[1]
+    if evidence_bundle is not None:
+        if evidence_bundle.root != root.resolve(strict=True):
+            raise ValueError(
+                "soak evidence bundle is bound to a different repository"
+            )
+        return _run_serial_soak_reserved(
+            evidence_bundle=evidence_bundle,
+            **kwargs,
+        )
+    with rf_acceptance.EvidenceBundle(root) as owned_bundle:
+        return _run_serial_soak_reserved(
+            evidence_bundle=owned_bundle,
+            **kwargs,
+        )
 
 
 def resolve_out_path(out_arg: str | None, mode: str) -> Path:
@@ -1391,7 +1570,8 @@ def main() -> int:
     parser.add_argument(
         "--peer-capture-dir",
         help=(
-            "repository-contained directory for read-only COM15 status "
+            "repository-contained directory for read-only local COM15 or "
+            "remote controlled-peer raw status "
             "snapshots (active release soak only)"
         ),
     )
@@ -1418,98 +1598,116 @@ def main() -> int:
             "--expected-firmware-commit must be an exact 40-character hexadecimal SHA"
         )
 
-    if args.dry_run:
-        report = dry_run_report(
-            duration_sec=args.duration_sec,
-            sample_interval_sec=args.sample_interval_sec,
-            active_public_text=args.active_public_text,
-            active_interval_sec=args.active_interval_sec,
-            require_rx_delta=args.require_rx_delta,
-            min_rx_delta=args.min_rx_delta,
-            min_tx_delta=args.min_tx_delta,
-            clear_crashlog_before_start=args.clear_crashlog_before_start,
-            command_retries=args.command_retries,
-            retry_delay_sec=args.retry_delay_sec,
-            sample_storage=args.sample_storage or args.sd_file_canary,
-            sd_file_canary=args.sd_file_canary,
-            allow_sd_unavailable=args.allow_sd_unavailable,
-            active_dm_fingerprint=args.active_dm_fingerprint,
-            active_dm_text=args.active_dm_text,
-            expected_firmware_commit=normalized_commit,
-            github_run_id=args.github_run_id,
-            workflow_run_attempt=args.github_run_attempt,
-        )
-        mode = "dry-run"
-    else:
-        if not args.port:
-            parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
-        if normalized_commit is None:
-            parser.error("Hardware soak requires --expected-firmware-commit.")
-        if (
-            not str(args.github_run_id or "").isdigit()
-            or int(str(args.github_run_id or "0")) < 1
-            or not str(args.github_run_attempt or "").isdigit()
-            or int(str(args.github_run_attempt or "0")) < 1
-        ):
-            parser.error(
-                "Hardware soak requires positive --github-run-id and "
-                "--github-run-attempt."
-            )
-        try:
-            report = run_serial_soak(
-                port=args.port,
-                baud=args.baud,
-                timeout=args.timeout,
-                duration_sec=args.duration_sec,
-                sample_interval_sec=args.sample_interval_sec,
-                active_public_text=args.active_public_text,
-                active_interval_sec=args.active_interval_sec,
-                startup_settle_sec=args.startup_settle_sec,
-                require_rx_delta=args.require_rx_delta,
-                min_rx_delta=args.min_rx_delta,
-                min_tx_delta=args.min_tx_delta,
-                clear_crashlog_before_start=args.clear_crashlog_before_start,
-                command_retries=args.command_retries,
-                retry_delay_sec=args.retry_delay_sec,
-                sample_storage=args.sample_storage or args.sd_file_canary,
-                sd_file_canary=args.sd_file_canary,
-                allow_sd_unavailable=args.allow_sd_unavailable,
-                active_dm_fingerprint=args.active_dm_fingerprint,
-                active_dm_text=args.active_dm_text,
-                expected_firmware_commit=normalized_commit,
-                github_run_id=str(args.github_run_id),
-                workflow_run_attempt=str(args.github_run_attempt),
-                expected_release_profile=args.expected_release_profile,
-                expected_sd_history_mode=args.expected_sd_history_mode,
-                controlled_peer_receipt=(
-                    (
-                        Path(args.controlled_peer_receipt)
-                        if Path(args.controlled_peer_receipt).is_absolute()
-                        else Path(__file__).resolve().parents[1]
-                        / args.controlled_peer_receipt
-                    )
-                    if args.controlled_peer_receipt
-                    else None
-                ),
-                peer_capture_dir=(
-                    (
-                        Path(args.peer_capture_dir)
-                        if Path(args.peer_capture_dir).is_absolute()
-                        else Path(__file__).resolve().parents[1]
-                        / args.peer_capture_dir
-                    )
-                    if args.peer_capture_dir
-                    else None
-                ),
-            )
-        except ValueError as exc:
-            parser.error(str(exc))
-        mode = "hardware"
-
+    mode = "dry-run" if args.dry_run else "hardware"
+    root = Path(__file__).resolve().parents[1]
     out_path = resolve_out_path(args.out, mode)
-    stamp_report(report, Path(__file__).resolve().parents[1])
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(report, indent=2), encoding="ascii")
+    try:
+        with rf_acceptance.EvidenceBundle(root) as evidence_bundle:
+            report_reservation = evidence_bundle.reserve(
+                "report",
+                out_path,
+                label="D1L soak report",
+            )
+            if args.dry_run:
+                report = dry_run_report(
+                    duration_sec=args.duration_sec,
+                    sample_interval_sec=args.sample_interval_sec,
+                    active_public_text=args.active_public_text,
+                    active_interval_sec=args.active_interval_sec,
+                    require_rx_delta=args.require_rx_delta,
+                    min_rx_delta=args.min_rx_delta,
+                    min_tx_delta=args.min_tx_delta,
+                    clear_crashlog_before_start=(
+                        args.clear_crashlog_before_start
+                    ),
+                    command_retries=args.command_retries,
+                    retry_delay_sec=args.retry_delay_sec,
+                    sample_storage=args.sample_storage
+                    or args.sd_file_canary,
+                    sd_file_canary=args.sd_file_canary,
+                    allow_sd_unavailable=args.allow_sd_unavailable,
+                    active_dm_fingerprint=args.active_dm_fingerprint,
+                    active_dm_text=args.active_dm_text,
+                    expected_firmware_commit=normalized_commit,
+                    github_run_id=args.github_run_id,
+                    workflow_run_attempt=args.github_run_attempt,
+                )
+            else:
+                if not args.port:
+                    parser.error(
+                        "No D1L port supplied. Set D1L_PORT or pass --port."
+                    )
+                if normalized_commit is None:
+                    parser.error(
+                        "Hardware soak requires --expected-firmware-commit."
+                    )
+                if (
+                    not str(args.github_run_id or "").isdigit()
+                    or int(str(args.github_run_id or "0")) < 1
+                    or not str(args.github_run_attempt or "").isdigit()
+                    or int(str(args.github_run_attempt or "0")) < 1
+                ):
+                    parser.error(
+                        "Hardware soak requires positive --github-run-id and "
+                        "--github-run-attempt."
+                    )
+                report = run_serial_soak(
+                    port=args.port,
+                    baud=args.baud,
+                    timeout=args.timeout,
+                    duration_sec=args.duration_sec,
+                    sample_interval_sec=args.sample_interval_sec,
+                    active_public_text=args.active_public_text,
+                    active_interval_sec=args.active_interval_sec,
+                    startup_settle_sec=args.startup_settle_sec,
+                    require_rx_delta=args.require_rx_delta,
+                    min_rx_delta=args.min_rx_delta,
+                    min_tx_delta=args.min_tx_delta,
+                    clear_crashlog_before_start=(
+                        args.clear_crashlog_before_start
+                    ),
+                    command_retries=args.command_retries,
+                    retry_delay_sec=args.retry_delay_sec,
+                    sample_storage=args.sample_storage
+                    or args.sd_file_canary,
+                    sd_file_canary=args.sd_file_canary,
+                    allow_sd_unavailable=args.allow_sd_unavailable,
+                    active_dm_fingerprint=args.active_dm_fingerprint,
+                    active_dm_text=args.active_dm_text,
+                    expected_firmware_commit=normalized_commit,
+                    github_run_id=str(args.github_run_id),
+                    workflow_run_attempt=str(args.github_run_attempt),
+                    expected_release_profile=args.expected_release_profile,
+                    expected_sd_history_mode=args.expected_sd_history_mode,
+                    controlled_peer_receipt=(
+                        (
+                            Path(args.controlled_peer_receipt)
+                            if Path(
+                                args.controlled_peer_receipt
+                            ).is_absolute()
+                            else root / args.controlled_peer_receipt
+                        )
+                        if args.controlled_peer_receipt
+                        else None
+                    ),
+                    peer_capture_dir=(
+                        (
+                            Path(args.peer_capture_dir)
+                            if Path(args.peer_capture_dir).is_absolute()
+                            else root / args.peer_capture_dir
+                        )
+                        if args.peer_capture_dir
+                        else None
+                    ),
+                    evidence_bundle=evidence_bundle,
+                )
+
+            stamp_report(report, root)
+            report_reservation.write_bytes(
+                (json.dumps(report, indent=2) + "\n").encode("ascii")
+            )
+    except ValueError as exc:
+        parser.error(str(exc))
     print(json.dumps(report))
     return 0 if report.get("ok") else 1
 

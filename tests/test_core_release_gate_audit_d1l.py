@@ -1,5 +1,6 @@
 import argparse
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -1078,6 +1079,683 @@ def test_reboot_gate_delegates_to_strict_r11_validator(
         RUN_ID,
         RUN_ATTEMPT,
     ).ok
+
+
+def write_remote_rf_receipt(tmp_path: Path) -> Path:
+    rf = audit.rf_acceptance
+    observed = datetime(2026, 7, 23, 15, 0, tzinfo=timezone.utc)
+    config = rf.remote_peer_config(
+        ssh_host="neonx@192.168.0.24"
+    )
+
+    def status(*, after: bool) -> dict:
+        return {
+            "service": "openclaw-radio-listener",
+            "run_id": "pi5-peer-run",
+            "status_written_at": (
+                observed - timedelta(seconds=1 if after else 5)
+            ).isoformat(),
+            "serial": {
+                "port": rf.REMOTE_PEER_DEVICE,
+                "mesh_connected": True,
+                "self_prefix": rf.REMOTE_PEER_PUBLIC_KEY[:12],
+                "public_key": rf.REMOTE_PEER_PUBLIC_KEY,
+            },
+            "mesh": {
+                "last_fetch_ok_at": (
+                    observed - timedelta(seconds=1 if after else 4)
+                ).isoformat(),
+                "last_rx_at": "after-rx" if after else "before-rx",
+                "last_rx_kind": "dm",
+                "last_rx_sender": rf.DEFAULT_D1L_PUBLIC_KEY[:12],
+                "last_tx_at": "after-tx" if after else "before-tx",
+                "last_tx_kind": "control_dm",
+            },
+            "startup_self_test": {"enabled": True, "ok": True},
+            "counters": {
+                "rx_dm_total": 11 if after else 10,
+                "tx_dm_total": 21 if after else 20,
+                "local_fast_reply_total": 4,
+                "tx_dm_ack_miss_total": 1,
+            },
+        }
+
+    before = status(after=False)
+    after = status(after=True)
+    sidecar_dir = tmp_path / "artifacts" / "hardware" / "com12" / "rf-peer"
+    sidecar_dir.mkdir(parents=True)
+    before_path = write_json(sidecar_dir / "before.json", before)
+    after_path = write_json(sidecar_dir / "after.json", after)
+
+    def status_row(path: Path) -> dict:
+        digest = audit.sha256_file(path)
+        return {
+            "path": path.relative_to(tmp_path).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": digest,
+            "source_path": rf.REMOTE_PEER_STATUS_PATH,
+            "source_host": config["ssh_host"],
+            "source_hostname": config["hostname"],
+            "transport": "ssh",
+            "captured_at": observed.isoformat(),
+            "remote_mtime_ns": 1,
+            "remote_sha256": digest,
+        }
+
+    before_row = status_row(before_path)
+    after_row = status_row(after_path)
+    before_validation = rf.validate_remote_peer_status(
+        before, config, observed_at=observed
+    )
+    after_validation = rf.validate_remote_peer_status(
+        after, config, observed_at=observed
+    )
+    token = "rf_remote"
+    inbound_token = f"{token}_in"
+    request, request_raw = rf.remote_control_request(
+        rf.DEFAULT_D1L_PUBLIC_KEY, inbound_token
+    )
+    response = {
+        "id": request["id"],
+        "op": "radio.send_dm",
+        "ok": True,
+        "cached": False,
+        "duration_ms": 123,
+        "result": {
+            "target": rf.DEFAULT_D1L_PUBLIC_KEY[:12],
+            "name": "D1L",
+            "utf8_bytes": len(inbound_token.encode("utf-8")),
+            "delivery": {
+                "event": "CONTACT_MSG_RECV",
+                "payload": {"ack": True},
+                "acknowledged": True,
+            },
+        },
+        "error": None,
+    }
+    response_raw = (
+        json.dumps(
+            response, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        + b"\n"
+    )
+    request_path = sidecar_dir / "request.jsonl"
+    response_path = sidecar_dir / "response.jsonl"
+    request_path.write_bytes(request_raw)
+    response_path.write_bytes(response_raw)
+
+    def control_row(path: Path, transport: str) -> dict:
+        return {
+            "path": path.relative_to(tmp_path).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": audit.sha256_file(path),
+            "source_path": rf.REMOTE_PEER_CONTROL_SOCKET,
+            "source_host": config["ssh_host"],
+            "source_hostname": config["hostname"],
+            "transport": transport,
+            "captured_at": observed.isoformat(),
+        }
+
+    control_validation = rf.validate_remote_control_exchange(
+        request_raw,
+        response_raw,
+        d1l_public_key=rf.DEFAULT_D1L_PUBLIC_KEY,
+        token=inbound_token,
+    )
+    control = {
+        "op": "radio.send_dm",
+        "socket_path": rf.REMOTE_PEER_CONTROL_SOCKET,
+        "request_id": request["id"],
+        "request": request,
+        "response": response,
+        "request_receipt": control_row(
+            request_path, "ssh-unix-socket-request"
+        ),
+        "response_receipt": control_row(
+            response_path, "ssh-unix-socket-response"
+        ),
+        "request_sha256": control_validation["request_sha256"],
+        "response_sha256": control_validation["response_sha256"],
+        "validation": control_validation,
+    }
+    fingerprint = rf.REMOTE_PEER_FINGERPRINT
+    import_command = rf.contact_import_command(
+        rf.REMOTE_PEER_PUBLIC_KEY
+    )
+    contact = {
+        "fingerprint": fingerprint,
+        "public_key": rf.REMOTE_PEER_PUBLIC_KEY,
+        "alias": rf.RADIO_LISTENER_CONTACT_NAME,
+        "type": "chat",
+        "verification_source": "uri_import",
+        "canonical": True,
+        "can_dm": True,
+        "can_admin": False,
+    }
+    import_result = {
+        "ok": True,
+        "cmd": "contacts import",
+        "persisted": True,
+        "result": "created",
+        **contact,
+    }
+    ack_hash = 1234567890
+    baseline_messages = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [{"seq": 1, "direction": "tx", "text": "older"}],
+    }
+    final_messages = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [
+            *baseline_messages["entries"],
+            {
+                "seq": 2,
+                "fingerprint": fingerprint,
+                "direction": "tx",
+                "text": "core acceptance test rf_remote_out",
+                "acked": True,
+                "delivered": True,
+                "ack_hash": ack_hash,
+                "ack_response": {
+                    "identity_valid": False,
+                    "state": "legacy_unverified",
+                    "dispatch_count": 0,
+                    "last_kind": "none",
+                    "last_error": "ESP_OK",
+                },
+            },
+            {
+                "seq": 3,
+                "fingerprint": fingerprint,
+                "direction": "rx",
+                "text": inbound_token,
+                "ack_response": {
+                    "identity_valid": True,
+                    "state": "sent",
+                    "dispatch_count": 1,
+                    "last_kind": "direct_ack",
+                    "last_error": "ESP_OK",
+                },
+            },
+        ],
+    }
+    baseline_packets = {
+        "ok": True,
+        "entries": [{"seq": 10, "kind": "other", "direction": "rx"}],
+    }
+    final_packets = {
+        "ok": True,
+        "entries": [
+            *baseline_packets["entries"],
+            {
+                "seq": 11,
+                "direction": "rx",
+                "kind": "dm_ack",
+                "note": (
+                    f"ack {ack_hash} {rf.RADIO_LISTENER_CONTACT_NAME}"
+                ),
+                "rssi_dbm": -70,
+                "snr_tenths": 80,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 12,
+            },
+        ],
+    }
+    baseline_route = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [
+            {
+                "seq": 20,
+                "target": fingerprint,
+                "kind": "other",
+                "direction": "rx",
+                "route": "direct",
+            }
+        ],
+    }
+    final_route = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [
+            {
+                "seq": 21,
+                "target": fingerprint,
+                "kind": "dm_ack",
+                "direction": "rx",
+                "route": "direct",
+                "last_rssi_dbm": -70,
+                "last_snr_tenths": 80,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 12,
+            }
+        ],
+    }
+    version = {
+        "ok": True,
+        "cmd": "version",
+        "build_commit": COMMIT,
+        "idf": "v5.5.4",
+        "release_profile": "core_1_0",
+        "sd_history_mode": "disabled",
+    }
+    steps = [
+        {"command": "version", "result": version},
+        {
+            "command": "identity status",
+            "result": {
+                "ok": True,
+                "cmd": "identity status",
+                "public_key": rf.DEFAULT_D1L_PUBLIC_KEY,
+                "fingerprint": rf.DEFAULT_D1L_PUBLIC_KEY[
+                    :16
+                ].upper(),
+            },
+        },
+        {"command": "contacts", "result": {"ok": True, "entries": []}},
+        {"command": import_command, "result": import_result},
+        {
+            "command": "contacts",
+            "result": {"ok": True, "entries": [contact]},
+        },
+        {
+            "command": f"messages dm {fingerprint}",
+            "result": baseline_messages,
+        },
+        {"command": "packets", "result": baseline_packets},
+        {
+            "command": f"routes trace {fingerprint}",
+            "result": baseline_route,
+        },
+        {
+            "command": (
+                f"mesh send dm {fingerprint} "
+                "core acceptance test rf_remote_out"
+            ),
+            "result": {"ok": True},
+        },
+        {
+            "command": "packets search rf_remote_out",
+            "result": {"ok": True, "entries": [{"note": "rf_remote_out"}]},
+        },
+        {
+            "command": f"messages dm {fingerprint}",
+            "result": final_messages,
+        },
+        {"command": "packets", "result": final_packets},
+        {
+            "command": f"routes trace {fingerprint}",
+            "result": final_route,
+        },
+        {
+            "command": f"messages dm {fingerprint}",
+            "result": final_messages,
+        },
+        {"command": "packets", "result": final_packets},
+        {
+            "command": f"routes trace {fingerprint}",
+            "result": final_route,
+        },
+        {
+            "command": "health",
+            "result": {
+                "ok": True,
+                "cmd": "health",
+                "build_commit": COMMIT,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+                "board_ready": True,
+                "ui_ready": True,
+            },
+        },
+    ]
+    report = rf.build_report(
+        port="COM12",
+        baud=115200,
+        peer_status_path=None,
+        peer_port=None,
+        fingerprint=fingerprint,
+        public_key=rf.DEFAULT_D1L_PUBLIC_KEY,
+        token=token,
+        send_outbound=True,
+        steps=steps,
+        peer_before=before,
+        peer_after=after,
+        inbound_seen_at=observed.isoformat(),
+        expected_commit=COMMIT,
+        peer_before_receipt=before_row,
+        peer_after_receipt=after_row,
+        github_run_id=RUN_ID,
+        workflow_run_attempt=RUN_ATTEMPT,
+        remote_peer=config,
+        remote_before_validation=before_validation,
+        remote_after_validation=after_validation,
+        remote_control=control,
+    )
+    report["git"] = {
+        "commit": COMMIT,
+        "dirty": False,
+        "dirty_entries": [],
+    }
+    path = tmp_path / "artifacts" / "hardware" / "com12" / "rf.json"
+    return write_json(path, report)
+
+
+def test_remote_rf_gate_recomputes_raw_status_and_control_sidecars(
+    tmp_path: Path,
+):
+    receipt = write_remote_rf_receipt(tmp_path)
+
+    gate = audit.rf_gate(
+        receipt,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is True
+    assert gate.details["raw_status_ok"] is True
+    assert gate.details["control_exchange_ok"] is True
+    assert gate.details["peer_binding_ok"] is True
+    assert len(gate.evidence) == 5
+
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    response_path = (
+        tmp_path
+        / report["controlled_peer_control"]["response_receipt"]["path"]
+    )
+    response = json.loads(response_path.read_text(encoding="utf-8"))
+    response["cached"] = True
+    response_path.write_text(
+        json.dumps(response, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    assert (
+        audit.rf_gate(
+            receipt,
+            tmp_path,
+            COMMIT,
+            "disabled",
+            RUN_ID,
+            RUN_ATTEMPT,
+        ).ok
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("controlled_peer", "ssh_host", "neonx@192.168.0.25"),
+        ("controlled_peer", "hostname", "forged-pi"),
+        ("controlled_peer", "status_path", "/tmp/status.json"),
+        ("controlled_peer", "max_status_age_sec", 120.001),
+        (
+            "controlled_peer_before_receipt",
+            "source_hostname",
+            "forged-pi",
+        ),
+        (
+            "controlled_peer_control.request_receipt",
+            "source_hostname",
+            "forged-pi",
+        ),
+    ],
+)
+def test_remote_core_rf_gate_rejects_forged_peer_binding(
+    tmp_path: Path,
+    section: str,
+    field: str,
+    value,
+):
+    receipt = write_remote_rf_receipt(tmp_path)
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    target = report
+    for part in section.split("."):
+        target = target[part]
+    target[field] = value
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+
+    assert (
+        audit.rf_gate(
+            receipt,
+            tmp_path,
+            COMMIT,
+            "disabled",
+            RUN_ID,
+            RUN_ATTEMPT,
+        ).ok
+        is False
+    )
+
+
+def test_remote_core_rf_gate_recomputes_after_coordinated_raw_digest_tamper(
+    tmp_path: Path,
+):
+    receipt = write_remote_rf_receipt(tmp_path)
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    after_row = report["controlled_peer_after_receipt"]
+    after_path = tmp_path / after_row["path"]
+    after = json.loads(after_path.read_text(encoding="utf-8"))
+    after["counters"]["tx_dm_total"] += 1
+    after_path.write_text(json.dumps(after), encoding="utf-8")
+    digest = audit.sha256_file(after_path)
+    after_row.update(
+        {
+            "size": after_path.stat().st_size,
+            "sha256": digest,
+            "remote_sha256": digest,
+        }
+    )
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+
+    gate = audit.rf_gate(
+        receipt,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert gate.details["raw_status_ok"] is False
+
+
+def test_remote_active_soak_recomputes_status_sidecars_and_binding(
+    tmp_path: Path,
+):
+    rf_receipt = write_remote_rf_receipt(tmp_path)
+    rf_report = json.loads(rf_receipt.read_text(encoding="utf-8"))
+    rf = audit.rf_acceptance
+    peer = rf_report["controlled_peer"]
+    config = rf.validate_remote_peer_config(
+        {
+            "ssh_host": peer["ssh_host"],
+            "hostname": peer["hostname"],
+            "status_path": peer["status_path"],
+            "control_socket": peer["control_socket"],
+            "device": peer["device"],
+            "public_key": peer["public_key"],
+            "max_status_age_sec": peer["max_status_age_sec"],
+        }
+    )
+    qualified, _ = soak_runner.qualified_controlled_peer_receipt(
+        path=rf_receipt,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+    )
+    assert qualified == rf_report
+
+    before_observed = datetime(
+        2026, 7, 23, 16, 0, tzinfo=timezone.utc
+    )
+    after_observed = before_observed + timedelta(hours=1)
+
+    def status(*, after: bool) -> dict:
+        observed = after_observed if after else before_observed
+        return {
+            "service": "openclaw-radio-listener",
+            "run_id": "pi5-peer-soak-run",
+            "status_written_at": (
+                observed - timedelta(seconds=1)
+            ).isoformat(),
+            "serial": {
+                "port": rf.REMOTE_PEER_DEVICE,
+                "mesh_connected": True,
+                "self_prefix": rf.REMOTE_PEER_PUBLIC_KEY[:12],
+                "public_key": rf.REMOTE_PEER_PUBLIC_KEY,
+            },
+            "mesh": {
+                "last_fetch_ok_at": (
+                    observed - timedelta(seconds=1)
+                ).isoformat(),
+                "last_rx_at": (
+                    "2026-07-23T16:59:58Z"
+                    if after
+                    else "2026-07-23T15:59:58Z"
+                ),
+                "last_rx_kind": "dm",
+                "last_rx_sender": rf.DEFAULT_D1L_PUBLIC_KEY[:12],
+                "last_tx_at": (
+                    "2026-07-23T16:59:59Z"
+                    if after
+                    else "2026-07-23T15:59:59Z"
+                ),
+                "last_tx_kind": "dm",
+            },
+            "startup_self_test": {"enabled": True, "ok": True},
+            "counters": {
+                "rx_dm_total": 16 if after else 10,
+                "tx_dm_total": 26 if after else 20,
+                "local_fast_reply_total": 36 if after else 30,
+                "tx_dm_ack_miss_total": 2,
+            },
+        }
+
+    before = status(after=False)
+    after = status(after=True)
+    sidecar_dir = tmp_path / "artifacts" / "soak" / "rf-peer"
+    sidecar_dir.mkdir(parents=True)
+    before_path = write_json(sidecar_dir / "before.json", before)
+    after_path = write_json(sidecar_dir / "after.json", after)
+
+    def row(path: Path, observed: datetime, mtime_ns: int) -> dict:
+        digest = audit.sha256_file(path)
+        return {
+            "path": path.relative_to(tmp_path).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": digest,
+            "source_path": config["status_path"],
+            "source_host": config["ssh_host"],
+            "source_hostname": config["hostname"],
+            "transport": "ssh",
+            "captured_at": observed.isoformat(),
+            "remote_mtime_ns": mtime_ns,
+            "remote_sha256": digest,
+        }
+
+    before_row = row(before_path, before_observed, 101)
+    after_row = row(after_path, after_observed, 102)
+    before_validation = rf.validate_remote_peer_status(
+        before,
+        config,
+        observed_at=before_observed,
+    )
+    after_validation = rf.validate_remote_peer_status(
+        after,
+        config,
+        observed_at=after_observed,
+    )
+
+    data = passing_soak(active=True)
+    text = "core soak test"
+    fingerprint = rf.REMOTE_PEER_FINGERPRINT
+    command = f"mesh send dm {fingerprint} {text}"
+    for event in data["active_events"]:
+        event.update(
+            {
+                "command": command,
+                "fingerprint": fingerprint,
+                "text": text,
+            }
+        )
+    data.update(
+        {
+            "active_dm_fingerprint": fingerprint,
+            "active_dm_text": text,
+            "active_command": command,
+            "active_interval_sec": 600,
+            "controlled_peer_before": rf.status_snapshot(before),
+            "controlled_peer_after": rf.status_snapshot(after),
+            "controlled_peer_before_receipt": before_row,
+            "controlled_peer_after_receipt": after_row,
+            "controlled_peer_remote": {
+                "before_validation": before_validation,
+                "after_validation": after_validation,
+            },
+            "controlled_peer_counter_deltas": {
+                "rx_dm_total": 6,
+                "tx_dm_total": 6,
+                "local_fast_reply_total": 6,
+                "tx_dm_ack_miss_total": 0,
+            },
+            "controlled_peer_successful_send_count": 6,
+            "controlled_peer_expected_send_count": 6,
+            "controlled_peer_flow_ok": True,
+        }
+    )
+
+    ok, details = audit.active_soak_peer_flow_ok(
+        data,
+        rf_report,
+        tmp_path,
+    )
+    assert ok is True
+    assert details["remote_mode"] is True
+    assert details["remote_status_validation_ok"] is True
+    assert details["canonical_status_sources"] is True
+
+    data["controlled_peer_before_receipt"][
+        "source_hostname"
+    ] = "forged-pi"
+    ok, details = audit.active_soak_peer_flow_ok(
+        data,
+        rf_report,
+        tmp_path,
+    )
+    assert ok is False
+    assert details["canonical_status_sources"] is False
+    data["controlled_peer_before_receipt"][
+        "source_hostname"
+    ] = rf.REMOTE_PEER_HOSTNAME
+
+    after["serial"]["port"] = "/dev/krab-other"
+    write_json(after_path, after)
+    tampered_digest = audit.sha256_file(after_path)
+    data["controlled_peer_after_receipt"].update(
+        {
+            "size": after_path.stat().st_size,
+            "sha256": tampered_digest,
+            "remote_sha256": tampered_digest,
+        }
+    )
+    ok, details = audit.active_soak_peer_flow_ok(
+        data,
+        rf_report,
+        tmp_path,
+    )
+    assert ok is False
+    assert details["remote_status_validation_ok"] is False
 
 
 class DummyImportedGate:
