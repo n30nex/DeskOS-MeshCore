@@ -8158,11 +8158,11 @@ def run_lifecycle_stress(
         raise ValueError("transitions must be at least 1")
     if release_profile not in RELEASE_PROFILES:
         raise ValueError(f"unknown release profile: {release_profile}")
-    selected_action_cycle = action_cycle or (
+    selected_action_cycle = (
         CORE_LIFECYCLE_TRANSITION_CYCLE
         if release_profile == CORE_RELEASE_PROFILE
         else LIFECYCLE_TRANSITION_CYCLE
-    )
+    ) if action_cycle is None else action_cycle
     if not selected_action_cycle:
         raise ValueError("action_cycle must not be empty")
     snapshot = snap or sample_snapshot()

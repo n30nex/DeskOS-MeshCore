@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from tools import ui_simulator
 
 
@@ -103,3 +105,11 @@ def test_ui_lifecycle_stress_returns_bounded_failure_receipt_for_missing_action(
             "action": "missing_action",
         }
     ]
+
+
+def test_ui_lifecycle_stress_rejects_explicit_empty_action_cycle():
+    with pytest.raises(ValueError, match="action_cycle must not be empty"):
+        ui_simulator.run_lifecycle_stress(
+            transitions=1,
+            action_cycle=(),
+        )
