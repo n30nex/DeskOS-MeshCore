@@ -22,8 +22,8 @@ The authoritative product boundary, roadmap, and work graph are:
 | Release profile | `core_1_0` |
 | Core readiness | `false` |
 | Full-feature readiness | `false` |
-| Candidate SHA | the single status-bearing R15 freeze commit containing this ledger; exact Git SHA is recorded in PR/Actions evidence after commit |
-| Candidate Actions run | pending replacement workflow dispatch; run `29667030146`, attempt 1, is superseded |
+| Candidate SHA | pending replacement R15 freeze; `f0fef39eb37f5795ebd683338c11a37ff2fc8399` is superseded |
+| Candidate Actions run | pending replacement workflow dispatch; run `29669268575`, attempt 1, succeeded only for superseded `f0fef39...` |
 | SD history mode | `disabled` |
 
 ## Immutable safety rules
@@ -58,15 +58,15 @@ The authoritative product boundary, roadmap, and work graph are:
 
 ## Current GitHub snapshot
 
-Snapshot refreshed at `2026-07-18T21:50:26-04:00`.
+Snapshot refreshed at `2026-07-23T18:18:10-04:00`.
 
 | Item | State |
 |---|---|
 | `origin/main` | `846f728dd3faded85451c6d39ba6a07cb8ca7f44` |
 | Main `d1l-ci` | run `29652673963`, success |
-| PR #200 | open draft; the single Core integration PR; head `a9f14afe…` pending the final R15 push |
-| PR #197 | open, non-draft, conflicting; Actions `29650366501` success |
-| PR #199 | open draft, conflicting; Actions `29650450872` firmware failure; excluded |
+| PR #200 | open draft; the single Core integration PR; head `f0fef39eb37f5795ebd683338c11a37ff2fc8399` |
+| PR #197 | open, non-draft; reviewed bounded substance already integrated; head `79d3efae9c784d65b70b0d79fae352b3ad5199aa` |
+| PR #199 | open draft at `6c854159dfc37525ff4df2d57ca216e4b2303bc2`; excluded |
 | Open release-blocker P0 issues | 21; all classified for Core 1.0 |
 | Existing `v1.0.0` tag/release | none |
 | Active/queued Actions runs at snapshot | none |
@@ -115,15 +115,15 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 | R4 | complete | Reviewed PR #197 substance integrated as `2824d63c6c779560ce0ad1ca787e230634b5c3ff`; 47 storage tests and 7 integrated source-pin checks passed |
 | R5 | complete | Profile-bound SD admission integrated as `0c72561`; Core conditional/disabled routes retained data to NVS and cannot activate SD |
 | R6 | complete | Public-only Core runtime boundary `e3f99a6` rejects private-channel RX/TX before decrypt/key/store/RF and prevents retained private-channel reconciliation; focused Mesh/DM/contact/route suites are green |
-| R7 | complete | Exact Actions capture, package/provenance/SBOM, non-erasing flash, Core smoke/UI, manual/install review, reboot, RF/DM, soak, defect, and final audit producers are integrated through `f9e26e0` |
-| R8 | complete | Three-lane final freeze review passed runtime and release-flow scope and closed its one evidence finding with deterministic provenance recomputation `f9e26e0`; no remaining concrete pre-freeze Core P0/P1 found |
-| R9 | complete | Final R15 source is review-clean; the complete repaired-tree host suite passed 1,507 tests with seven skips; this status-bearing commit is the replacement freeze |
-| R10 | pending | Dispatch final `d1l-ci` with `include_sd_bridge=false`, then capture and checksum every artifact from the exact replacement SHA |
-| R11 | pending | Flash only the new exact verified package to COM12 and rerun smoke, Core UI, standalone scroll, reboot, and persistence gates from scratch |
+| R7 | in progress | The f0 producers exposed retained pagination/snapshot safety and Pi5-peer binding gaps; bounded repairs and audit consumption are under review |
+| R8 | in progress | Independent review rejected the first retained and Core-simulator repair commits; corrected commits require fresh review |
+| R9 | in progress | The f0 host suite passed before its freeze, but runtime-affecting R15 repairs require focused validation and one new complete host suite |
+| R10 | superseded / pending | Exact run `29669268575`, attempt 1, succeeded and all five archives verified for f0; dispatch a fresh `include_sd_bridge=false` run after replacement freeze |
+| R11 | failed closed / pending | f0 flash, smoke, and Core UI passed, then retained seed failed; all physical gates must restart on the replacement candidate |
 | R12 | pending | Controlled peer RF/DM; `public_rf_tx=false` |
 | R13 | in progress | SD disabled/NVS fallback selected because COM16 is absent; exact package/device truth remains |
 | R14 | pending | 60-minute active plus 30-minute idle exact-candidate soak |
-| R15 | complete | Raw positive-overflow scroll semantics, probe-only DM presentation, hard TX suppression, independent evidence recomputation, exact runner admission, source pins, and stale receipt fixtures are repaired; final review found no Core P0/P1 |
+| R15 | in progress | Repair retained full-store proof, Core simulator reachability, exact protocol-migration evidence, and Pi5 RF/soak peer binding; no rejected repair commit may be integrated |
 | R16 | pending | Final Core audit and tag/release or exact no-go |
 
 ## Exact-candidate evidence ledger
@@ -132,20 +132,21 @@ All rows remain fail-closed until an exact receipt is recorded.
 
 | Gate | Status | Exact evidence |
 |---|---|---|
-| Source/profile frozen | pass at this commit | Final R15 diff and canonical source pins are review-clean; the exact resolved SHA is bound by the post-push PR and Actions receipts |
-| Full host suite | pass | Repaired tree: 1,507 passed, 7 skipped in 446.45 seconds |
-| Final Actions workflow | pending | Run `29667030146`, attempt 1, succeeded only for superseded `a9f14afe…`; exact replacement dispatch required |
-| Artifact downloads/checksums | pending | The superseded five-archive capture is retained only as history; a fresh exact replacement directory and checksum receipt are required |
-| Profile/package/provenance/SBOM binding | superseded pass | Exact run/package trees verified for `a9f14afe…`; new SHA/run binding required |
-| Non-erasing COM12 flash | superseded pass | `esp32_flash_bootstrap_a9f14af_actions_29667030146_attempt_1_COM12.json`; exact identity passed, no erase |
-| Core smoke/display/touch | superseded pass | `core_smoke_post_baseline_a9f14afe58aaa307a40e90378c64db7a464e59bc_run_29667030146_attempt_1_COM12.json`; all 13 checks passed after preserving and clearing predecessor-only crashlog history |
-| 20-round Core UI probe | exact failed / superseded | `core_ui_corruption_probe_a9f14afe58aaa307a40e90378c64db7a464e59bc_run_29667030146_attempt_1_COM12.json`: 20 rounds and 120 events had zero navigation, identity, telemetry, or crash failures, but five raw probe checks failed |
-| Compose/scroll surfaces | implementation pass / physical pending | Raw positive overflow independently controls movement applicability; probe-only DM sheets retain strict production identity admission and cannot enable or reach either RF send path |
+| Source/profile frozen | superseded / pending | f0 was clean and exact; rejected R15 repairs are not integrated and no replacement source is frozen |
+| Full host suite | superseded pass / pending | The f0 tree passed before freeze; one replacement-candidate full host suite is required after integration |
+| Final Actions workflow | superseded pass / pending | Run `29669268575`, attempt 1, succeeded only for superseded `f0fef39...`; exact replacement dispatch required |
+| Artifact downloads/checksums | superseded pass / pending | All five f0 archives and embedded trees verified; a fresh exact replacement directory and checksum receipt are required |
+| Profile/package/provenance/SBOM binding | superseded pass | Exact f0 run/package trees verified; new SHA/run binding required |
+| Non-erasing COM12 flash | superseded bootstrap pass | `esp32_flash_bootstrap_f0fef39_actions_29669268575_attempt_1_COM12.json`; exact identity passed without erase, but `closure_eligible=false` |
+| Core smoke/display/touch | superseded pass | Fresh exact-f0 Core smoke passed with disabled-SD/NVS truth and clean crashlog |
+| 20-round Core UI probe | superseded pass | Exact-f0 UI ran 20 rounds / 120 events successfully; replacement-candidate proof is required |
+| Compose/scroll surfaces | superseded physical pass | Exact-f0 Core UI checks passed; replacement-candidate proof is required |
 | Five software reboots | missing | — |
 | Three cold boots | missing | — |
-| Retained state | missing | — |
+| Retained state | exact failed / superseded | f0 seed receipt is immutable and `closure_eligible=false`; initial pagination/contact capture failed before mutation |
+| Protocol timestamp migration | missing | f0 reports legacy lower-bound confirmation required; no migration attempted |
 | Controlled RF/DM/ACK/PATH/direct route | missing | — |
-| SD decision | selected disabled | `COM16` absent; compile-time default changed to `disabled`; exact package/device confirmation pending |
+| SD decision | superseded pass / selected disabled | f0 package/device confirmed disabled-SD/NVS; COM16 remains absent and the replacement must repeat this truth |
 | 60-minute active soak | missing | — |
 | 30-minute idle soak | missing | — |
 | Install/recovery package review | missing | — |
@@ -641,3 +642,62 @@ release is authorized by the evidence currently recorded.
   is active or queued.
 - No local firmware build occurred. The superseded candidate remains on
   COM12; no new serial, RF, SD, or RP2040 operation occurred during R15.
+
+### `2026-07-23T18:18:10-04:00`
+
+- The authoritative 24-hour elapsed cap has expired without a releasable
+  candidate. `core_release_ready=false` and
+  `full_feature_release_ready=false`; GitHub has no `v1.0.0` tag or release.
+  Work continues under R15, but the missed deadline and every remaining
+  physical gate stay explicit no-go conditions.
+- Candidate `f0fef39eb37f5795ebd683338c11a37ff2fc8399` passed the complete
+  host suite and exact workflow-dispatch `d1l-ci` run `29669268575`, attempt
+  1, with `include_sd_bridge=false`. The five downloaded Actions archives,
+  their extracted inventories, and embedded checksum trees passed. The
+  application image SHA-256 is
+  `c5c9436f65ccf9d9d11e4900769fd78c92f2dd66835a26715b51e60a1b8ec032`;
+  the full 8 MiB image SHA-256 is
+  `0128aa5e7603483d69dc2215ee39c724302d51814b66c814717fd54511a73696`.
+- The exact package received a non-erasing COM12 bootstrap flash. Its flash
+  receipt is intentionally `closure_eligible=false`. Fresh exact-candidate
+  Core smoke passed, and the strict Core UI probe passed 20 rounds / 120
+  navigation and refresh events with the five supported tabs and excluded
+  destinations rejected.
+- The immutable retained-state seed receipt then failed closed. The initial
+  raw capture proved a valid Public page response was rejected because its
+  command label omitted the requested offset, only eight of sixteen contacts
+  were projected, and the Public, DM, and contact stores were at their
+  bounded capacities. Candidate-local retained and settings mutations were
+  skipped after the failed initial capture, so this attempt caused no
+  eviction, deletion, overwrite, Public RF, DM RF, SD, or RP2040 operation.
+  All `f0fef39...` physical receipts are now superseded for closure.
+- The exact device also reported
+  `protocol_tx_ready=false`, legacy retained value `1767225743`, and
+  `legacy_protocol_lower_bound_unconfirmed`. No wall time was inferred and
+  no migration was attempted. A separate fail-closed exact-device migration
+  evidence runner is under review and cannot execute before a replacement
+  exact Actions candidate is present on uniquely identified COM12.
+- Independent review rejected the first retained repair commit `0332d3d`
+  for partial-mutation, retry-truth, global-flush, output-reservation, and
+  snapshot-coherence gaps. It also rejected simulator commit `e8f27d1`
+  because one Full-Feature alias remained accepted, coordinate-bearing node
+  detail could trap Core navigation at Map, and excluded Route/Trace and QR
+  actions remained visible. Both branches are being repaired; neither commit
+  is integrated or candidate evidence.
+- The controlled peer now lives on the Pi 5 rather than local COM15. A
+  fail-closed SSH/raw-status/UDS adapter and matching active-soak evidence
+  binding are under host-only test. Live use remains blocked until valid
+  noninteractive Pi authentication is available; the forbidden COM11 peer is
+  excluded and untouched.
+- A read-only phase-boundary enumeration currently finds no COM12 and no
+  COM16. No port was remapped or substituted. The next firmware-changing
+  action remains a new GitHub-Actions-only candidate; no local firmware build
+  is permitted.
+- Live GitHub refresh shows `origin/main` still at
+  `846f728dd3faded85451c6d39ba6a07cb8ca7f44`, reviewed PR #197 open at
+  `79d3efae9c784d65b70b0d79fae352b3ad5199aa`, excluded draft PR #199 open
+  at `6c854159dfc37525ff4df2d57ca216e4b2303bc2`, and draft PR #200 as the
+  sole Core integration PR at `f0fef39eb37f5795ebd683338c11a37ff2fc8399`.
+- C: free space is monitored before long phases with a 4 GiB safety floor;
+  it was 4.89 GiB at this update. Test temporary files are redirected to F:,
+  and no background or visible terminal processes are used.
