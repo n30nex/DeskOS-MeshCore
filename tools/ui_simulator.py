@@ -66,6 +66,7 @@ CORE_EXCLUDED_DESTINATION_FEATURES = (
     ("route_trace_sheet", "user_trace_path"),
     ("advert_sheet", "advanced_qr_emoji"),
     ("contact_export_sheet", "advanced_qr_emoji"),
+    ("settings_advanced_expanded", "advanced_qr_emoji"),
     ("advanced_qr_emoji", "advanced_qr_emoji"),
 )
 CORE_EXCLUDED_DESTINATIONS = tuple(
@@ -525,6 +526,14 @@ def project_core_snapshot(snap: Snapshot) -> Snapshot:
         (channel for channel in snap.channels if channel.channel_id == 1),
         Channel(1, "Public", enabled=True, active=True, unread=snap.unread_public),
     )
+
+    def project_node(node: Node) -> Node:
+        return replace(
+            node,
+            advert_lat_e6=None,
+            advert_lon_e6=None,
+            location_advert_timestamp=0,
+        )
     return replace(
         snap,
         wifi_build_enabled=False,
@@ -561,6 +570,10 @@ def project_core_snapshot(snap: Snapshot) -> Snapshot:
         map_lat_e7=0,
         map_lon_e7=0,
         map_center_source="unset",
+        rooms=tuple(project_node(node) for node in snap.rooms),
+        repeaters=tuple(project_node(node) for node in snap.repeaters),
+        contacts=tuple(project_node(node) for node in snap.contacts),
+        heard=tuple(project_node(node) for node in snap.heard),
         channels=(replace(public_channel, active=True),),
         channel_messages=(),
         active_channel_id=1,
@@ -4959,7 +4972,7 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
         back_action="close_contact_options",
         back_destination="contact_detail_sheet",
     )
-    rows = (
+    full_feature_rows = (
         ((16, 120, 464, 168), "Route", "Trace path", BLUE, "open_route_trace", "route_trace_sheet", False),
         ((16, 172, 464, 220), "Rename", "Change alias", ACCENT, "open_contact_edit", "contact_edit_sheet", False),
         ((16, 224, 464, 272), "Favorite", "Off", AMBER, "toggle_favorite", None, False),
@@ -4975,6 +4988,25 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
             True,
         ),
     )
+    core_rows = (
+        ((16, 120, 464, 180), "Rename", "Change alias", ACCENT, "open_contact_edit", "contact_edit_sheet", False),
+        ((16, 188, 464, 248), "Favorite", "Off", AMBER, "toggle_favorite", None, False),
+        ((16, 256, 464, 316), "Mute", "Off", VIOLET, "toggle_mute", None, False),
+        (
+            (16, 324, 464, 392),
+            "Forget contact",
+            "Requires confirmation",
+            RED,
+            "open_forget_contact_confirm",
+            "forget_contact_confirm_page",
+            True,
+        ),
+    )
+    rows = (
+        core_rows
+        if s.release_profile == CORE_RELEASE_PROFILE
+        else full_feature_rows
+    )
     for box, title, status, color, action, destination, warning in rows:
         draw_more_leaf(
             s,
@@ -4986,7 +5018,12 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
             destination=destination,
             warning=warning,
         )
-    s.metrics.update({"contact_hierarchy_level": "options", "contact_option_count": 6})
+    s.metrics.update(
+        {
+            "contact_hierarchy_level": "options",
+            "contact_option_count": len(rows),
+        }
+    )
 
 
 def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
@@ -5017,13 +5054,19 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
             action="explain_node_dm",
             destination=None,
         )
+    core_profile = s.release_profile == CORE_RELEASE_PROFILE
+    return_destination = (
+        "nodes"
+        if core_profile or node.advert_lat_e6 is None
+        else "map"
+    )
     draw_button(
         s,
         (344, 72, 420, 116),
         "Close",
         MUTED,
         action="close_node_detail",
-        destination="map" if node.advert_lat_e6 is not None else "nodes",
+        destination=return_destination,
     )
     s.round_rect((36, 150, 110, 176), (22, 39, 49), role_badge_color(node.role), 8)
     s.text(role_badge_text(node.role), (42, 152, 104, 174), 11, role_badge_color(node.role), True, "center")
@@ -5037,25 +5080,44 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
     s.text(node.signal, (124, 256, 262, 276), 14, GREEN, True)
     s.text("Path", (272, 256, 328, 276), 13, MUTED, True)
     s.text(node.meta, (328, 256, 428, 276), 12, MUTED)
-    location = (
-        f"{format_e6(node.advert_lat_e6)}, {format_e6(node.advert_lon_e6)}"
-        if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
-        else "not provided"
-    )
-    s.text("Advert location", (36, 314, 158, 334), 13, BLUE, True)
-    s.text(location, (160, 314, 428, 334), 13, TEXT)
-    s.text("Last heard", (36, 338, 142, 358), 13, MUTED, True)
-    s.text("12s ago  heard 24", (144, 338, 428, 358), 14, TEXT)
+    location = None
+    if not core_profile:
+        location = (
+            f"{format_e6(node.advert_lat_e6)}, {format_e6(node.advert_lon_e6)}"
+            if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
+            else "not provided"
+        )
+        s.text("Advert location", (36, 314, 158, 334), 13, BLUE, True)
+        s.text(location, (160, 314, 428, 334), 13, TEXT)
+    last_heard_y = 314 if core_profile else 338
+    status_y = 346 if core_profile else 370
+    reason_y = 368 if core_profile else 392
+    s.text("Last heard", (36, last_heard_y, 142, last_heard_y + 20), 13, MUTED, True)
+    s.text("12s ago  heard 24", (144, last_heard_y, 428, last_heard_y + 20), 14, TEXT)
     status = "DM ready" if dm_available else "DM unavailable"
-    s.text(f"{status} [{dm_reason}]", (36, 370, 428, 390), 12, GREEN if dm_available else AMBER, True)
-    s.text(DM_IDENTITY_REASON_TEXT[dm_reason], (36, 392, 428, 424), 11, MUTED)
+    s.text(
+        f"{status} [{dm_reason}]",
+        (36, status_y, 428, status_y + 20),
+        12,
+        GREEN if dm_available else AMBER,
+        True,
+    )
+    s.text(
+        DM_IDENTITY_REASON_TEXT[dm_reason],
+        (36, reason_y, 428, reason_y + 32),
+        11,
+        MUTED,
+    )
     if management_gated:
         s.text("Manage locked", (36, 426, 428, 446), 11, MUTED, True)
         s.text("Authenticated admin session required.", (36, 448, 428, 468), 10, MUTED)
-    return_destination = "map" if node.advert_lat_e6 is not None else "nodes"
     s.metrics.update(
         {
-            "node_detail_location_provenance": "advert",
+            "node_detail_location_provenance": (
+                "unavailable_in_release_profile"
+                if core_profile
+                else "advert"
+            ),
             "node_detail_advert_location": location,
             "node_detail_return_destination": return_destination,
             "node_detail_return_reuses_map_view": return_destination == "map",
@@ -6882,6 +6944,25 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Device",
         "Support",
     ),
+    "contact_options_page": (
+        "Contact Options",
+        "Back",
+        "Rename",
+        "Favorite",
+        "Mute",
+        "Forget contact",
+        "Requires confirmation",
+    ),
+    "node_detail_sheet": (
+        "Node Detail",
+        "Role",
+        "Fingerprint",
+        "Public key",
+        "Signal",
+        "Path",
+        "Last heard",
+        "Close",
+    ),
 }
 
 
@@ -8398,6 +8479,254 @@ def core_excluded_destination_rejections() -> list[dict[str, object]]:
     ]
 
 
+def core_navigation_state_key(state: LifecycleState) -> str:
+    return f"{state.current_view}|{state.active_tab}"
+
+
+def build_core_navigation_graph_report(
+    snap: Snapshot,
+    *,
+    scenario: str = "default",
+) -> dict[str, object]:
+    """Walk every actually reachable Core view without dispatching unsafe actions."""
+
+    snapshot = project_core_snapshot(snap)
+    initial = LifecycleState(
+        current_view="home",
+        active_tab="home",
+        generation=1,
+        release_profile=CORE_RELEASE_PROFILE,
+    )
+    queue = [initial]
+    queued = {core_navigation_state_key(initial)}
+    cursor = 0
+    rendered_states: list[dict[str, object]] = []
+    rendered_views: set[str] = set()
+    accepted_edges: list[dict[str, object]] = []
+    render_errors: list[dict[str, object]] = []
+    render_invariant_issues: list[dict[str, object]] = []
+    excluded_touch_targets: list[dict[str, object]] = []
+    dead_touch_targets: list[dict[str, object]] = []
+    format_touch_targets: list[dict[str, object]] = []
+    location_claims: list[dict[str, object]] = []
+    rf_touch_targets: list[dict[str, object]] = []
+
+    while cursor < len(queue):
+        state = queue[cursor]
+        cursor += 1
+        state_key = core_navigation_state_key(state)
+        try:
+            surface = Surface(
+                state.current_view,
+                release_profile=CORE_RELEASE_PROFILE,
+            )
+            RENDERERS[state.current_view](surface, snapshot)
+        except Exception as exc:
+            render_errors.append(
+                {
+                    "state": state_key,
+                    "view": state.current_view,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        rendered_views.add(state.current_view)
+        summary = surface.summary(
+            Path("core-navigation") / f"{state.current_view}.png",
+            required_labels_for_profile(
+                state.current_view,
+                CORE_RELEASE_PROFILE,
+            ),
+        )
+        target_overlaps = touch_target_overlaps(surface.touch_targets)
+        if (
+            summary["overflow"]
+            or summary["touch_target_issues"]
+            or not summary["dock_invariant_ok"]
+            or target_overlaps
+        ):
+            render_invariant_issues.append(
+                {
+                    "state": state_key,
+                    "view": state.current_view,
+                    "overflow_count": len(summary["overflow"]),
+                    "missing_required_labels": summary[
+                        "missing_required_labels"
+                    ],
+                    "touch_target_issue_count": len(
+                        summary["touch_target_issues"]
+                    ),
+                    "touch_target_overlap_count": len(target_overlaps),
+                    "dock_invariant_ok": summary["dock_invariant_ok"],
+                }
+            )
+
+        if (
+            "Advert location" in surface.labels
+            or surface.metrics.get("node_detail_advert_location") is not None
+        ):
+            location_claims.append(
+                {
+                    "state": state_key,
+                    "view": state.current_view,
+                    "advert_location_label": (
+                        "Advert location" in surface.labels
+                    ),
+                    "advert_location": surface.metrics.get(
+                        "node_detail_advert_location"
+                    ),
+                }
+            )
+
+        rendered_states.append(
+            {
+                "state": state_key,
+                "view": state.current_view,
+                "active_tab": state.active_tab,
+                "touch_target_count": len(surface.touch_targets),
+            }
+        )
+        for target in surface.touch_targets:
+            destination = target.get("destination")
+            target_summary = {
+                "state": state_key,
+                "view": state.current_view,
+                "action": target["action"],
+                "label": target["label"],
+                "destination": destination,
+            }
+            if target["enabled"] and destination in CORE_EXCLUDED_DESTINATIONS:
+                excluded_touch_targets.append(target_summary)
+            if target["formats_sd"]:
+                format_touch_targets.append(target_summary)
+            if target["rf_tx"]:
+                rf_touch_targets.append(
+                    {
+                        **target_summary,
+                        "public_rf_tx": target["public_rf_tx"],
+                        "dm_tx": target["dm_tx"],
+                    }
+                )
+
+            binding = lifecycle_binding(
+                state.generation,
+                state.current_view,
+                target,
+            )
+            dispatched = dispatch_lifecycle_binding(state, binding)
+            destination_action = target["enabled"] and destination is not None
+            intentionally_not_dispatched = (
+                target["rf_tx"]
+                or target["destructive"]
+                or target["formats_sd"]
+                or destination in CORE_EXCLUDED_DESTINATIONS
+            )
+            if (
+                destination_action
+                and not intentionally_not_dispatched
+                and not dispatched.accepted
+            ):
+                dead_touch_targets.append(
+                    {
+                        **target_summary,
+                        "reason": dispatched.reason,
+                    }
+                )
+                continue
+            if not dispatched.accepted:
+                continue
+
+            next_state = dispatched.state
+            next_key = core_navigation_state_key(next_state)
+            if destination is not None:
+                accepted_edges.append(
+                    {
+                        **target_summary,
+                        "to_state": next_key,
+                        "to_view": next_state.current_view,
+                    }
+                )
+            if (
+                next_state.current_view != state.current_view
+                and next_key not in queued
+            ):
+                queued.add(next_key)
+                queue.append(next_state)
+
+    root_states = {
+        row["state"]
+        for row in rendered_states
+        if row["view"] in CORE_ROOT_VIEWS
+    }
+    reverse_edges: dict[str, set[str]] = {}
+    for edge in accepted_edges:
+        reverse_edges.setdefault(str(edge["to_state"]), set()).add(
+            str(edge["state"])
+        )
+    escapable_states = set(root_states)
+    escape_queue = list(root_states)
+    escape_cursor = 0
+    while escape_cursor < len(escape_queue):
+        destination_state = escape_queue[escape_cursor]
+        escape_cursor += 1
+        for source_state in reverse_edges.get(destination_state, set()):
+            if source_state in escapable_states:
+                continue
+            escapable_states.add(source_state)
+            escape_queue.append(source_state)
+    trapped_states = sorted(
+        row["state"]
+        for row in rendered_states
+        if row["view"] not in CORE_ROOT_VIEWS
+        and row["state"] not in escapable_states
+    )
+
+    ok = (
+        not render_errors
+        and not render_invariant_issues
+        and not excluded_touch_targets
+        and not dead_touch_targets
+        and not format_touch_targets
+        and not location_claims
+        and not trapped_states
+    )
+    return {
+        "schema": 1,
+        "ok": ok,
+        "artifact_kind": "host_simulator_core_navigation_non_closure",
+        "release_profile": CORE_RELEASE_PROFILE,
+        "scenario": scenario,
+        "mode": "simulation",
+        "hardware_required": True,
+        "closure_eligible": False,
+        "physical_observed": False,
+        "physical_acceptance_claimed": False,
+        "rf_acceptance_claimed": False,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "rendered_state_count": len(rendered_states),
+        "rendered_states": rendered_states,
+        "rendered_views": sorted(rendered_views),
+        "accepted_edge_count": len(accepted_edges),
+        "accepted_edges": accepted_edges,
+        "render_errors": render_errors,
+        "render_invariant_issues": render_invariant_issues,
+        "excluded_touch_targets": excluded_touch_targets,
+        "dead_touch_targets": dead_touch_targets,
+        "format_touch_targets": format_touch_targets,
+        "location_claims": location_claims,
+        "rf_touch_target_count": len(rf_touch_targets),
+        "rf_touch_targets": rf_touch_targets,
+        "rf_actions_dispatched": 0,
+        "format_actions_dispatched": 0,
+        "root_states": sorted(root_states),
+        "escapable_state_count": len(escapable_states),
+        "trapped_states": trapped_states,
+    }
+
+
 def build_core_surface_report(
     report_views: list[dict[str, object]],
 ) -> dict[str, object]:
@@ -8583,6 +8912,14 @@ def generate(
         if release_profile == CORE_RELEASE_PROFILE
         else None
     )
+    core_navigation_graph_report = (
+        build_core_navigation_graph_report(
+            snap,
+            scenario=scenario,
+        )
+        if release_profile == CORE_RELEASE_PROFILE
+        else None
+    )
     lifecycle_report = (
         run_lifecycle_stress(
             snap,
@@ -8604,6 +8941,10 @@ def generate(
             and (
                 core_surface_report is None
                 or core_surface_report["ok"]
+            )
+            and (
+                core_navigation_graph_report is None
+                or core_navigation_graph_report["ok"]
             )
             and (lifecycle_report is None or lifecycle_report["ok"])
         ),
@@ -8639,6 +8980,10 @@ def generate(
         report["core_surface_report"] = core_surface_report
         report["excluded_destination_rejections"] = (
             core_surface_report["excluded_destination_rejections"]
+        )
+    if core_navigation_graph_report is not None:
+        report["core_navigation_graph_report"] = (
+            core_navigation_graph_report
         )
     if lifecycle_report is not None:
         report["lifecycle_report"] = lifecycle_report

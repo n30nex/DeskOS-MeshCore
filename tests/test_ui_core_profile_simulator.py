@@ -63,6 +63,18 @@ def test_core_profile_renders_exact_root_surface_and_non_closure_truth(
     ) * 2
     assert report["lifecycle_report"]["rf_actions_dispatched"] == 0
     assert report["lifecycle_report"]["format_actions_dispatched"] == 0
+    graph = report["core_navigation_graph_report"]
+    assert graph["ok"] is True
+    assert graph["mode"] == "simulation"
+    assert graph["closure_eligible"] is False
+    assert graph["physical_observed"] is False
+    assert graph["excluded_touch_targets"] == []
+    assert graph["dead_touch_targets"] == []
+    assert graph["format_touch_targets"] == []
+    assert graph["location_claims"] == []
+    assert graph["trapped_states"] == []
+    assert graph["rf_actions_dispatched"] == 0
+    assert graph["format_actions_dispatched"] == 0
 
 
 def test_core_profile_hides_every_excluded_root_affordance(tmp_path: Path):
@@ -123,6 +135,9 @@ def test_core_profile_rejects_excluded_destination_inventory(tmp_path: Path):
     assert set(ui_simulator.CORE_UNAVAILABLE_CAPABILITIES) <= {
         row["feature"] for row in inventory
     }
+    assert "settings_advanced_expanded" in (
+        ui_simulator.CORE_EXCLUDED_DESTINATIONS
+    )
 
     for destination in ui_simulator.CORE_EXCLUDED_DESTINATIONS:
         with pytest.raises(
@@ -155,6 +170,170 @@ def test_core_profile_rejects_excluded_destination_inventory(tmp_path: Path):
         assert dispatched.accepted is False
         assert dispatched.reason == "unavailable_in_release_profile"
         assert dispatched.state == state
+
+
+def test_core_profile_all_dispatch_accepted_renderer_aliases_render():
+    snapshot = ui_simulator.project_core_snapshot(ui_simulator.sample_snapshot())
+    state = ui_simulator.LifecycleState(
+        generation=1,
+        release_profile=ui_simulator.CORE_RELEASE_PROFILE,
+    )
+
+    for destination, renderer in ui_simulator.RENDERERS.items():
+        binding = ui_simulator.LifecycleBinding(
+            generation=1,
+            view="home",
+            action=f"deep_link_{destination}",
+            destination=destination,
+            kind="button",
+            enabled=True,
+            rf_tx=False,
+            public_rf_tx=False,
+            dm_tx=False,
+            destructive=False,
+            formats_sd=False,
+        )
+        dispatched = ui_simulator.dispatch_lifecycle_binding(state, binding)
+        if destination in ui_simulator.CORE_EXCLUDED_DESTINATIONS:
+            assert dispatched.accepted is False
+            assert dispatched.reason == "unavailable_in_release_profile"
+            continue
+
+        assert dispatched.accepted is True
+        surface = ui_simulator.Surface(
+            destination,
+            release_profile=ui_simulator.CORE_RELEASE_PROFILE,
+        )
+        renderer(surface, snapshot)
+        assert all(
+            not target["enabled"]
+            or target["destination"]
+            not in ui_simulator.CORE_EXCLUDED_DESTINATIONS
+            for target in surface.touch_targets
+        )
+        assert all(
+            target["formats_sd"] is False
+            for target in surface.touch_targets
+        )
+        assert "Advert location" not in surface.labels
+        assert surface.metrics.get("node_detail_advert_location") is None
+
+        alias_state = ui_simulator.LifecycleState(
+            current_view=destination,
+            active_tab="home",
+            generation=1,
+            release_profile=ui_simulator.CORE_RELEASE_PROFILE,
+        )
+        for target in surface.touch_targets:
+            if (
+                not target["enabled"]
+                or target["destination"] is None
+                or target["rf_tx"]
+                or target["destructive"]
+                or target["formats_sd"]
+            ):
+                continue
+            alias_dispatch = ui_simulator.dispatch_lifecycle_binding(
+                alias_state,
+                ui_simulator.lifecycle_binding(
+                    1,
+                    destination,
+                    target,
+                ),
+            )
+            assert alias_dispatch.accepted is True
+
+
+def test_core_profile_omits_trace_export_and_location_affordances():
+    snapshot = ui_simulator.project_core_snapshot(
+        ui_simulator.SCENARIOS["map-ready"]()
+    )
+    assert all(
+        node.advert_lat_e6 is None
+        and node.advert_lon_e6 is None
+        and node.location_advert_timestamp == 0
+        for nodes in (
+            snapshot.rooms,
+            snapshot.repeaters,
+            snapshot.contacts,
+            snapshot.heard,
+        )
+        for node in nodes
+    )
+
+    options = ui_simulator.Surface(
+        "contact_options_page",
+        release_profile=ui_simulator.CORE_RELEASE_PROFILE,
+    )
+    ui_simulator.RENDERERS["contact_options_page"](options, snapshot)
+    option_actions = {target["action"] for target in options.touch_targets}
+    option_destinations = {
+        target["destination"]
+        for target in options.touch_targets
+        if target["destination"]
+    }
+    assert {"open_route_trace", "open_contact_export"}.isdisjoint(
+        option_actions
+    )
+    assert {"route_trace_sheet", "contact_export_sheet"}.isdisjoint(
+        option_destinations
+    )
+    assert {"Route", "Trace path", "Export", "Share QR"}.isdisjoint(
+        set(options.labels)
+    )
+
+    node_detail = ui_simulator.Surface(
+        "node_detail_sheet",
+        release_profile=ui_simulator.CORE_RELEASE_PROFILE,
+    )
+    ui_simulator.RENDERERS["node_detail_sheet"](node_detail, snapshot)
+    close = next(
+        target
+        for target in node_detail.touch_targets
+        if target["action"] == "close_node_detail"
+    )
+    assert close["destination"] == "nodes"
+    assert "Advert location" not in node_detail.labels
+    assert node_detail.metrics["node_detail_advert_location"] is None
+    assert node_detail.metrics["node_detail_location_provenance"] == (
+        "unavailable_in_release_profile"
+    )
+
+
+@pytest.mark.parametrize("scenario", tuple(ui_simulator.SCENARIOS))
+def test_core_profile_reachable_graph_is_safe_in_every_scenario(scenario: str):
+    report = ui_simulator.build_core_navigation_graph_report(
+        ui_simulator.SCENARIOS[scenario](),
+        scenario=scenario,
+    )
+
+    assert report["ok"] is True
+    assert report["scenario"] == scenario
+    assert report["render_errors"] == []
+    assert report["render_invariant_issues"] == []
+    assert report["excluded_touch_targets"] == []
+    assert report["dead_touch_targets"] == []
+    assert report["format_touch_targets"] == []
+    assert report["location_claims"] == []
+    assert report["trapped_states"] == []
+    assert "map" not in report["rendered_views"]
+    assert report["rf_actions_dispatched"] == 0
+    assert report["format_actions_dispatched"] == 0
+
+
+def test_core_profile_map_ready_lifecycle_returns_node_detail_to_nodes():
+    report = ui_simulator.run_lifecycle_stress(
+        ui_simulator.SCENARIOS["map-ready"](),
+        transitions=len(ui_simulator.CORE_LIFECYCLE_TRANSITION_CYCLE),
+        scenario="map-ready",
+        release_profile=ui_simulator.CORE_RELEASE_PROFILE,
+    )
+
+    assert report["ok"] is True
+    assert report["completed_transitions"] == len(
+        ui_simulator.CORE_LIFECYCLE_TRANSITION_CYCLE
+    )
+    assert report["failures"] == []
 
 
 def test_full_feature_simulator_remains_the_default(tmp_path: Path):
