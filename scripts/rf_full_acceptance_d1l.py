@@ -56,6 +56,7 @@ REMOTE_PEER_MAX_STATUS_AGE_SEC = 120.0
 REMOTE_PEER_MAX_STATUS_BYTES = 1024 * 1024
 REMOTE_PEER_MAX_CONTROL_BYTES = 64 * 1024
 REMOTE_PEER_SSH_TIMEOUT_SEC = 45.0
+REMOTE_PEER_SSH_IDENTITY_ENV = "MESH_PEER_SSH_IDENTITY"
 REMOTE_PEER_HELPER_SCHEMA = 1
 REMOTE_PEER_FORBIDDEN_DEVICE = "/dev/krab-" + "com" + str(11)
 
@@ -807,6 +808,39 @@ def _remote_peer_request(config: dict, operation: str, raw: bytes | None) -> byt
     ).encode("utf-8")
 
 
+def _remote_peer_ssh_identity_args() -> list[str]:
+    raw = os.environ.get(REMOTE_PEER_SSH_IDENTITY_ENV)
+    if raw is None:
+        return []
+    value = raw.strip()
+    if not value or "\x00" in value:
+        raise RemotePeerError(
+            "ssh_identity_invalid",
+            "controlled-peer SSH identity setting "
+            f"{REMOTE_PEER_SSH_IDENTITY_ENV} must name one private-key file",
+        )
+    try:
+        supplied = Path(value).expanduser()
+        identity = supplied.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise RemotePeerError(
+            "ssh_identity_invalid",
+            "configured controlled-peer SSH identity is unavailable",
+        ) from exc
+    if (
+        not supplied.is_absolute()
+        or supplied.is_symlink()
+        or is_link_or_reparse(supplied)
+        or not identity.is_file()
+    ):
+        raise RemotePeerError(
+            "ssh_identity_invalid",
+            "configured controlled-peer SSH identity must be an absolute, "
+            "regular, non-linked file",
+        )
+    return ["-o", "IdentitiesOnly=yes", "-i", str(identity)]
+
+
 def run_remote_peer_operation(
     config: dict,
     operation: str,
@@ -829,6 +863,7 @@ def run_remote_peer_operation(
         "StrictHostKeyChecking=yes",
         "-o",
         "LogLevel=ERROR",
+        *_remote_peer_ssh_identity_args(),
         config["ssh_host"],
         REMOTE_PEER_HELPER_COMMAND,
     ]

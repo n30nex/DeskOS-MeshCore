@@ -1046,6 +1046,71 @@ def test_remote_peer_ssh_uses_fixed_argv_stdin_and_no_shell(monkeypatch):
     assert request["control_socket"] == rf_accept.REMOTE_PEER_CONTROL_SOCKET
 
 
+def test_remote_peer_ssh_uses_explicit_nonlinked_identity(
+    tmp_path, monkeypatch
+):
+    identity = tmp_path / "neonx"
+    identity.write_bytes(b"private-key-fixture")
+    monkeypatch.setenv(
+        rf_accept.REMOTE_PEER_SSH_IDENTITY_ENV, str(identity.resolve())
+    )
+    calls = []
+    response = {
+        "schema": rf_accept.REMOTE_PEER_HELPER_SCHEMA,
+        "ok": True,
+        "operation": "capture_status",
+        "result": {},
+        "error": None,
+    }
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(response).encode("utf-8"),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(rf_accept.subprocess, "run", fake_run)
+
+    assert rf_accept.run_remote_peer_operation(
+        remote_config(), "capture_status"
+    ) == {}
+    argv, _ = calls[0]
+    identity_index = argv.index("-i")
+    assert argv[identity_index - 2 : identity_index] == [
+        "-o",
+        "IdentitiesOnly=yes",
+    ]
+    assert argv[identity_index + 1] == str(identity.resolve())
+    assert argv[identity_index + 2] == rf_accept.REMOTE_PEER_SSH_HOST
+
+
+@pytest.mark.parametrize("value", ["", "missing-private-key"])
+def test_remote_peer_ssh_rejects_invalid_explicit_identity(
+    tmp_path, monkeypatch, value
+):
+    configured = value
+    if value:
+        configured = str(tmp_path / value)
+    monkeypatch.setenv(rf_accept.REMOTE_PEER_SSH_IDENTITY_ENV, configured)
+    monkeypatch.setattr(
+        rf_accept.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "invalid SSH identity must fail before subprocess"
+        ),
+    )
+
+    with pytest.raises(
+        rf_accept.RemotePeerError, match="SSH identity"
+    ) as caught:
+        rf_accept.run_remote_peer_operation(
+            remote_config(), "capture_status"
+        )
+    assert caught.value.code == "ssh_identity_invalid"
+
+
 def test_remote_peer_ssh_rejects_noncanonical_success_envelope(monkeypatch):
     response = {
         "schema": rf_accept.REMOTE_PEER_HELPER_SCHEMA,
