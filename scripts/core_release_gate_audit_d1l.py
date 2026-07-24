@@ -2940,10 +2940,10 @@ def remote_rf_gate(
     identity_ok = (
         d1l_public_key is not None
         and d1l_fingerprint is not None
-        and identity.get("ok") is True
-        and rf_acceptance.exact_public_key(identity.get("public_key"))
-        == d1l_public_key
-        and str(identity.get("fingerprint") or "").upper() == d1l_fingerprint
+        and rf_acceptance.d1l_identity_status_ok(
+            identity, d1l_public_key
+        )
+        and data.get("identity_public_key") == d1l_public_key
         and data.get("expected_identity_fingerprint") == d1l_fingerprint
         and data.get("identity_fingerprint") == d1l_fingerprint
     )
@@ -3312,10 +3312,10 @@ def rf_gate(
     identity_ok = (
         d1l_public_key is not None
         and d1l_fingerprint is not None
-        and identity.get("ok") is True
-        and rf_acceptance.exact_public_key(identity.get("public_key"))
-        == d1l_public_key
-        and str(identity.get("fingerprint") or "").upper() == d1l_fingerprint
+        and rf_acceptance.d1l_identity_status_ok(
+            identity, d1l_public_key
+        )
+        and data.get("identity_public_key") == d1l_public_key
         and data.get("expected_identity_fingerprint") == d1l_fingerprint
         and data.get("identity_fingerprint") == d1l_fingerprint
     )

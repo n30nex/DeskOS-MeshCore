@@ -1766,10 +1766,13 @@ def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
         {
             "command": "identity status",
             "result": {
+                "schema": 1,
                 "ok": True,
                 "cmd": "identity status",
+                "public_key_ready": True,
                 "public_key": rf.DEFAULT_D1L_PUBLIC_KEY,
                 "fingerprint": rf.DEFAULT_D1L_PUBLIC_KEY[:16].upper(),
+                "role": "desk_companion",
             },
         },
         {"command": "contacts", "result": {"ok": True, "entries": []}},
@@ -1906,6 +1909,29 @@ def test_remote_rf_gate_recomputes_raw_status_and_control_sidecars(
         ).ok
         is False
     )
+
+
+def test_remote_rf_gate_requires_exact_full_d1l_identity_status(
+    tmp_path: Path,
+):
+    receipt = write_remote_rf_receipt(tmp_path)
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    report["steps"][1]["result"]["role"] = "forged_role"
+    write_json(receipt, report)
+
+    gate = audit.rf_gate(
+        receipt,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert gate.details["derived_checks"][
+        "identity_public_key_matches"
+    ] is False
 
 
 def test_local_rf_gate_recomputes_raw_status_and_control_sidecars(
