@@ -156,7 +156,7 @@ def test_all_d1l_console_scripts_use_the_safe_open_helper():
         assert functions == intentional_direct_functions.get(filename, []), filename
 
 
-def test_only_intentional_rp2040_paths_keep_direct_serial_opening():
+def test_only_intentional_paths_keep_direct_serial_opening():
     direct_calls = {}
     for path in (ROOT / "scripts").glob("*.py"):
         calls = serial_calls(path)
@@ -165,6 +165,7 @@ def test_only_intentional_rp2040_paths_keep_direct_serial_opening():
 
     assert direct_calls == {
         "autonomous_hardware_validate_d1l.py": ["capture_official_smoke"],
+        "core_flash_only_d1l.py": ["open_posix_admitted_serial"],
         "guided_sd_install_d1l.py": ["capture_official_smoke"],
         "rp2040_direct_sd_file_canary.py": ["run_canary"],
     }
