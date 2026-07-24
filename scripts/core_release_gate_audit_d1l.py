@@ -1362,14 +1362,17 @@ def core_flash_receipt_gate(
         capture_recomputed = {}
         capture_ok = False
     raw_log, raw_log_ok = _verified_file_row(data.get("raw_flash_log"), root)
+    flash_snapshot_fields = [
+        "d1l_target",
+        "d1l_target_before",
+        "d1l_target_after",
+    ]
+    if expected_target == POSIX_D1L_TARGET:
+        flash_snapshot_fields.append("pre_flash_target_after_open")
     target_ok, target_identity, target_details = target_receipt_binding(
         data,
         expected_target=expected_target,
-        snapshot_fields=(
-            "d1l_target",
-            "d1l_target_before",
-            "d1l_target_after",
-        ),
+        snapshot_fields=tuple(flash_snapshot_fields),
         continuity_flag="target_identity_continuity_ok",
     )
     public_key_ok, _d1l_public_key, public_key_details = (
@@ -1406,6 +1409,13 @@ def core_flash_receipt_gate(
     )
     version = data.get("post_flash_version")
     health = data.get("post_flash_health")
+    serial_binding_ok = (
+        data.get("flash_serial_binding")
+        == "posix_fork_inherited_open_serial"
+        and data.get("flash_serial_binding_ok") is True
+        if expected_target == POSIX_D1L_TARGET
+        else True
+    )
     scope_ok = (
         real_evidence(data)
         and data.get("schema") == 2
@@ -1417,6 +1427,7 @@ def core_flash_receipt_gate(
         and data.get("port") == expected_target
         and target_ok
         and public_key_ok
+        and serial_binding_ok
         and exact_candidate_fields(data, commit)
         and str(data.get("github_actions_run")) == str(run_id)
         and str(data.get("workflow_run_attempt")) == str(run_attempt)
@@ -1480,6 +1491,7 @@ def core_flash_receipt_gate(
             "retained_after_ok": after_ok,
             "non_erasing_retained_state_ok": retained_ok,
             "actions_archive_binding_ok": capture_ok,
+            "flash_serial_binding_ok": serial_binding_ok,
             "d1l_target_binding": target_details,
             "d1l_public_key_binding": public_key_details,
             "legacy_details": legacy.to_dict().get("details", {}),

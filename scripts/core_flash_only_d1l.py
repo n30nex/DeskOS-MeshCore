@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import re
+import select
+import signal
 import subprocess
 import sys
 import time
+import traceback
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +43,7 @@ try:
         exact_version_identity,
         resolve_core_target,
     )
-    from d1l_serial_target import safe_slug
+    from d1l_serial_target import POSIX_TARGET_KIND, safe_slug
     from release_gate_audit_d1l import find_release_package
     from smoke_d1l import (
         exact_commit,
@@ -76,7 +81,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         exact_version_identity,
         resolve_core_target,
     )
-    from scripts.d1l_serial_target import safe_slug
+    from scripts.d1l_serial_target import POSIX_TARGET_KIND, safe_slug
     from scripts.release_gate_audit_d1l import find_release_package
     from scripts.smoke_d1l import (
         exact_commit,
@@ -383,6 +388,185 @@ def default_flash_runner(
     return result, raw
 
 
+@contextlib.contextmanager
+def open_posix_admitted_serial(
+    port: str,
+    baud: int,
+    timeout: float,
+):
+    """Keep the exact identity-admitted POSIX serial endpoint open."""
+    if os.name != "posix":
+        raise RuntimeError("POSIX serial admission requires a POSIX runtime")
+    try:
+        import serial
+    except ImportError as exc:
+        raise RuntimeError(
+            "pyserial is required for bound POSIX D1L flashing"
+        ) from exc
+    handle = open_d1l_serial(
+        serial, port=port, baudrate=baud, timeout=timeout
+    )
+    try:
+        time.sleep(1.0)
+        handle.reset_input_buffer()
+        yield handle
+    finally:
+        handle.close()
+
+
+def read_identity_status_from_handle(
+    handle: Any,
+    timeout: float,
+    command_sender: Callable[[Any, str, float], dict],
+) -> dict:
+    return command_sender(handle, "identity status", timeout)
+
+
+def read_retained_state_from_handle(
+    handle: Any,
+    timeout: float,
+    command_sender: Callable[[Any, str, float], dict],
+) -> list[dict]:
+    return [
+        command_sender(handle, command, timeout)
+        for command in RETAINED_STATE_COMMANDS
+    ]
+
+
+def _command_option(command: list[str], *names: str) -> str | None:
+    for index, token in enumerate(command):
+        if token in names and index + 1 < len(command):
+            return command[index + 1]
+        for name in names:
+            prefix = f"{name}="
+            if token.startswith(prefix):
+                return token[len(prefix) :]
+    return None
+
+
+def _run_esptool_with_open_serial(
+    command: list[str],
+    serial_handle: Any,
+) -> None:
+    """Run esptool through an already-open serial object."""
+    if len(command) < 4 or command[1:3] != ["-m", "esptool"]:
+        raise ValueError("Unexpected esptool command prefix")
+    chip = _command_option(command, "--chip")
+    before = _command_option(command, "--before") or "default-reset"
+    baud_text = _command_option(command, "--baud", "-b")
+    if chip != "esp32s3" or baud_text is None:
+        raise ValueError("Bound esptool command must select ESP32-S3 and baud")
+    baud = int(baud_text)
+    if baud <= 0:
+        raise ValueError("Bound esptool baud must be positive")
+
+    import esptool
+    from esptool.cmds import detect_chip
+
+    esp = detect_chip(
+        port=serial_handle,
+        baud=min(115200, baud),
+        connect_mode=before,
+    )
+    detected = str(getattr(esp, "CHIP_NAME", "")).lower().replace("-", "")
+    if detected != chip:
+        raise RuntimeError(
+            f"Bound esptool endpoint is {detected or 'unknown'}, not {chip}"
+        )
+    esptool.main(argv=command[3:], esp=esp)
+
+
+def default_posix_flash_runner(
+    command: list[str],
+    cwd: Path,
+    timeout: int,
+    serial_handle: Any,
+) -> tuple[dict, bytes]:
+    """Fork esptool with the exact serial file description admitted above."""
+    started_at = utc_now()
+    if os.name != "posix" or not hasattr(os, "fork"):
+        raise RuntimeError(
+            "Bound POSIX flashing requires fork-based descriptor inheritance"
+        )
+    os.fstat(serial_handle.fileno())
+    sys.stdout.flush()
+    sys.stderr.flush()
+    read_fd, write_fd = os.pipe()
+    try:
+        pid = os.fork()
+    except BaseException:
+        os.close(read_fd)
+        os.close(write_fd)
+        raise
+    if pid == 0:  # pragma: no cover - exercised by Linux hardware
+        try:
+            os.close(read_fd)
+            os.dup2(write_fd, 1)
+            os.dup2(write_fd, 2)
+            if write_fd not in {1, 2}:
+                os.close(write_fd)
+            os.chdir(cwd)
+            _run_esptool_with_open_serial(command, serial_handle)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
+        except BaseException:
+            traceback.print_exc()
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(1)
+
+    os.close(write_fd)
+    raw_parts: list[bytes] = []
+    status: int | None = None
+    timed_out = False
+    deadline = time.monotonic() + timeout
+    try:
+        while status is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                os.kill(pid, signal.SIGKILL)
+                _, status = os.waitpid(pid, 0)
+                break
+            readable, _, _ = select.select(
+                [read_fd], [], [], min(0.1, remaining)
+            )
+            if readable:
+                chunk = os.read(read_fd, 65536)
+                if chunk:
+                    raw_parts.append(chunk)
+            waited_pid, waited_status = os.waitpid(pid, os.WNOHANG)
+            if waited_pid == pid:
+                status = waited_status
+        while True:
+            chunk = os.read(read_fd, 65536)
+            if not chunk:
+                break
+            raw_parts.append(chunk)
+    finally:
+        os.close(read_fd)
+
+    returncode = (
+        None
+        if timed_out or status is None
+        else os.waitstatus_to_exitcode(status)
+    )
+    result = {
+        "name": "esp32_flash",
+        "ok": returncode == 0 and not timed_out,
+        "returncode": returncode,
+        "args": command,
+        "cwd": str(cwd),
+        "started_at": started_at,
+        "ended_at": utc_now(),
+        "serial_handoff": "fork_inherited_open_serial",
+    }
+    if timed_out:
+        result["error"] = "timeout"
+    return result, b"".join(raw_parts)
+
+
 def exact_public_key(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -658,6 +842,15 @@ def run_core_flash_only(
     identity_status_reader: Callable[
         [str, int, float, float], dict
     ] = read_identity_status,
+    posix_serial_opener: Callable[
+        [str, int, float], Any
+    ] = open_posix_admitted_serial,
+    posix_flash_runner: Callable[
+        [list[str], Path, int, Any], tuple[dict, bytes]
+    ] = default_posix_flash_runner,
+    serial_command_sender: Callable[
+        [Any, str, float], dict
+    ] = send_console_command,
     port_lister: Callable[[], Iterable[object]] | None = None,
     platform_name: str | None = None,
 ) -> dict:
@@ -762,65 +955,6 @@ def run_core_flash_only(
         run_attempt=str(run_attempt),
         actions_verification=actions_verification,
     )
-    pre_flash_identity = identity_status_reader(
-        port, serial_baud, serial_timeout, 0.0
-    )
-    if not identity_status_ok(
-        pre_flash_identity,
-        normalized_public_key,
-    ):
-        raise ValueError(
-            "Pre-flash identity status does not match the pinned D1L public key"
-        )
-    before_projection: dict | None = None
-    before_snapshot_row: dict | None = None
-    if flash_phase == FLASH_PHASE_RETAINED_REFLASH:
-        before_results = retained_state_reader(
-            port, serial_baud, serial_timeout, 0.0
-        )
-        before_projection = retained_state_projection(before_results)
-        before_version = (
-            before_results[0] if len(before_results) > 0 else {}
-        )
-        before_health = (
-            before_results[1] if len(before_results) > 1 else {}
-        )
-        before_identity = next(
-            (
-                row
-                for row in before_results
-                if isinstance(row, dict)
-                and row.get("cmd") == "identity status"
-            ),
-            {},
-        )
-        if not (
-            before_projection is not None
-            and exact_version_identity(
-                before_version, normalized_commit, EXPECTED_SD_HISTORY_MODE
-            )
-            and exact_identity(
-                before_health, normalized_commit, EXPECTED_SD_HISTORY_MODE
-            )
-            and before_health.get("board_ready") is True
-            and before_health.get("ui_ready") is True
-            and identity_status_ok(
-                before_identity,
-                normalized_public_key,
-            )
-        ):
-            raise ValueError(
-                "Closing reflash baseline must be the exact ready candidate; "
-                "use --phase bootstrap for the initial candidate install"
-            )
-        _, before_snapshot_row = write_state_snapshot(
-            path=before_snapshot_path,
-            root=root,
-            phase="pre_flash",
-            commit=normalized_commit,
-            results=before_results,
-            d1l_target=d1l_target_before,
-        )
     build_dir = github_run_dir / "d1l-firmware-artifacts" / "build"
     command = esptool_flash_command(build_dir, port, flash_baud)
     if (
@@ -835,7 +969,124 @@ def run_core_flash_only(
     ):
         raise ValueError("Generated flash command violates the Core flash-only scope")
 
-    result, raw_log = flash_runner(command, root, flash_timeout)
+    posix_binding = (
+        d1l_target_before.get("target_kind") == POSIX_TARGET_KIND
+    )
+    admission_context = (
+        posix_serial_opener(port, serial_baud, serial_timeout)
+        if posix_binding
+        else contextlib.nullcontext(None)
+    )
+    pre_flash_identity: dict = {}
+    pre_flash_target_after_open: dict[str, Any] | None = None
+    before_projection: dict | None = None
+    before_snapshot_row: dict | None = None
+    with admission_context as admitted_handle:
+        if posix_binding:
+            if admitted_handle is None:
+                raise RuntimeError(
+                    "Bound POSIX serial admission returned no handle"
+                )
+            pre_flash_target_after_open = resolve_core_target(
+                port,
+                port_lister=port_lister,
+                platform_name=platform_name,
+            )
+            if (
+                pre_flash_target_after_open["stable_identity_sha256"]
+                != d1l_target_before["stable_identity_sha256"]
+            ):
+                raise ValueError(
+                    "D1L target changed while opening the admitted serial handle"
+                )
+            pre_flash_identity = read_identity_status_from_handle(
+                admitted_handle,
+                serial_timeout,
+                serial_command_sender,
+            )
+        else:
+            pre_flash_identity = identity_status_reader(
+                port, serial_baud, serial_timeout, 0.0
+            )
+        if not identity_status_ok(
+            pre_flash_identity,
+            normalized_public_key,
+        ):
+            raise ValueError(
+                "Pre-flash identity status does not match the pinned D1L public key"
+            )
+        if flash_phase == FLASH_PHASE_RETAINED_REFLASH:
+            before_results = (
+                read_retained_state_from_handle(
+                    admitted_handle,
+                    serial_timeout,
+                    serial_command_sender,
+                )
+                if posix_binding
+                else retained_state_reader(
+                    port, serial_baud, serial_timeout, 0.0
+                )
+            )
+            before_projection = retained_state_projection(before_results)
+            before_version = (
+                before_results[0] if len(before_results) > 0 else {}
+            )
+            before_health = (
+                before_results[1] if len(before_results) > 1 else {}
+            )
+            before_identity = next(
+                (
+                    row
+                    for row in before_results
+                    if isinstance(row, dict)
+                    and row.get("cmd") == "identity status"
+                ),
+                {},
+            )
+            if not (
+                before_projection is not None
+                and exact_version_identity(
+                    before_version,
+                    normalized_commit,
+                    EXPECTED_SD_HISTORY_MODE,
+                )
+                and exact_identity(
+                    before_health,
+                    normalized_commit,
+                    EXPECTED_SD_HISTORY_MODE,
+                )
+                and before_health.get("board_ready") is True
+                and before_health.get("ui_ready") is True
+                and identity_status_ok(
+                    before_identity,
+                    normalized_public_key,
+                )
+            ):
+                raise ValueError(
+                    "Closing reflash baseline must be the exact ready candidate; "
+                    "use --phase bootstrap for the initial candidate install"
+                )
+            _, before_snapshot_row = write_state_snapshot(
+                path=before_snapshot_path,
+                root=root,
+                phase="pre_flash",
+                commit=normalized_commit,
+                results=before_results,
+                d1l_target=(
+                    pre_flash_target_after_open
+                    if pre_flash_target_after_open is not None
+                    else d1l_target_before
+                ),
+            )
+        if posix_binding:
+            result, raw_log = posix_flash_runner(
+                command,
+                root,
+                flash_timeout,
+                admitted_handle,
+            )
+        else:
+            result, raw_log = flash_runner(command, root, flash_timeout)
     raw_log_path.parent.mkdir(parents=True, exist_ok=True)
     raw_log_path.write_bytes(raw_log)
     raw_log_row = _relative_file_row(raw_log_path, root)
@@ -898,10 +1149,19 @@ def run_core_flash_only(
                     results=after_results,
                     d1l_target=d1l_target_after,
                 )
+    flash_serial_binding = (
+        "posix_fork_inherited_open_serial"
+        if posix_binding
+        else "windows_com_path"
+    )
+    flash_serial_binding_ok = (
+        result.get("serial_handoff") == "fork_inherited_open_serial"
+        if posix_binding
+        else True
+    )
     identity_ok = (
         target_continuity_ok
-        and
-        exact_version_identity(
+        and exact_version_identity(
             version, normalized_commit, EXPECTED_SD_HISTORY_MODE
         )
         and exact_identity(
@@ -914,7 +1174,11 @@ def run_core_flash_only(
             normalized_public_key,
         )
     )
-    ok = result.get("ok") is True and identity_ok
+    ok = (
+        result.get("ok") is True
+        and identity_ok
+        and flash_serial_binding_ok
+    )
     retained_preserved = (
         bool(
             before_projection is not None
@@ -955,9 +1219,12 @@ def run_core_flash_only(
         "port": port,
         "d1l_target": d1l_target_before,
         "d1l_target_before": d1l_target_before,
+        "pre_flash_target_after_open": pre_flash_target_after_open,
         "d1l_target_after": d1l_target_after,
         "target_identity_continuity_ok": target_continuity_ok,
         "target_post_error": target_post_error,
+        "flash_serial_binding": flash_serial_binding,
+        "flash_serial_binding_ok": flash_serial_binding_ok,
         "commit": normalized_commit,
         "github_actions_run": str(run_id),
         "workflow_run_attempt": str(run_attempt),
