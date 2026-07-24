@@ -7,6 +7,7 @@ after:
 
 * the exact clean Core candidate and Actions identity are established;
 * the exact cross-platform D1L target is uniquely present;
+* the live device reports the pinned full D1L public key and companion role;
 * the live device reports the expected legacy value and a TX block; and
 * the requested bound covers a deliberately pessimistic availability-window
   calculation for every predecessor timestamp allocation.
@@ -168,6 +169,35 @@ def _finite_positive_timeout(value: object) -> bool:
         return math.isfinite(value) and value > 0
     except (OverflowError, TypeError, ValueError):
         return False
+
+
+def exact_public_key(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return (
+        normalized
+        if re.fullmatch(r"[0-9a-f]{64}", normalized) is not None
+        else None
+    )
+
+
+def identity_status_ok(result: object, expected_public_key: object) -> bool:
+    """Require the complete live D1L identity before persistent mutation."""
+
+    public_key = exact_public_key(expected_public_key)
+    return bool(
+        public_key is not None
+        and isinstance(result, dict)
+        and type(result.get("schema")) is int
+        and result.get("schema") == 1
+        and result.get("ok") is True
+        and result.get("cmd") == "identity status"
+        and result.get("public_key_ready") is True
+        and exact_public_key(result.get("public_key")) == public_key
+        and result.get("fingerprint") == public_key[:16].upper()
+        and result.get("role") == "desk_companion"
+    )
 
 
 def _authorized_target(value: object) -> str | None:
@@ -1166,6 +1196,14 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
     requested_target = _authorized_target(receipt.get("port"))
     if requested_target is None:
         errors.append("receipt port is not an authorized canonical D1L target")
+    expected_public_key = exact_public_key(
+        receipt.get("expected_d1l_public_key")
+    )
+    if (
+        expected_public_key is None
+        or receipt.get("expected_d1l_public_key") != expected_public_key
+    ):
+        errors.append("expected D1L public key is not exact normalized 64-hex")
     required = {
         "schema": 2,
         "kind": "time_protocol_migration",
@@ -1190,6 +1228,7 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
         "sd_access": False,
         "rp2040_access": False,
         "predecessor_evidence_used": False,
+        "d1l_identity_ok": True,
     }
     for key, expected in required.items():
         if receipt.get(key) != expected:
@@ -1287,8 +1326,8 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
             ):
                 errors.append("bound attestation recomputation failed")
     transactions = receipt.get("transactions")
-    if not isinstance(transactions, list) or len(transactions) != 7:
-        errors.append("exact seven-command transaction sequence is missing")
+    if not isinstance(transactions, list) or len(transactions) != 8:
+        errors.append("exact eight-command transaction sequence is missing")
         return False, errors
     parsed: list[dict[str, Any] | None] = []
     for index, transaction in enumerate(transactions):
@@ -1296,6 +1335,7 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
         parsed.append(result)
         errors.extend(f"transaction[{index}]: {error}" for error in transaction_errors)
     if [row.get("expected_cmd") for row in transactions] != [
+        "identity status",
         "version",
         "health",
         "time migration status",
@@ -1305,49 +1345,59 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
         "health",
     ]:
         errors.append("transaction command order is invalid")
-    if transactions[3].get("command_redacted") is not True:
+    if transactions[4].get("command_redacted") is not True:
         errors.append("migration command is not redacted")
     if any(
         row.get("command_redacted") is True
         for index, row in enumerate(transactions)
-        if index != 3
+        if index != 4
     ):
         errors.append("read-only command unexpectedly marked redacted")
-    if commit is not None and len(parsed) == 7:
-        if not exact_version(parsed[0], commit, tx_ready=False):
+    if len(parsed) == 8:
+        if (
+            not identity_status_ok(parsed[0], expected_public_key)
+            or not _json_exact_equal(
+                receipt.get("d1l_identity_status"),
+                parsed[0],
+            )
+            or receipt.get("d1l_identity_ok") is not True
+        ):
+            errors.append("exact D1L public-key identity binding failed")
+    if commit is not None and len(parsed) == 8:
+        if not exact_version(parsed[1], commit, tx_ready=False):
             errors.append("pre-migration exact version/TX block failed")
         if not (
-            isinstance(parsed[1], dict)
-            and _exact_int(parsed[1].get("schema"), 1)
-            and parsed[1].get("ok") is True
-            and parsed[1].get("cmd") == "health"
+            isinstance(parsed[2], dict)
+            and _exact_int(parsed[2].get("schema"), 1)
+            and parsed[2].get("ok") is True
+            and parsed[2].get("cmd") == "health"
         ):
             errors.append("pre-migration health failed")
         if not before_status_ok(
-            parsed[2],
+            parsed[3],
             expected_legacy_value=int(legacy or 0),
             confirmed_upper_bound=int(upper or 0),
         ):
             errors.append("pre-migration status failed")
         if not migration_result_ok(
-            parsed[3],
+            parsed[4],
             expected_legacy_value=int(legacy or 0),
             confirmed_upper_bound=int(upper or 0),
         ):
             errors.append("migration mutation result failed")
         if not after_status_ok(
-            parsed[4],
+            parsed[5],
             expected_legacy_value=int(legacy or 0),
             confirmed_upper_bound=int(upper or 0),
         ):
             errors.append("post-migration status failed")
-        if not exact_version(parsed[5], commit, tx_ready=True):
+        if not exact_version(parsed[6], commit, tx_ready=True):
             errors.append("post-migration exact version/TX readiness failed")
         if not (
-            isinstance(parsed[6], dict)
-            and _exact_int(parsed[6].get("schema"), 1)
-            and parsed[6].get("ok") is True
-            and parsed[6].get("cmd") == "health"
+            isinstance(parsed[7], dict)
+            and _exact_int(parsed[7].get("schema"), 1)
+            and parsed[7].get("ok") is True
+            and parsed[7].get("cmd") == "health"
         ):
             errors.append("post-migration health failed")
     before_target = receipt.get("d1l_target_before")
@@ -1411,6 +1461,17 @@ def _strict_receipt_shape_errors(
     requested_target = _authorized_target(receipt.get("port"))
     if requested_target is None:
         errors.append("receipt port is not an authorized canonical D1L target")
+    expected_public_key = exact_public_key(
+        receipt.get("expected_d1l_public_key")
+    )
+    if (
+        expected_public_key is None
+        or not _exact_json_scalar(
+            receipt.get("expected_d1l_public_key"),
+            expected_public_key,
+        )
+    ):
+        errors.append("expected D1L public key is not exact normalized 64-hex")
     required = {
         "schema": 2,
         "kind": "time_protocol_migration",
@@ -1435,6 +1496,7 @@ def _strict_receipt_shape_errors(
         "sd_access": False,
         "rp2040_access": False,
         "predecessor_evidence_used": False,
+        "d1l_identity_ok": True,
     }
     for key, expected in required.items():
         if not _exact_json_scalar(receipt.get(key), expected):
@@ -1568,13 +1630,13 @@ def _strict_receipt_shape_errors(
     transactions = receipt.get("transactions")
     if not (
         isinstance(transactions, list)
-        and len(transactions) == 7
+        and len(transactions) == 8
         and all(isinstance(row, dict) for row in transactions)
     ):
-        errors.append("exact typed seven-command sequence is missing")
+        errors.append("exact typed eight-command sequence is missing")
         return errors
     for index, transaction in enumerate(transactions):
-        expected_redacted = index == 3
+        expected_redacted = index == 4
         if transaction.get("command_redacted") is not expected_redacted:
             errors.append(f"transaction[{index}] redaction flag type/value mismatch")
         if transaction.get("confirmation_echo_detected") is not False:
@@ -1600,6 +1662,19 @@ def _strict_receipt_shape_errors(
         ]
     ):
         errors.append("confirmation phrase is reconstructable across receipt raw rows")
+    identity_result, identity_errors = _transaction_result(transactions[0])
+    errors.extend(
+        f"transaction[0]: {error}" for error in identity_errors
+    )
+    if (
+        not identity_status_ok(identity_result, expected_public_key)
+        or not _json_exact_equal(
+            receipt.get("d1l_identity_status"),
+            identity_result,
+        )
+        or receipt.get("d1l_identity_ok") is not True
+    ):
+        errors.append("exact D1L public-key identity binding failed")
 
     before_identity = (
         _strict_target_identity(
@@ -1827,6 +1902,7 @@ def _execute_migration_reserved(
     commit: str,
     run_id: str,
     run_attempt: str,
+    expected_d1l_public_key: str,
     expected_legacy_value: int,
     confirmed_upper_bound: int,
     attest_exact_device_upper_bound: bool,
@@ -1839,6 +1915,11 @@ def _execute_migration_reserved(
 ) -> dict[str, Any]:
     if attest_exact_device_upper_bound is not True:
         raise ValueError("explicit exact-device upper-bound attestation is required")
+    normalized_public_key = exact_public_key(expected_d1l_public_key)
+    if normalized_public_key is None:
+        raise ValueError(
+            "expected D1L public key must be exactly 64 hexadecimal characters"
+        )
     observed_at = now()
     predecessor_source = predecessor_source_metadata(root, commit)
     canonical_requested_target = enforce_core_port(requested_target)
@@ -1873,6 +1954,23 @@ def _execute_migration_reserved(
         if hasattr(ser, "reset_input_buffer"):
             ser.reset_input_buffer()
         transactions.append(
+            read_only_command(
+                ser,
+                "identity status",
+                timeout,
+                now=now,
+                clock=clock,
+            )
+        )
+        identity_result, identity_errors = _transaction_result(transactions[0])
+        if (
+            identity_errors
+            or not identity_status_ok(identity_result, normalized_public_key)
+        ):
+            raise ValueError(
+                "D1L identity preflight failed; no mutation sent"
+            )
+        transactions.append(
             read_only_command(ser, "version", timeout, now=now, clock=clock)
         )
         transactions.append(
@@ -1887,9 +1985,9 @@ def _execute_migration_reserved(
                 clock=clock,
             )
         )
-        pre_version, pre_version_errors = _transaction_result(transactions[0])
-        pre_health, pre_health_errors = _transaction_result(transactions[1])
-        pre_status, pre_status_errors = _transaction_result(transactions[2])
+        pre_version, pre_version_errors = _transaction_result(transactions[1])
+        pre_health, pre_health_errors = _transaction_result(transactions[2])
+        pre_status, pre_status_errors = _transaction_result(transactions[3])
         preflight_errors = [
             *pre_version_errors,
             *pre_health_errors,
@@ -2012,6 +2110,12 @@ def _execute_migration_reserved(
         "commit": commit,
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
+        "expected_d1l_public_key": normalized_public_key,
+        "d1l_identity_status": identity_result,
+        "d1l_identity_ok": identity_status_ok(
+            identity_result,
+            normalized_public_key,
+        ),
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": CORE_SD_HISTORY_MODE,
         "automatic_migration": False,
@@ -2067,6 +2171,7 @@ def execute_migration(
     commit: str,
     run_id: str,
     run_attempt: str,
+    expected_d1l_public_key: str,
     expected_legacy_value: int,
     confirmed_upper_bound: int,
     attest_exact_device_upper_bound: bool,
@@ -2078,6 +2183,11 @@ def execute_migration(
 ) -> dict[str, Any]:
     if attest_exact_device_upper_bound is not True:
         raise ValueError("explicit exact-device upper-bound attestation is required")
+    normalized_public_key = exact_public_key(expected_d1l_public_key)
+    if normalized_public_key is None:
+        raise ValueError(
+            "expected D1L public key must be exactly 64 hexadecimal characters"
+        )
     if not _finite_positive_timeout(timeout):
         raise ValueError("command timeout must be finite and positive")
     if not (
@@ -2123,6 +2233,7 @@ def execute_migration(
             commit=commit,
             run_id=run_id,
             run_attempt=run_attempt,
+            expected_d1l_public_key=normalized_public_key,
             expected_legacy_value=expected_legacy_value,
             confirmed_upper_bound=confirmed_upper_bound,
             attest_exact_device_upper_bound=(attest_exact_device_upper_bound),
@@ -2165,6 +2276,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--github-run-id", required=True)
     parser.add_argument("--github-run-attempt", required=True)
     parser.add_argument("--core-actions-run-metadata", required=True)
+    parser.add_argument("--expected-d1l-public-key", required=True)
     parser.add_argument("--expected-legacy-value", type=int, required=True)
     parser.add_argument("--confirmed-upper-bound", type=int, required=True)
     parser.add_argument(
@@ -2202,6 +2314,14 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("Actions run and attempt must be positive integers")
         if not _finite_positive_timeout(args.timeout):
             raise ValueError("--timeout must be finite and positive")
+        expected_d1l_public_key = exact_public_key(
+            args.expected_d1l_public_key
+        )
+        if expected_d1l_public_key is None:
+            raise ValueError(
+                "--expected-d1l-public-key must be exactly 64 hexadecimal "
+                "characters"
+            )
         root = Path(args.root).resolve(strict=True)
         source_git = exact_source_git(root, commit)
         serial_module, port_lister = _serial_runtime()
@@ -2214,6 +2334,7 @@ def main(argv: list[str] | None = None) -> int:
             commit=commit,
             run_id=run_id,
             run_attempt=run_attempt,
+            expected_d1l_public_key=expected_d1l_public_key,
             expected_legacy_value=args.expected_legacy_value,
             confirmed_upper_bound=args.confirmed_upper_bound,
             attest_exact_device_upper_bound=(args.attest_exact_device_upper_bound),

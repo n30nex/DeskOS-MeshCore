@@ -18,6 +18,7 @@ CANDIDATE_AUTHORED_AT = "2026-07-23T20:00:00Z"
 CANDIDATE_COMMITTED_AT = "2026-07-23T20:30:00Z"
 STAMP = "2026-07-23T21:00:00Z"
 POSIX_TTY = "/dev/ttyUSB2"
+PUBLIC_KEY = "0123456789abcdef" * 4
 
 
 def source(start: str = migration.FIRST_TIMESTAMP_AUTHORED_AT):
@@ -71,6 +72,20 @@ def version(tx_ready: bool):
 
 def health():
     return {"schema": 1, "ok": True, "cmd": "health", "boot_nonce": 77}
+
+
+def identity_status(public_key=PUBLIC_KEY):
+    normalized = migration.exact_public_key(public_key)
+    assert normalized is not None
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "identity status",
+        "public_key_ready": True,
+        "public_key": normalized,
+        "fingerprint": normalized[:16].upper(),
+        "role": "desk_companion",
+    }
 
 
 def before_status():
@@ -410,6 +425,7 @@ def valid_receipt(
         run_attempt=RUN_ATTEMPT,
     )
     transactions = [
+        transaction(identity_status()),
         transaction(version(False)),
         transaction(health()),
         transaction(before_status()),
@@ -440,6 +456,9 @@ def valid_receipt(
         "commit": COMMIT,
         "github_actions_run": RUN_ID,
         "workflow_run_attempt": RUN_ATTEMPT,
+        "expected_d1l_public_key": PUBLIC_KEY,
+        "d1l_identity_status": identity_status(),
+        "d1l_identity_ok": True,
         "release_profile": "core_1_0",
         "sd_history_mode": "disabled",
         "automatic_migration": False,
@@ -582,13 +601,18 @@ def test_valid_posix_receipt_accepts_tty_renumber_with_stable_identity(tmp_path)
         lambda row: row["bound_attestation"]["availability_window"].__setitem__(
             "start_utc", "2026-06-30T10:56:55Z"
         ),
-        lambda row: row["transactions"][3].__setitem__("command_redacted", False),
-        lambda row: row["transactions"][3]["raw_lines"][0].__setitem__(
+        lambda row: row["transactions"][4].__setitem__("command_redacted", False),
+        lambda row: row["transactions"][4]["raw_lines"][0].__setitem__(
             "sha256", "0" * 64
         ),
-        lambda row: row["transactions"][4]["result"].__setitem__(
+        lambda row: row["transactions"][5]["result"].__setitem__(
             "protocol_tx_ready", False
         ),
+        lambda row: row.__setitem__("expected_d1l_public_key", "f" * 64),
+        lambda row: row["d1l_identity_status"].__setitem__(
+            "role", "untrusted"
+        ),
+        lambda row: row.__setitem__("d1l_identity_ok", False),
         lambda row: row["d1l_target_after"].__setitem__("hwid", "different"),
         lambda row: row["git"].__setitem__("dirty", True),
     ],
@@ -641,7 +665,7 @@ def test_receipt_rejects_cross_row_confirmation_reconstruction(tmp_path):
     row = valid_receipt(tmp_path)
     secret = migration.CONFIRMATION.encode("ascii")
     cut = len(secret) // 2
-    row["transactions"][3]["raw_lines"][:0] = [
+    row["transactions"][4]["raw_lines"][:0] = [
         migration._raw_line(secret[:cut], STAMP),
         migration._raw_line(secret[cut:], STAMP),
     ]
@@ -657,7 +681,7 @@ def test_receipt_rejects_json_escaped_confirmation_in_raw(tmp_path):
     raw = (f'{{"schema":1,"ok":false,"cmd":"noise","detail":"{escaped}"}}\n').encode(
         "ascii"
     )
-    row["transactions"][3]["raw_lines"].insert(
+    row["transactions"][4]["raw_lines"].insert(
         0,
         migration._raw_line(raw, STAMP),
     )
@@ -760,7 +784,7 @@ def test_receipt_malformed_bound_fails_closed_without_throwing(tmp_path):
         [],
         [None],
         {},
-        {"transactions": [None] * 7},
+        {"transactions": [None] * 8},
         {"bound_attestation": {"confirmed_upper_bound": {"bad": "type"}}},
     ],
 )
@@ -916,7 +940,12 @@ def test_migration_wire_is_zeroed_when_serial_write_raises():
 
 def test_execute_migration_never_mutates_after_failed_preflight(tmp_path, monkeypatch):
     fake = FakeSerial(
-        [version(False), health(), {**before_status(), "state": "corrupt"}]
+        [
+            identity_status(),
+            version(False),
+            health(),
+            {**before_status(), "state": "corrupt"},
+        ]
     )
     module = FakeSerialModule(fake)
     monkeypatch.setattr(
@@ -935,6 +964,7 @@ def test_execute_migration_never_mutates_after_failed_preflight(tmp_path, monkey
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_legacy_value=LEGACY,
             confirmed_upper_bound=UPPER,
             attest_exact_device_upper_bound=True,
@@ -943,9 +973,119 @@ def test_execute_migration_never_mutates_after_failed_preflight(tmp_path, monkey
             actions_metadata_path=install_actions_receipt(tmp_path),
             now=lambda: "2026-07-23T21:00:00Z",
         )
-    assert len(fake.writes) == 3
+    assert len(fake.writes) == 4
+    assert fake.writes[0] == b"identity status\n"
     assert not any(value.startswith(b"time migrate-legacy") for value in fake.writes)
     assert not (tmp_path / ".out.json.reservation").exists()
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "wrong-key",
+        "missing-key",
+        "short-key",
+        "wrong-role",
+        "bool-schema",
+        "wrong-fingerprint",
+        "not-ready",
+    ],
+)
+def test_live_identity_failure_stops_before_any_nonidentity_command_or_mutation(
+    tmp_path,
+    monkeypatch,
+    case,
+):
+    live_identity = identity_status()
+    if case == "wrong-key":
+        live_identity = identity_status("f" * 64)
+    elif case == "missing-key":
+        live_identity.pop("public_key")
+    elif case == "short-key":
+        live_identity["public_key"] = PUBLIC_KEY[:-1]
+    elif case == "wrong-role":
+        live_identity["role"] = "repeater"
+    elif case == "bool-schema":
+        live_identity["schema"] = True
+    elif case == "wrong-fingerprint":
+        live_identity["fingerprint"] = "0" * 16
+    elif case == "not-ready":
+        live_identity["public_key_ready"] = False
+
+    fake = FakeSerial([live_identity])
+    module = FakeSerialModule(fake)
+    monkeypatch.setattr(
+        migration,
+        "predecessor_source_metadata",
+        lambda _root, _commit: source(),
+    )
+    out = tmp_path / f"{case}.json"
+
+    with pytest.raises(ValueError, match="identity preflight failed"):
+        migration.execute_migration(
+            root=tmp_path,
+            out=out,
+            serial_module=module,
+            port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
+            expected_legacy_value=LEGACY,
+            confirmed_upper_bound=UPPER,
+            attest_exact_device_upper_bound=True,
+            timeout=1.0,
+            source_git=valid_receipt(tmp_path)["git"],
+            actions_metadata_path=install_actions_receipt(tmp_path),
+            now=lambda: STAMP,
+        )
+
+    assert len(module.calls) == 1
+    assert fake.writes == [b"identity status\n"]
+    assert fake.closed is True
+    assert not out.exists()
+    assert not out.with_name(f".{out.name}.reservation").exists()
+
+
+@pytest.mark.parametrize(
+    "expected_public_key",
+    [None, "", "0" * 63, "g" * 64, True],
+)
+def test_invalid_expected_public_key_fails_before_target_serial_or_reservation(
+    tmp_path,
+    expected_public_key,
+):
+    fake = FakeSerial([])
+    module = FakeSerialModule(fake)
+    out = tmp_path / "invalid-key.json"
+
+    with pytest.raises(ValueError, match="exactly 64 hexadecimal"):
+        migration.execute_migration(
+            root=tmp_path,
+            out=out,
+            serial_module=module,
+            port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=expected_public_key,
+            expected_legacy_value=LEGACY,
+            confirmed_upper_bound=UPPER,
+            attest_exact_device_upper_bound=True,
+            timeout=1.0,
+            source_git=clean_source_git(),
+            actions_metadata_path=tmp_path / "not-read.json",
+            now=lambda: STAMP,
+        )
+
+    assert module.calls == []
+    assert fake.writes == []
+    assert not out.exists()
+    assert not out.with_name(f".{out.name}.reservation").exists()
 
 
 def test_execute_rejects_mismatched_actions_metadata_before_serial(
@@ -978,6 +1118,7 @@ def test_execute_rejects_mismatched_actions_metadata_before_serial(
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_legacy_value=LEGACY,
             confirmed_upper_bound=UPPER,
             attest_exact_device_upper_bound=True,
@@ -1005,6 +1146,7 @@ def test_receipt_rejects_changed_bound_actions_metadata(tmp_path):
 def test_execute_migration_writes_one_immutable_valid_receipt(tmp_path, monkeypatch):
     fake = FakeSerial(
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1031,6 +1173,7 @@ def test_execute_migration_writes_one_immutable_valid_receipt(tmp_path, monkeypa
         commit=COMMIT,
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
+        expected_d1l_public_key=PUBLIC_KEY,
         expected_legacy_value=LEGACY,
         confirmed_upper_bound=UPPER,
         attest_exact_device_upper_bound=True,
@@ -1055,6 +1198,7 @@ def test_execute_migration_writes_one_immutable_valid_receipt(tmp_path, monkeypa
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_legacy_value=LEGACY,
             confirmed_upper_bound=UPPER,
             attest_exact_device_upper_bound=True,
@@ -1071,6 +1215,7 @@ def test_execute_posix_opens_by_id_and_accepts_tty_renumber(
 ):
     fake = FakeSerial(
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1119,6 +1264,7 @@ def test_execute_posix_opens_by_id_and_accepts_tty_renumber(
         commit=COMMIT,
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
+        expected_d1l_public_key=PUBLIC_KEY,
         expected_legacy_value=LEGACY,
         confirmed_upper_bound=UPPER,
         attest_exact_device_upper_bound=True,
@@ -1151,6 +1297,7 @@ def test_post_mutation_hardware_identity_change_is_uncertain(
 ):
     fake = FakeSerial(
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1194,6 +1341,7 @@ def test_post_mutation_hardware_identity_change_is_uncertain(
         commit=COMMIT,
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
+        expected_d1l_public_key=PUBLIC_KEY,
         expected_legacy_value=LEGACY,
         confirmed_upper_bound=UPPER,
         attest_exact_device_upper_bound=True,
@@ -1254,6 +1402,7 @@ def test_invalid_posix_target_fails_before_serial_or_mutation(
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_legacy_value=LEGACY,
             confirmed_upper_bound=UPPER,
             attest_exact_device_upper_bound=True,
@@ -1271,7 +1420,9 @@ def test_invalid_posix_target_fails_before_serial_or_mutation(
 def test_post_preflight_serial_error_persists_uncertain_mutation_receipt(
     tmp_path, monkeypatch
 ):
-    fake = FailOnMigrationWriteSerial([version(False), health(), before_status()])
+    fake = FailOnMigrationWriteSerial(
+        [identity_status(), version(False), health(), before_status()]
+    )
     module = FakeSerialModule(fake)
     monkeypatch.setattr(
         migration,
@@ -1289,6 +1440,7 @@ def test_post_preflight_serial_error_persists_uncertain_mutation_receipt(
         commit=COMMIT,
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
+        expected_d1l_public_key=PUBLIC_KEY,
         expected_legacy_value=LEGACY,
         confirmed_upper_bound=UPPER,
         attest_exact_device_upper_bound=True,
@@ -1326,6 +1478,7 @@ def execute_fake_migration(tmp_path, monkeypatch, results):
         commit=COMMIT,
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
+        expected_d1l_public_key=PUBLIC_KEY,
         expected_legacy_value=LEGACY,
         confirmed_upper_bound=UPPER,
         attest_exact_device_upper_bound=True,
@@ -1358,6 +1511,7 @@ def test_post_preflight_negative_result_persists_uncertain_mutation_receipt(
         tmp_path,
         monkeypatch,
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1385,6 +1539,7 @@ def test_post_preflight_malformed_result_persists_uncertain_mutation_receipt(
         tmp_path,
         monkeypatch,
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1429,6 +1584,7 @@ def test_post_preflight_timeout_result_persists_uncertain_mutation_receipt(
         tmp_path,
         monkeypatch,
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1453,6 +1609,7 @@ def test_post_mutation_failed_status_persists_uncertain_mutation_receipt(
         tmp_path,
         monkeypatch,
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1470,6 +1627,7 @@ def test_post_mutation_failed_status_persists_uncertain_mutation_receipt(
 def test_failed_evidence_write_after_mutation_leaves_reservation(tmp_path, monkeypatch):
     fake = FakeSerial(
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1504,6 +1662,7 @@ def test_failed_evidence_write_after_mutation_leaves_reservation(tmp_path, monke
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_legacy_value=LEGACY,
             confirmed_upper_bound=UPPER,
             attest_exact_device_upper_bound=True,
@@ -1522,6 +1681,7 @@ def test_execute_migration_rejects_existing_output_before_serial(tmp_path, monke
     out.write_text("{}\n", encoding="ascii")
     fake = FakeSerial(
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1548,6 +1708,7 @@ def test_execute_migration_rejects_existing_output_before_serial(tmp_path, monke
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_legacy_value=LEGACY,
             confirmed_upper_bound=UPPER,
             attest_exact_device_upper_bound=True,
@@ -1570,6 +1731,7 @@ def test_execute_migration_rejects_existing_reservation_before_serial(
     )
     fake = FakeSerial(
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1596,6 +1758,7 @@ def test_execute_migration_rejects_existing_reservation_before_serial(
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_legacy_value=LEGACY,
             confirmed_upper_bound=UPPER,
             attest_exact_device_upper_bound=True,
@@ -1621,7 +1784,7 @@ def test_safe_writer_emits_only_minimal_failure_for_split_secret(tmp_path):
     row = valid_receipt(tmp_path)
     secret = migration.CONFIRMATION.encode("ascii")
     cut = len(secret) // 2
-    row["transactions"][3]["raw_lines"][:0] = [
+    row["transactions"][4]["raw_lines"][:0] = [
         migration._raw_line(secret[:cut], STAMP),
         migration._raw_line(secret[cut:], STAMP),
     ]
@@ -1647,6 +1810,7 @@ def test_execute_migration_rejects_output_outside_root_before_serial(
     root.mkdir()
     fake = FakeSerial(
         [
+            identity_status(),
             version(False),
             health(),
             before_status(),
@@ -1673,6 +1837,7 @@ def test_execute_migration_rejects_output_outside_root_before_serial(
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_legacy_value=LEGACY,
             confirmed_upper_bound=UPPER,
             attest_exact_device_upper_bound=True,
@@ -1743,6 +1908,8 @@ def test_cli_requires_explicit_attestation():
             RUN_ATTEMPT,
             "--core-actions-run-metadata",
             "actions.json",
+            "--expected-d1l-public-key",
+            PUBLIC_KEY,
             "--expected-legacy-value",
             str(LEGACY),
             "--confirmed-upper-bound",
@@ -1752,6 +1919,29 @@ def test_cli_requires_explicit_attestation():
         ]
     )
     assert args.attest_exact_device_upper_bound is False
+
+
+def test_cli_requires_expected_d1l_public_key():
+    parser = migration.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "--commit",
+                COMMIT,
+                "--github-run-id",
+                RUN_ID,
+                "--github-run-attempt",
+                RUN_ATTEMPT,
+                "--core-actions-run-metadata",
+                "actions.json",
+                "--expected-legacy-value",
+                str(LEGACY),
+                "--confirmed-upper-bound",
+                str(UPPER),
+                "--out",
+                "out.json",
+            ]
+        )
 
 
 def test_cli_rejects_failed_exact_source_before_serial(
@@ -1784,6 +1974,8 @@ def test_cli_rejects_failed_exact_source_before_serial(
             RUN_ATTEMPT,
             "--core-actions-run-metadata",
             str(actions_path),
+            "--expected-d1l-public-key",
+            PUBLIC_KEY,
             "--expected-legacy-value",
             str(LEGACY),
             "--confirmed-upper-bound",
@@ -1825,6 +2017,8 @@ def test_cli_rejects_nonfinite_or_nonpositive_timeout(
             RUN_ATTEMPT,
             "--core-actions-run-metadata",
             "actions.json",
+            "--expected-d1l-public-key",
+            PUBLIC_KEY,
             "--expected-legacy-value",
             str(LEGACY),
             "--confirmed-upper-bound",
