@@ -884,6 +884,7 @@ export D1L_ACTIONS_RUN='<numeric-run-id>'
 export D1L_RUN_ATTEMPT='<numeric-attempt>'
 export D1L_PUBLIC_KEY='<64-hex-D1L-public-key>'
 export D1L_PEER_FINGERPRINT='<16-hex-controlled-peer>'
+export D1L_CONTROLLED_PEER_RECEIPT='<qualified-controlled-peer-receipt.json>'
 ```
 
 If the device is intentionally moved to Windows, set
@@ -895,12 +896,20 @@ raw `/dev/ttyUSB*` name.
 ```powershell
 gh workflow run d1l-ci.yml --ref release/24h-core -f include_sd_bridge=false
 gh run watch <run-id> --exit-status
-gh run download <run-id> --dir artifacts\github\<run-id>-<sha>
+python .\scripts\capture_core_actions_run_d1l.py `
+  --github-run-id <run-id> `
+  --commit <sha> `
+  --github-run-dir artifacts\github\<run-id>-<sha>
 python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-firmware-artifacts
 python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-release-package
 ```
 
-Use `include_sd_bridge=true` only for a candidate that will advertise supported SD history.
+Only a successful `workflow_dispatch` run whose `head_sha` is the exact
+candidate is qualifying release evidence. A pull-request run is useful CI, but
+its synthetic merge SHA is not flashable candidate evidence. The capture tool
+requires exactly the five Core archives, verifies their GitHub API digests and
+extracted trees, and records the run attempt. Use `include_sd_bridge=true` only
+for a candidate that will advertise supported SD history.
 
 ### Core smoke
 
@@ -976,15 +985,20 @@ Core D1L target. Never automate default Public-channel transmission.
 python ./scripts/soak_d1l.py \
   --port "$D1L_PORT" \
   --expected-firmware-commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --expected-release-profile core_1_0 \
+  --expected-sd-history-mode disabled \
   --duration-sec 3600 \
   --sample-interval-sec 300 \
   --active-dm-fingerprint "$D1L_PEER_FINGERPRINT" \
-  --active-dm-text "core_soak_${D1L_COMMIT:0:7}" \
+  --active-dm-text "core_soak_test_${D1L_COMMIT:0:7}" \
   --active-interval-sec 300 \
+  --controlled-peer-receipt "$D1L_CONTROLLED_PEER_RECEIPT" \
   --require-rx-delta \
   --min-rx-delta 1 \
   --min-tx-delta 6 \
-  --clear-crashlog-before-start \
   --sample-storage \
   --allow-sd-unavailable \
   --out artifacts/soak/core_active_60m_${D1L_COMMIT}_neopi5_by-id.json
@@ -1000,6 +1014,11 @@ acceptance.
 python ./scripts/soak_d1l.py \
   --port "$D1L_PORT" \
   --expected-firmware-commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --expected-release-profile core_1_0 \
+  --expected-sd-history-mode disabled \
   --duration-sec 1800 \
   --sample-interval-sec 300 \
   --sample-storage \

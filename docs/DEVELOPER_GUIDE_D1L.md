@@ -208,12 +208,15 @@ non-destructive: no RF send, no SD format, and no manual touch requirement.
 
 The `d1l-ci` workflow runs host checks on Windows plus ESP32 firmware
 build/package generation using the issue #63 selected target,
-`espressif/idf:v5.5.4`. This is a version-pinned tag, not a content-immutable
-image identity or proof that the SDK is already production-qualified. The default path
+`espressif/idf:v5.5.4` pinned to its reviewed SHA-256 container digest. The
+digest makes the build image content-immutable; the remaining exact-candidate
+and physical gates still determine release qualification. The default path
 skips SD/RP2040 dry-runs and RP2040 Arduino builds so ESP32/UI fixes do not
 rebuild or revalidate the already-working bridge. Expected default artifacts:
 
 - `d1l-host-artifacts`
+- `d1l-meshcore-wire-conformance`
+- `d1l-idf55-migration-state`
 - `d1l-firmware-artifacts`
 - `d1l-release-package`
 
