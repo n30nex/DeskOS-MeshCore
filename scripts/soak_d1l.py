@@ -1239,6 +1239,18 @@ def _run_serial_soak_reserved(
         raise ValueError(
             "GitHub run id and run attempt must both be positive integers"
     )
+    core_disabled = (
+        expected_release_profile == "core_1_0"
+        and expected_sd_history_mode == "disabled"
+    )
+    if release_bound and (
+        normalized_commit is None or not core_disabled
+    ):
+        raise ValueError(
+            "release-bound hardware soak requires an exact firmware commit, "
+            "--expected-release-profile core_1_0, and "
+            "--expected-sd-history-mode disabled"
+        )
     if normalized_commit is not None and release_bound:
         source = git_metadata(root)
         if not (
@@ -1249,10 +1261,6 @@ def _run_serial_soak_reserved(
             raise ValueError(
                 "hardware soak must run from the exact clean candidate source"
             )
-    core_disabled = (
-        expected_release_profile == "core_1_0"
-        and expected_sd_history_mode == "disabled"
-    )
     d1l_target: dict[str, Any] | None = None
     d1l_target_after: dict[str, Any] | None = None
     if core_disabled:
@@ -1320,7 +1328,10 @@ def _run_serial_soak_reserved(
     peer_status_after_validation: dict | None = None
     peer_before_reservation: rf_acceptance.EvidenceReservation | None = None
     peer_after_reservation: rf_acceptance.EvidenceReservation | None = None
+    before_capture: Path | None = None
     after_capture: Path | None = None
+    peer: dict[str, Any] | None = None
+    expected_d1l_public_key: str | None = None
     if active_command is not None and release_bound:
         if controlled_peer_receipt is None or normalized_commit is None:
             raise ValueError(
@@ -1339,6 +1350,13 @@ def _run_serial_soak_reserved(
                 else None
             ),
         )
+        expected_d1l_public_key = rf_acceptance.exact_public_key(
+            peer_receipt.get("d1l_public_key")
+        )
+        if expected_d1l_public_key is None:
+            raise ValueError(
+                "controlled-peer receipt has no exact D1L public key"
+            )
         if not listener_test_text_ok(active_dm_text):
             raise ValueError(
                 "controlled-peer active soak DM text must contain the "
@@ -1412,77 +1430,6 @@ def _run_serial_soak_reserved(
             label="active-soak controlled-peer after status",
         )
         evidence_bundle.mark_external_io_started()
-        if remote_peer_config is not None:
-            (
-                peer_before,
-                peer_before_receipt,
-                peer_status_before_validation,
-            ) = rf_acceptance.capture_remote_peer_status(
-                remote_peer_config,
-                before_capture,
-                root,
-                reservation=peer_before_reservation,
-                evidence_bundle=evidence_bundle,
-            )
-        elif local_peer_config is not None:
-            (
-                peer_before,
-                peer_before_receipt,
-                peer_status_before_validation,
-            ) = rf_acceptance.capture_local_peer_status(
-                local_peer_config,
-                before_capture,
-                root,
-                reservation=peer_before_reservation,
-                evidence_bundle=evidence_bundle,
-            )
-        else:
-            (
-                peer_before,
-                peer_before_receipt,
-            ) = rf_acceptance.capture_peer_status(
-                rf_acceptance.RADIO_LISTENER_STATUS_PATH,
-                before_capture,
-                root,
-                reservation=peer_before_reservation,
-            )
-        expected_peer_key = rf_acceptance.exact_public_key(
-            peer.get("public_key")
-        )
-        identity_ready = (
-            expected_peer_key is not None
-            and rf_acceptance.exact_public_key(
-                rf_acceptance.get_path(
-                    peer_before, "serial", "public_key"
-                )
-            )
-            == expected_peer_key
-            and rf_acceptance.public_key_fingerprint(expected_peer_key)
-            == str(active_dm_fingerprint).upper()
-        )
-        if (
-            remote_peer_config is not None
-            or local_peer_config is not None
-        ):
-            identity_ready = (
-                identity_ready
-                and peer_status_before_validation is not None
-                and peer_status_before_validation.get("ok") is True
-            )
-        else:
-            identity_ready = (
-                identity_ready
-                and rf_acceptance.radio_listener_connected(
-                    peer_before,
-                    rf_acceptance.RADIO_LISTENER_PORT,
-                    str(active_dm_fingerprint).upper(),
-                )
-            )
-        if not identity_ready:
-            raise ValueError(
-                "controlled-peer status/public-key identity is not "
-                "ready for active soak"
-            )
     if not evidence_bundle.external_io_started:
         evidence_bundle.mark_external_io_started()
     samples: list[dict] = []
@@ -1490,6 +1437,8 @@ def _run_serial_soak_reserved(
     setup_events: list[dict] = []
     version_preflight: dict = {}
     firmware_identity_ok: bool | None = None
+    d1l_identity_preflight: dict = {}
+    d1l_identity_ok: bool | None = None
     preflight_failure: str | None = None
     started_at = datetime.now(timezone.utc)
     commands = soak_commands(sample_storage=sample_storage, sd_file_canary=sd_file_canary)
@@ -1527,6 +1476,115 @@ def _run_serial_soak_reserved(
                 preflight_failure = "version_preflight_failed"
             elif not firmware_identity_ok:
                 preflight_failure = "firmware_identity_mismatch"
+
+        if active_command is not None and release_bound:
+            if (
+                peer is None
+                or before_capture is None
+                or peer_before_reservation is None
+                or expected_d1l_public_key is None
+            ):
+                raise ValueError(
+                    "active soak identity/capture state is incomplete"
+                )
+            if preflight_failure is None:
+                d1l_identity_preflight = send_soak_command(
+                    ser,
+                    "identity status",
+                    timeout,
+                    command_retries,
+                    retry_delay_sec,
+                )
+                setup_events.append(
+                    {
+                        "elapsed_sec": 0.0,
+                        "cmd": "identity status",
+                        "result": d1l_identity_preflight,
+                    }
+                )
+                d1l_identity_ok = (
+                    rf_acceptance.d1l_identity_status_ok(
+                        d1l_identity_preflight,
+                        expected_d1l_public_key,
+                    )
+                )
+                if not d1l_identity_ok:
+                    preflight_failure = "d1l_identity_mismatch"
+
+            if preflight_failure is None:
+                if remote_peer_config is not None:
+                    (
+                        peer_before,
+                        peer_before_receipt,
+                        peer_status_before_validation,
+                    ) = rf_acceptance.capture_remote_peer_status(
+                        remote_peer_config,
+                        before_capture,
+                        root,
+                        reservation=peer_before_reservation,
+                        evidence_bundle=evidence_bundle,
+                    )
+                elif local_peer_config is not None:
+                    (
+                        peer_before,
+                        peer_before_receipt,
+                        peer_status_before_validation,
+                    ) = rf_acceptance.capture_local_peer_status(
+                        local_peer_config,
+                        before_capture,
+                        root,
+                        reservation=peer_before_reservation,
+                        evidence_bundle=evidence_bundle,
+                    )
+                else:
+                    (
+                        peer_before,
+                        peer_before_receipt,
+                    ) = rf_acceptance.capture_peer_status(
+                        rf_acceptance.RADIO_LISTENER_STATUS_PATH,
+                        before_capture,
+                        root,
+                        reservation=peer_before_reservation,
+                    )
+                expected_peer_key = rf_acceptance.exact_public_key(
+                    peer.get("public_key")
+                )
+                identity_ready = (
+                    expected_peer_key is not None
+                    and rf_acceptance.exact_public_key(
+                        rf_acceptance.get_path(
+                            peer_before, "serial", "public_key"
+                        )
+                    )
+                    == expected_peer_key
+                    and rf_acceptance.public_key_fingerprint(
+                        expected_peer_key
+                    )
+                    == str(active_dm_fingerprint).upper()
+                )
+                if (
+                    remote_peer_config is not None
+                    or local_peer_config is not None
+                ):
+                    identity_ready = (
+                        identity_ready
+                        and peer_status_before_validation is not None
+                        and peer_status_before_validation.get("ok") is True
+                    )
+                else:
+                    identity_ready = (
+                        identity_ready
+                        and rf_acceptance.radio_listener_connected(
+                            peer_before,
+                            rf_acceptance.RADIO_LISTENER_PORT,
+                            str(active_dm_fingerprint).upper(),
+                        )
+                    )
+                if not identity_ready:
+                    raise ValueError(
+                        "controlled-peer status/public-key identity is not "
+                        "ready for active soak"
+                    )
 
         if clear_crashlog_before_start:
             if preflight_failure is None:
@@ -1746,7 +1804,10 @@ def _run_serial_soak_reserved(
         "closure_eligible": summary["ok"],
         "port": port,
         "baud": baud,
-        "preflight_commands": ["version"] if normalized_commit is not None else [],
+        "preflight_commands": [
+            event["cmd"] for event in setup_events
+            if event.get("cmd") in {"version", "identity status"}
+        ],
         "expected_firmware_commit": normalized_commit,
         "github_actions_run": (
             str(github_run_id) if github_run_id is not None else None
@@ -1771,6 +1832,12 @@ def _run_serial_soak_reserved(
         "firmware_identity_required": normalized_commit is not None,
         "firmware_identity_ok": firmware_identity_ok,
         "version_preflight": version_preflight,
+        "d1l_identity_required": (
+            active_command is not None and release_bound
+        ),
+        "expected_d1l_public_key": expected_d1l_public_key,
+        "d1l_identity_status": d1l_identity_preflight,
+        "d1l_identity_ok": d1l_identity_ok,
         "preflight_failure": preflight_failure,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
         "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
@@ -1807,7 +1874,7 @@ def _run_serial_soak_reserved(
         ),
         "controlled_peer_expected_send_count": peer_expected_send_count,
         "controlled_peer_flow_ok": peer_flow_ok,
-        "dm_rf_tx": active_command is not None,
+        "dm_rf_tx": bool(active_events),
         "public_rf_tx": False,
         "formats_sd": False,
         "sample_storage": sample_storage or sd_file_canary,

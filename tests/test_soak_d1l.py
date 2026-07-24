@@ -1060,6 +1060,95 @@ def test_core_disabled_soak_rejects_unsafe_target_before_serial_open(port):
         )
 
 
+@pytest.mark.parametrize(
+    ("release_profile", "sd_history_mode"),
+    [
+        (None, None),
+        ("core_1_0", None),
+        (None, "disabled"),
+        ("full_feature", "disabled"),
+        ("core_1_0", "enabled"),
+    ],
+)
+def test_release_bound_soak_requires_exact_core_contract_before_io(
+    release_profile,
+    sd_history_mode,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: pytest.fail(
+            "source or hardware I/O must not begin without the Core contract"
+        ),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail(
+            "serial must not open without the Core contract"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="release-bound hardware soak"):
+        run_soak_for_timeout_test(
+            expected_firmware_commit="a" * 40,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            expected_release_profile=release_profile,
+            expected_sd_history_mode=sd_history_mode,
+        )
+
+
+def test_release_bound_active_soak_rejects_raw_tty_before_peer_or_serial(
+    monkeypatch,
+):
+    external_calls = []
+
+    def unexpected_external(*_args, **_kwargs):
+        external_calls.append(True)
+        raise AssertionError("unsafe target must fail before external I/O")
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "qualified_controlled_peer_receipt",
+        unexpected_external,
+    )
+    monkeypatch.setattr(soak_d1l, "open_d1l_serial", unexpected_external)
+    monkeypatch.setattr(
+        soak_d1l.rf_acceptance,
+        "capture_remote_peer_status",
+        unexpected_external,
+    )
+
+    with pytest.raises(ValueError, match="requires COM12"):
+        run_soak_for_timeout_test(
+            port="/dev/ttyUSB2",
+            active_dm_fingerprint=(
+                soak_d1l.rf_acceptance.REMOTE_PEER_FINGERPRINT
+            ),
+            active_dm_text="core soak test",
+            expected_firmware_commit="a" * 40,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+        )
+
+    assert external_calls == []
+
+
 class FakeSoakPort:
     def reset_input_buffer(self):
         pass
@@ -1357,8 +1446,143 @@ def test_release_active_soak_rejects_non_test_text_before_peer_capture(
             expected_firmware_commit=commit,
             github_run_id="123",
             workflow_run_attempt="1",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
             controlled_peer_receipt=Path("ignored.json"),
+            port_lister=lambda: [windows_target_row()],
+            platform_name="nt",
         )
+
+
+def test_release_active_soak_wrong_full_d1l_key_has_no_peer_or_rf_io(
+    tmp_path,
+    monkeypatch,
+):
+    rf = soak_d1l.rf_acceptance
+    commit = "a" * 40
+    expected_key = rf.DEFAULT_D1L_PUBLIC_KEY
+    wrong_suffix = (
+        "0" * 48 if expected_key[16:] != "0" * 48 else "1" * 48
+    )
+    wrong_key = expected_key[:16] + wrong_suffix
+    commands = []
+    peer_calls = []
+
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        soak_d1l,
+        "__file__",
+        str(tmp_path / "scripts" / "soak_d1l.py"),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    config = rf.remote_peer_config()
+    peer_report = {
+        "controlled_peer": {
+            "evidence_source": rf.REMOTE_PEER_EVIDENCE_SOURCE,
+            "port": None,
+            "fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+            **config,
+        },
+        "controlled_peer_adapter": rf.REMOTE_PEER_ADAPTER,
+        "d1l_public_key": expected_key,
+    }
+    monkeypatch.setattr(
+        soak_d1l,
+        "qualified_controlled_peer_receipt",
+        lambda **_kwargs: (peer_report, {"path": "rf.json"}),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSoakPort(),
+    )
+
+    def fake_send(_ser, command, *_args, **_kwargs):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": commit,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+            }
+        if command == "identity status":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "identity status",
+                "public_key_ready": True,
+                "public_key": wrong_key,
+                "fingerprint": wrong_key[:16].upper(),
+                "role": "desk_companion",
+            }
+        pytest.fail(f"unexpected command after identity mismatch: {command}")
+
+    def unexpected_peer(*_args, **_kwargs):
+        peer_calls.append(True)
+        raise AssertionError("peer I/O must not begin for the wrong D1L key")
+
+    monkeypatch.setattr(soak_d1l, "send_soak_command", fake_send)
+    monkeypatch.setattr(
+        rf,
+        "capture_remote_peer_status",
+        unexpected_peer,
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "collect_sample",
+        lambda *_args, **_kwargs: pytest.fail(
+            "sampling must not begin for the wrong D1L key"
+        ),
+    )
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        active_dm_fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+        active_dm_text="core soak test",
+        expected_firmware_commit=commit,
+        github_run_id="123",
+        workflow_run_attempt="1",
+        expected_release_profile="core_1_0",
+        expected_sd_history_mode="disabled",
+        sample_storage=True,
+        allow_sd_unavailable=True,
+        controlled_peer_receipt=tmp_path / "rf.json",
+        peer_capture_dir=tmp_path / "artifacts" / "soak" / "rf-peer",
+        port_lister=lambda: [windows_target_row()],
+        platform_name="nt",
+    )
+
+    assert commands == ["version", "identity status"]
+    assert peer_calls == []
+    assert report["preflight_commands"] == [
+        "version",
+        "identity status",
+    ]
+    assert report["expected_d1l_public_key"] == expected_key
+    assert report["d1l_identity_status"]["public_key"] == wrong_key
+    assert report["d1l_identity_ok"] is False
+    assert report["preflight_failure"] == "d1l_identity_mismatch"
+    assert report["active_events"] == []
+    assert report["samples"] == []
+    assert report["controlled_peer_before"] == {}
+    assert report["controlled_peer_after"] == {}
+    assert report["dm_rf_tx"] is False
+    assert report["closure_eligible"] is False
+    assert report["ok"] is False
 
 
 def test_soak_stops_after_crashlog_clear_timeout(monkeypatch):
@@ -1758,8 +1982,14 @@ def test_soak_peer_sidecar_collision_prevents_serial_and_ssh(
             expected_firmware_commit="a" * 40,
             github_run_id="1",
             workflow_run_attempt="1",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
             controlled_peer_receipt=tmp_path / "rf.json",
             peer_capture_dir=capture_dir,
+            port_lister=lambda: [windows_target_row()],
+            platform_name="nt",
         )
 
     assert external_calls == []
