@@ -1515,12 +1515,15 @@ def _settings_result_snapshot(result: object) -> tuple[str, int] | None:
 
 
 def core_persistence_raw_ok(
-    persistence: object, commit: str, sd_history_mode: str
+    persistence: object,
+    commit: str,
+    sd_history_mode: str,
+    expected_d1l_public_key: object,
 ) -> bool:
     if not isinstance(persistence, dict):
         return False
     steps = persistence.get("steps")
-    if not isinstance(steps, list) or len(steps) != 13:
+    if not isinstance(steps, list) or len(steps) != 15:
         return False
     if not all(
         isinstance(step, dict)
@@ -1531,9 +1534,9 @@ def core_persistence_raw_ok(
         return False
     original = _settings_result_snapshot(steps[0]["result"])
     changed_observed = _settings_result_snapshot(steps[2]["result"])
-    persisted = _settings_result_snapshot(steps[6]["result"])
-    restored_pre = _settings_result_snapshot(steps[8]["result"])
-    restored_post = _settings_result_snapshot(steps[12]["result"])
+    persisted = _settings_result_snapshot(steps[7]["result"])
+    restored_pre = _settings_result_snapshot(steps[9]["result"])
+    restored_post = _settings_result_snapshot(steps[14]["result"])
     if (
         original is None
         or changed_observed is None
@@ -1550,20 +1553,24 @@ def core_persistence_raw_ok(
         "health",
         "reboot",
         "health",
+        "identity status",
         "settings get",
         f"settings set name {original_name}",
         "settings get",
         "health",
         "reboot",
         "health",
+        "identity status",
         "settings get",
     ]
     if [step["command"] for step in steps] != expected_commands:
         return False
     before_one = steps[3]["result"]
     after_one = steps[5]["result"]
-    before_two = steps[9]["result"]
-    after_two = steps[11]["result"]
+    identity_one = steps[6]["result"]
+    before_two = steps[10]["result"]
+    after_two = steps[12]["result"]
+    identity_two = steps[13]["result"]
 
     def software_transition(before: dict, after: dict) -> bool:
         before_nonce = before.get("boot_nonce")
@@ -1590,14 +1597,28 @@ def core_persistence_raw_ok(
         and persistence.get("first_reboot_proven") is True
         and persistence.get("persisted_after_reboot") is True
         and persistence.get("original_restored") is True
+        and persistence.get("expected_d1l_public_key")
+        == expected_d1l_public_key
+        and persistence.get("post_reboot_identity_status") == identity_one
+        and persistence.get("post_reboot_identity_ok") is True
+        and persistence.get("cleanup_post_reboot_identity_status")
+        == identity_two
+        and persistence.get("cleanup_post_reboot_identity_ok") is True
+        and persistence.get("d1l_public_key_continuity_ok") is True
         and steps[1]["result"].get("ok") is True
         and steps[1]["result"].get("cmd") == "settings set name"
-        and steps[7]["result"].get("ok") is True
-        and steps[7]["result"].get("cmd") == "settings set name"
+        and steps[8]["result"].get("ok") is True
+        and steps[8]["result"].get("cmd") == "settings set name"
         and reboot_command_passed(steps[4]["result"])
-        and reboot_command_passed(steps[10]["result"])
+        and reboot_command_passed(steps[11]["result"])
         and software_transition(before_one, after_one)
         and software_transition(before_two, after_two)
+        and rf_acceptance.d1l_identity_status_ok(
+            identity_one, expected_d1l_public_key
+        )
+        and rf_acceptance.d1l_identity_status_ok(
+            identity_two, expected_d1l_public_key
+        )
         and persisted == changed_observed
         and restored_pre == original
         and restored_post == original
@@ -1619,7 +1640,7 @@ def core_smoke_gate(
         expected_target=expected_target,
         snapshot_fields=("d1l_target",),
     )
-    public_key_ok, _d1l_public_key, public_key_details = (
+    public_key_ok, d1l_public_key, public_key_details = (
         standard_d1l_public_key_binding(data)
     )
     probes = data.get("unavailable_mutation_probes")
@@ -1679,6 +1700,7 @@ def core_smoke_gate(
         "health",
         *supported_result_commands,
         "health",
+        "identity status",
     ]
     result_commands = [
         result.get("cmd") if isinstance(result, dict) else None
@@ -1699,7 +1721,13 @@ def core_smoke_gate(
                 results[1], data.get("expected_d1l_public_key")
             )
             and _profile_identity_result(results[2], commit, sd_history_mode)
-            and _profile_identity_result(results[-1], commit, sd_history_mode)
+            and _profile_identity_result(results[-2], commit, sd_history_mode)
+            and data.get("d1l_identity_status_final") == results[-1]
+            and data.get("d1l_identity_final_ok") is True
+            and data.get("d1l_public_key_continuity_ok") is True
+            and rf_acceptance.d1l_identity_status_ok(
+                results[-1], d1l_public_key
+            )
         )
         if results
         else False
@@ -1728,7 +1756,10 @@ def core_smoke_gate(
     )
     crashlog_ok = len(crashlog_rows) == 1 and crashlog_clean(crashlog_rows[0])
     persistence_raw_ok = core_persistence_raw_ok(
-        persistence, commit, sd_history_mode
+        persistence,
+        commit,
+        sd_history_mode,
+        d1l_public_key,
     )
     required_check_names = {
         "exact_candidate",
@@ -1741,6 +1772,7 @@ def core_smoke_gate(
         "unavailable_mutations_rejected",
         "disabled_sd_status_probes_truthful",
         "health_ready",
+        "d1l_identity_continuity",
         "persistence_pass",
         "no_public_rf",
         "no_sd_format",
@@ -1762,6 +1794,8 @@ def core_smoke_gate(
         and data.get("port") == expected_target
         and target_ok
         and public_key_ok
+        and data.get("d1l_identity_final_ok") is True
+        and data.get("d1l_public_key_continuity_ok") is True
         and data.get("release_profile") == CORE_RELEASE_PROFILE
         and data.get("sd_history_mode") == sd_history_mode
         and exact_candidate_fields(data, commit)

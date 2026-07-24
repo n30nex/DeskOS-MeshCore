@@ -252,6 +252,10 @@ def passing_core_smoke() -> dict:
         {"command": "health", "result": health(10)},
         {"command": "reboot", "result": reboot()},
         {"command": "health", "result": health(11)},
+        {
+            "command": "identity status",
+            "result": d1l_identity_status(),
+        },
         {"command": "settings get", "result": changed},
         {
             "command": "settings set name DeskOS",
@@ -265,6 +269,10 @@ def passing_core_smoke() -> dict:
         {"command": "health", "result": health(11)},
         {"command": "reboot", "result": reboot()},
         {"command": "health", "result": health(12)},
+        {
+            "command": "identity status",
+            "result": d1l_identity_status(),
+        },
         {"command": "settings get", "result": original},
     ]
     return {
@@ -286,6 +294,9 @@ def passing_core_smoke() -> dict:
         "firmware_identity_required": True,
         "firmware_identity_ok": True,
         **standard_identity_fields(),
+        "d1l_identity_status_final": d1l_identity_status(),
+        "d1l_identity_final_ok": True,
+        "d1l_public_key_continuity_ok": True,
         "git": {"commit": COMMIT, "dirty": False, "dirty_entries": []},
         "checks": {
             "exact_candidate": True,
@@ -298,6 +309,7 @@ def passing_core_smoke() -> dict:
             "unavailable_mutations_rejected": True,
             "disabled_sd_status_probes_truthful": True,
             "health_ready": True,
+            "d1l_identity_continuity": True,
             "persistence_pass": True,
             "no_public_rf": True,
             "no_sd_format": True,
@@ -316,6 +328,12 @@ def passing_core_smoke() -> dict:
             "first_reboot_proven": True,
             "persisted_after_reboot": True,
             "original_restored": True,
+            "expected_d1l_public_key": D1L_PUBLIC_KEY,
+            "post_reboot_identity_status": d1l_identity_status(),
+            "post_reboot_identity_ok": True,
+            "cleanup_post_reboot_identity_status": d1l_identity_status(),
+            "cleanup_post_reboot_identity_ok": True,
+            "d1l_public_key_continuity_ok": True,
             "steps": persistence_steps,
         },
         "public_rf_tx": False,
@@ -326,7 +344,7 @@ def passing_core_smoke() -> dict:
             health(9, reset_reason="POWERON"),
         ]
         + supported_results
-        + [health(12)],
+        + [health(12), d1l_identity_status()],
     }
 
 
@@ -381,6 +399,44 @@ def test_core_smoke_gate_requires_raw_full_key_identity(tmp_path):
     receipt = passing_core_smoke()
     receipt["d1l_identity_status"] = d1l_identity_status("b" * 64)
     write_json(path, receipt)
+    assert not audit.core_smoke_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+
+@pytest.mark.parametrize(
+    ("location", "step_index", "summary_field"),
+    [
+        ("first-reboot", 6, "post_reboot_identity_status"),
+        ("cleanup-reboot", 13, "cleanup_post_reboot_identity_status"),
+        ("final", None, "d1l_identity_status_final"),
+    ],
+)
+@pytest.mark.parametrize("case", ["wrong-key", "same-prefix-key", "missing-key"])
+def test_core_smoke_gate_rejects_post_reboot_or_final_key_drift(
+    tmp_path,
+    location,
+    step_index,
+    summary_field,
+    case,
+):
+    receipt = passing_core_smoke()
+    bad_key = (
+        D1L_PUBLIC_KEY[:16] + "f" * 48
+        if case == "same-prefix-key"
+        else "f" * 64
+    )
+    bad_identity = d1l_identity_status(bad_key)
+    if case == "missing-key":
+        bad_identity.pop("public_key")
+    if location == "final":
+        receipt["results"][-1] = bad_identity
+        receipt[summary_field] = bad_identity
+    else:
+        receipt["persistence"]["steps"][step_index]["result"] = bad_identity
+        receipt["persistence"][summary_field] = bad_identity
+    path = write_json(tmp_path / f"smoke-{location}-{case}.json", receipt)
+
     assert not audit.core_smoke_gate(
         path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
     ).ok

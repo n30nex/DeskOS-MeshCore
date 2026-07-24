@@ -431,8 +431,17 @@ def _set_settings(ser, timeout: float, snapshot: dict, steps: list[dict]) -> boo
     )
 
 
-def run_core_persistence_check(ser, timeout: float) -> dict:
-    """Prove one mutation/reboot/restore cycle without touching unavailable state."""
+def run_core_persistence_check(
+    ser,
+    timeout: float,
+    expected_d1l_public_key: str,
+) -> dict:
+    """Prove one mutation/reboot/restore cycle on one exact D1L identity."""
+    normalized_public_key = exact_public_key(expected_d1l_public_key)
+    if normalized_public_key is None:
+        raise ValueError(
+            "expected D1L public key must be exactly 64 hexadecimal characters"
+        )
     steps: list[dict] = []
 
     original_result = send_console_command(ser, "settings get", timeout)
@@ -445,6 +454,12 @@ def run_core_persistence_check(ser, timeout: float) -> dict:
             "ok": False,
             "mutation_started": False,
             "reboot_count": 0,
+            "expected_d1l_public_key": normalized_public_key,
+            "post_reboot_identity_status": {},
+            "post_reboot_identity_ok": False,
+            "cleanup_post_reboot_identity_status": {},
+            "cleanup_post_reboot_identity_ok": False,
+            "d1l_public_key_continuity_ok": False,
             "steps": steps,
         }
 
@@ -474,6 +489,8 @@ def run_core_persistence_check(ser, timeout: float) -> dict:
 
     first_reboot_ok = reboot_command_passed(reboot)
     post_reboot: dict = {}
+    post_reboot_identity: dict = {}
+    post_reboot_identity_ok = False
     persisted: dict = {}
     first_transition = False
     if first_reboot_ok:
@@ -481,11 +498,35 @@ def run_core_persistence_check(ser, timeout: float) -> dict:
         post_reboot = wait_for_console_ready(ser, timeout)
         steps.append({"command": "health", "result": post_reboot})
         first_transition = software_reboot_transition_proven(pre_reboot, post_reboot)
-        persisted = send_console_command(ser, "settings get", timeout)
-        steps.append({"command": "settings get", "result": persisted})
+        post_reboot_identity = send_console_command(
+            ser,
+            "identity status",
+            timeout,
+        )
+        steps.append(
+            {
+                "command": "identity status",
+                "result": post_reboot_identity,
+            }
+        )
+        post_reboot_identity_ok = d1l_identity_status_ok(
+            post_reboot_identity,
+            normalized_public_key,
+        )
+        if post_reboot_identity_ok:
+            persisted = send_console_command(ser, "settings get", timeout)
+            steps.append({"command": "settings get", "result": persisted})
 
-    persisted_ok = first_transition and _settings_equal(persisted, changed)
-    restored = _set_settings(ser, timeout, original, steps) if first_reboot_ok else False
+    persisted_ok = (
+        first_transition
+        and post_reboot_identity_ok
+        and _settings_equal(persisted, changed)
+    )
+    restored = (
+        _set_settings(ser, timeout, original, steps)
+        if first_reboot_ok and post_reboot_identity_ok
+        else False
+    )
     cleanup_pre = send_console_command(ser, "health", timeout) if restored else {}
     if restored:
         steps.append({"command": "health", "result": cleanup_pre})
@@ -503,6 +544,8 @@ def run_core_persistence_check(ser, timeout: float) -> dict:
 
     cleanup_reboot_ok = reboot_command_passed(cleanup_reboot)
     cleanup_post: dict = {}
+    cleanup_post_identity: dict = {}
+    cleanup_post_identity_ok = False
     cleanup_transition = False
     cleanup_result: dict = {}
     if cleanup_reboot_ok:
@@ -512,19 +555,54 @@ def run_core_persistence_check(ser, timeout: float) -> dict:
         cleanup_transition = software_reboot_transition_proven(
             cleanup_pre, cleanup_post
         )
-        cleanup_result = send_console_command(ser, "settings get", timeout)
-        steps.append({"command": "settings get", "result": cleanup_result})
+        cleanup_post_identity = send_console_command(
+            ser,
+            "identity status",
+            timeout,
+        )
+        steps.append(
+            {
+                "command": "identity status",
+                "result": cleanup_post_identity,
+            }
+        )
+        cleanup_post_identity_ok = d1l_identity_status_ok(
+            cleanup_post_identity,
+            normalized_public_key,
+        )
+        if cleanup_post_identity_ok:
+            cleanup_result = send_console_command(ser, "settings get", timeout)
+            steps.append({"command": "settings get", "result": cleanup_result})
 
-    cleanup_ok = cleanup_transition and _settings_equal(cleanup_result, original)
+    cleanup_ok = (
+        cleanup_transition
+        and cleanup_post_identity_ok
+        and _settings_equal(cleanup_result, original)
+    )
+    d1l_public_key_continuity_ok = bool(
+        post_reboot_identity_ok and cleanup_post_identity_ok
+    )
     return {
         "schema": 1,
         "kind": "core_settings_persistence",
-        "ok": bool(changed_written and persisted_ok and restored and cleanup_ok),
+        "ok": bool(
+            changed_written
+            and persisted_ok
+            and restored
+            and cleanup_ok
+            and d1l_public_key_continuity_ok
+        ),
         "mutation_started": changed_written,
         "reboot_count": int(first_reboot_ok) + int(cleanup_reboot_ok),
         "first_reboot_proven": first_transition,
         "persisted_after_reboot": persisted_ok,
         "original_restored": cleanup_ok,
+        "expected_d1l_public_key": normalized_public_key,
+        "post_reboot_identity_status": post_reboot_identity,
+        "post_reboot_identity_ok": post_reboot_identity_ok,
+        "cleanup_post_reboot_identity_status": cleanup_post_identity,
+        "cleanup_post_reboot_identity_ok": cleanup_post_identity_ok,
+        "d1l_public_key_continuity_ok": d1l_public_key_continuity_ok,
         "steps": steps,
     }
 
@@ -739,10 +817,21 @@ def run_core_smoke(
             probe_results.append({**probe, "result": result})
 
         persistence = (
-            run_core_persistence_check(ser, timeout) if persistence_test else None
+            run_core_persistence_check(
+                ser,
+                timeout,
+                normalized_public_key,
+            )
+            if persistence_test
+            else None
         )
         health_final = send_console_command(ser, "health", timeout)
-        results.append(health_final)
+        d1l_identity_status_final = send_console_command(
+            ser,
+            "identity status",
+            timeout,
+        )
+        results.extend([health_final, d1l_identity_status_final])
 
     if manual_touch:
         print(
@@ -783,11 +872,22 @@ def run_core_smoke(
         )
         for row in status_probe_results
     )
-    health_final = results[-1]
+    health_final = results[-2]
     health_ready = (
         exact_identity(health_final, normalized_commit, expected_sd_history_mode)
         and health_final.get("board_ready") is True
         and health_final.get("ui_ready") is True
+    )
+    d1l_identity_final_ok = d1l_identity_status_ok(
+        d1l_identity_status_final,
+        normalized_public_key,
+    )
+    d1l_public_key_continuity_ok = bool(
+        d1l_identity_final_ok
+        and (
+            persistence is None
+            or persistence.get("d1l_public_key_continuity_ok") is True
+        )
     )
     report = {
         "schema": 2,
@@ -800,6 +900,7 @@ def run_core_smoke(
             and disabled_storage_ok
             and crashlog_ok
             and health_ready
+            and d1l_public_key_continuity_ok
             and (persistence is None or persistence.get("ok") is True)
         ),
         "closure_eligible": True,
@@ -816,6 +917,9 @@ def run_core_smoke(
         "expected_d1l_public_key": normalized_public_key,
         "d1l_identity_status": d1l_identity_status,
         "d1l_identity_ok": True,
+        "d1l_identity_status_final": d1l_identity_status_final,
+        "d1l_identity_final_ok": d1l_identity_final_ok,
+        "d1l_public_key_continuity_ok": d1l_public_key_continuity_ok,
         "device_build_commit": version.get("build_commit"),
         "firmware_identity_required": True,
         "firmware_identity_ok": True,
@@ -836,6 +940,7 @@ def run_core_smoke(
             "unavailable_mutations_rejected": probes_ok,
             "disabled_sd_status_probes_truthful": status_probes_ok,
             "health_ready": health_ready,
+            "d1l_identity_continuity": d1l_public_key_continuity_ok,
             "persistence_pass": persistence is None
             or persistence.get("ok") is True,
             "no_public_rf": True,

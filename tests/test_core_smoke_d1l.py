@@ -84,6 +84,150 @@ def install_hardware_fakes(monkeypatch, command_runner):
     return fake
 
 
+def install_persistence_fakes(monkeypatch, *, wrong_identity_number=None):
+    commands = []
+    current_name = {"value": "DeskOS"}
+    identity_number = {"value": 0}
+    health_number = {"value": 0}
+    ready_rows = iter(
+        (
+            persistence_health(11),
+            persistence_health(12),
+        )
+    )
+
+    def command_runner(_ser, command, _timeout):
+        commands.append(command)
+        if command == "settings get":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "settings get",
+                "node_name": current_name["value"],
+                "path_hash_bytes": 2,
+            }
+        if command.startswith("settings set name "):
+            current_name["value"] = command.removeprefix("settings set name ")
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "settings set name",
+            }
+        if command == "health":
+            health_number["value"] += 1
+            return persistence_health(9 + health_number["value"])
+        if command == "reboot":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "reboot",
+                "rebooting": True,
+                "reset_scope": "system",
+                "storage_manager_quiesced": True,
+                "retained_worker_quiesced": True,
+                "rp2040_bridge_quiesced": True,
+                "connectivity_prepare": "ESP_OK",
+                "retained_flush": "ESP_OK",
+                "route_flush": "ESP_OK",
+            }
+        if command == "identity status":
+            identity_number["value"] += 1
+            if identity_number["value"] == wrong_identity_number:
+                return identity_status("f" * 64)
+            return identity_status()
+        raise AssertionError(f"unexpected persistence command: {command}")
+
+    monkeypatch.setattr(core_smoke, "send_console_command", command_runner)
+    monkeypatch.setattr(core_smoke, "wait_after_reboot", lambda *_args: None)
+    monkeypatch.setattr(
+        core_smoke,
+        "wait_for_console_ready",
+        lambda *_args: next(ready_rows),
+    )
+    return commands, current_name
+
+
+def persistence_health(nonce):
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "health",
+        "build_commit": COMMIT,
+        "release_profile": core_smoke.CORE_RELEASE_PROFILE,
+        "sd_history_mode": "disabled",
+        "board_ready": True,
+        "ui_ready": True,
+        "boot_nonce": nonce,
+        "reset_reason": "SW",
+    }
+
+
+def test_core_persistence_binds_full_identity_after_each_reboot(monkeypatch):
+    commands, current_name = install_persistence_fakes(monkeypatch)
+
+    report = core_smoke.run_core_persistence_check(
+        object(),
+        1.0,
+        PUBLIC_KEY,
+    )
+
+    assert report["ok"] is True
+    assert report["post_reboot_identity_status"] == identity_status()
+    assert report["post_reboot_identity_ok"] is True
+    assert report["cleanup_post_reboot_identity_status"] == identity_status()
+    assert report["cleanup_post_reboot_identity_ok"] is True
+    assert report["d1l_public_key_continuity_ok"] is True
+    assert [step["command"] for step in report["steps"]] == [
+        "settings get",
+        "settings set name D1L Core Persist",
+        "settings get",
+        "health",
+        "reboot",
+        "health",
+        "identity status",
+        "settings get",
+        "settings set name DeskOS",
+        "settings get",
+        "health",
+        "reboot",
+        "health",
+        "identity status",
+        "settings get",
+    ]
+    assert commands.count("identity status") == 2
+    assert current_name["value"] == "DeskOS"
+
+
+@pytest.mark.parametrize("wrong_identity_number", [1, 2])
+def test_core_persistence_key_drift_stops_before_next_settings_operation(
+    monkeypatch,
+    wrong_identity_number,
+):
+    commands, current_name = install_persistence_fakes(
+        monkeypatch,
+        wrong_identity_number=wrong_identity_number,
+    )
+
+    report = core_smoke.run_core_persistence_check(
+        object(),
+        1.0,
+        PUBLIC_KEY,
+    )
+
+    assert report["ok"] is False
+    assert report["d1l_public_key_continuity_ok"] is False
+    assert commands[-1] == "identity status"
+    if wrong_identity_number == 1:
+        assert report["post_reboot_identity_ok"] is False
+        assert report["reboot_count"] == 1
+        assert current_name["value"] == "D1L Core Persist"
+    else:
+        assert report["post_reboot_identity_ok"] is True
+        assert report["cleanup_post_reboot_identity_ok"] is False
+        assert report["reboot_count"] == 2
+        assert current_name["value"] == "DeskOS"
+
+
 def test_core_smoke_requires_exact_com12():
     assert core_smoke.enforce_core_port(" com12 ") == "COM12"
     assert core_smoke.enforce_core_port(r"\\.\COM12") == "COM12"
@@ -310,10 +454,14 @@ def test_hardware_smoke_binds_full_identity_before_health_and_supported_commands
         "health",
         *core_smoke.CORE_SMOKE_COMMANDS,
         "health",
+        "identity status",
     ]
     assert report["expected_d1l_public_key"] == PUBLIC_KEY
     assert report["d1l_identity_status"] == identity_status()
     assert report["d1l_identity_ok"] is True
+    assert report["d1l_identity_status_final"] == identity_status()
+    assert report["d1l_identity_final_ok"] is True
+    assert report["d1l_public_key_continuity_ok"] is True
     assert report["supported_commands_executed"] == list(
         core_smoke.CORE_SMOKE_COMMANDS
     )
