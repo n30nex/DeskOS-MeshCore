@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Produce fail-closed Core 1.0 reboot and retained-state evidence on COM12.
+"""Produce fail-closed Core 1.0 reboot and retained-state evidence on a D1L.
 
 The producer deliberately separates two phases:
 
@@ -35,6 +35,15 @@ from typing import Any, Callable, Iterable
 
 try:
     from artifact_metadata import git_metadata
+    from d1l_serial_target import (
+        EXPECTED_PID,
+        EXPECTED_VID,
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+        resolve_target,
+        safe_slug,
+        validate_snapshot,
+    )
     from smoke_d1l import (
         exact_commit,
         expected_command_name,
@@ -44,6 +53,15 @@ try:
     from verify_checksums import is_link_or_reparse, sha256_file
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import git_metadata
+    from scripts.d1l_serial_target import (
+        EXPECTED_PID,
+        EXPECTED_VID,
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+        resolve_target,
+        safe_slug,
+        validate_snapshot,
+    )
     from scripts.smoke_d1l import (
         exact_commit,
         expected_command_name,
@@ -54,7 +72,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-D1L_CORE_PORT = "COM12"
+D1L_CORE_PORT = WINDOWS_D1L_TARGET
+D1L_CORE_POSIX_TARGET = POSIX_D1L_TARGET
 D1L_BAUD = 115200
 CORE_RELEASE_PROFILE = "core_1_0"
 SD_HISTORY_MODE = "disabled"
@@ -146,6 +165,8 @@ def candidate_witness_identity(
 def normalize_port(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
+    if value == D1L_CORE_POSIX_TARGET:
+        return D1L_CORE_POSIX_TARGET
     normalized = value.strip().upper().replace("/", "\\")
     for prefix in ("\\\\.\\", "\\\\?\\"):
         if normalized.startswith(prefix):
@@ -156,14 +177,83 @@ def normalize_port(value: object) -> str | None:
 
 def enforce_core_port(value: object) -> str:
     port = normalize_port(value)
-    if port != D1L_CORE_PORT:
+    if port not in {D1L_CORE_PORT, D1L_CORE_POSIX_TARGET}:
         raise ValueError(
-            f"Core reboot/persistence validation requires {D1L_CORE_PORT}; "
-            f"got {port or '<missing>'}"
+            "Core reboot/persistence validation requires COM12 or the exact "
+            f"{D1L_CORE_POSIX_TARGET} by-id target; got "
+            f"{port or '<missing>'}"
         )
     if port in FORBIDDEN_PORTS:
         raise ValueError(f"refusing forbidden port {port}")
     return port
+
+
+def resolve_core_target(
+    value: object,
+    *,
+    port_lister: Callable[[], Iterable[object]],
+    platform_name: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the selected D1L before any serial or reboot operation."""
+
+    requested = enforce_core_port(value)
+    return resolve_target(
+        requested,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
+
+
+def exact_public_key(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return (
+        normalized
+        if re.fullmatch(r"[0-9a-f]{64}", normalized)
+        else None
+    )
+
+
+def identity_status_ok(result: object, expected_public_key: str) -> bool:
+    public_key = exact_public_key(expected_public_key)
+    return (
+        public_key is not None
+        and isinstance(result, dict)
+        and result.get("schema") == 1
+        and result.get("ok") is True
+        and result.get("cmd") == "identity status"
+        and result.get("public_key_ready") is True
+        and exact_public_key(result.get("public_key")) == public_key
+        and result.get("fingerprint") == public_key[:16].upper()
+        and result.get("role") == "desk_companion"
+    )
+
+
+def target_identity(
+    snapshot: object,
+    expected_target: str,
+) -> str | None:
+    try:
+        validate_snapshot(snapshot, expected_target)
+    except ValueError:
+        return None
+    assert isinstance(snapshot, dict)
+    identity = snapshot.get("stable_identity_sha256")
+    return identity if isinstance(identity, str) else None
+
+
+def target_continuity(
+    before: object,
+    after: object,
+    expected_target: str,
+) -> bool:
+    before_identity = target_identity(before, expected_target)
+    after_identity = target_identity(after, expected_target)
+    return (
+        before_identity is not None
+        and before_identity == after_identity
+    )
 
 
 def exact_source_git(
@@ -373,9 +463,11 @@ def _unused_cycle_reservation_receipt(
     run_id: str,
     run_attempt: str,
     reason: str,
+    requested_target: str,
+    d1l_target: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_reboot_persistence_cycle_reservation",
         "mode": "hardware",
         "ok": False,
@@ -384,7 +476,8 @@ def _unused_cycle_reservation_receipt(
         "physical_observed": False,
         "cycle_type": cycle_type,
         "ordinal": ordinal,
-        "port": D1L_CORE_PORT,
+        "port": requested_target,
+        "d1l_target": d1l_target,
         "commit": commit,
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
@@ -408,6 +501,8 @@ def finalize_unused_cycle_reservations(
     run_id: str,
     run_attempt: str,
     reason: str,
+    requested_target: str,
+    d1l_target: dict[str, Any] | None,
 ) -> None:
     first_error: BaseException | None = None
     for (cycle_type, ordinal), (_, handle) in reservations.items():
@@ -423,6 +518,8 @@ def finalize_unused_cycle_reservations(
                     run_id=run_id,
                     run_attempt=run_attempt,
                     reason=reason,
+                    requested_target=requested_target,
+                    d1l_target=d1l_target,
                 ),
             )
         except BaseException as exc:
@@ -1639,6 +1736,117 @@ def seed_store_transition_preserved(
     return not errors, errors
 
 
+_ABSENT_TARGET_ERRORS = (
+    "is missing or dangling",
+    "is not present",
+)
+
+
+def target_presence_sample(
+    requested_target: str,
+    port_lister: Callable[[], Iterable[object]],
+    *,
+    platform_name: str | None = None,
+    now: Callable[[], str] = utc_now,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    snapshot: dict[str, Any] | None = None
+    error: str | None = None
+    state = "present"
+    try:
+        snapshot = resolve_core_target(
+            requested_target,
+            port_lister=port_lister,
+            platform_name=platform_name,
+        )
+    except ValueError as exc:
+        error = str(exc)
+        state = (
+            "absent"
+            if any(fragment in error for fragment in _ABSENT_TARGET_ERRORS)
+            else "invalid"
+        )
+    return {
+        "observed_at": now(),
+        "monotonic_sec": round(clock(), 6),
+        "requested_path": requested_target,
+        "state": state,
+        "present": state == "present",
+        "valid_absence": state == "absent",
+        "d1l_target": snapshot,
+        "error": error,
+    }
+
+
+def wait_for_target_state(
+    requested_target: str,
+    port_lister: Callable[[], Iterable[object]],
+    *,
+    present: bool,
+    timeout: float,
+    poll_sec: float,
+    platform_name: str | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    now: Callable[[], str] = utc_now,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[bool, list[dict[str, Any]]]:
+    deadline = clock() + timeout
+    samples: list[dict[str, Any]] = []
+    while clock() <= deadline:
+        sample = target_presence_sample(
+            requested_target,
+            port_lister,
+            platform_name=platform_name,
+            now=now,
+            clock=clock,
+        )
+        samples.append(sample)
+        desired = "present" if present else "absent"
+        if sample.get("state") == desired:
+            return True, samples
+        sleep(poll_sec)
+    return False, samples
+
+
+def prove_power_off_window(
+    requested_target: str,
+    port_lister: Callable[[], Iterable[object]],
+    *,
+    minimum_sec: float,
+    poll_sec: float,
+    platform_name: str | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    now: Callable[[], str] = utc_now,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[bool, list[dict[str, Any]], float]:
+    started = clock()
+    samples: list[dict[str, Any]] = []
+    while clock() - started < minimum_sec:
+        sample = target_presence_sample(
+            requested_target,
+            port_lister,
+            platform_name=platform_name,
+            now=now,
+            clock=clock,
+        )
+        samples.append(sample)
+        if sample.get("state") != "absent":
+            return False, samples, max(0.0, clock() - started)
+        sleep(min(poll_sec, max(0.0, minimum_sec - (clock() - started))))
+    final = target_presence_sample(
+        requested_target,
+        port_lister,
+        platform_name=platform_name,
+        now=now,
+        clock=clock,
+    )
+    samples.append(final)
+    duration = max(0.0, clock() - started)
+    return final.get("state") == "absent", samples, duration
+
+
+# Compatibility for the independently migrated protocol-evidence producer.
+# Reboot/persistence evidence never consumes these COM-only snapshots.
 def _port_record(item: object) -> dict[str, Any]:
     def value(name: str) -> Any:
         if isinstance(item, dict):
@@ -1668,7 +1876,9 @@ def port_snapshot(
         _port_record(item)
         for item in port_lister()
         if normalize_port(
-            item.get("device") if isinstance(item, dict) else getattr(item, "device", None)
+            item.get("device")
+            if isinstance(item, dict)
+            else getattr(item, "device", None)
         )
         == D1L_CORE_PORT
     ]
@@ -1700,50 +1910,6 @@ def port_identity(snapshot: object) -> str | None:
     if not any(value not in (None, "") for value in strong):
         return None
     return sha256_bytes(canonical_json(match))
-
-
-def wait_for_port_state(
-    port_lister: Callable[[], Iterable[object]],
-    *,
-    present: bool,
-    timeout: float,
-    poll_sec: float,
-    clock: Callable[[], float] = time.monotonic,
-    now: Callable[[], str] = utc_now,
-    sleep: Callable[[float], None] = time.sleep,
-) -> tuple[bool, list[dict[str, Any]]]:
-    deadline = clock() + timeout
-    samples: list[dict[str, Any]] = []
-    while clock() <= deadline:
-        sample = port_snapshot(port_lister, now=now, clock=clock)
-        samples.append(sample)
-        if sample.get("present") is present:
-            return True, samples
-        sleep(poll_sec)
-    return False, samples
-
-
-def prove_power_off_window(
-    port_lister: Callable[[], Iterable[object]],
-    *,
-    minimum_sec: float,
-    poll_sec: float,
-    clock: Callable[[], float] = time.monotonic,
-    now: Callable[[], str] = utc_now,
-    sleep: Callable[[float], None] = time.sleep,
-) -> tuple[bool, list[dict[str, Any]], float]:
-    started = clock()
-    samples: list[dict[str, Any]] = []
-    while clock() - started < minimum_sec:
-        sample = port_snapshot(port_lister, now=now, clock=clock)
-        samples.append(sample)
-        if sample.get("present") is not False:
-            return False, samples, max(0.0, clock() - started)
-        sleep(min(poll_sec, max(0.0, minimum_sec - (clock() - started))))
-    final = port_snapshot(port_lister, now=now, clock=clock)
-    samples.append(final)
-    duration = max(0.0, clock() - started)
-    return final.get("present") is False, samples, duration
 
 
 def _crash_transition(
@@ -1863,6 +2029,9 @@ def validate_seed_receipt(
     commit: str,
     run_id: str,
     run_attempt: str,
+    expected_target: str | None = None,
+    expected_target_identity_sha256: str | None = None,
+    expected_d1l_public_key: str | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     errors: list[str] = []
     if not isinstance(receipt, dict):
@@ -1873,15 +2042,44 @@ def validate_seed_receipt(
         or not positive_decimal(run_attempt)
     ):
         return None, ["seed expected candidate identity is invalid"]
+    receipt_target = normalize_port(receipt.get("port"))
+    target = (
+        enforce_core_port(expected_target)
+        if expected_target is not None
+        else receipt_target
+    )
+    if target not in {D1L_CORE_PORT, D1L_CORE_POSIX_TARGET}:
+        return None, ["seed target is invalid"]
+    receipt_public_key = exact_public_key(
+        receipt.get("expected_d1l_public_key")
+    )
+    public_key = (
+        exact_public_key(expected_d1l_public_key)
+        if expected_d1l_public_key is not None
+        else receipt_public_key
+    )
+    if public_key is None:
+        return None, ["seed expected D1L public key is invalid"]
+    receipt_target_identity = target_identity(
+        receipt.get("d1l_target"), target
+    )
+    required_target_identity = (
+        expected_target_identity_sha256
+        if expected_target_identity_sha256 is not None
+        else receipt_target_identity
+    )
     required = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_retained_state_seed",
         "mode": "hardware",
         "ok": True,
         "closure_eligible": False,
         "hardware_required": True,
         "physical_observed": True,
-        "port": D1L_CORE_PORT,
+        "port": target,
+        "expected_target_identity_sha256": required_target_identity,
+        "expected_d1l_public_key": public_key,
+        "d1l_identity_ok": True,
         "commit": commit,
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
@@ -1898,6 +2096,17 @@ def validate_seed_receipt(
     for key, expected in required.items():
         if receipt.get(key) != expected:
             errors.append(f"seed: {key} mismatch")
+    if (
+        receipt_target_identity is None
+        or receipt_target_identity != required_target_identity
+    ):
+        errors.append("seed: D1L target snapshot is invalid")
+    identity_result, identity_errors = recompute_raw_command(
+        receipt.get("d1l_identity_status")
+    )
+    errors.extend(f"seed identity: {error}" for error in identity_errors)
+    if not identity_status_ok(identity_result, public_key):
+        errors.append("seed: live D1L identity does not match the pinned key")
     source = receipt.get("git")
     if not (
         isinstance(source, dict)
@@ -2059,6 +2268,22 @@ def _snapshot_has_retention_witnesses(
     return witness_ok
 
 
+def command_uses_only_target(command: object, target: str) -> bool:
+    if not isinstance(command, list) or not all(
+        isinstance(token, str) for token in command
+    ):
+        return False
+    selected: list[str] = []
+    for index, token in enumerate(command):
+        if token in {"--port", "-p"}:
+            if index + 1 >= len(command):
+                return False
+            selected.append(command[index + 1])
+        elif token.startswith("--port="):
+            selected.append(token.split("=", 1)[1])
+    return selected == [target]
+
+
 def validate_closing_flash_receipt(
     receipt: object,
     *,
@@ -2067,6 +2292,9 @@ def validate_closing_flash_receipt(
     run_id: str,
     run_attempt: str,
     witness: dict[str, Any],
+    expected_target: str,
+    expected_target_identity_sha256: str,
+    expected_d1l_public_key: str,
 ) -> list[str]:
     errors: list[str] = []
     if not isinstance(receipt, dict):
@@ -2077,8 +2305,12 @@ def validate_closing_flash_receipt(
         or not positive_decimal(run_attempt)
     ):
         return ["flash expected candidate identity is invalid"]
+    target = enforce_core_port(expected_target)
+    public_key = exact_public_key(expected_d1l_public_key)
+    if public_key is None:
+        return ["flash expected D1L public key is invalid"]
     required = {
-        "schema": 1,
+        "schema": 2,
         "kind": "esp32_flash",
         "mode": "hardware",
         "scope": "core-retained-reflash-only",
@@ -2087,7 +2319,7 @@ def validate_closing_flash_receipt(
         "closure_eligible": True,
         "hardware_required": True,
         "physical_observed": True,
-        "port": D1L_CORE_PORT,
+        "port": target,
         "commit": commit,
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
@@ -2095,6 +2327,9 @@ def validate_closing_flash_receipt(
         "sd_history_mode": SD_HISTORY_MODE,
         "firmware_identity_ok": True,
         "runner_source_identity_ok": True,
+        "expected_d1l_public_key": public_key,
+        "target_identity_continuity_ok": True,
+        "d1l_public_key_continuity_ok": True,
         "retained_state_preserved": True,
         "erase_flash": False,
         "public_rf_tx": False,
@@ -2107,6 +2342,30 @@ def validate_closing_flash_receipt(
     for key, expected in required.items():
         if receipt.get(key) != expected:
             errors.append(f"flash: {key} mismatch")
+    target_snapshots = (
+        receipt.get("d1l_target"),
+        receipt.get("d1l_target_before"),
+        receipt.get("d1l_target_after"),
+    )
+    target_identities = [
+        target_identity(snapshot, target) for snapshot in target_snapshots
+    ]
+    if (
+        any(identity is None for identity in target_identities)
+        or any(
+            identity != expected_target_identity_sha256
+            for identity in target_identities
+        )
+    ):
+        errors.append("flash: D1L target identity binding failed")
+    if not identity_status_ok(
+        receipt.get("pre_flash_identity"), public_key
+    ):
+        errors.append("flash: pre-flash D1L identity binding failed")
+    if not identity_status_ok(
+        receipt.get("post_flash_identity"), public_key
+    ):
+        errors.append("flash: post-flash D1L identity binding failed")
     source = receipt.get("git")
     if not (
         isinstance(source, dict)
@@ -2120,9 +2379,11 @@ def validate_closing_flash_receipt(
         isinstance(command, list)
         and "write-flash" in command
         and not any("erase" in str(token).lower() for token in command)
-        and D1L_CORE_PORT in [normalize_port(token) for token in command]
+        and command_uses_only_target(command, target)
     ):
-        errors.append("flash: command is not exact non-erasing COM12 write-flash")
+        errors.append(
+            "flash: command is not an exact non-erasing target write-flash"
+        )
     for label, field in (
         ("flash raw log", "raw_flash_log"),
         ("pre-flash retained snapshot", "retained_state_before"),
@@ -2139,11 +2400,13 @@ def validate_closing_flash_receipt(
             expected_phase = "pre_flash" if field == "retained_state_before" else "post_flash"
             projection = snapshot.get("projection")
             if not (
-                snapshot.get("schema") == 1
+                snapshot.get("schema") == 2
                 and snapshot.get("kind") == "core_retained_state_snapshot"
                 and snapshot.get("mode") == "hardware"
                 and snapshot.get("phase") == expected_phase
-                and snapshot.get("port") == D1L_CORE_PORT
+                and snapshot.get("port") == target
+                and target_identity(snapshot.get("d1l_target"), target)
+                == expected_target_identity_sha256
                 and exact_commit(snapshot.get("expected_firmware_commit")) == commit
                 and isinstance(projection, dict)
                 and snapshot.get("projection_sha256") == projection_sha256(projection)
@@ -2168,16 +2431,21 @@ def _cycle_base(
     seed_sha256: str,
     flash_sha256: str,
     previous_sha256: str,
+    d1l_target: dict[str, Any],
 ) -> dict[str, Any]:
+    requested_target = d1l_target["requested_path"]
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_reboot_persistence_cycle",
         "mode": "hardware",
         "matrix_id": matrix_id,
         "cycle_id": f"{matrix_id}:{cycle_type}:{ordinal}",
         "cycle_type": cycle_type,
         "ordinal": ordinal,
-        "port": D1L_CORE_PORT,
+        "port": requested_target,
+        "expected_target_identity_sha256": d1l_target[
+            "stable_identity_sha256"
+        ],
         "baud": D1L_BAUD,
         "commit": commit,
         "github_actions_run": run_id,
@@ -2210,10 +2478,14 @@ def _cycle_base(
     }
 
 
-def _open_serial(serial_module: Any, timeout: float) -> Any:
+def _open_serial(
+    serial_module: Any,
+    timeout: float,
+    requested_target: str,
+) -> Any:
     return open_d1l_serial(
         serial_module,
-        port=D1L_CORE_PORT,
+        port=requested_target,
         baudrate=D1L_BAUD,
         timeout=timeout,
     )
@@ -2248,18 +2520,30 @@ def run_software_cycle(
     commit: str,
     baseline: dict[str, Any],
     report: dict[str, Any],
+    requested_target: str,
+    expected_target_identity_sha256: str,
+    platform_name: str | None = None,
     clock: Callable[[], float] = time.monotonic,
     now: Callable[[], str] = utc_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     errors: list[str] = []
     command_log = report["partial_command_receipts"]
-    report["stage"] = "preflight_port_snapshot"
-    before_port = port_snapshot(port_lister, now=now, clock=clock)
-    report["physical_observed"] = before_port.get("present") is True
+    report["stage"] = "resolving_pre_reboot_d1l_target"
+    before_target = resolve_core_target(
+        requested_target,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
+    if (
+        before_target["stable_identity_sha256"]
+        != expected_target_identity_sha256
+    ):
+        raise ValueError("D1L target identity drifted before software reboot")
+    report["physical_observed"] = True
     report["serial_open_attempted"] = True
     report["stage"] = "opening_pre_reboot_serial"
-    with _open_serial(serial_module, timeout) as ser:
+    with _open_serial(serial_module, timeout, requested_target) as ser:
         report["serial_opened"] = True
         report["physical_observed"] = True
         report["stage"] = "capturing_pre_reboot_state"
@@ -2309,7 +2593,12 @@ def run_software_cycle(
         )
         report["post"] = post
         errors.extend(f"post: {error}" for error in post_errors)
-    after_port = port_snapshot(port_lister, now=now, clock=clock)
+    report["stage"] = "resolving_post_reboot_d1l_target"
+    after_target = resolve_core_target(
+        requested_target,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
     boot_analysis, boot_errors = analyze_boot_lines(boot_lines)
     errors.extend(boot_errors)
     raw_sw_reset = (
@@ -2337,31 +2626,32 @@ def run_software_cycle(
         )
         if not baseline_preserved:
             errors.extend(f"baseline: {error}" for error in baseline_errors)
-    before_identity = port_identity(before_port)
-    after_identity = port_identity(after_port)
-    port_ok = (
-        before_port.get("present") is True
-        and after_port.get("present") is True
-        and before_identity is not None
-        and before_identity == after_identity
+    target_ok = (
+        target_continuity(
+            before_target, after_target, requested_target
+        )
+        and before_target["stable_identity_sha256"]
+        == expected_target_identity_sha256
     )
-    if not port_ok:
-        errors.append("COM12 presence/identity changed across software reboot")
+    if not target_ok:
+        errors.append("D1L target identity changed across software reboot")
+        report["physical_state_outcome_uncertain"] = True
+        report["mutation_outcome_uncertain"] = True
     report["action"] = {
         "kind": "software_reboot",
         "reboot_command": reboot,
         "boot_raw_lines": boot_lines,
         "boot_analysis": boot_analysis,
         "port_disappear_required": False,
-        "port_before": before_port,
-        "port_after": after_port,
+        "d1l_target_before": before_target,
+        "d1l_target_after": after_target,
     }
     report["checks"] = {
         "raw_reboot_ack": _reboot_ack_ok(reboot_result),
         "raw_sw_system_reset": raw_sw_reset,
         "transition": transition,
         "transition_ok": transition_ok,
-        "port_identity_stable": port_ok,
+        "target_identity_stable": target_ok,
         "retained_state_preserved": not any(
             error.startswith(("pre:", "post:", "baseline:")) for error in errors
         ),
@@ -2386,18 +2676,30 @@ def run_cold_cycle(
     commit: str,
     baseline: dict[str, Any],
     report: dict[str, Any],
+    requested_target: str,
+    expected_target_identity_sha256: str,
+    platform_name: str | None = None,
     clock: Callable[[], float] = time.monotonic,
     now: Callable[[], str] = utc_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     errors: list[str] = []
     command_log = report["partial_command_receipts"]
-    report["stage"] = "preflight_port_snapshot"
-    before_port = port_snapshot(port_lister, now=now, clock=clock)
-    report["physical_observed"] = before_port.get("present") is True
+    report["stage"] = "resolving_pre_cold_cycle_d1l_target"
+    before_target = resolve_core_target(
+        requested_target,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
+    if (
+        before_target["stable_identity_sha256"]
+        != expected_target_identity_sha256
+    ):
+        raise ValueError("D1L target identity drifted before cold reboot")
+    report["physical_observed"] = True
     report["serial_open_attempted"] = True
     report["stage"] = "opening_pre_cold_cycle_serial"
-    with _open_serial(serial_module, timeout) as ser:
+    with _open_serial(serial_module, timeout, requested_target) as ser:
         report["serial_opened"] = True
         report["physical_observed"] = True
         report["stage"] = "capturing_pre_cold_cycle_state"
@@ -2422,13 +2724,15 @@ def run_cold_cycle(
     report["reboot_or_power_action_may_have_executed"] = True
     prompt(
         f"Cold cycle {report['ordinal']}/{COLD_CYCLE_COUNT}: press Enter to arm, "
-        f"then remove all power from the D1L until {D1L_CORE_PORT} disappears."
+        f"then remove all power from the D1L until {requested_target} disappears."
     )
-    disappeared, disappear_samples = wait_for_port_state(
+    disappeared, disappear_samples = wait_for_target_state(
+        requested_target,
         port_lister,
         present=False,
         timeout=port_timeout,
         poll_sec=port_poll_sec,
+        platform_name=platform_name,
         clock=clock,
         now=now,
         sleep=sleep,
@@ -2438,36 +2742,54 @@ def run_cold_cycle(
     off_duration = 0.0
     if disappeared:
         off_ok, off_samples, off_duration = prove_power_off_window(
+            requested_target,
             port_lister,
             minimum_sec=minimum_power_off_sec,
             poll_sec=port_poll_sec,
+            platform_name=platform_name,
             clock=clock,
             now=now,
             sleep=sleep,
         )
     if not disappeared:
-        errors.append("COM12 did not disappear during cold power removal")
+        errors.append(
+            "stable D1L by-id target did not disappear during cold power removal"
+        )
     if not off_ok or off_duration < minimum_power_off_sec:
         errors.append("cold power-off interval was not continuously observed")
 
     prompt(
         f"Cold cycle {report['ordinal']}/{COLD_CYCLE_COUNT}: press Enter, "
-        f"then restore power and wait for {D1L_CORE_PORT}."
+        f"then restore power and wait for {requested_target}."
     )
-    reappeared, reappear_samples = wait_for_port_state(
+    reappeared, reappear_samples = wait_for_target_state(
+        requested_target,
         port_lister,
         present=True,
         timeout=port_timeout,
         poll_sec=port_poll_sec,
+        platform_name=platform_name,
         clock=clock,
         now=now,
         sleep=sleep,
     )
-    after_port = reappear_samples[-1] if reappear_samples else port_snapshot(
-        port_lister, now=now, clock=clock
+    after_sample = (
+        reappear_samples[-1]
+        if reappear_samples
+        else target_presence_sample(
+            requested_target,
+            port_lister,
+            platform_name=platform_name,
+            now=now,
+            clock=clock,
+        )
     )
+    after_target = after_sample.get("d1l_target")
     if not reappeared:
-        errors.append("COM12 did not reappear after cold power restore")
+        errors.append(
+            "stable D1L by-id target did not reappear with "
+            f"VID {EXPECTED_VID:04X}/PID {EXPECTED_PID:04X}"
+        )
 
     post: dict[str, Any] = {"captured_at": now(), "commands": []}
     post_projection: dict[str, Any] | None = None
@@ -2475,7 +2797,7 @@ def run_cold_cycle(
     if reappeared:
         report["serial_open_attempted"] = True
         report["stage"] = "opening_post_cold_cycle_serial"
-        with _open_serial(serial_module, timeout) as ser:
+        with _open_serial(serial_module, timeout, requested_target) as ser:
             report["serial_opened"] = True
             report["physical_observed"] = True
             report["stage"] = "capturing_post_cold_cycle_state"
@@ -2504,34 +2826,38 @@ def run_cold_cycle(
         )
         if not baseline_preserved:
             errors.extend(f"baseline: {error}" for error in baseline_errors)
-    before_identity = port_identity(before_port)
-    after_identity = port_identity(after_port)
-    port_ok = (
-        before_port.get("present") is True
-        and disappeared
+    target_ok = (
+        disappeared
         and off_ok
         and reappeared
-        and before_identity is not None
-        and before_identity == after_identity
+        and target_continuity(
+            before_target, after_target, requested_target
+        )
+        and before_target["stable_identity_sha256"]
+        == expected_target_identity_sha256
     )
-    if not port_ok:
-        errors.append("cold-cycle COM12 disappearance/reappearance identity failed")
+    if not target_ok:
+        errors.append(
+            "cold-cycle D1L by-id disappearance/reappearance identity failed"
+        )
+        report["physical_state_outcome_uncertain"] = True
+        report["mutation_outcome_uncertain"] = True
     report["action"] = {
         "kind": "operator_controlled_cold_power_cycle",
         "operator_interactive": True,
         "minimum_power_off_sec": minimum_power_off_sec,
         "observed_power_off_sec": round(off_duration, 6),
-        "port_before": before_port,
+        "d1l_target_before": before_target,
         "disappear_samples": disappear_samples,
         "power_off_samples": off_samples,
         "reappear_samples": reappear_samples,
-        "port_after": after_port,
+        "d1l_target_after": after_target,
     }
     report["checks"] = {
         "port_disappeared": disappeared,
         "power_off_window_observed": off_ok,
         "port_reappeared": reappeared,
-        "port_identity_stable": port_ok,
+        "target_identity_stable": target_ok,
         "transition": transition,
         "transition_ok": transition_ok,
         "retained_state_preserved": not any(
@@ -2546,31 +2872,64 @@ def run_cold_cycle(
     return report
 
 
-def _port_action_recomputed(
+def _presence_sample_valid(
+    sample: object,
+    *,
+    requested_target: str,
+    expected_target_identity_sha256: str,
+) -> bool:
+    if not isinstance(sample, dict):
+        return False
+    if (
+        sample.get("requested_path") != requested_target
+        or type(sample.get("monotonic_sec")) not in (int, float)
+        or not isinstance(sample.get("observed_at"), str)
+    ):
+        return False
+    state = sample.get("state")
+    if state == "present":
+        return (
+            sample.get("present") is True
+            and sample.get("valid_absence") is False
+            and sample.get("error") is None
+            and target_identity(
+                sample.get("d1l_target"), requested_target
+            )
+            == expected_target_identity_sha256
+        )
+    if state == "absent":
+        error = sample.get("error")
+        return (
+            sample.get("present") is False
+            and sample.get("valid_absence") is True
+            and sample.get("d1l_target") is None
+            and isinstance(error, str)
+            and any(fragment in error for fragment in _ABSENT_TARGET_ERRORS)
+        )
+    return False
+
+
+def _target_action_recomputed(
     action: object,
     *,
     cycle_type: str,
+    requested_target: str,
+    expected_target_identity_sha256: str,
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
     if not isinstance(action, dict):
         return False, ["cycle action is missing"]
-    before = action.get("port_before")
-    after = action.get("port_after")
-    before_identity = port_identity(before)
-    after_identity = port_identity(after)
+    before = action.get("d1l_target_before")
+    after = action.get("d1l_target_after")
     stable = (
-        before_identity is not None
-        and after_identity is not None
-        and before_identity == after_identity
+        target_continuity(before, after, requested_target)
+        and target_identity(before, requested_target)
+        == expected_target_identity_sha256
     )
     if cycle_type == "software":
         if not (
             action.get("kind") == "software_reboot"
             and action.get("port_disappear_required") is False
-            and isinstance(before, dict)
-            and before.get("present") is True
-            and isinstance(after, dict)
-            and after.get("present") is True
             and stable
         ):
             errors.append("software cycle port evidence failed")
@@ -2598,21 +2957,58 @@ def _port_action_recomputed(
         if off_times_valid
         else -1.0
     )
+    disappear_samples_valid = (
+        isinstance(disappear, list)
+        and disappear
+        and all(
+            _presence_sample_valid(
+                sample,
+                requested_target=requested_target,
+                expected_target_identity_sha256=(
+                    expected_target_identity_sha256
+                ),
+            )
+            for sample in disappear
+        )
+    )
+    off_samples_valid = (
+        isinstance(off, list)
+        and len(off) >= 2
+        and all(
+            _presence_sample_valid(
+                sample,
+                requested_target=requested_target,
+                expected_target_identity_sha256=(
+                    expected_target_identity_sha256
+                ),
+            )
+            and sample.get("state") == "absent"
+            for sample in off
+        )
+    )
+    reappear_samples_valid = (
+        isinstance(reappear, list)
+        and reappear
+        and all(
+            _presence_sample_valid(
+                sample,
+                requested_target=requested_target,
+                expected_target_identity_sha256=(
+                    expected_target_identity_sha256
+                ),
+            )
+            for sample in reappear
+        )
+    )
     if not (
         action.get("kind") == "operator_controlled_cold_power_cycle"
         and action.get("operator_interactive") is True
-        and isinstance(disappear, list)
-        and disappear
+        and disappear_samples_valid
         and any(
-            isinstance(sample, dict) and sample.get("present") is False
+            sample.get("state") == "absent"
             for sample in disappear
         )
-        and isinstance(off, list)
-        and len(off) >= 2
-        and all(
-            isinstance(sample, dict) and sample.get("present") is False
-            for sample in off
-        )
+        and off_samples_valid
         and type(minimum) in (int, float)
         and minimum >= MINIMUM_POWER_OFF_SEC
         and type(observed) in (int, float)
@@ -2620,10 +3016,9 @@ def _port_action_recomputed(
         and off_times_valid
         and recomputed_off_duration >= minimum
         and abs(float(observed) - recomputed_off_duration) <= 0.01
-        and isinstance(reappear, list)
-        and reappear
+        and reappear_samples_valid
         and any(
-            isinstance(sample, dict) and sample.get("present") is True
+            sample.get("state") == "present"
             for sample in reappear
         )
         and stable
@@ -2640,6 +3035,8 @@ def recompute_cycle(
     run_attempt: str,
     matrix_id: str,
     baseline: dict[str, Any],
+    expected_target: str,
+    expected_target_identity_sha256: str,
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
     if not isinstance(receipt, dict):
@@ -2648,11 +3045,14 @@ def recompute_cycle(
     if cycle_type not in {"software", "cold"}:
         return False, ["cycle type is invalid"]
     required = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_reboot_persistence_cycle",
         "mode": "hardware",
         "matrix_id": matrix_id,
-        "port": D1L_CORE_PORT,
+        "port": expected_target,
+        "expected_target_identity_sha256": (
+            expected_target_identity_sha256
+        ),
         "baud": D1L_BAUD,
         "commit": commit,
         "github_actions_run": run_id,
@@ -2700,10 +3100,15 @@ def recompute_cycle(
     )
     errors.extend(transition_errors)
     action = receipt.get("action")
-    port_ok, port_errors = _port_action_recomputed(
-        action, cycle_type=cycle_type
+    target_ok, target_errors = _target_action_recomputed(
+        action,
+        cycle_type=cycle_type,
+        requested_target=expected_target,
+        expected_target_identity_sha256=(
+            expected_target_identity_sha256
+        ),
     )
-    errors.extend(port_errors)
+    errors.extend(target_errors)
     if cycle_type == "software":
         reboot_result, reboot_errors = recompute_raw_command(
             action.get("reboot_command") if isinstance(action, dict) else None
@@ -2728,7 +3133,7 @@ def recompute_cycle(
             and boot_analysis.get("crash_marker_count") == 0
         ):
             errors.append("software reboot raw boot/reset evidence failed")
-    return not errors and transition_ok and port_ok, errors
+    return not errors and transition_ok and target_ok, errors
 
 
 def _validate_core_reboot_persistence_report(
@@ -2751,15 +3156,28 @@ def _validate_core_reboot_persistence_report(
         or not positive_decimal(run_attempt)
     ):
         return False, ["validator expected identity is invalid"], matrix
+    target = normalize_port(matrix.get("port"))
+    if target not in {D1L_CORE_PORT, D1L_CORE_POSIX_TARGET}:
+        return False, ["matrix: D1L target is invalid"], matrix
+    target_digest = target_identity(matrix.get("d1l_target"), target)
+    if target_digest is None:
+        errors.append("matrix: D1L target snapshot is invalid")
+        target_digest = ""
+    public_key = exact_public_key(matrix.get("expected_d1l_public_key"))
+    if public_key is None:
+        errors.append("matrix: expected D1L public key is invalid")
+        public_key = ""
     required = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_reboot_persistence_matrix",
         "mode": "hardware",
         "ok": True,
         "closure_eligible": True,
         "hardware_required": True,
         "physical_observed": True,
-        "port": D1L_CORE_PORT,
+        "port": target,
+        "expected_target_identity_sha256": target_digest,
+        "expected_d1l_public_key": public_key,
         "commit": commit,
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
@@ -2809,6 +3227,9 @@ def _validate_core_reboot_persistence_report(
             commit=commit,
             run_id=run_id,
             run_attempt=run_attempt,
+            expected_target=target,
+            expected_target_identity_sha256=target_digest,
+            expected_d1l_public_key=public_key,
         )
         errors.extend(seed_errors)
     if flash_path is not None:
@@ -2821,6 +3242,9 @@ def _validate_core_reboot_persistence_report(
                 run_id=run_id,
                 run_attempt=run_attempt,
                 witness=seed.get("retention_witness", {}),
+                expected_target=target,
+                expected_target_identity_sha256=target_digest,
+                expected_d1l_public_key=public_key,
             )
         )
 
@@ -2828,6 +3252,29 @@ def _validate_core_reboot_persistence_report(
         matrix.get("post_reinstall_live_capture"), commit
     )
     errors.extend(f"post-reinstall live: {error}" for error in live_errors)
+    live_identity_result, live_identity_errors = recompute_raw_command(
+        matrix.get("post_reinstall_identity_status")
+    )
+    errors.extend(
+        f"post-reinstall identity: {error}"
+        for error in live_identity_errors
+    )
+    if (
+        matrix.get("post_reinstall_identity_ok") is not True
+        or not identity_status_ok(live_identity_result, public_key)
+    ):
+        errors.append(
+            "matrix: live post-reinstall D1L identity is not pinned"
+        )
+    if (
+        target_identity(
+            matrix.get("post_reinstall_d1l_target"), target
+        )
+        != target_digest
+    ):
+        errors.append(
+            "matrix: live post-reinstall D1L target identity drifted"
+        )
     if baseline is not None and live_projection is not None:
         live_ok, live_state_errors = state_preserved(
             baseline, live_projection
@@ -2907,6 +3354,8 @@ def _validate_core_reboot_persistence_report(
             run_attempt=run_attempt,
             matrix_id=matrix_id,
             baseline=baseline,
+            expected_target=target,
+            expected_target_identity_sha256=target_digest,
         )
         if not cycle_ok:
             errors.extend(
@@ -2957,10 +3406,16 @@ def _seed_retained_state_report(
     timeout: float,
     source_git: dict[str, Any],
     progress: dict[str, Any],
+    d1l_target: dict[str, Any],
+    expected_d1l_public_key: str,
     now: Callable[[], str] = utc_now,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
+    requested_target = d1l_target["requested_path"]
     expected_witness = candidate_witness_identity(commit, run_id, run_attempt)
+    identity_receipt: dict[str, Any] | None = None
+    identity_result: dict[str, Any] | None = None
+    identity_errors: list[str] = []
     witness_receipt: dict[str, Any] | None = None
     settings_mutation: dict[str, Any] | None = None
     witness_result: dict[str, Any] | None = None
@@ -2971,7 +3426,7 @@ def _seed_retained_state_report(
     command_log = progress["partial_command_receipts"]
     progress["serial_open_attempted"] = True
     progress["stage"] = "opening_seed_serial"
-    with _open_serial(serial_module, timeout) as ser:
+    with _open_serial(serial_module, timeout, requested_target) as ser:
         progress["serial_opened"] = True
         progress["physical_observed"] = True
         progress["stage"] = "capturing_initial_state"
@@ -2989,56 +3444,86 @@ def _seed_retained_state_report(
             initial, commit
         )
         if initial_projection is not None and not initial_errors:
-            progress["stage"] = "retained_witness_proof"
-            witness_receipt = read_raw_command(
+            progress["stage"] = "validating_live_d1l_identity"
+            identity_receipt = read_raw_command(
                 ser,
-                f"core retained-witness {expected_witness['token']}",
+                "identity status",
                 timeout,
                 clock=clock,
                 now=now,
                 command_log=command_log,
             )
-            progress["retained_witness_proof"] = witness_receipt
-            witness_result, witness_raw_errors = recompute_raw_command(
-                witness_receipt
+            progress["d1l_identity_status"] = identity_receipt
+            identity_result, identity_raw_errors = recompute_raw_command(
+                identity_receipt
             )
-            witness_errors.extend(witness_raw_errors)
-            retained_witness, retained_witness_errors = (
-                recompute_retained_witness_proof(
-                    witness_result,
-                    expected=expected_witness,
-                    initial_projection=initial_projection,
+            identity_errors.extend(identity_raw_errors)
+            if not identity_status_ok(
+                identity_result, expected_d1l_public_key
+            ):
+                identity_errors.append(
+                    "live identity does not match the pinned D1L public key"
                 )
-            )
-            witness_errors.extend(retained_witness_errors)
-            if not witness_errors:
-                derived_witness = retained_witness
-                progress["retention_witness"] = derived_witness
-                progress["stage"] = "settings_retention_mutation"
-                progress["settings_mutation_may_have_executed"] = True
-                settings_mutation = read_raw_command(
+            if not identity_errors:
+                progress["stage"] = "retained_witness_proof"
+                witness_receipt = read_raw_command(
                     ser,
-                    "settings set name "
-                    f"{expected_witness['settings_node_name']}",
+                    f"core retained-witness {expected_witness['token']}",
                     timeout,
                     clock=clock,
                     now=now,
                     command_log=command_log,
                 )
-                progress["settings_retention_mutation"] = settings_mutation
-                settings_result, settings_errors = recompute_raw_command(
-                    settings_mutation
+                progress["retained_witness_proof"] = witness_receipt
+                witness_result, witness_raw_errors = recompute_raw_command(
+                    witness_receipt
                 )
-                progress["settings_mutation_confirmed_persisted"] = bool(
-                    _command_ok(settings_result, "settings set name")
-                    and settings_result.get("persisted") is True
-                    and settings_result.get("node_name")
-                    == expected_witness["settings_node_name"]
+                witness_errors.extend(witness_raw_errors)
+                retained_witness, retained_witness_errors = (
+                    recompute_retained_witness_proof(
+                        witness_result,
+                        expected=expected_witness,
+                        initial_projection=initial_projection,
+                    )
                 )
+                witness_errors.extend(retained_witness_errors)
+                if not witness_errors:
+                    derived_witness = retained_witness
+                    progress["retention_witness"] = derived_witness
+                    progress["stage"] = "settings_retention_mutation"
+                    progress["settings_mutation_may_have_executed"] = True
+                    settings_mutation = read_raw_command(
+                        ser,
+                        "settings set name "
+                        f"{expected_witness['settings_node_name']}",
+                        timeout,
+                        clock=clock,
+                        now=now,
+                        command_log=command_log,
+                    )
+                    progress["settings_retention_mutation"] = settings_mutation
+                    settings_result, settings_errors = recompute_raw_command(
+                        settings_mutation
+                    )
+                    progress["settings_mutation_confirmed_persisted"] = bool(
+                        _command_ok(settings_result, "settings set name")
+                        and settings_result.get("persisted") is True
+                        and settings_result.get("node_name")
+                        == expected_witness["settings_node_name"]
+                    )
+                else:
+                    settings_errors.append(
+                        "settings retention mutation skipped because the "
+                        "candidate full-store witness proof failed"
+                    )
             else:
+                witness_errors.append(
+                    "candidate full-store witness proof skipped because the "
+                    "live D1L identity check failed"
+                )
                 settings_errors.append(
-                    "settings retention mutation skipped because the "
-                    "candidate full-store witness proof failed"
+                    "settings retention mutation skipped because the live "
+                    "D1L identity check failed"
                 )
             progress["stage"] = "capturing_final_state"
             final = capture_state(
@@ -3064,6 +3549,7 @@ def _seed_retained_state_report(
     projection, capture_errors, _ = recompute_state_capture(final, commit)
     errors = [
         *(f"initial: {error}" for error in initial_errors),
+        *(f"identity: {error}" for error in identity_errors),
         *(f"retained witness proof: {error}" for error in witness_errors),
         *(f"settings mutation: {error}" for error in settings_errors),
         *(f"final: {error}" for error in capture_errors),
@@ -3105,14 +3591,23 @@ def _seed_retained_state_report(
     progress["mutation_outcome_uncertain"] = mutation_outcome_uncertain
     progress["stage"] = "complete"
     report = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_retained_state_seed",
         "mode": "hardware",
         "ok": not errors,
         "closure_eligible": False,
         "hardware_required": True,
         "physical_observed": progress["physical_observed"],
-        "port": D1L_CORE_PORT,
+        "port": requested_target,
+        "d1l_target": d1l_target,
+        "expected_target_identity_sha256": d1l_target[
+            "stable_identity_sha256"
+        ],
+        "expected_d1l_public_key": expected_d1l_public_key,
+        "d1l_identity_status": identity_receipt,
+        "d1l_identity_ok": identity_status_ok(
+            identity_result, expected_d1l_public_key
+        ),
         "baud": D1L_BAUD,
         "commit": commit,
         "github_actions_run": run_id,
@@ -3144,6 +3639,7 @@ def _seed_retained_state_report(
         ),
         "checks": {
             "exact_candidate": not initial_errors and not capture_errors,
+            "live_d1l_identity": not identity_errors,
             "candidate_full_store_witness_set_proven": (
                 derived_witness is not None and not witness_errors
             ),
@@ -3183,9 +3679,18 @@ def seed_retained_state(
     run_attempt: str,
     timeout: float,
     source_git: dict[str, Any],
+    port: str,
+    port_lister: Callable[[], Iterable[object]],
+    expected_d1l_public_key: str,
+    platform_name: str | None = None,
     now: Callable[[], str] = utc_now,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
+    normalized_public_key = exact_public_key(expected_d1l_public_key)
+    if normalized_public_key is None:
+        raise ValueError(
+            "expected D1L public key must be an exact 64-hex value"
+        )
     _, output_handle = reserve_json_output(out, root)
     progress: dict[str, Any] = {
         "stage": "reserved_before_io",
@@ -3196,8 +3701,16 @@ def seed_retained_state(
         "settings_mutation_confirmed_persisted": False,
         "mutation_outcome_uncertain": False,
         "partial_command_receipts": [],
+        "d1l_target": None,
     }
     try:
+        progress["stage"] = "resolving_d1l_target"
+        d1l_target = resolve_core_target(
+            port,
+            port_lister=port_lister,
+            platform_name=platform_name,
+        )
+        progress["d1l_target"] = d1l_target
         report = _seed_retained_state_report(
             root=root,
             serial_module=serial_module,
@@ -3207,6 +3720,8 @@ def seed_retained_state(
             timeout=timeout,
             source_git=source_git,
             progress=progress,
+            d1l_target=d1l_target,
+            expected_d1l_public_key=normalized_public_key,
             now=now,
             clock=clock,
         )
@@ -3217,7 +3732,7 @@ def seed_retained_state(
         )
         progress["mutation_outcome_uncertain"] = mutation_outcome_uncertain
         failure = {
-            "schema": 1,
+            "schema": 2,
             "kind": "core_retained_state_seed",
             "mode": "hardware",
             "ok": False,
@@ -3226,7 +3741,18 @@ def seed_retained_state(
             "physical_observed": bool(
                 progress["physical_observed"] or progress["serial_opened"]
             ),
-            "port": D1L_CORE_PORT,
+            "port": normalize_port(port),
+            "d1l_target": progress.get("d1l_target"),
+            "expected_target_identity_sha256": (
+                progress.get("d1l_target", {}).get(
+                    "stable_identity_sha256"
+                )
+                if isinstance(progress.get("d1l_target"), dict)
+                else None
+            ),
+            "expected_d1l_public_key": normalized_public_key,
+            "d1l_identity_status": progress.get("d1l_identity_status"),
+            "d1l_identity_ok": False,
             "baud": D1L_BAUD,
             "commit": commit,
             "github_actions_run": run_id,
@@ -3309,10 +3835,15 @@ def _verify_reboot_matrix_after_reservation(
     port_poll_sec: float,
     minimum_power_off_sec: float,
     source_git: dict[str, Any],
+    d1l_target: dict[str, Any],
+    expected_d1l_public_key: str,
+    platform_name: str | None = None,
     now: Callable[[], str] = utc_now,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
+    requested_target = d1l_target["requested_path"]
+    target_digest = d1l_target["stable_identity_sha256"]
     execution["stage"] = "validating_seed_receipt"
     seed = load_json(seed_path, root, "seed receipt")
     baseline, seed_errors = validate_seed_receipt(
@@ -3320,6 +3851,9 @@ def _verify_reboot_matrix_after_reservation(
         commit=commit,
         run_id=run_id,
         run_attempt=run_attempt,
+        expected_target=requested_target,
+        expected_target_identity_sha256=target_digest,
+        expected_d1l_public_key=expected_d1l_public_key,
     )
     if seed_errors or baseline is None:
         raise ValueError("seed receipt failed validation: " + "; ".join(seed_errors))
@@ -3332,6 +3866,9 @@ def _verify_reboot_matrix_after_reservation(
         run_id=run_id,
         run_attempt=run_attempt,
         witness=seed.get("retention_witness", {}),
+        expected_target=requested_target,
+        expected_target_identity_sha256=target_digest,
+        expected_d1l_public_key=expected_d1l_public_key,
     )
     if flash_errors:
         raise ValueError(
@@ -3340,15 +3877,47 @@ def _verify_reboot_matrix_after_reservation(
     seed_row = relative_file_row(seed_path, root, "seed receipt")
     flash_row = relative_file_row(flash_path, root, "closing flash receipt")
 
-    # Verify the live post-reinstall state before any reboot.
+    # Re-resolve and pin the live identity immediately before any reboot.
+    execution["stage"] = "resolving_post_reinstall_d1l_target"
+    live_target = resolve_core_target(
+        requested_target,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
+    if live_target["stable_identity_sha256"] != target_digest:
+        raise ValueError(
+            "post-reinstall D1L target identity drifted before serial open"
+        )
+    execution["post_reinstall_d1l_target"] = live_target
     execution["serial_open_attempted"] = True
     execution["stage"] = "opening_post_reinstall_serial"
-    with _open_serial(serial_module, timeout) as ser:
+    with _open_serial(serial_module, timeout, requested_target) as ser:
         execution["serial_opened"] = True
         execution["physical_observed"] = True
-        execution["stage"] = "capturing_post_reinstall_state"
         if hasattr(ser, "reset_input_buffer"):
             ser.reset_input_buffer()
+        execution["stage"] = "capturing_post_reinstall_identity"
+        live_identity_receipt = read_raw_command(
+            ser,
+            "identity status",
+            timeout,
+            clock=clock,
+            now=now,
+            command_log=execution["partial_command_receipts"],
+        )
+        execution["post_reinstall_identity_status"] = (
+            live_identity_receipt
+        )
+        live_identity_result, live_identity_errors = recompute_raw_command(
+            live_identity_receipt
+        )
+        if live_identity_errors or not identity_status_ok(
+            live_identity_result, expected_d1l_public_key
+        ):
+            raise ValueError(
+                "post-reinstall live identity does not match the pinned D1L"
+            )
+        execution["stage"] = "capturing_post_reinstall_state"
         live_capture = capture_state(
             ser,
             timeout,
@@ -3392,6 +3961,7 @@ def _verify_reboot_matrix_after_reservation(
             seed_sha256=seed_row["sha256"],
             flash_sha256=flash_row["sha256"],
             previous_sha256=previous_sha,
+            d1l_target=d1l_target,
         )
         execution["current_cycle_key"] = key
         execution["current_cycle_path"] = str(child)
@@ -3404,6 +3974,9 @@ def _verify_reboot_matrix_after_reservation(
             commit=commit,
             baseline=baseline,
             report=cycle,
+            requested_target=requested_target,
+            expected_target_identity_sha256=target_digest,
+            platform_name=platform_name,
             clock=clock,
             now=now,
             sleep=sleep,
@@ -3437,6 +4010,7 @@ def _verify_reboot_matrix_after_reservation(
                 seed_sha256=seed_row["sha256"],
                 flash_sha256=flash_row["sha256"],
                 previous_sha256=previous_sha,
+                d1l_target=d1l_target,
             )
             execution["current_cycle_key"] = key
             execution["current_cycle_path"] = str(child)
@@ -3452,6 +4026,9 @@ def _verify_reboot_matrix_after_reservation(
                 commit=commit,
                 baseline=baseline,
                 report=cycle,
+                requested_target=requested_target,
+                expected_target_identity_sha256=target_digest,
+                platform_name=platform_name,
                 clock=clock,
                 now=now,
                 sleep=sleep,
@@ -3480,11 +4057,13 @@ def _verify_reboot_matrix_after_reservation(
             "not executed because an earlier reboot/persistence cycle "
             "did not close"
         ),
+        requested_target=requested_target,
+        d1l_target=d1l_target,
     )
     complete = len(cycle_rows) == SOFTWARE_CYCLE_COUNT + COLD_CYCLE_COUNT
     execution["stage"] = "assembling_matrix"
     report = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_reboot_persistence_matrix",
         "mode": "hardware",
         "ok": bool(all_cycles_ok and complete),
@@ -3492,7 +4071,10 @@ def _verify_reboot_matrix_after_reservation(
         "hardware_required": True,
         "physical_observed": bool(execution["physical_observed"]),
         "matrix_id": matrix_id,
-        "port": D1L_CORE_PORT,
+        "port": requested_target,
+        "d1l_target": d1l_target,
+        "expected_target_identity_sha256": target_digest,
+        "expected_d1l_public_key": expected_d1l_public_key,
         "baud": D1L_BAUD,
         "commit": commit,
         "github_actions_run": run_id,
@@ -3505,6 +4087,9 @@ def _verify_reboot_matrix_after_reservation(
         "git": source_git,
         "seed_receipt": seed_row,
         "closing_flash_receipt": flash_row,
+        "post_reinstall_d1l_target": live_target,
+        "post_reinstall_identity_status": live_identity_receipt,
+        "post_reinstall_identity_ok": True,
         "post_reinstall_live_capture": live_capture,
         "post_reinstall_projection_sha256": projection_sha256(live_projection),
         "software_cycle_count": SOFTWARE_CYCLE_COUNT,
@@ -3588,6 +4173,9 @@ def verify_reboot_matrix(
     port_poll_sec: float,
     minimum_power_off_sec: float,
     source_git: dict[str, Any],
+    port: str,
+    expected_d1l_public_key: str,
+    platform_name: str | None = None,
     now: Callable[[], str] = utc_now,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
@@ -3598,9 +4186,15 @@ def verify_reboot_matrix(
         or not positive_decimal(run_attempt)
     ):
         raise ValueError("reboot matrix candidate identity is invalid")
+    requested_target = enforce_core_port(port)
+    normalized_public_key = exact_public_key(expected_d1l_public_key)
+    if normalized_public_key is None:
+        raise ValueError(
+            "expected D1L public key must be an exact 64-hex value"
+        )
 
     # The final matrix and all eight child receipts are exclusively reserved
-    # before any COM enumeration/open, reboot command, or cold-cycle prompt.
+    # before any target enumeration/open, reboot command, or cold-cycle prompt.
     _, final_handle, cycle_reservations = reserve_reboot_outputs(
         out, root
     )
@@ -3610,13 +4204,23 @@ def verify_reboot_matrix(
         "serial_opened": False,
         "physical_observed": False,
         "partial_command_receipts": [],
+        "post_reinstall_d1l_target": None,
+        "post_reinstall_identity_status": None,
         "post_reinstall_live_capture": None,
         "cycle_receipts": [],
         "current_cycle_key": None,
         "current_cycle_path": None,
         "current_cycle": None,
+        "d1l_target": None,
     }
     try:
+        execution["stage"] = "resolving_d1l_target_before_any_io"
+        d1l_target = resolve_core_target(
+            requested_target,
+            port_lister=port_lister,
+            platform_name=platform_name,
+        )
+        execution["d1l_target"] = d1l_target
         return _verify_reboot_matrix_after_reservation(
             root=root,
             final_handle=final_handle,
@@ -3636,6 +4240,9 @@ def verify_reboot_matrix(
             port_poll_sec=port_poll_sec,
             minimum_power_off_sec=minimum_power_off_sec,
             source_git=source_git,
+            d1l_target=d1l_target,
+            expected_d1l_public_key=normalized_public_key,
+            platform_name=platform_name,
             now=now,
             clock=clock,
             sleep=sleep,
@@ -3678,6 +4285,12 @@ def verify_reboot_matrix(
                     "not executed because the verify producer failed before "
                     "this reserved cycle"
                 ),
+                requested_target=requested_target,
+                d1l_target=(
+                    execution.get("d1l_target")
+                    if isinstance(execution.get("d1l_target"), dict)
+                    else None
+                ),
             )
         except BaseException as finalize_exc:
             receipt_finalize_errors.append(
@@ -3692,7 +4305,7 @@ def verify_reboot_matrix(
             )
         )
         failure = {
-            "schema": 1,
+            "schema": 2,
             "kind": "core_reboot_persistence_matrix",
             "mode": "hardware",
             "ok": False,
@@ -3702,7 +4315,16 @@ def verify_reboot_matrix(
                 execution["physical_observed"]
                 or execution["serial_opened"]
             ),
-            "port": D1L_CORE_PORT,
+            "port": requested_target,
+            "d1l_target": execution.get("d1l_target"),
+            "expected_target_identity_sha256": (
+                execution.get("d1l_target", {}).get(
+                    "stable_identity_sha256"
+                )
+                if isinstance(execution.get("d1l_target"), dict)
+                else None
+            ),
+            "expected_d1l_public_key": normalized_public_key,
             "baud": D1L_BAUD,
             "commit": commit,
             "github_actions_run": run_id,
@@ -3714,6 +4336,13 @@ def verify_reboot_matrix(
             "post_reinstall_live_capture": execution.get(
                 "post_reinstall_live_capture"
             ),
+            "post_reinstall_d1l_target": execution.get(
+                "post_reinstall_d1l_target"
+            ),
+            "post_reinstall_identity_status": execution.get(
+                "post_reinstall_identity_status"
+            ),
+            "post_reinstall_identity_ok": False,
             "partial_command_receipts": execution[
                 "partial_command_receipts"
             ],
@@ -3769,7 +4398,11 @@ def _serial_runtime() -> tuple[Any, Callable[[], Iterable[object]]]:
         raise RuntimeError(
             "pyserial is required for Core reboot/persistence evidence"
         ) from exc
-    return serial, serial.tools.list_ports.comports
+
+    def port_lister() -> Iterable[object]:
+        return serial.tools.list_ports.comports(include_links=True)
+
+    return serial, port_lister
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3778,13 +4411,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", default=D1L_CORE_PORT)
     parser.add_argument("--baud", type=int, default=D1L_BAUD)
     parser.add_argument("--commit", required=True)
+    parser.add_argument("--expected-d1l-public-key", required=True)
     parser.add_argument("--github-run-id", required=True)
     parser.add_argument("--github-run-attempt", required=True)
     parser.add_argument("--timeout", type=float, default=8.0)
     subparsers = parser.add_subparsers(dest="operation", required=True)
 
     seed = subparsers.add_parser("seed")
-    seed.add_argument("--out", required=True)
+    seed.add_argument("--out")
 
     verify = subparsers.add_parser("verify")
     verify.add_argument("--seed-receipt", required=True)
@@ -3797,7 +4431,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=MINIMUM_POWER_OFF_SEC,
     )
-    verify.add_argument("--out", required=True)
+    verify.add_argument("--out")
     return parser
 
 
@@ -3806,9 +4440,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         port = enforce_core_port(args.port)
-        if port != D1L_CORE_PORT or args.baud != D1L_BAUD:
+        if args.baud != D1L_BAUD:
             raise ValueError(
-                f"only {D1L_CORE_PORT} at {D1L_BAUD} baud is permitted"
+                f"only {D1L_BAUD} baud is permitted"
+            )
+        public_key = exact_public_key(args.expected_d1l_public_key)
+        if public_key is None:
+            raise ValueError(
+                "--expected-d1l-public-key must be an exact 64-hex value"
             )
         commit = exact_commit(args.commit)
         if commit is None:
@@ -3828,16 +4467,36 @@ def main(argv: list[str] | None = None) -> int:
         root = Path(args.root).resolve(strict=True)
         source_git = exact_source_git(root, commit)
         serial_module, port_lister = _serial_runtime()
+        target_slug = safe_slug(port)
+        default_name = (
+            f"core_retained_seed_{commit[:7]}.json"
+            if args.operation == "seed"
+            else f"core_reboot_persistence_{commit[:7]}.json"
+        )
+        output = _resolve(
+            root,
+            args.out
+            or str(
+                Path("artifacts")
+                / "hardware"
+                / target_slug
+                / default_name
+            ),
+            for_output=True,
+        )
         if args.operation == "seed":
             report = seed_retained_state(
                 root=root,
-                out=_resolve(root, args.out, for_output=True),
+                out=output,
                 serial_module=serial_module,
                 commit=commit,
                 run_id=run_id,
                 run_attempt=run_attempt,
                 timeout=args.timeout,
                 source_git=source_git,
+                port=port,
+                port_lister=port_lister,
+                expected_d1l_public_key=public_key,
             )
         else:
             if (
@@ -3852,7 +4511,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             report = verify_reboot_matrix(
                 root=root,
-                out=_resolve(root, args.out, for_output=True),
+                out=output,
                 seed_path=_resolve(root, args.seed_receipt),
                 flash_path=_resolve(root, args.closing_flash_receipt),
                 serial_module=serial_module,
@@ -3867,6 +4526,8 @@ def main(argv: list[str] | None = None) -> int:
                 port_poll_sec=args.port_poll_sec,
                 minimum_power_off_sec=args.minimum_power_off_sec,
                 source_git=source_git,
+                port=port,
+                expected_d1l_public_key=public_key,
             )
     except (OSError, RuntimeError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
@@ -3876,7 +4537,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "ok": report.get("ok") is True,
                 "kind": report.get("kind"),
-                "out": str(args.out),
+                "out": str(output),
             },
             indent=2,
         )

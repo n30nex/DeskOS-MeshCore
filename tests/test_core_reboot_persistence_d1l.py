@@ -31,6 +31,81 @@ SOURCE_GIT = {
 }
 
 
+def target_row(
+    *,
+    device: str = "COM12",
+    vid: int = 0x1A86,
+    pid: int = 0x7523,
+):
+    return {
+        "device": device,
+        "description": "D1L USB serial",
+        "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+        "serial_number": "D1L-COM12",
+        "vid": vid,
+        "pid": pid,
+        "location": "1-2",
+        "manufacturer": "wch.cn",
+        "product": "USB Serial",
+    }
+
+
+def valid_port_lister():
+    return [target_row()]
+
+
+def target_snapshot():
+    return reboot.resolve_core_target(
+        "COM12",
+        port_lister=valid_port_lister,
+        platform_name="nt",
+    )
+
+
+def alternate_target_snapshot():
+    row = target_row()
+    row["serial_number"] = "OTHER-D1L"
+    row["hwid"] = "USB VID:PID=1A86:7523 SER=OTHER-D1L"
+    return reboot.resolve_core_target(
+        "COM12",
+        port_lister=lambda: [row],
+        platform_name="nt",
+    )
+
+
+def posix_target_snapshot(resolved_tty: str):
+    requested = reboot.D1L_CORE_POSIX_TARGET
+    row = target_row(device=resolved_tty)
+    row["serial_number"] = None
+    row["hwid"] = "USB VID:PID=1A86:7523 LOCATION=1-2"
+
+    def realpath(value: str):
+        return resolved_tty if value == requested else value
+
+    return reboot.resolve_target(
+        requested,
+        port_lister=lambda: [row],
+        platform_name="posix",
+        exists=lambda _value: True,
+        is_symlink=lambda value: value == requested,
+        realpath=realpath,
+        access=lambda _value, _mode: True,
+        hostname=lambda: "neopi5",
+    )
+
+
+def identity_status():
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "identity status",
+        "public_key_ready": True,
+        "public_key": PUBLIC_KEY,
+        "fingerprint": PUBLIC_KEY[:16].upper(),
+        "role": "desk_companion",
+    }
+
+
 def raw_line(payload: bytes, observed_at: str = "2026-07-18T12:00:00Z"):
     return {
         "observed_at": observed_at,
@@ -467,27 +542,19 @@ def full_state_capture(
 
 
 def port_sample(present: bool, monotonic: float):
+    target = target_snapshot() if present else None
     return {
         "observed_at": "2026-07-18T12:00:00Z",
         "monotonic_sec": monotonic,
-        "port": "COM12",
+        "requested_path": "COM12",
+        "state": "present" if present else "absent",
         "present": present,
-        "matches": (
-            [
-                {
-                    "device": "COM12",
-                    "description": "D1L USB serial",
-                    "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
-                    "serial_number": "D1L-COM12",
-                    "vid": 0x1A86,
-                    "pid": 0x7523,
-                    "location": "1-2",
-                    "manufacturer": "wch.cn",
-                    "product": "USB Serial",
-                }
-            ]
+        "valid_absence": not present,
+        "d1l_target": target,
+        "error": (
+            None
             if present
-            else []
+            else "the requested D1L target is not present"
         ),
     }
 
@@ -662,8 +729,9 @@ def seed_receipt():
     assert derived_witness is not None
     projection, errors, _ = reboot.recompute_state_capture(capture, COMMIT)
     assert not errors
+    d1l_target = target_snapshot()
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_retained_state_seed",
         "mode": "hardware",
         "ok": True,
@@ -671,6 +739,15 @@ def seed_receipt():
         "hardware_required": True,
         "physical_observed": True,
         "port": "COM12",
+        "d1l_target": d1l_target,
+        "expected_target_identity_sha256": d1l_target[
+            "stable_identity_sha256"
+        ],
+        "expected_d1l_public_key": PUBLIC_KEY,
+        "d1l_identity_status": command_receipt(
+            "identity status", identity_status()
+        ),
+        "d1l_identity_ok": True,
         "baud": 115200,
         "commit": COMMIT,
         "github_actions_run": RUN_ID,
@@ -731,6 +808,7 @@ def row(path: Path, root: Path):
 
 
 def flash_receipt(root: Path, seed: dict):
+    d1l_target = target_snapshot()
     results = [
         version(),
         health(110, 10000, "SW"),
@@ -746,11 +824,12 @@ def flash_receipt(root: Path, seed: dict):
         write_json(
             path,
             {
-                "schema": 1,
+                "schema": 2,
                 "kind": "core_retained_state_snapshot",
                 "mode": "hardware",
                 "phase": phase,
                 "port": "COM12",
+                "d1l_target": d1l_target,
                 "expected_firmware_commit": COMMIT,
                 "results": results,
                 "projection": snapshot_projection,
@@ -761,7 +840,7 @@ def flash_receipt(root: Path, seed: dict):
     raw = root / "flash.log"
     raw.write_bytes(b"esptool write-flash success\n")
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "esp32_flash",
         "mode": "hardware",
         "scope": "core-retained-reflash-only",
@@ -771,6 +850,14 @@ def flash_receipt(root: Path, seed: dict):
         "hardware_required": True,
         "physical_observed": True,
         "port": "COM12",
+        "d1l_target": d1l_target,
+        "d1l_target_before": d1l_target,
+        "d1l_target_after": d1l_target,
+        "target_identity_continuity_ok": True,
+        "expected_d1l_public_key": PUBLIC_KEY,
+        "pre_flash_identity": identity_status(),
+        "post_flash_identity": identity_status(),
+        "d1l_public_key_continuity_ok": True,
         "commit": COMMIT,
         "github_actions_run": RUN_ID,
         "workflow_run_attempt": RUN_ATTEMPT,
@@ -832,6 +919,7 @@ def cycle_receipt(
         seed_sha256=seed_hash,
         flash_sha256=flash_hash,
         previous_sha256=previous_hash,
+        d1l_target=target_snapshot(),
     )
     report["pre"] = full_state_capture(
         1000 + ordinal, 600000, "SW", 100 + ordinal
@@ -846,8 +934,8 @@ def cycle_receipt(
             "boot_raw_lines": boot_lines(),
             "boot_analysis": {},
             "port_disappear_required": False,
-            "port_before": port_sample(True, 0.0),
-            "port_after": port_sample(True, 1.0),
+            "d1l_target_before": target_snapshot(),
+            "d1l_target_after": target_snapshot(),
         }
     else:
         report["action"] = {
@@ -855,7 +943,7 @@ def cycle_receipt(
             "operator_interactive": True,
             "minimum_power_off_sec": 2.0,
             "observed_power_off_sec": 2.1,
-            "port_before": port_sample(True, 0.0),
+            "d1l_target_before": target_snapshot(),
             "disappear_samples": [
                 port_sample(True, 0.1),
                 port_sample(False, 0.2),
@@ -868,7 +956,7 @@ def cycle_receipt(
                 port_sample(False, 2.4),
                 port_sample(True, 2.5),
             ],
-            "port_after": port_sample(True, 2.5),
+            "d1l_target_after": target_snapshot(),
         }
     report["checks"] = {}
     report["ok"] = True
@@ -916,7 +1004,7 @@ def valid_matrix_tree(tmp_path: Path):
     live_projection, errors, _ = reboot.recompute_state_capture(live, COMMIT)
     assert not errors
     matrix = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_reboot_persistence_matrix",
         "mode": "hardware",
         "ok": True,
@@ -925,6 +1013,11 @@ def valid_matrix_tree(tmp_path: Path):
         "physical_observed": True,
         "matrix_id": matrix_id,
         "port": "COM12",
+        "d1l_target": target_snapshot(),
+        "expected_target_identity_sha256": target_snapshot()[
+            "stable_identity_sha256"
+        ],
+        "expected_d1l_public_key": PUBLIC_KEY,
         "baud": 115200,
         "commit": COMMIT,
         "github_actions_run": RUN_ID,
@@ -937,6 +1030,11 @@ def valid_matrix_tree(tmp_path: Path):
         "git": SOURCE_GIT,
         "seed_receipt": seed_row,
         "closing_flash_receipt": flash_row,
+        "post_reinstall_d1l_target": target_snapshot(),
+        "post_reinstall_identity_status": command_receipt(
+            "identity status", identity_status()
+        ),
+        "post_reinstall_identity_ok": True,
         "post_reinstall_live_capture": live,
         "post_reinstall_projection_sha256": reboot.projection_sha256(
             live_projection
@@ -959,8 +1057,213 @@ def valid_matrix_tree(tmp_path: Path):
 
 @pytest.mark.parametrize("port", ["COM8", "COM11", "COM16", "COM29", "COM13"])
 def test_only_com12_is_admitted(port):
-    with pytest.raises(ValueError, match="requires COM12"):
+    with pytest.raises(ValueError, match="requires COM12 or the exact"):
         reboot.enforce_core_port(port)
+
+
+def test_exact_posix_by_id_target_is_admitted():
+    assert (
+        reboot.enforce_core_port(reboot.D1L_CORE_POSIX_TARGET)
+        == reboot.D1L_CORE_POSIX_TARGET
+    )
+
+    with pytest.raises(ValueError, match="requires COM12 or the exact"):
+        reboot.enforce_core_port("/dev/ttyUSB2")
+    with pytest.raises(ValueError, match="requires COM12 or the exact"):
+        reboot.enforce_core_port(
+            f" {reboot.D1L_CORE_POSIX_TARGET} "
+        )
+
+
+@pytest.mark.parametrize(
+    ("port", "rows"),
+    [
+        ("COM12", [target_row(vid=0x10C4)]),
+        ("/dev/ttyUSB2", [target_row(device="/dev/ttyUSB2")]),
+    ],
+)
+def test_invalid_target_fails_before_serial_open(
+    tmp_path, monkeypatch, port, rows
+):
+    opened = False
+
+    def unexpected_open(*_args, **_kwargs):
+        nonlocal opened
+        opened = True
+        raise AssertionError("serial must not open for an invalid target")
+
+    monkeypatch.setattr(reboot, "_open_serial", unexpected_open)
+    with pytest.raises(ValueError):
+        reboot.seed_retained_state(
+            root=tmp_path,
+            out=tmp_path / f"invalid-{len(rows)}-{len(port)}.json",
+            serial_module=object(),
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            timeout=1.0,
+            source_git=SOURCE_GIT,
+            port=port,
+            port_lister=lambda: rows,
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt" if port == "COM12" else "posix",
+        )
+
+    assert opened is False
+
+
+def test_target_drift_is_rejected_before_next_serial_open(monkeypatch):
+    opened = False
+
+    def unexpected_open(*_args, **_kwargs):
+        nonlocal opened
+        opened = True
+        raise AssertionError("serial must not open after target drift")
+
+    monkeypatch.setattr(reboot, "_open_serial", unexpected_open)
+    initial = target_snapshot()
+    report = reboot._cycle_base(
+        matrix_id="1" * 32,
+        cycle_type="software",
+        ordinal=1,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        seed_sha256="2" * 64,
+        flash_sha256="3" * 64,
+        previous_sha256="3" * 64,
+        d1l_target=initial,
+    )
+
+    with pytest.raises(ValueError, match="identity drifted"):
+        reboot.run_software_cycle(
+            serial_module=object(),
+            port_lister=lambda: [
+                {
+                    **target_row(),
+                    "serial_number": "OTHER-D1L",
+                    "hwid": "USB VID:PID=1A86:7523 SER=OTHER-D1L",
+                }
+            ],
+            timeout=1.0,
+            transition_timeout=1.0,
+            commit=COMMIT,
+            baseline={},
+            report=report,
+            requested_target="COM12",
+            expected_target_identity_sha256=initial[
+                "stable_identity_sha256"
+            ],
+            platform_name="nt",
+        )
+
+    assert opened is False
+
+
+def test_cold_posix_by_id_allows_tty_renumbering():
+    before = posix_target_snapshot("/dev/ttyUSB2")
+    after = posix_target_snapshot("/dev/ttyUSB9")
+    assert before["stable_identity_sha256"] == after[
+        "stable_identity_sha256"
+    ]
+
+    def sample(state: str, at: float, snapshot=None, error=None):
+        return {
+            "observed_at": "2026-07-24T12:00:00Z",
+            "monotonic_sec": at,
+            "requested_path": reboot.D1L_CORE_POSIX_TARGET,
+            "state": state,
+            "present": state == "present",
+            "valid_absence": state == "absent",
+            "d1l_target": snapshot,
+            "error": error,
+        }
+
+    missing = "POSIX D1L by-id target is missing or dangling"
+    action = {
+        "kind": "operator_controlled_cold_power_cycle",
+        "operator_interactive": True,
+        "minimum_power_off_sec": 2.0,
+        "observed_power_off_sec": 2.1,
+        "d1l_target_before": before,
+        "disappear_samples": [
+            sample("present", 0.0, before),
+            sample("absent", 0.1, error=missing),
+        ],
+        "power_off_samples": [
+            sample("absent", 0.1, error=missing),
+            sample("absent", 2.2, error=missing),
+        ],
+        "reappear_samples": [
+            sample("absent", 2.3, error=missing),
+            sample("present", 2.4, after),
+        ],
+        "d1l_target_after": after,
+    }
+
+    ok, errors = reboot._target_action_recomputed(
+        action,
+        cycle_type="cold",
+        requested_target=reboot.D1L_CORE_POSIX_TARGET,
+        expected_target_identity_sha256=before[
+            "stable_identity_sha256"
+        ],
+    )
+
+    assert ok is True, errors
+    assert errors == []
+
+
+def test_serial_open_uses_posix_by_id_path_never_resolved_tty(monkeypatch):
+    opened = []
+    sentinel = object()
+
+    def fake_open(
+        _serial_module, *, port, baudrate, timeout
+    ):
+        opened.append((port, baudrate, timeout))
+        return sentinel
+
+    monkeypatch.setattr(reboot, "open_d1l_serial", fake_open)
+
+    result = reboot._open_serial(
+        object(), 8.0, reboot.D1L_CORE_POSIX_TARGET
+    )
+
+    assert result is sentinel
+    assert opened == [
+        (reboot.D1L_CORE_POSIX_TARGET, reboot.D1L_BAUD, 8.0)
+    ]
+    assert "/dev/ttyUSB" not in opened[0][0]
+
+
+def test_cold_reappearance_with_wrong_usb_ids_is_rejected():
+    action = cycle_receipt(
+        "cold", 1, "1" * 32, "2" * 64, "3" * 64, "3" * 64
+    )["action"]
+    action["reappear_samples"][-1] = {
+        "observed_at": "2026-07-24T12:00:00Z",
+        "monotonic_sec": 2.5,
+        "requested_path": "COM12",
+        "state": "invalid",
+        "present": False,
+        "valid_absence": False,
+        "d1l_target": None,
+        "error": "D1L VID must be 0x1A86; got 4292",
+    }
+    action["d1l_target_after"] = None
+
+    ok, errors = reboot._target_action_recomputed(
+        action,
+        cycle_type="cold",
+        requested_target="COM12",
+        expected_target_identity_sha256=target_snapshot()[
+            "stable_identity_sha256"
+        ],
+    )
+
+    assert ok is False
+    assert errors == ["cold cycle raw port transition evidence failed"]
 
 
 def test_candidate_witness_identity_is_exact_run_and_attempt_bound():
@@ -1381,6 +1684,10 @@ def test_software_cycle_is_recomputed_from_raw_not_checks():
         run_attempt=RUN_ATTEMPT,
         matrix_id="1" * 32,
         baseline=baseline,
+        expected_target="COM12",
+        expected_target_identity_sha256=target_snapshot()[
+            "stable_identity_sha256"
+        ],
     )
 
     assert ok is True
@@ -1406,6 +1713,10 @@ def test_software_cycle_rejects_raw_poweron_banner():
         run_attempt=RUN_ATTEMPT,
         matrix_id="1" * 32,
         baseline=baseline,
+        expected_target="COM12",
+        expected_target_identity_sha256=target_snapshot()[
+            "stable_identity_sha256"
+        ],
     )
 
     assert ok is False
@@ -1429,6 +1740,10 @@ def test_cycle_validator_rejects_unclosed_physical_outcome():
         run_attempt=RUN_ATTEMPT,
         matrix_id="1" * 32,
         baseline=baseline,
+        expected_target="COM12",
+        expected_target_identity_sha256=target_snapshot()[
+            "stable_identity_sha256"
+        ],
     )
 
     assert ok is False
@@ -1441,7 +1756,14 @@ def test_cold_cycle_duration_is_derived_from_raw_monotonic_samples():
     )["action"]
     action["observed_power_off_sec"] = 99.0
 
-    ok, errors = reboot._port_action_recomputed(action, cycle_type="cold")
+    ok, errors = reboot._target_action_recomputed(
+        action,
+        cycle_type="cold",
+        requested_target="COM12",
+        expected_target_identity_sha256=target_snapshot()[
+            "stable_identity_sha256"
+        ],
+    )
 
     assert ok is False
     assert errors == ["cold cycle raw port transition evidence failed"]
@@ -1527,10 +1849,15 @@ def test_flash_validator_rejects_bootstrap_or_erasing_flash(tmp_path):
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
         witness=seed["retention_witness"],
+        expected_target="COM12",
+        expected_target_identity_sha256=target_snapshot()[
+            "stable_identity_sha256"
+        ],
+        expected_d1l_public_key=PUBLIC_KEY,
     )
 
     assert "flash: flash_phase mismatch" in errors
-    assert any("not exact non-erasing" in error for error in errors)
+    assert any("non-erasing" in error for error in errors)
 
 
 def test_seed_validator_requires_raw_settings_retention_mutation():
@@ -1601,7 +1928,7 @@ def test_seed_producer_proves_run_bound_witness_before_settings(
         ]
     )
     monkeypatch.setattr(
-        reboot, "_open_serial", lambda _module, _timeout: SerialContext()
+        reboot, "_open_serial", lambda *_args: SerialContext()
     )
     monkeypatch.setattr(
         reboot,
@@ -1611,6 +1938,8 @@ def test_seed_producer_proves_run_bound_witness_before_settings(
 
     def fake_command(_serial, command, *_args, **_kwargs):
         commands.append(command)
+        if command == "identity status":
+            return command_receipt(command, identity_status())
         if command.startswith("core retained-witness "):
             return command_receipt(command, retained_witness_result())
         return command_receipt(
@@ -1636,11 +1965,16 @@ def test_seed_producer_proves_run_bound_witness_before_settings(
         run_attempt=RUN_ATTEMPT,
         timeout=1.0,
         source_git=SOURCE_GIT,
+        port="COM12",
+        port_lister=valid_port_lister,
+        expected_d1l_public_key=PUBLIC_KEY,
+        platform_name="nt",
     )
 
     assert report["ok"] is True, report["checks"]["errors"]
     assert report["checks"]["candidate_full_store_witness_set_proven"] is True
     assert commands == [
+        "identity status",
         f"core retained-witness {TOKEN}",
         f"settings set name {WITNESS_BASE['settings_node_name']}",
     ]
@@ -1674,7 +2008,7 @@ def test_seed_producer_does_not_mutate_wrong_candidate(tmp_path, monkeypatch):
     wrong_version["build_commit"] = "b" * 40
     wrong["commands"][0] = command_receipt("version", wrong_version)
     monkeypatch.setattr(
-        reboot, "_open_serial", lambda _module, _timeout: SerialContext()
+        reboot, "_open_serial", lambda *_args: SerialContext()
     )
     monkeypatch.setattr(
         reboot,
@@ -1696,9 +2030,71 @@ def test_seed_producer_does_not_mutate_wrong_candidate(tmp_path, monkeypatch):
         run_attempt=RUN_ATTEMPT,
         timeout=1.0,
         source_git=SOURCE_GIT,
+        port="COM12",
+        port_lister=valid_port_lister,
+        expected_d1l_public_key=PUBLIC_KEY,
+        platform_name="nt",
     )
 
     assert report["ok"] is False
+    assert report["retained_witness_proof"] is None
+    assert report["settings_retention_mutation"] is None
+
+
+def test_seed_producer_does_not_mutate_wrong_live_public_key(
+    tmp_path, monkeypatch
+):
+    class SerialContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def reset_input_buffer(self):
+            return None
+
+    captures = iter(
+        [
+            initial_state_capture(1, 10000, "SW", 10),
+            initial_state_capture(1, 11000, "SW", 10),
+        ]
+    )
+    monkeypatch.setattr(
+        reboot, "_open_serial", lambda *_args: SerialContext()
+    )
+    monkeypatch.setattr(
+        reboot,
+        "capture_state",
+        lambda *_args, **_kwargs: next(captures),
+    )
+
+    def identity_only(_serial, command, *_args, **_kwargs):
+        assert command == "identity status"
+        wrong = identity_status()
+        wrong["public_key"] = "b" * 64
+        wrong["fingerprint"] = ("b" * 64)[:16].upper()
+        return command_receipt(command, wrong)
+
+    monkeypatch.setattr(reboot, "read_raw_command", identity_only)
+
+    report = reboot.seed_retained_state(
+        root=tmp_path,
+        out=tmp_path / "wrong-key-seed.json",
+        serial_module=object(),
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        timeout=1.0,
+        source_git=SOURCE_GIT,
+        port="COM12",
+        port_lister=valid_port_lister,
+        expected_d1l_public_key=PUBLIC_KEY,
+        platform_name="nt",
+    )
+
+    assert report["ok"] is False
+    assert report["d1l_identity_ok"] is False
     assert report["retained_witness_proof"] is None
     assert report["settings_retention_mutation"] is None
 
@@ -1760,6 +2156,10 @@ def test_seed_reserves_output_before_opening_serial(tmp_path, monkeypatch):
             run_attempt=RUN_ATTEMPT,
             timeout=1.0,
             source_git=SOURCE_GIT,
+            port="COM12",
+            port_lister=valid_port_lister,
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
         )
 
     assert opened is False
@@ -1786,6 +2186,10 @@ def test_seed_exception_finalizes_reserved_failure_receipt(
             run_attempt=RUN_ATTEMPT,
             timeout=1.0,
             source_git=SOURCE_GIT,
+            port="COM12",
+            port_lister=valid_port_lister,
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
         )
 
     receipt = json.loads(path.read_text(encoding="ascii"))
@@ -1851,7 +2255,7 @@ def test_seed_failure_after_possible_settings_write_preserves_uncertainty(
             return None
 
     monkeypatch.setattr(
-        reboot, "_open_serial", lambda _module, _timeout: SerialContext()
+        reboot, "_open_serial", lambda *_args: SerialContext()
     )
     monkeypatch.setattr(
         reboot,
@@ -1863,6 +2267,10 @@ def test_seed_failure_after_possible_settings_write_preserves_uncertainty(
 
     def command_then_fail(_serial, command, *_args, **kwargs):
         command_log = kwargs.get("command_log")
+        if command == "identity status":
+            receipt = command_receipt(command, identity_status())
+            command_log.append(receipt)
+            return receipt
         if command.startswith("core retained-witness "):
             receipt = command_receipt(command, retained_witness_result())
             command_log.append(receipt)
@@ -1894,6 +2302,10 @@ def test_seed_failure_after_possible_settings_write_preserves_uncertainty(
             run_attempt=RUN_ATTEMPT,
             timeout=1.0,
             source_git=SOURCE_GIT,
+            port="COM12",
+            port_lister=valid_port_lister,
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
         )
 
     receipt = json.loads(path.read_text(encoding="ascii"))
@@ -1904,7 +2316,7 @@ def test_seed_failure_after_possible_settings_write_preserves_uncertainty(
         is True
     )
     assert receipt["mutation_outcome_uncertain"] is True
-    assert len(receipt["partial_command_receipts"]) == 2
+    assert len(receipt["partial_command_receipts"]) == 3
     assert receipt["partial_command_receipts"][-1]["write_attempted"] is True
 
 
@@ -1944,6 +2356,9 @@ def test_verify_final_collision_causes_zero_device_io(
             port_poll_sec=0.1,
             minimum_power_off_sec=2.0,
             source_git=SOURCE_GIT,
+            port="COM12",
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
         )
 
     assert opened is False
@@ -1985,6 +2400,9 @@ def test_verify_cycle_directory_collision_causes_zero_device_io(
             port_poll_sec=0.1,
             minimum_power_off_sec=2.0,
             source_git=SOURCE_GIT,
+            port="COM12",
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
         )
 
     assert opened is False
@@ -2023,7 +2441,7 @@ def test_verify_reserves_matrix_and_all_eight_children_before_serial(
             seed_path=seed_path,
             flash_path=flash_path,
             serial_module=object(),
-            port_lister=lambda: [],
+            port_lister=valid_port_lister,
             prompt=lambda _text: "",
             commit=COMMIT,
             run_id=RUN_ID,
@@ -2034,6 +2452,9 @@ def test_verify_reserves_matrix_and_all_eight_children_before_serial(
             port_poll_sec=0.1,
             minimum_power_off_sec=2.0,
             source_git=SOURCE_GIT,
+            port="COM12",
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
         )
 
     assert checked is True
@@ -2064,13 +2485,20 @@ def test_verify_exception_after_reboot_action_is_physically_uncertain(
             return None
 
     monkeypatch.setattr(
-        reboot, "_open_serial", lambda _module, _timeout: SerialContext()
+        reboot, "_open_serial", lambda *_args: SerialContext()
     )
     monkeypatch.setattr(
         reboot,
         "capture_state",
         lambda *_args, **_kwargs: full_state_capture(
             3000, 10000, "SW", 200
+        ),
+    )
+    monkeypatch.setattr(
+        reboot,
+        "read_raw_command",
+        lambda _ser, command, *_args, **_kwargs: command_receipt(
+            command, identity_status()
         ),
     )
 
@@ -2099,7 +2527,7 @@ def test_verify_exception_after_reboot_action_is_physically_uncertain(
             seed_path=seed_path,
             flash_path=flash_path,
             serial_module=object(),
-            port_lister=lambda: [],
+            port_lister=valid_port_lister,
             prompt=lambda _text: "",
             commit=COMMIT,
             run_id=RUN_ID,
@@ -2110,6 +2538,9 @@ def test_verify_exception_after_reboot_action_is_physically_uncertain(
             port_poll_sec=0.1,
             minimum_power_off_sec=2.0,
             source_git=SOURCE_GIT,
+            port="COM12",
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
         )
 
     matrix = json.loads(out.read_text(encoding="ascii"))
@@ -2141,13 +2572,20 @@ def test_verify_producer_validates_before_final_matrix_write(
             return None
 
     monkeypatch.setattr(
-        reboot, "_open_serial", lambda _module, _timeout: SerialContext()
+        reboot, "_open_serial", lambda *_args: SerialContext()
     )
     monkeypatch.setattr(
         reboot,
         "capture_state",
         lambda *_args, **_kwargs: full_state_capture(
             3000, 10000, "SW", 200
+        ),
+    )
+    monkeypatch.setattr(
+        reboot,
+        "read_raw_command",
+        lambda _ser, command, *_args, **_kwargs: command_receipt(
+            command, identity_status()
         ),
     )
 
@@ -2170,7 +2608,7 @@ def test_verify_producer_validates_before_final_matrix_write(
         seed_path=seed_path,
         flash_path=flash_path,
         serial_module=object(),
-        port_lister=lambda: [],
+        port_lister=valid_port_lister,
         prompt=lambda _text: "",
         commit=COMMIT,
         run_id=RUN_ID,
@@ -2181,6 +2619,9 @@ def test_verify_producer_validates_before_final_matrix_write(
         port_poll_sec=0.1,
         minimum_power_off_sec=2.0,
         source_git=SOURCE_GIT,
+        port="COM12",
+        expected_d1l_public_key=PUBLIC_KEY,
+        platform_name="nt",
     )
 
     assert report["ok"] is True
