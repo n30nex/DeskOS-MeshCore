@@ -258,6 +258,66 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "contacts export" in SMOKE_COMMANDS
 
 
+def test_console_contact_snapshot_covers_full_bounded_store():
+    console = read("main/comms/usb_console.c")
+    body = console.split("static void cmd_contacts(void)", 1)[1].split(
+        "static const char *contact_import_result_name", 1
+    )[0]
+
+    assert "entries[D1L_CONTACT_STORE_CAPACITY]" in body
+    assert (
+        "d1l_contact_store_copy_recent(\n"
+        "        entries, D1L_CONTACT_STORE_CAPACITY)"
+    ) in body
+    assert "entries[8]" not in body
+
+
+def test_core_retained_witness_never_evicts_full_user_stores():
+    console = read("main/comms/usb_console.c")
+    body = console.split("static void cmd_core_retained_witness", 1)[1].split(
+        "static void cmd_contacts_clear", 1
+    )[0]
+
+    assert "existing_full_preserved" in body
+    assert "core_retained_public_witness" in body
+    assert "core_retained_dm_witness" in body
+    assert "core_retained_contact_witness" in body
+    assert "public_before.count == public_before.capacity" in body
+    assert "public_before.public_count == public_before.capacity" in body
+    assert "copied != expected->count" in console
+    assert "dm_before.count == dm_before.capacity" in body
+    assert "contact_before.count == contact_before.capacity" in body
+    assert "expected->persistence_dirty" in console
+    assert "expected->nvs_fallback_dirty" in console
+    assert "expected->nvs_fallback_last_error != ESP_OK" in console
+    assert "expected->sd_primary_required" in console
+    assert '"public_evicted\\":false' in body
+    assert '"dm_evicted\\":false' in body
+    assert '"contact_evicted\\":false' in body
+    assert "d1l_contact_store_delete" not in body
+    assert "RETAINED_WITNESS_SET_NOT_FULL" in body
+    assert '"witness_only\\":true' in body
+    assert '"public_mutated\\":false' in body
+    assert '"dm_mutated\\":false' in body
+    assert '"contact_mutated\\":false' in body
+    assert "d1l_message_store_append" not in body
+    assert "d1l_dm_store_append" not in body
+    assert "d1l_contact_store_import_uri" not in body
+    assert "d1l_route_store_worker_force_flush" not in body
+
+
+def test_console_labels_volatile_message_previews_explicitly():
+    console = read("main/comms/usb_console.c")
+
+    assert '"retained\\":%s,\\"volatile_preview\\":%s' in console
+    assert '"volatile_preview_present\\":%s' in console
+    assert '"volatile_preview_seq\\":%lu' in console
+    assert "d1l_message_store_query_page_snapshot(" in console
+    assert "d1l_dm_store_copy_recent_page_snapshot(" in console
+    assert "d1l_dm_store_copy_thread_page_snapshot(" in console
+    assert "entries[i].seq != volatile_preview_seq" in console
+
+
 def test_contact_import_is_full_key_authoritative_and_truthful():
     header = read("main/mesh/contact_store.h")
     source = read("main/mesh/contact_store.c")

@@ -154,7 +154,7 @@ def test_sd_mutations_are_admitted_before_dispatch_and_core_help_is_nvs_only():
     core_help, _ = _help_profiles()
     assert r"storage force-nvs [on]" in core_help
     assert r"storage force-nvs [on|off]" not in core_help
-    assert r"core retained-canary <token>" in core_help
+    assert r"core retained-witness <token>" in core_help
     assert r"storage retained-canary <token>" not in core_help
 
 
@@ -446,36 +446,38 @@ def test_ui_probe_alias_classifier_does_not_capture_valid_core_aliases():
         assert f'{{"{alias}",' not in compose_map
 
 
-def test_core_retained_canary_is_nvs_only_and_excluded_sd_canary_is_closed():
+def test_core_retained_witness_is_nvs_only_and_excluded_sd_canary_is_closed():
     table = CONSOLE.split(
         "static const d1l_release_command_rule_t s_release_command_rules[] = {",
         1,
     )[1].split("};", 1)[0]
     assert _rule_pattern(
-        "core retained-canary", "MUTATION", "RETAINED_NVS"
+        "core retained-witness", "READ_ONLY", "RETAINED_NVS"
     ).search(table)
     assert _rule_pattern(
         "storage retained-canary", "MUTATION", "SD_HISTORY"
     ).search(table)
 
     implementation = CONSOLE.split(
-        "static bool core_retained_canary_nvs_only(void)", 1
+        "static bool core_retained_witness_nvs_only(void)", 1
     )[1].split("static void cmd_contacts_clear(void)", 1)[0]
     handler = implementation.split(
-        "static void cmd_core_retained_canary(const char *line)", 1
+        "static void cmd_core_retained_witness(const char *line)", 1
     )[1]
 
     assert "d1l_retained_blob_store_backend_state(" in implementation
     assert "state.enabled" in implementation
     assert "d1l_release_sd_history_mode() !=" in handler
     assert "D1L_SD_HISTORY_MODE_DISABLED" in handler
-    assert "d1l_message_store_append_public(" in handler
-    assert "d1l_dm_store_append(" in handler
-    assert "ed25519_create_keypair(public_key, private_key, seed);" in implementation
-    assert "wipe_console_bytes(seed, sizeof(seed));" in implementation
-    assert "wipe_console_bytes(private_key, sizeof(private_key));" in implementation
-    assert "public_key_hex[i * 2U]" in implementation
-    assert "seed[i]" not in implementation
+    assert "RETAINED_WITNESS_SET_NOT_FULL" in handler
+    assert '"witness_only\\":true' in handler
+    assert '"public_mutated\\":false' in handler
+    assert '"dm_mutated\\":false' in handler
+    assert '"contact_mutated\\":false' in handler
+    assert "d1l_message_store_append" not in handler
+    assert "d1l_dm_store_append" not in handler
+    assert "d1l_contact_store_import_uri" not in handler
+    assert "d1l_route_store_worker_force_flush" not in handler
 
     for forbidden in (
         "d1l_meshcore_service",

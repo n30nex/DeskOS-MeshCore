@@ -3,8 +3,10 @@
 
 The producer deliberately separates two phases:
 
-* ``seed`` runs on the exact candidate, writes deterministic local-only NVS
-  Public/DM/contact and settings canaries, and captures retained Core state.
+* ``seed`` runs on the exact candidate, proves a stable witness-only snapshot
+  of already-full retained Public/DM/contact stores, writes one settings
+  retention marker only after that read-only proof passes, and captures the
+  resulting Core state.
 * ``verify`` requires the seed plus the exact-candidate non-erasing reflash
   receipt, then executes five software reboots and three operator-controlled
   cold power cycles.
@@ -22,6 +24,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -73,8 +76,8 @@ STATE_TAIL_COMMANDS = (
 MAX_RAW_LINE_BYTES = 131072
 MAX_PAGES = 32
 CLAIM = "same_exact_candidate_non_erasing_reinstall"
-CORE_CANARY_KEY_DOMAIN = "sigui-core-retained-canary:"
-CORE_CANARY_MESSAGE_PREFIX = "core-retained-canary "
+CORE_WITNESS_TOKEN_DOMAIN = "sigui-core-retained-witness:"
+CORE_WITNESS_LABEL_PREFIX = "core-retained-witness "
 
 RESET_RE = re.compile(
     r"(?:^|\s)rst:0x(?P<code>[0-9a-f]+)\s*\((?P<reason>[^)]+)\)",
@@ -113,54 +116,7 @@ def positive_decimal(value: object) -> bool:
     return text.isdigit() and int(text) > 0
 
 
-_ED25519_Q = 2**255 - 19
-_ED25519_D = (
-    -121665 * pow(121666, _ED25519_Q - 2, _ED25519_Q)
-) % _ED25519_Q
-_ED25519_BASE = (
-    15112221349535400772501151409588531511454012693041857206046113283949847762202,
-    46316835694926478169428394003475163141307993866256225615783033603165251855960,
-)
-
-
-def _ed25519_add(
-    left: tuple[int, int],
-    right: tuple[int, int],
-) -> tuple[int, int]:
-    x1, y1 = left
-    x2, y2 = right
-    product = _ED25519_D * x1 * x2 * y1 * y2 % _ED25519_Q
-    x3 = (
-        (x1 * y2 + x2 * y1)
-        * pow(1 + product, _ED25519_Q - 2, _ED25519_Q)
-    ) % _ED25519_Q
-    y3 = (
-        (y1 * y2 + x1 * x2)
-        * pow(1 - product, _ED25519_Q - 2, _ED25519_Q)
-    ) % _ED25519_Q
-    return x3, y3
-
-
-def ed25519_public_key_from_seed(seed: bytes) -> bytes:
-    if not isinstance(seed, bytes) or len(seed) != 32:
-        raise ValueError("Ed25519 seed must be exactly 32 bytes")
-    expanded = bytearray(hashlib.sha512(seed).digest())
-    expanded[0] &= 248
-    expanded[31] &= 63
-    expanded[31] |= 64
-    scalar = int.from_bytes(expanded[:32], "little")
-    point = (0, 1)
-    addend = _ED25519_BASE
-    while scalar:
-        if scalar & 1:
-            point = _ed25519_add(point, addend)
-        addend = _ed25519_add(addend, addend)
-        scalar >>= 1
-    encoded = point[1] | ((point[0] & 1) << 255)
-    return encoded.to_bytes(32, "little")
-
-
-def candidate_canary(
+def candidate_witness_identity(
     commit: str,
     run_id: str,
     run_attempt: str,
@@ -171,7 +127,7 @@ def candidate_canary(
         or not positive_decimal(run_id)
         or not positive_decimal(run_attempt)
     ):
-        raise ValueError("candidate canary identity is invalid")
+        raise ValueError("candidate witness identity is invalid")
     identity = canonical_json(
         {
             "commit": commit,
@@ -180,16 +136,10 @@ def candidate_canary(
         }
     )
     token = f"core-{sha256_bytes(identity)[:24]}"
-    seed = hashlib.sha256(
-        f"{CORE_CANARY_KEY_DOMAIN}{token}".encode("ascii")
-    ).digest()
-    public_key = ed25519_public_key_from_seed(seed).hex()
     return {
         "settings_node_name": f"D1L-Core-{commit[:7]}",
         "token": token,
-        "message_text": f"{CORE_CANARY_MESSAGE_PREFIX}{token}",
-        "contact_fingerprint": public_key[:16].upper(),
-        "contact_public_key": public_key,
+        "witness_request_label": f"{CORE_WITNESS_LABEL_PREFIX}{token}",
     }
 
 
@@ -234,31 +184,62 @@ def exact_source_git(
     return source
 
 
+def _lexical_absolute(path: Path) -> Path:
+    """Return an absolute path without resolving links or reparse points."""
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _reject_reparse_chain(
+    root: Path,
+    path: Path,
+    label: str,
+    *,
+    include_leaf: bool,
+) -> None:
+    cursor = path if include_leaf else path.parent
+    while True:
+        if os.path.lexists(os.fspath(cursor)) and is_link_or_reparse(cursor):
+            relation = "output" if cursor == path else "parent"
+            raise ValueError(
+                f"{label} {relation} cannot be a link/reparse point: {cursor}"
+            )
+        if cursor == root:
+            return
+        parent = cursor.parent
+        if parent == cursor:
+            raise ValueError(f"{label} must stay inside {root}")
+        cursor = parent
+
+
 def _inside_existing(root: Path, path: Path, label: str) -> Path:
+    resolved_root = root.resolve(strict=True)
+    lexical = _lexical_absolute(path)
     try:
-        resolved_root = root.resolve(strict=True)
-        resolved = path.resolve(strict=True)
+        lexical.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"{label} must stay inside {root}") from exc
+    _reject_reparse_chain(
+        resolved_root, lexical, label, include_leaf=True
+    )
+    try:
+        resolved = lexical.resolve(strict=True)
         resolved.relative_to(resolved_root)
     except (OSError, RuntimeError, ValueError) as exc:
         raise ValueError(f"{label} must stay inside {root}") from exc
-    if is_link_or_reparse(path):
-        raise ValueError(f"{label} cannot be a link/reparse point: {path}")
     return resolved
 
 
 def _inside_output(root: Path, path: Path, label: str) -> Path:
     resolved_root = root.resolve(strict=True)
-    resolved = path.resolve()
+    lexical = _lexical_absolute(path)
     try:
-        resolved.relative_to(resolved_root)
+        lexical.relative_to(resolved_root)
     except ValueError as exc:
         raise ValueError(f"{label} must stay inside {root}") from exc
-    cursor = resolved.parent
-    while cursor != resolved_root:
-        if cursor.exists() and is_link_or_reparse(cursor):
-            raise ValueError(f"{label} parent cannot be a link/reparse point")
-        cursor = cursor.parent
-    return resolved
+    _reject_reparse_chain(
+        resolved_root, lexical, label, include_leaf=True
+    )
+    return lexical
 
 
 def load_json(path: Path, root: Path, label: str) -> dict[str, Any]:
@@ -309,15 +290,146 @@ def validate_file_row(
     return path, errors
 
 
+def reserve_json_output(path: Path, root: Path) -> tuple[Path, Any]:
+    lexical = _inside_output(root, path, "evidence output")
+    lexical.parent.mkdir(parents=True, exist_ok=True)
+    lexical = _inside_output(root, lexical, "evidence output")
+    resolved_parent = lexical.parent.resolve(strict=True)
+    try:
+        resolved_parent.relative_to(root.resolve(strict=True))
+    except ValueError as exc:
+        raise ValueError("evidence output parent escaped the root") from exc
+    try:
+        handle = lexical.open("x", encoding="ascii", newline="\n")
+    except FileExistsError as exc:
+        raise ValueError(f"refusing to overwrite evidence: {lexical}") from exc
+    try:
+        reserved = _inside_existing(root, lexical, "evidence output reservation")
+        if reserved != lexical:
+            raise ValueError("evidence output reservation changed path identity")
+    except BaseException:
+        handle.close()
+        raise
+    return lexical, handle
+
+
+def finalize_json_output(handle: Any, value: dict[str, Any]) -> None:
+    try:
+        handle.write(
+            json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+        )
+        handle.flush()
+        os.fsync(handle.fileno())
+    finally:
+        handle.close()
+
+
 def write_json_once(path: Path, root: Path, value: dict[str, Any]) -> None:
-    resolved = _inside_output(root, path, "evidence output")
-    if resolved.exists():
-        raise ValueError(f"refusing to overwrite evidence: {resolved}")
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(
-        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
-        encoding="ascii",
-    )
+    _, handle = reserve_json_output(path, root)
+    finalize_json_output(handle, value)
+
+
+def reserve_reboot_outputs(
+    out: Path,
+    root: Path,
+) -> tuple[Path, Any, dict[tuple[str, int], tuple[Path, Any]]]:
+    final_path, final_handle = reserve_json_output(out, root)
+    reservations: dict[tuple[str, int], tuple[Path, Any]] = {}
+    try:
+        child_dir = _inside_output(
+            root,
+            final_path.with_suffix("").with_name(final_path.stem + "_cycles"),
+            "cycle directory",
+        )
+        child_dir.mkdir(parents=True, exist_ok=False)
+        child_dir = _inside_output(root, child_dir, "cycle directory")
+        if not child_dir.is_dir():
+            raise ValueError("cycle directory reservation failed")
+        for cycle_type, count in (
+            ("software", SOFTWARE_CYCLE_COUNT),
+            ("cold", COLD_CYCLE_COUNT),
+        ):
+            for ordinal in range(1, count + 1):
+                path, handle = reserve_json_output(
+                    child_dir / f"{cycle_type}_{ordinal}.json",
+                    root,
+                )
+                reservations[(cycle_type, ordinal)] = (path, handle)
+    except BaseException:
+        if not final_handle.closed:
+            final_handle.close()
+        for _, handle in reservations.values():
+            if not handle.closed:
+                handle.close()
+        raise
+    return final_path, final_handle, reservations
+
+
+def _unused_cycle_reservation_receipt(
+    *,
+    cycle_type: str,
+    ordinal: int,
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "schema": 1,
+        "kind": "core_reboot_persistence_cycle_reservation",
+        "mode": "hardware",
+        "ok": False,
+        "closure_eligible": False,
+        "hardware_required": True,
+        "physical_observed": False,
+        "cycle_type": cycle_type,
+        "ordinal": ordinal,
+        "port": D1L_CORE_PORT,
+        "commit": commit,
+        "github_actions_run": run_id,
+        "workflow_run_attempt": run_attempt,
+        "release_profile": CORE_RELEASE_PROFILE,
+        "sd_history_mode": SD_HISTORY_MODE,
+        "execution_state": "not_executed",
+        "reason": reason,
+        "physical_state_outcome_uncertain": False,
+        "mutation_outcome_uncertain": False,
+        "public_rf_tx": False,
+        "dm_rf_tx": False,
+        "formats_sd": False,
+        "predecessor_evidence_used": False,
+    }
+
+
+def finalize_unused_cycle_reservations(
+    reservations: dict[tuple[str, int], tuple[Path, Any]],
+    *,
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+    reason: str,
+) -> None:
+    first_error: BaseException | None = None
+    for (cycle_type, ordinal), (_, handle) in reservations.items():
+        if handle.closed:
+            continue
+        try:
+            finalize_json_output(
+                handle,
+                _unused_cycle_reservation_receipt(
+                    cycle_type=cycle_type,
+                    ordinal=ordinal,
+                    commit=commit,
+                    run_id=run_id,
+                    run_attempt=run_attempt,
+                    reason=reason,
+                ),
+            )
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
+    if first_error is not None:
+        raise first_error
 
 
 def _raw_line(raw: bytes, observed_at: str) -> dict[str, Any]:
@@ -327,6 +439,18 @@ def _raw_line(raw: bytes, observed_at: str) -> dict[str, Any]:
         "sha256": sha256_bytes(raw),
         "base64": base64.b64encode(raw).decode("ascii"),
     }
+
+
+def expected_raw_command_name(command: str) -> str:
+    """Return the response ``cmd`` emitted for one exact console request."""
+    if (
+        command == "messages public"
+        or command.startswith("messages public offset ")
+    ):
+        return "messages public"
+    if command.startswith("core retained-witness "):
+        return "core retained-witness"
+    return expected_command_name(command)
 
 
 def decode_raw_line(row: object) -> tuple[bytes | None, list[str]]:
@@ -358,17 +482,30 @@ def read_raw_command(
     *,
     clock: Callable[[], float] = time.monotonic,
     now: Callable[[], str] = utc_now,
+    command_log: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    expected = expected_command_name(command)
+    expected = expected_raw_command_name(command)
     started_at = now()
-    ser.write((command + "\n").encode("utf-8"))
-    if hasattr(ser, "flush"):
-        ser.flush()
-    deadline = clock() + timeout
     lines: list[dict[str, Any]] = []
     result: dict[str, Any] | None = None
+    receipt: dict[str, Any] = {
+        "command": command,
+        "expected_cmd": expected,
+        "started_at": started_at,
+        "ended_at": None,
+        "write_attempted": False,
+        "raw_lines": lines,
+        "result": None,
+    }
+    if command_log is not None:
+        command_log.append(receipt)
     original_timeout = getattr(ser, "timeout", None)
     try:
+        receipt["write_attempted"] = True
+        ser.write((command + "\n").encode("utf-8"))
+        if hasattr(ser, "flush"):
+            ser.flush()
+        deadline = clock() + timeout
         while clock() < deadline:
             remaining = max(0.001, deadline - clock())
             if hasattr(ser, "timeout"):
@@ -388,6 +525,7 @@ def read_raw_command(
                 result = parsed
                 break
     finally:
+        receipt["ended_at"] = now()
         if hasattr(ser, "timeout"):
             ser.timeout = original_timeout
     if result is None:
@@ -397,14 +535,8 @@ def read_raw_command(
             "cmd": expected,
             "code": "TIMEOUT_OR_INVALID_RAW",
         }
-    return {
-        "command": command,
-        "expected_cmd": expected,
-        "started_at": started_at,
-        "ended_at": now(),
-        "raw_lines": lines,
-        "result": result,
-    }
+    receipt["result"] = result
+    return receipt
 
 
 def recompute_raw_command(row: object) -> tuple[dict[str, Any] | None, list[str]]:
@@ -416,7 +548,7 @@ def recompute_raw_command(row: object) -> tuple[dict[str, Any] | None, list[str]
     if not isinstance(command, str) or not command:
         errors.append("command receipt command is missing")
         return None, errors
-    if expected != expected_command_name(command):
+    if expected != expected_raw_command_name(command):
         errors.append(f"{command}: expected command mismatch")
     raw_lines = row.get("raw_lines")
     if not isinstance(raw_lines, list) or not raw_lines:
@@ -564,13 +696,19 @@ def _capture_pages(
     *,
     clock: Callable[[], float],
     now: Callable[[], str],
+    command_log: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     offset = 0
     for _ in range(MAX_PAGES):
         request = command if offset == 0 else f"{command} offset {offset}"
         row = read_raw_command(
-            ser, request, timeout, clock=clock, now=now
+            ser,
+            request,
+            timeout,
+            clock=clock,
+            now=now,
+            command_log=command_log,
         )
         rows.append(row)
         result = row.get("result")
@@ -594,9 +732,17 @@ def capture_state(
     *,
     clock: Callable[[], float] = time.monotonic,
     now: Callable[[], str] = utc_now,
+    command_log: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     commands = [
-        read_raw_command(ser, command, timeout, clock=clock, now=now)
+        read_raw_command(
+            ser,
+            command,
+            timeout,
+            clock=clock,
+            now=now,
+            command_log=command_log,
+        )
         for command in STATE_BASE_COMMANDS
     ]
     commands.extend(
@@ -606,6 +752,7 @@ def capture_state(
             timeout,
             clock=clock,
             now=now,
+            command_log=command_log,
         )
         for command in ("messages public", "messages dm")
     )
@@ -616,7 +763,14 @@ def capture_state(
         else:
             flattened.append(row)
     flattened.extend(
-        read_raw_command(ser, command, timeout, clock=clock, now=now)
+        read_raw_command(
+            ser,
+            command,
+            timeout,
+            clock=clock,
+            now=now,
+            command_log=command_log,
+        )
         for command in STATE_TAIL_COMMANDS
     )
     return {
@@ -689,11 +843,19 @@ def _page_projection(
         "total_matches",
         "retained_epoch",
         "content_revision",
+        "volatile_preview_present",
+        "volatile_preview_seq",
     )
+    if command == "messages public":
+        stable_fields += ("retained_store_count", "retained_public_count")
+    else:
+        stable_fields += ("retained_count",)
     for index, result in enumerate(pages):
         if not _command_ok(result, command):
             errors.append(f"{command}: page {index} failed")
             continue
+        if result.get("filtered") is not False:
+            errors.append(f"{command}: page {index} is unexpectedly filtered")
         if not _clean_persistence(result):
             errors.append(f"{command}: page {index} persistence is not clean")
         offset = result.get("offset")
@@ -741,15 +903,71 @@ def _page_projection(
     ]
     if len(sequences) != len(entries) or len(set(sequences)) != len(sequences):
         errors.append(f"{command}: entry sequence values are invalid or duplicated")
-    entries.sort(key=lambda entry: entry["seq"])
+    retained_entries: list[dict[str, Any]] = []
+    volatile_entries: list[dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        retained = entry.get("retained")
+        volatile_preview = entry.get("volatile_preview")
+        if (
+            type(retained) is not bool
+            or type(volatile_preview) is not bool
+            or retained == volatile_preview
+        ):
+            errors.append(
+                f"{command}: entry {index} retained/volatile classification is invalid"
+            )
+            continue
+        (retained_entries if retained else volatile_entries).append(entry)
+    preview_present = first.get("volatile_preview_present")
+    preview_seq = first.get("volatile_preview_seq")
+    if type(preview_present) is not bool:
+        errors.append(f"{command}: volatile preview presence is invalid")
+    elif preview_present:
+        if (
+            len(volatile_entries) != 1
+            or type(preview_seq) is not int
+            or preview_seq <= 0
+            or volatile_entries[0].get("seq") != preview_seq
+        ):
+            errors.append(f"{command}: volatile preview identity is invalid")
+    elif volatile_entries or preview_seq != 0:
+        errors.append(f"{command}: unexpected volatile preview row")
+    retained_count = first.get("count")
+    if type(retained_count) is not int or retained_count < 0:
+        errors.append(f"{command}: retained count is invalid")
+    elif retained_count != len(retained_entries):
+        errors.append(
+            f"{command}: retained count does not equal captured durable entries"
+        )
+    if command == "messages public":
+        if first.get("retained_public_count") != retained_count:
+            errors.append("messages public: retained Public count mismatch")
+        store_count = first.get("retained_store_count")
+        capacity = first.get("capacity")
+        if (
+            type(store_count) is not int
+            or type(capacity) is not int
+            or capacity <= 0
+            or store_count < retained_count
+            or store_count > capacity
+        ):
+            errors.append("messages public: retained shared-store count is invalid")
+    elif first.get("retained_count") != retained_count:
+        errors.append("messages dm: retained count mismatch")
+    retained_entries.sort(key=lambda entry: entry["seq"])
     return {
         "count": first.get("count"),
         "capacity": first.get("capacity"),
+        **(
+            {"retained_store_count": first.get("retained_store_count")}
+            if command == "messages public"
+            else {}
+        ),
         "total_written": first.get("total_written"),
         "dropped_oldest": first.get("dropped_oldest"),
         "retained_epoch": first.get("retained_epoch"),
         "content_revision": first.get("content_revision"),
-        "entries": entries,
+        "entries": retained_entries,
     }, errors
 
 
@@ -761,8 +979,13 @@ def _contact_projection(
         return None, ["contacts: command or persistence failed"]
     entries = result.get("entries")
     count = result.get("count")
+    capacity = result.get("capacity")
     if (
         type(count) is not int
+        or type(capacity) is not int
+        or count < 0
+        or capacity <= 0
+        or count > capacity
         or not isinstance(entries, list)
         or not all(isinstance(entry, dict) for entry in entries)
     ):
@@ -793,11 +1016,31 @@ def _contact_projection(
             continue
         projected.append({field: entry[field] for field in durable_fields})
     projected.sort(key=lambda entry: entry["seq"])
+    sequences = [entry.get("seq") for entry in projected]
+    if (
+        len(projected) != len(entries)
+        or any(type(value) is not int or value <= 0 for value in sequences)
+        or len(set(sequences)) != len(sequences)
+    ):
+        errors.append("contacts: durable sequence values are invalid or duplicated")
+    for field in (
+        "total_written",
+        "dropped_oldest",
+        "persistence_revision",
+    ):
+        if type(result.get(field)) is not int or result[field] < 0:
+            errors.append(f"contacts: {field} is invalid")
+    if (
+        result.get("persistence_dirty") is not False
+        or result.get("persistence_last_error") != "ESP_OK"
+    ):
+        errors.append("contacts: persistence state is not clean")
     return {
         "count": count,
-        "capacity": result.get("capacity"),
+        "capacity": capacity,
         "total_written": result.get("total_written"),
         "dropped_oldest": result.get("dropped_oldest"),
+        "persistence_revision": result.get("persistence_revision"),
         "entries": projected,
     }, errors
 
@@ -970,118 +1213,429 @@ def state_preserved(
     return not errors, errors
 
 
-def recompute_local_canary_mutation(
+def recompute_retained_witness_proof(
     result: object,
     *,
     expected: dict[str, Any],
+    initial_projection: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     errors: list[str] = []
-    if not _command_ok(result, "core retained-canary"):
-        return None, ["local retained canary command failed"]
+    if not _command_ok(result, "core retained-witness"):
+        return None, ["retained witness command failed"]
+    if not isinstance(initial_projection, dict):
+        return None, ["retained witness initial projection is missing"]
     assert isinstance(result, dict)
     required = {
         "token": expected.get("token"),
-        "message_text": expected.get("message_text"),
-        "fingerprint": expected.get("contact_fingerprint"),
-        "public_key": expected.get("contact_public_key"),
+        "witness_request_label": expected.get("witness_request_label"),
         "persisted": True,
         "retention": "nvs",
         "backend_mode": "nvs_disabled",
-        "synthetic_local": True,
-        "retained_flush": "ESP_OK",
+        "synthetic_local": False,
+        "retained_flush": "not_requested_zero_mutation",
+        "witness_only": True,
+        "public_mutated": False,
+        "dm_mutated": False,
+        "contact_mutated": False,
         "public_rf_tx": False,
         "dm_rf_tx": False,
         "sd_access": False,
         "rp2040_access": False,
         "formats_sd": False,
         "predecessor_evidence_used": False,
+        "public_evicted": False,
+        "dm_evicted": False,
+        "contact_evicted": False,
     }
     for key, expected_value in required.items():
         observed = result.get(key)
-        if key == "fingerprint" and isinstance(observed, str):
-            observed = observed.upper()
-        if key == "public_key" and isinstance(observed, str):
-            observed = observed.lower()
         if observed != expected_value:
-            errors.append(f"local retained canary {key} mismatch")
-    if result.get("contact_result") not in {"created", "updated", "promoted"}:
-        errors.append("local retained canary contact result is not admissible")
+            errors.append(f"retained witness {key} mismatch")
     sequence_fields = ("public_seq", "dm_seq", "contact_seq")
     for key in sequence_fields:
         if type(result.get(key)) is not int or result[key] <= 0:
-            errors.append(f"local retained canary {key} is invalid")
+            errors.append(f"retained witness {key} is invalid")
+
+    public_before = initial_projection.get("public_messages")
+    dm_before = initial_projection.get("direct_messages")
+    contacts_before = initial_projection.get("contacts")
+    if not all(
+        isinstance(value, dict)
+        for value in (public_before, dm_before, contacts_before)
+    ):
+        return None, [
+            *errors,
+            "retained witness initial retained projections are incomplete",
+        ]
+    assert isinstance(public_before, dict)
+    assert isinstance(dm_before, dict)
+    assert isinstance(contacts_before, dict)
+
+    def integer(name: str) -> int | None:
+        value = result.get(name)
+        if type(value) is not int or value < 0:
+            errors.append(f"retained witness {name} is invalid")
+            return None
+        return value
+
+    public_fields = {
+        name: integer(name)
+        for name in (
+            "public_store_count_before",
+            "public_store_count_after",
+            "public_retained_count_before",
+            "public_retained_count_after",
+            "public_capacity",
+            "public_total_written_before",
+            "public_total_written_after",
+            "public_dropped_oldest_before",
+            "public_dropped_oldest_after",
+            "public_content_revision_before",
+            "public_content_revision_after",
+        )
+    }
+    dm_fields = {
+        name: integer(name)
+        for name in (
+            "dm_count_before",
+            "dm_count_after",
+            "dm_capacity",
+            "dm_total_written_before",
+            "dm_total_written_after",
+            "dm_dropped_oldest_before",
+            "dm_dropped_oldest_after",
+            "dm_content_revision_before",
+            "dm_content_revision_after",
+        )
+    }
+    contact_fields = {
+        name: integer(name)
+        for name in (
+            "contact_count_before",
+            "contact_count_after",
+            "contact_capacity",
+            "contact_total_written_before",
+            "contact_total_written_after",
+            "contact_dropped_oldest_before",
+            "contact_dropped_oldest_after",
+            "contact_persistence_revision_before",
+            "contact_persistence_revision_after",
+        )
+    }
+
+    public_initial_required = {
+        "public_store_count_before": public_before.get("retained_store_count"),
+        "public_retained_count_before": public_before.get("count"),
+        "public_capacity": public_before.get("capacity"),
+        "public_total_written_before": public_before.get("total_written"),
+        "public_dropped_oldest_before": public_before.get("dropped_oldest"),
+        "public_content_revision_before": public_before.get("content_revision"),
+    }
+    dm_initial_required = {
+        "dm_count_before": dm_before.get("count"),
+        "dm_capacity": dm_before.get("capacity"),
+        "dm_total_written_before": dm_before.get("total_written"),
+        "dm_dropped_oldest_before": dm_before.get("dropped_oldest"),
+        "dm_content_revision_before": dm_before.get("content_revision"),
+    }
+    contact_initial_required = {
+        "contact_count_before": contacts_before.get("count"),
+        "contact_capacity": contacts_before.get("capacity"),
+        "contact_total_written_before": contacts_before.get("total_written"),
+        "contact_dropped_oldest_before": contacts_before.get("dropped_oldest"),
+        "contact_persistence_revision_before": contacts_before.get(
+            "persistence_revision"
+        ),
+    }
+    for values, expected_values, label in (
+        (public_fields, public_initial_required, "Public"),
+        (dm_fields, dm_initial_required, "DM"),
+        (contact_fields, contact_initial_required, "contact"),
+    ):
+        for key, expected_value in expected_values.items():
+            if values.get(key) != expected_value:
+                errors.append(
+                    f"retained witness {label} initial {key} mismatch"
+                )
+
+    def witness(
+        entries: object,
+        sequence: object,
+        label: str,
+    ) -> dict[str, Any] | None:
+        if not isinstance(entries, list):
+            errors.append(f"retained witness {label} entries are missing")
+            return None
+        matches = [
+            entry
+            for entry in entries
+            if isinstance(entry, dict) and entry.get("seq") == sequence
+        ]
+        if len(matches) != 1:
+            errors.append(
+                f"retained witness {label} durable witness is not unique"
+            )
+            return None
+        return matches[0]
+
+    mode_witness = "existing_full_preserved"
+    public_mode = result.get("public_mode")
+    dm_mode = result.get("dm_mode")
+    contact_mode = result.get("contact_mode")
+    public_witness: dict[str, Any] | None = None
+    dm_witness: dict[str, Any] | None = None
+    contact_witness: dict[str, Any] | None = None
+
+    if public_mode == mode_witness:
+        if (
+            result.get("public_mutated") is not False
+            or public_fields["public_store_count_before"]
+            != public_fields["public_capacity"]
+            or public_fields["public_retained_count_before"]
+            != public_fields["public_capacity"]
+            or public_before.get("retained_store_count")
+            != public_before.get("count")
+            or not isinstance(public_before.get("entries"), list)
+            or len(public_before["entries"])
+            != public_fields["public_capacity"]
+        ):
+            errors.append("retained Public witness full-store mode is unsafe")
+        for suffix in (
+            "store_count",
+            "retained_count",
+            "total_written",
+            "dropped_oldest",
+            "content_revision",
+        ):
+            if public_fields[f"public_{suffix}_after"] != public_fields[
+                f"public_{suffix}_before"
+            ]:
+                errors.append(
+                    f"retained Public witness {suffix} changed"
+                )
+        public_witness = witness(
+            public_before.get("entries"), result.get("public_seq"), "Public"
+        )
+    else:
+        errors.append("retained Public proof must be witness-only")
+
+    if dm_mode == mode_witness:
+        if (
+            result.get("dm_mutated") is not False
+            or dm_fields["dm_count_before"] != dm_fields["dm_capacity"]
+            or not isinstance(dm_before.get("entries"), list)
+            or len(dm_before["entries"]) != dm_fields["dm_capacity"]
+        ):
+            errors.append("retained DM witness full-store mode is unsafe")
+        for suffix in (
+            "count",
+            "total_written",
+            "dropped_oldest",
+            "content_revision",
+        ):
+            if dm_fields[f"dm_{suffix}_after"] != dm_fields[
+                f"dm_{suffix}_before"
+            ]:
+                errors.append(
+                    f"retained DM witness {suffix} changed"
+                )
+        dm_witness = witness(
+            dm_before.get("entries"), result.get("dm_seq"), "DM"
+        )
+    else:
+        errors.append("retained DM proof must be witness-only")
+
+    fingerprint = result.get("fingerprint")
+    public_key = result.get("public_key")
+    normalized_fingerprint = (
+        fingerprint.upper() if isinstance(fingerprint, str) else ""
+    )
+    normalized_public_key = (
+        public_key.lower() if isinstance(public_key, str) else ""
+    )
+    if (
+        not re.fullmatch(r"[0-9A-F]{16}", normalized_fingerprint)
+        or not re.fullmatch(r"[0-9a-f]{64}", normalized_public_key)
+        or normalized_public_key[:16].upper() != normalized_fingerprint
+    ):
+        errors.append("retained contact witness identity is invalid")
+    if contact_mode == mode_witness:
+        if (
+            result.get("contact_result") != mode_witness
+            or result.get("contact_mutated") is not False
+            or contact_fields["contact_count_before"]
+            != contact_fields["contact_capacity"]
+            or not isinstance(contacts_before.get("entries"), list)
+            or len(contacts_before["entries"])
+            != contact_fields["contact_capacity"]
+        ):
+            errors.append("retained contact witness full-store mode is unsafe")
+        for suffix in (
+            "count",
+            "total_written",
+            "dropped_oldest",
+            "persistence_revision",
+        ):
+            if contact_fields[f"contact_{suffix}_after"] != contact_fields[
+                f"contact_{suffix}_before"
+            ]:
+                errors.append(
+                    f"retained contact witness {suffix} changed"
+                )
+        contact_witness = witness(
+            contacts_before.get("entries"),
+            result.get("contact_seq"),
+            "contact",
+        )
+        if (
+            contact_witness is not None
+            and (
+                str(contact_witness.get("fingerprint") or "").upper()
+                != normalized_fingerprint
+                or str(contact_witness.get("public_key") or "").lower()
+                != normalized_public_key
+                or contact_witness.get("canonical") is not True
+                or contact_witness.get("can_dm") is not True
+            )
+        ):
+            errors.append(
+                "selected contact was not the exact initial retained witness"
+            )
+    else:
+        errors.append("retained contact proof must be witness-only")
+
     if errors:
         return None, errors
     return {
         **expected,
         **{key: result[key] for key in sequence_fields},
+        "contact_fingerprint": normalized_fingerprint,
+        "contact_public_key": normalized_public_key,
+        "public_mode": public_mode,
+        "dm_mode": dm_mode,
+        "contact_mode": contact_mode,
+        "contact_result": result.get("contact_result"),
+        "public_witness": public_witness,
+        "dm_witness": dm_witness,
+        "contact_witness": contact_witness,
+        "store_after": {
+            "public_messages": {
+                "retained_store_count": public_fields[
+                    "public_store_count_after"
+                ],
+                "count": public_fields["public_retained_count_after"],
+                "capacity": public_fields["public_capacity"],
+                "total_written": public_fields["public_total_written_after"],
+                "dropped_oldest": public_fields[
+                    "public_dropped_oldest_after"
+                ],
+                "content_revision": public_fields[
+                    "public_content_revision_after"
+                ],
+            },
+            "direct_messages": {
+                "count": dm_fields["dm_count_after"],
+                "capacity": dm_fields["dm_capacity"],
+                "total_written": dm_fields["dm_total_written_after"],
+                "dropped_oldest": dm_fields["dm_dropped_oldest_after"],
+                "content_revision": dm_fields[
+                    "dm_content_revision_after"
+                ],
+            },
+            "contacts": {
+                "count": contact_fields["contact_count_after"],
+                "capacity": contact_fields["contact_capacity"],
+                "total_written": contact_fields[
+                    "contact_total_written_after"
+                ],
+                "dropped_oldest": contact_fields[
+                    "contact_dropped_oldest_after"
+                ],
+                "persistence_revision": contact_fields[
+                    "contact_persistence_revision_after"
+                ],
+            },
+        },
     }, []
 
 
-def canary_check(
+def retention_witness_check(
     projection: dict[str, Any],
     *,
-    canary: dict[str, Any],
+    witness: dict[str, Any],
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
     if (
         projection.get("settings", {}).get("node_name")
-        != canary.get("settings_node_name")
+        != witness.get("settings_node_name")
     ):
-        errors.append("settings canary is missing")
+        errors.append("settings retention marker is missing")
     public_rows = projection.get("public_messages", {}).get("entries", [])
-    matching_public = [
-        row
-        for row in public_rows
-        if (
-            isinstance(row, dict)
-            and row.get("seq") == canary.get("public_seq")
-            and row.get("text") == canary.get("message_text")
-            and row.get("direction") == "rx"
-            and row.get("author") == "Core Canary"
-            and row.get("delivered") is True
-        )
-    ]
+    matching_public = (
+        [row for row in public_rows if row == witness.get("public_witness")]
+        if witness.get("public_mode") == "existing_full_preserved"
+        else []
+    )
     if len(matching_public) != 1:
-        errors.append("exact retained Public canary is missing or duplicated")
-    normalized_fingerprint = str(
-        canary.get("contact_fingerprint") or ""
-    ).upper()
+        errors.append("exact retained Public witness is missing or duplicated")
     direct_rows = projection.get("direct_messages", {}).get("entries", [])
-    matching_direct = [
-        row
-        for row in direct_rows
-        if (
-            isinstance(row, dict)
-            and row.get("seq") == canary.get("dm_seq")
-            and row.get("text") == canary.get("message_text")
-            and str(row.get("fingerprint") or "").upper()
-            == normalized_fingerprint
-            and row.get("alias") == "Core Canary"
-            and row.get("direction") == "rx"
-            and row.get("delivered") is True
-            and row.get("acked") is False
-        )
-    ]
+    matching_direct = (
+        [row for row in direct_rows if row == witness.get("dm_witness")]
+        if witness.get("dm_mode") == "existing_full_preserved"
+        else []
+    )
     if len(matching_direct) != 1:
-        errors.append("exact retained DM canary is missing or duplicated")
-    matching_contacts = [
-        row
-        for row in projection.get("contacts", {}).get("entries", [])
-        if (
-            isinstance(row, dict)
-            and row.get("seq") == canary.get("contact_seq")
-            and str(row.get("fingerprint") or "").upper()
-            == normalized_fingerprint
-            and str(row.get("public_key") or "").lower()
-            == canary.get("contact_public_key")
-            and row.get("verification_source") == "uri_import"
-            and row.get("canonical") is True
-            and row.get("can_dm") is True
-        )
-    ]
+        errors.append("exact retained DM witness is missing or duplicated")
+    contact_rows = projection.get("contacts", {}).get("entries", [])
+    matching_contacts = (
+        [row for row in contact_rows if row == witness.get("contact_witness")]
+        if witness.get("contact_mode") == "existing_full_preserved"
+        else []
+    )
     if len(matching_contacts) != 1:
-        errors.append("exact canonical local contact canary is missing or duplicated")
+        errors.append(
+            "exact canonical retained contact witness is missing or duplicated"
+        )
+    return not errors, errors
+
+
+def seed_store_transition_preserved(
+    initial: dict[str, Any],
+    observed: dict[str, Any],
+    *,
+    witness: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    errors: list[str] = []
+    store_after = witness.get("store_after")
+    if not isinstance(store_after, dict):
+        return False, ["seed store transition metadata is missing"]
+    for key, mode_key in (
+        ("public_messages", "public_mode"),
+        ("direct_messages", "dm_mode"),
+        ("contacts", "contact_mode"),
+    ):
+        before = initial.get(key)
+        after = observed.get(key)
+        expected_after = store_after.get(key)
+        if not all(
+            isinstance(value, dict)
+            for value in (before, after, expected_after)
+        ):
+            errors.append(f"{key}: seed transition projection is incomplete")
+            continue
+        assert isinstance(before, dict)
+        assert isinstance(after, dict)
+        assert isinstance(expected_after, dict)
+        for field, expected_value in expected_after.items():
+            if after.get(field) != expected_value:
+                errors.append(
+                    f"{key}: final {field} differs from raw witness proof"
+                )
+        if witness.get(mode_key) != "existing_full_preserved":
+            errors.append(f"{key}: non-witness seed mode is forbidden")
+            continue
+        if after != before:
+            errors.append(f"{key}: full-store witness state changed")
     return not errors, errors
 
 
@@ -1339,6 +1893,7 @@ def validate_seed_receipt(
         "rp2040_access": False,
         "formats_sd": False,
         "predecessor_evidence_used": False,
+        "mutation_outcome_uncertain": False,
     }
     for key, expected in required.items():
         if receipt.get(key) != expected:
@@ -1351,70 +1906,99 @@ def validate_seed_receipt(
         and source.get("dirty_entries") == []
     ):
         errors.append("seed: source git is not the exact clean candidate")
+    producer_io = receipt.get("producer_io")
+    if not (
+        isinstance(producer_io, dict)
+        and producer_io.get("stage") == "complete"
+        and producer_io.get("serial_open_attempted") is True
+        and producer_io.get("serial_opened") is True
+        and producer_io.get("physical_observed") is True
+        and producer_io.get("settings_mutation_may_have_executed") is True
+        and producer_io.get("settings_mutation_confirmed_persisted") is True
+        and producer_io.get("mutation_outcome_uncertain") is False
+    ):
+        errors.append("seed: producer I/O and mutation outcome are not closed")
     initial_projection, initial_errors, _ = recompute_state_capture(
         receipt.get("initial_state_capture"), commit
     )
     errors.extend(f"seed initial: {error}" for error in initial_errors)
     if initial_projection is None:
         errors.append("seed: initial exact-candidate state is missing")
-    local_result, local_raw_errors = recompute_raw_command(
-        receipt.get("local_retained_canary_mutation")
+    witness_result, witness_raw_errors = recompute_raw_command(
+        receipt.get("retained_witness_proof")
     )
     errors.extend(
-        f"seed local mutation: {error}" for error in local_raw_errors
+        f"seed retained witness proof: {error}" for error in witness_raw_errors
     )
-    expected_canary = candidate_canary(commit, run_id, run_attempt)
-    expected_local_command = (
-        f"core retained-canary {expected_canary['token']}"
+    expected_witness = candidate_witness_identity(commit, run_id, run_attempt)
+    expected_witness_command = (
+        f"core retained-witness {expected_witness['token']}"
     )
-    local_receipt = receipt.get("local_retained_canary_mutation")
+    witness_receipt = receipt.get("retained_witness_proof")
     if not (
-        isinstance(local_receipt, dict)
-        and local_receipt.get("command") == expected_local_command
+        isinstance(witness_receipt, dict)
+        and witness_receipt.get("command") == expected_witness_command
     ):
-        errors.append("seed local mutation: exact command mismatch")
-    derived_canary, local_errors = recompute_local_canary_mutation(
-        local_result,
-        expected=expected_canary,
+        errors.append("seed retained witness proof: exact command mismatch")
+    derived_witness, witness_errors = recompute_retained_witness_proof(
+        witness_result,
+        expected=expected_witness,
+        initial_projection=initial_projection,
     )
-    errors.extend(f"seed local mutation: {error}" for error in local_errors)
+    errors.extend(
+        f"seed retained witness proof: {error}" for error in witness_errors
+    )
     settings_result, settings_errors = recompute_raw_command(
-        receipt.get("settings_canary_mutation")
+        receipt.get("settings_retention_mutation")
     )
     errors.extend(f"seed settings mutation: {error}" for error in settings_errors)
-    settings_receipt = receipt.get("settings_canary_mutation")
+    settings_receipt = receipt.get("settings_retention_mutation")
     if not (
         isinstance(settings_receipt, dict)
         and settings_receipt.get("command")
-        == f"settings set name {expected_canary['settings_node_name']}"
+        == f"settings set name {expected_witness['settings_node_name']}"
     ):
         errors.append("seed settings mutation: exact command mismatch")
     projection, capture_errors, _ = recompute_state_capture(
         receipt.get("state_capture"), commit
     )
     errors.extend(f"seed: {error}" for error in capture_errors)
-    canary = receipt.get("canary")
-    if not isinstance(canary, dict):
-        errors.append("seed: canary descriptor is missing")
-    elif derived_canary is None:
-        errors.append("seed: local canary descriptor cannot be derived from raw")
+    witness = receipt.get("retention_witness")
+    if not isinstance(witness, dict):
+        errors.append("seed: retention witness descriptor is missing")
+    elif derived_witness is None:
+        errors.append("seed: retention witness cannot be derived from raw")
     else:
-        if canary != derived_canary:
-            errors.append("seed: canary descriptor differs from raw mutation")
+        if witness != derived_witness:
+            errors.append(
+                "seed: retention witness differs from raw witness proof"
+            )
         if not (
             _command_ok(settings_result, "settings set name")
             and settings_result.get("persisted") is True
             and settings_result.get("node_name")
-            == expected_canary["settings_node_name"]
+            == expected_witness["settings_node_name"]
         ):
-            errors.append("seed: settings canary mutation is not proven")
+            errors.append("seed: settings retention mutation is not proven")
         if projection is not None:
-            canary_ok, canary_errors = canary_check(
+            witness_ok, witness_check_errors = retention_witness_check(
                 projection,
-                canary=derived_canary,
+                witness=derived_witness,
             )
-            if not canary_ok:
-                errors.extend(f"seed: {error}" for error in canary_errors)
+            if not witness_ok:
+                errors.extend(
+                    f"seed: {error}" for error in witness_check_errors
+                )
+            if initial_projection is not None:
+                transition_ok, transition_errors = seed_store_transition_preserved(
+                    initial_projection,
+                    projection,
+                    witness=derived_witness,
+                )
+                if not transition_ok:
+                    errors.extend(
+                        f"seed: {error}" for error in transition_errors
+                    )
     if projection is not None and receipt.get("projection_sha256") != projection_sha256(
         projection
     ):
@@ -1422,9 +2006,9 @@ def validate_seed_receipt(
     return projection, errors
 
 
-def _snapshot_has_canaries(
+def _snapshot_has_retention_witnesses(
     snapshot: dict[str, Any],
-    canary: dict[str, Any],
+    witness: dict[str, Any],
     commit: str,
 ) -> bool:
     results = snapshot.get("results")
@@ -1438,6 +2022,14 @@ def _snapshot_has_canaries(
     if not exact_version(first("version"), commit):
         return False
     if not exact_health(first("health")):
+        return False
+    contact_result = first("contacts")
+    contact_projection, contact_errors = (
+        _contact_projection(contact_result)
+        if isinstance(contact_result, dict)
+        else (None, ["contacts: result is missing"])
+    )
+    if contact_projection is None or contact_errors:
         return False
     projected: dict[str, Any] = {
         "settings": first("settings get") or {},
@@ -1461,16 +2053,10 @@ def _snapshot_has_canaries(
                 if isinstance(entry, dict)
             ],
         },
-        "contacts": {
-            "entries": (
-                first("contacts").get("entries", [])
-                if isinstance(first("contacts"), dict)
-                else []
-            ),
-        },
+        "contacts": contact_projection,
     }
-    canary_ok, _ = canary_check(projected, canary=canary)
-    return canary_ok
+    witness_ok, _ = retention_witness_check(projected, witness=witness)
+    return witness_ok
 
 
 def validate_closing_flash_receipt(
@@ -1480,7 +2066,7 @@ def validate_closing_flash_receipt(
     commit: str,
     run_id: str,
     run_attempt: str,
-    canary: dict[str, Any],
+    witness: dict[str, Any],
 ) -> list[str]:
     errors: list[str] = []
     if not isinstance(receipt, dict):
@@ -1561,9 +2147,13 @@ def validate_closing_flash_receipt(
                 and exact_commit(snapshot.get("expected_firmware_commit")) == commit
                 and isinstance(projection, dict)
                 and snapshot.get("projection_sha256") == projection_sha256(projection)
-                and _snapshot_has_canaries(snapshot, canary, commit)
+                and _snapshot_has_retention_witnesses(
+                    snapshot, witness, commit
+                )
             ):
-                errors.append(f"flash: {expected_phase} snapshot failed canary/identity checks")
+                errors.append(
+                    f"flash: {expected_phase} snapshot failed witness/identity checks"
+                )
     return errors
 
 
@@ -1604,8 +2194,16 @@ def _cycle_base(
         "action": None,
         "checks": {},
         "ok": False,
+        "closure_eligible": False,
         "hardware_required": True,
-        "physical_observed": True,
+        "physical_observed": False,
+        "stage": "reserved_before_io",
+        "serial_open_attempted": False,
+        "serial_opened": False,
+        "reboot_or_power_action_may_have_executed": False,
+        "physical_state_outcome_uncertain": False,
+        "mutation_outcome_uncertain": False,
+        "partial_command_receipts": [],
         "public_rf_tx": False,
         "formats_sd": False,
         "predecessor_evidence_used": False,
@@ -1628,8 +2226,15 @@ def _capture_and_recompute(
     commit: str,
     clock: Callable[[], float],
     now: Callable[[], str],
+    command_log: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None, list[str], dict[str, Any]]:
-    capture = capture_state(ser, timeout, clock=clock, now=now)
+    capture = capture_state(
+        ser,
+        timeout,
+        clock=clock,
+        now=now,
+        command_log=command_log,
+    )
     projection, errors, raw = recompute_state_capture(capture, commit)
     return capture, projection, errors, raw
 
@@ -1648,12 +2253,25 @@ def run_software_cycle(
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     errors: list[str] = []
+    command_log = report["partial_command_receipts"]
+    report["stage"] = "preflight_port_snapshot"
     before_port = port_snapshot(port_lister, now=now, clock=clock)
+    report["physical_observed"] = before_port.get("present") is True
+    report["serial_open_attempted"] = True
+    report["stage"] = "opening_pre_reboot_serial"
     with _open_serial(serial_module, timeout) as ser:
+        report["serial_opened"] = True
+        report["physical_observed"] = True
+        report["stage"] = "capturing_pre_reboot_state"
         if hasattr(ser, "reset_input_buffer"):
             ser.reset_input_buffer()
         pre, pre_projection, pre_errors, pre_raw = _capture_and_recompute(
-            ser, timeout=timeout, commit=commit, clock=clock, now=now
+            ser,
+            timeout=timeout,
+            commit=commit,
+            clock=clock,
+            now=now,
+            command_log=command_log,
         )
         report["pre"] = pre
         errors.extend(f"pre: {error}" for error in pre_errors)
@@ -1661,19 +2279,33 @@ def run_software_cycle(
             preserved, state_errors = state_preserved(baseline, pre_projection)
             if not preserved:
                 errors.extend(f"pre: {error}" for error in state_errors)
+        report["stage"] = "software_reboot_command"
+        report["reboot_or_power_action_may_have_executed"] = True
         reboot = read_raw_command(
-            ser, "reboot", max(timeout, 30.0), clock=clock, now=now
+            ser,
+            "reboot",
+            max(timeout, 30.0),
+            clock=clock,
+            now=now,
+            command_log=command_log,
         )
         reboot_result, reboot_errors = recompute_raw_command(reboot)
         errors.extend(f"reboot: {error}" for error in reboot_errors)
+        report["stage"] = "capturing_software_reboot_boot_lines"
         boot_lines = capture_boot_lines(
             ser, transition_timeout, clock=clock, now=now
         )
         if hasattr(ser, "reset_input_buffer"):
             ser.reset_input_buffer()
         sleep(0.1)
+        report["stage"] = "capturing_post_reboot_state"
         post, post_projection, post_errors, post_raw = _capture_and_recompute(
-            ser, timeout=timeout, commit=commit, clock=clock, now=now
+            ser,
+            timeout=timeout,
+            commit=commit,
+            clock=clock,
+            now=now,
+            command_log=command_log,
         )
         report["post"] = post
         errors.extend(f"post: {error}" for error in post_errors)
@@ -1736,6 +2368,8 @@ def run_software_cycle(
         "errors": errors,
     }
     report["ok"] = not errors
+    report["closure_eligible"] = report["ok"]
+    report["stage"] = "complete"
     report["ended_at"] = now()
     return report
 
@@ -1757,12 +2391,25 @@ def run_cold_cycle(
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     errors: list[str] = []
+    command_log = report["partial_command_receipts"]
+    report["stage"] = "preflight_port_snapshot"
     before_port = port_snapshot(port_lister, now=now, clock=clock)
+    report["physical_observed"] = before_port.get("present") is True
+    report["serial_open_attempted"] = True
+    report["stage"] = "opening_pre_cold_cycle_serial"
     with _open_serial(serial_module, timeout) as ser:
+        report["serial_opened"] = True
+        report["physical_observed"] = True
+        report["stage"] = "capturing_pre_cold_cycle_state"
         if hasattr(ser, "reset_input_buffer"):
             ser.reset_input_buffer()
         pre, pre_projection, pre_errors, pre_raw = _capture_and_recompute(
-            ser, timeout=timeout, commit=commit, clock=clock, now=now
+            ser,
+            timeout=timeout,
+            commit=commit,
+            clock=clock,
+            now=now,
+            command_log=command_log,
         )
     report["pre"] = pre
     errors.extend(f"pre: {error}" for error in pre_errors)
@@ -1771,6 +2418,8 @@ def run_cold_cycle(
         if not preserved:
             errors.extend(f"pre: {error}" for error in state_errors)
 
+    report["stage"] = "operator_cold_power_removal"
+    report["reboot_or_power_action_may_have_executed"] = True
     prompt(
         f"Cold cycle {report['ordinal']}/{COLD_CYCLE_COUNT}: press Enter to arm, "
         f"then remove all power from the D1L until {D1L_CORE_PORT} disappears."
@@ -1824,10 +2473,20 @@ def run_cold_cycle(
     post_projection: dict[str, Any] | None = None
     post_raw: dict[str, Any] = {}
     if reappeared:
+        report["serial_open_attempted"] = True
+        report["stage"] = "opening_post_cold_cycle_serial"
         with _open_serial(serial_module, timeout) as ser:
+            report["serial_opened"] = True
+            report["physical_observed"] = True
+            report["stage"] = "capturing_post_cold_cycle_state"
             sleep(1.0)
             post, post_projection, post_errors, post_raw = _capture_and_recompute(
-                ser, timeout=timeout, commit=commit, clock=clock, now=now
+                ser,
+                timeout=timeout,
+                commit=commit,
+                clock=clock,
+                now=now,
+                command_log=command_log,
             )
             errors.extend(f"post: {error}" for error in post_errors)
     report["post"] = post
@@ -1881,6 +2540,8 @@ def run_cold_cycle(
         "errors": errors,
     }
     report["ok"] = not errors
+    report["closure_eligible"] = report["ok"]
+    report["stage"] = "complete"
     report["ended_at"] = now()
     return report
 
@@ -2000,9 +2661,17 @@ def recompute_cycle(
         "sd_history_mode": SD_HISTORY_MODE,
         "hardware_required": True,
         "physical_observed": True,
+        "ok": True,
+        "closure_eligible": True,
         "public_rf_tx": False,
         "formats_sd": False,
         "predecessor_evidence_used": False,
+        "stage": "complete",
+        "serial_open_attempted": True,
+        "serial_opened": True,
+        "reboot_or_power_action_may_have_executed": True,
+        "physical_state_outcome_uncertain": False,
+        "mutation_outcome_uncertain": False,
     }
     for key, expected in required.items():
         if receipt.get(key) != expected:
@@ -2062,8 +2731,8 @@ def recompute_cycle(
     return not errors and transition_ok and port_ok, errors
 
 
-def validate_core_reboot_persistence_receipt(
-    matrix_path: Path,
+def _validate_core_reboot_persistence_report(
+    matrix: object,
     *,
     root: Path,
     expected_commit: str,
@@ -2071,7 +2740,8 @@ def validate_core_reboot_persistence_receipt(
     expected_run_attempt: str,
 ) -> tuple[bool, list[str], dict[str, Any]]:
     errors: list[str] = []
-    matrix = load_json(matrix_path, root, "Core reboot persistence matrix")
+    if not isinstance(matrix, dict):
+        return False, ["Core reboot persistence matrix is not an object"], {}
     commit = exact_commit(expected_commit)
     run_id = str(expected_run_id)
     run_attempt = str(expected_run_attempt)
@@ -2101,6 +2771,7 @@ def validate_core_reboot_persistence_receipt(
         "software_cycle_count": SOFTWARE_CYCLE_COUNT,
         "cold_cycle_count": COLD_CYCLE_COUNT,
         "public_rf_tx": False,
+        "dm_rf_tx": False,
         "formats_sd": False,
     }
     for key, expected in required.items():
@@ -2149,7 +2820,7 @@ def validate_core_reboot_persistence_receipt(
                 commit=commit,
                 run_id=run_id,
                 run_attempt=run_attempt,
-                canary=seed.get("canary", {}),
+                witness=seed.get("retention_witness", {}),
             )
         )
 
@@ -2258,6 +2929,250 @@ def validate_core_reboot_persistence_receipt(
     return not errors, errors, matrix
 
 
+def validate_core_reboot_persistence_receipt(
+    matrix_path: Path,
+    *,
+    root: Path,
+    expected_commit: str,
+    expected_run_id: str,
+    expected_run_attempt: str,
+) -> tuple[bool, list[str], dict[str, Any]]:
+    matrix = load_json(matrix_path, root, "Core reboot persistence matrix")
+    return _validate_core_reboot_persistence_report(
+        matrix,
+        root=root,
+        expected_commit=expected_commit,
+        expected_run_id=expected_run_id,
+        expected_run_attempt=expected_run_attempt,
+    )
+
+
+def _seed_retained_state_report(
+    *,
+    root: Path,
+    serial_module: Any,
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+    timeout: float,
+    source_git: dict[str, Any],
+    progress: dict[str, Any],
+    now: Callable[[], str] = utc_now,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    expected_witness = candidate_witness_identity(commit, run_id, run_attempt)
+    witness_receipt: dict[str, Any] | None = None
+    settings_mutation: dict[str, Any] | None = None
+    witness_result: dict[str, Any] | None = None
+    settings_result: dict[str, Any] | None = None
+    derived_witness: dict[str, Any] | None = None
+    witness_errors: list[str] = []
+    settings_errors: list[str] = []
+    command_log = progress["partial_command_receipts"]
+    progress["serial_open_attempted"] = True
+    progress["stage"] = "opening_seed_serial"
+    with _open_serial(serial_module, timeout) as ser:
+        progress["serial_opened"] = True
+        progress["physical_observed"] = True
+        progress["stage"] = "capturing_initial_state"
+        if hasattr(ser, "reset_input_buffer"):
+            ser.reset_input_buffer()
+        initial = capture_state(
+            ser,
+            timeout,
+            clock=clock,
+            now=now,
+            command_log=command_log,
+        )
+        progress["initial_state_capture"] = initial
+        initial_projection, initial_errors, _ = recompute_state_capture(
+            initial, commit
+        )
+        if initial_projection is not None and not initial_errors:
+            progress["stage"] = "retained_witness_proof"
+            witness_receipt = read_raw_command(
+                ser,
+                f"core retained-witness {expected_witness['token']}",
+                timeout,
+                clock=clock,
+                now=now,
+                command_log=command_log,
+            )
+            progress["retained_witness_proof"] = witness_receipt
+            witness_result, witness_raw_errors = recompute_raw_command(
+                witness_receipt
+            )
+            witness_errors.extend(witness_raw_errors)
+            retained_witness, retained_witness_errors = (
+                recompute_retained_witness_proof(
+                    witness_result,
+                    expected=expected_witness,
+                    initial_projection=initial_projection,
+                )
+            )
+            witness_errors.extend(retained_witness_errors)
+            if not witness_errors:
+                derived_witness = retained_witness
+                progress["retention_witness"] = derived_witness
+                progress["stage"] = "settings_retention_mutation"
+                progress["settings_mutation_may_have_executed"] = True
+                settings_mutation = read_raw_command(
+                    ser,
+                    "settings set name "
+                    f"{expected_witness['settings_node_name']}",
+                    timeout,
+                    clock=clock,
+                    now=now,
+                    command_log=command_log,
+                )
+                progress["settings_retention_mutation"] = settings_mutation
+                settings_result, settings_errors = recompute_raw_command(
+                    settings_mutation
+                )
+                progress["settings_mutation_confirmed_persisted"] = bool(
+                    _command_ok(settings_result, "settings set name")
+                    and settings_result.get("persisted") is True
+                    and settings_result.get("node_name")
+                    == expected_witness["settings_node_name"]
+                )
+            else:
+                settings_errors.append(
+                    "settings retention mutation skipped because the "
+                    "candidate full-store witness proof failed"
+                )
+            progress["stage"] = "capturing_final_state"
+            final = capture_state(
+                ser,
+                timeout,
+                clock=clock,
+                now=now,
+                command_log=command_log,
+            )
+            progress["state_capture"] = final
+        else:
+            final = initial
+            witness_errors.append(
+                "candidate full-store witness proof skipped because initial "
+                "exact candidate state failed"
+            )
+            settings_errors.append(
+                "settings retention mutation skipped because initial exact "
+                "candidate state failed"
+            )
+            progress["state_capture"] = final
+    progress["stage"] = "recomputing_seed_report"
+    projection, capture_errors, _ = recompute_state_capture(final, commit)
+    errors = [
+        *(f"initial: {error}" for error in initial_errors),
+        *(f"retained witness proof: {error}" for error in witness_errors),
+        *(f"settings mutation: {error}" for error in settings_errors),
+        *(f"final: {error}" for error in capture_errors),
+    ]
+    if initial_projection is None:
+        errors.append("initial exact-candidate state capture failed")
+    if not (
+        _command_ok(settings_result, "settings set name")
+        and settings_result.get("persisted") is True
+        and settings_result.get("node_name")
+        == expected_witness["settings_node_name"]
+    ):
+        errors.append("settings retention mutation failed")
+    witness = derived_witness or expected_witness
+    witness_check_errors: list[str] = []
+    if projection is not None and derived_witness is not None:
+        witness_ok, witness_check_errors = retention_witness_check(
+            projection,
+            witness=derived_witness,
+        )
+        if not witness_ok:
+            errors.extend(witness_check_errors)
+        if initial_projection is not None:
+            transition_ok, transition_errors = seed_store_transition_preserved(
+                initial_projection,
+                projection,
+                witness=derived_witness,
+            )
+            if not transition_ok:
+                errors.extend(transition_errors)
+    else:
+        errors.append(
+            "final retained projection or raw-derived witness is unavailable"
+        )
+    mutation_outcome_uncertain = bool(
+        progress["settings_mutation_may_have_executed"]
+        and not progress["settings_mutation_confirmed_persisted"]
+    )
+    progress["mutation_outcome_uncertain"] = mutation_outcome_uncertain
+    progress["stage"] = "complete"
+    report = {
+        "schema": 1,
+        "kind": "core_retained_state_seed",
+        "mode": "hardware",
+        "ok": not errors,
+        "closure_eligible": False,
+        "hardware_required": True,
+        "physical_observed": progress["physical_observed"],
+        "port": D1L_CORE_PORT,
+        "baud": D1L_BAUD,
+        "commit": commit,
+        "github_actions_run": run_id,
+        "workflow_run_attempt": run_attempt,
+        "release_profile": CORE_RELEASE_PROFILE,
+        "sd_history_mode": SD_HISTORY_MODE,
+        "git": source_git,
+        "captured_at": now(),
+        "retention_witness": witness,
+        "initial_state_capture": initial,
+        "retained_witness_proof": witness_receipt,
+        "settings_retention_mutation": settings_mutation,
+        "state_capture": final,
+        "producer_io": {
+            key: progress[key]
+            for key in (
+                "stage",
+                "serial_open_attempted",
+                "serial_opened",
+                "physical_observed",
+                "settings_mutation_may_have_executed",
+                "settings_mutation_confirmed_persisted",
+                "mutation_outcome_uncertain",
+            )
+        },
+        "mutation_outcome_uncertain": mutation_outcome_uncertain,
+        "projection_sha256": (
+            projection_sha256(projection) if projection is not None else None
+        ),
+        "checks": {
+            "exact_candidate": not initial_errors and not capture_errors,
+            "candidate_full_store_witness_set_proven": (
+                derived_witness is not None and not witness_errors
+            ),
+            "settings_retention_mutation_persisted": bool(
+                progress["settings_mutation_confirmed_persisted"]
+                and not settings_errors
+            ),
+            "retained_public_and_dm_witnesses_present": (
+                projection is not None
+                and derived_witness is not None
+                and not witness_check_errors
+            ),
+            "canonical_contact_witness_present": (
+                projection is not None
+                and derived_witness is not None
+                and not witness_check_errors
+            ),
+            "errors": errors,
+        },
+        "public_rf_tx": False,
+        "dm_rf_tx": False,
+        "sd_access": False,
+        "rp2040_access": False,
+        "formats_sd": False,
+        "predecessor_evidence_used": False,
+    }
+    return report
+
+
 def seed_retained_state(
     *,
     root: Path,
@@ -2271,106 +3186,312 @@ def seed_retained_state(
     now: Callable[[], str] = utc_now,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
-    expected_canary = candidate_canary(commit, run_id, run_attempt)
-    local_mutation: dict[str, Any] | None = None
-    settings_mutation: dict[str, Any] | None = None
-    local_result: dict[str, Any] | None = None
-    settings_result: dict[str, Any] | None = None
-    derived_canary: dict[str, Any] | None = None
-    local_errors: list[str] = []
-    settings_errors: list[str] = []
+    _, output_handle = reserve_json_output(out, root)
+    progress: dict[str, Any] = {
+        "stage": "reserved_before_io",
+        "serial_open_attempted": False,
+        "serial_opened": False,
+        "physical_observed": False,
+        "settings_mutation_may_have_executed": False,
+        "settings_mutation_confirmed_persisted": False,
+        "mutation_outcome_uncertain": False,
+        "partial_command_receipts": [],
+    }
+    try:
+        report = _seed_retained_state_report(
+            root=root,
+            serial_module=serial_module,
+            commit=commit,
+            run_id=run_id,
+            run_attempt=run_attempt,
+            timeout=timeout,
+            source_git=source_git,
+            progress=progress,
+            now=now,
+            clock=clock,
+        )
+    except BaseException as exc:
+        mutation_outcome_uncertain = bool(
+            progress["settings_mutation_may_have_executed"]
+            and not progress["settings_mutation_confirmed_persisted"]
+        )
+        progress["mutation_outcome_uncertain"] = mutation_outcome_uncertain
+        failure = {
+            "schema": 1,
+            "kind": "core_retained_state_seed",
+            "mode": "hardware",
+            "ok": False,
+            "closure_eligible": False,
+            "hardware_required": True,
+            "physical_observed": bool(
+                progress["physical_observed"] or progress["serial_opened"]
+            ),
+            "port": D1L_CORE_PORT,
+            "baud": D1L_BAUD,
+            "commit": commit,
+            "github_actions_run": run_id,
+            "workflow_run_attempt": run_attempt,
+            "release_profile": CORE_RELEASE_PROFILE,
+            "sd_history_mode": SD_HISTORY_MODE,
+            "git": source_git,
+            "captured_at": now(),
+            "retention_witness": progress.get(
+                "retention_witness",
+                candidate_witness_identity(commit, run_id, run_attempt),
+            ),
+            "initial_state_capture": progress.get("initial_state_capture"),
+            "retained_witness_proof": progress.get(
+                "retained_witness_proof"
+            ),
+            "settings_retention_mutation": progress.get(
+                "settings_retention_mutation"
+            ),
+            "state_capture": progress.get("state_capture"),
+            "partial_command_receipts": progress[
+                "partial_command_receipts"
+            ],
+            "producer_io": {
+                key: progress[key]
+                for key in (
+                    "stage",
+                    "serial_open_attempted",
+                    "serial_opened",
+                    "physical_observed",
+                    "settings_mutation_may_have_executed",
+                    "settings_mutation_confirmed_persisted",
+                    "mutation_outcome_uncertain",
+                )
+            },
+            "mutation_outcome_uncertain": mutation_outcome_uncertain,
+            "failure": {
+                "stage": progress["stage"],
+                "type": type(exc).__name__,
+                "detail": str(exc),
+            },
+            "public_rf_tx": False,
+            "dm_rf_tx": False,
+            "sd_access": False,
+            "rp2040_access": False,
+            "formats_sd": False,
+            "predecessor_evidence_used": False,
+        }
+        try:
+            finalize_json_output(output_handle, failure)
+        except BaseException as finalize_exc:
+            raise RuntimeError(
+                "seed operation failed and its reserved failure receipt "
+                "could not be finalized; the exclusive reservation was retained"
+            ) from finalize_exc
+        raise
+    finalize_json_output(output_handle, report)
+    return report
+
+
+def _verify_reboot_matrix_after_reservation(
+    *,
+    root: Path,
+    final_handle: Any,
+    cycle_reservations: dict[
+        tuple[str, int], tuple[Path, Any]
+    ],
+    execution: dict[str, Any],
+    seed_path: Path,
+    flash_path: Path,
+    serial_module: Any,
+    port_lister: Callable[[], Iterable[object]],
+    prompt: Callable[[str], str],
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+    timeout: float,
+    transition_timeout: float,
+    port_timeout: float,
+    port_poll_sec: float,
+    minimum_power_off_sec: float,
+    source_git: dict[str, Any],
+    now: Callable[[], str] = utc_now,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    execution["stage"] = "validating_seed_receipt"
+    seed = load_json(seed_path, root, "seed receipt")
+    baseline, seed_errors = validate_seed_receipt(
+        seed,
+        commit=commit,
+        run_id=run_id,
+        run_attempt=run_attempt,
+    )
+    if seed_errors or baseline is None:
+        raise ValueError("seed receipt failed validation: " + "; ".join(seed_errors))
+    execution["stage"] = "validating_closing_flash_receipt"
+    flash = load_json(flash_path, root, "closing flash receipt")
+    flash_errors = validate_closing_flash_receipt(
+        flash,
+        root=root,
+        commit=commit,
+        run_id=run_id,
+        run_attempt=run_attempt,
+        witness=seed.get("retention_witness", {}),
+    )
+    if flash_errors:
+        raise ValueError(
+            "closing flash receipt failed validation: " + "; ".join(flash_errors)
+        )
+    seed_row = relative_file_row(seed_path, root, "seed receipt")
+    flash_row = relative_file_row(flash_path, root, "closing flash receipt")
+
+    # Verify the live post-reinstall state before any reboot.
+    execution["serial_open_attempted"] = True
+    execution["stage"] = "opening_post_reinstall_serial"
     with _open_serial(serial_module, timeout) as ser:
+        execution["serial_opened"] = True
+        execution["physical_observed"] = True
+        execution["stage"] = "capturing_post_reinstall_state"
         if hasattr(ser, "reset_input_buffer"):
             ser.reset_input_buffer()
-        initial = capture_state(ser, timeout, clock=clock, now=now)
-        initial_projection, initial_errors, _ = recompute_state_capture(
-            initial, commit
+        live_capture = capture_state(
+            ser,
+            timeout,
+            clock=clock,
+            now=now,
+            command_log=execution["partial_command_receipts"],
         )
-        if initial_projection is not None and not initial_errors:
-            local_mutation = read_raw_command(
-                ser,
-                f"core retained-canary {expected_canary['token']}",
-                timeout,
+        execution["post_reinstall_live_capture"] = live_capture
+    live_projection, live_errors, _ = recompute_state_capture(
+        live_capture, commit
+    )
+    if live_projection is None:
+        raise ValueError(
+            "post-reinstall live state capture failed: " + "; ".join(live_errors)
+        )
+    live_preserved, live_state_errors = state_preserved(
+        baseline, live_projection
+    )
+    if live_errors or not live_preserved:
+        raise ValueError(
+            "post-reinstall live state does not preserve the seed: "
+            + "; ".join([*live_errors, *live_state_errors])
+        )
+
+    execution["stage"] = "running_reboot_cycles"
+    matrix_id = uuid.uuid4().hex
+    previous_sha = flash_row["sha256"]
+    cycle_rows: list[dict[str, Any]] = []
+    execution["cycle_receipts"] = cycle_rows
+    all_cycles_ok = True
+    for ordinal in range(1, SOFTWARE_CYCLE_COUNT + 1):
+        key = ("software", ordinal)
+        child, child_handle = cycle_reservations[key]
+        cycle = _cycle_base(
+            matrix_id=matrix_id,
+            cycle_type="software",
+            ordinal=ordinal,
+            commit=commit,
+            run_id=run_id,
+            run_attempt=run_attempt,
+            seed_sha256=seed_row["sha256"],
+            flash_sha256=flash_row["sha256"],
+            previous_sha256=previous_sha,
+        )
+        execution["current_cycle_key"] = key
+        execution["current_cycle_path"] = str(child)
+        execution["current_cycle"] = cycle
+        cycle = run_software_cycle(
+            serial_module=serial_module,
+            port_lister=port_lister,
+            timeout=timeout,
+            transition_timeout=transition_timeout,
+            commit=commit,
+            baseline=baseline,
+            report=cycle,
+            clock=clock,
+            now=now,
+            sleep=sleep,
+        )
+        execution["physical_observed"] = bool(
+            execution["physical_observed"]
+            or cycle.get("physical_observed") is True
+        )
+        finalize_json_output(child_handle, cycle)
+        row = relative_file_row(child, root, f"software cycle {ordinal}")
+        cycle_rows.append(row)
+        previous_sha = row["sha256"]
+        execution["current_cycle_key"] = None
+        execution["current_cycle_path"] = None
+        execution["current_cycle"] = None
+        all_cycles_ok = all_cycles_ok and cycle.get("ok") is True
+        if not cycle.get("ok"):
+            break
+
+    if all_cycles_ok:
+        for ordinal in range(1, COLD_CYCLE_COUNT + 1):
+            key = ("cold", ordinal)
+            child, child_handle = cycle_reservations[key]
+            cycle = _cycle_base(
+                matrix_id=matrix_id,
+                cycle_type="cold",
+                ordinal=ordinal,
+                commit=commit,
+                run_id=run_id,
+                run_attempt=run_attempt,
+                seed_sha256=seed_row["sha256"],
+                flash_sha256=flash_row["sha256"],
+                previous_sha256=previous_sha,
+            )
+            execution["current_cycle_key"] = key
+            execution["current_cycle_path"] = str(child)
+            execution["current_cycle"] = cycle
+            cycle = run_cold_cycle(
+                serial_module=serial_module,
+                port_lister=port_lister,
+                prompt=prompt,
+                timeout=timeout,
+                port_timeout=port_timeout,
+                port_poll_sec=port_poll_sec,
+                minimum_power_off_sec=minimum_power_off_sec,
+                commit=commit,
+                baseline=baseline,
+                report=cycle,
                 clock=clock,
                 now=now,
+                sleep=sleep,
             )
-            local_result, local_raw_errors = recompute_raw_command(
-                local_mutation
+            execution["physical_observed"] = bool(
+                execution["physical_observed"]
+                or cycle.get("physical_observed") is True
             )
-            local_errors.extend(local_raw_errors)
-            local_canary, local_canary_errors = (
-                recompute_local_canary_mutation(
-                    local_result,
-                    expected=expected_canary,
-                )
-            )
-            local_errors.extend(local_canary_errors)
-            if not local_errors:
-                derived_canary = local_canary
-                settings_mutation = read_raw_command(
-                    ser,
-                    "settings set name "
-                    f"{expected_canary['settings_node_name']}",
-                    timeout,
-                    clock=clock,
-                    now=now,
-                )
-                settings_result, settings_errors = recompute_raw_command(
-                    settings_mutation
-                )
-            else:
-                settings_errors.append(
-                    "settings canary mutation skipped because the "
-                    "candidate-local retained mutation failed"
-                )
-            final = capture_state(ser, timeout, clock=clock, now=now)
-        else:
-            final = initial
-            local_errors.append(
-                "candidate-local mutations skipped because initial exact "
-                "candidate state failed"
-            )
-            settings_errors.append(
-                "settings canary mutation skipped because initial exact "
-                "candidate state failed"
-            )
-    projection, capture_errors, _ = recompute_state_capture(final, commit)
-    errors = [
-        *(f"initial: {error}" for error in initial_errors),
-        *(f"local mutation: {error}" for error in local_errors),
-        *(f"settings mutation: {error}" for error in settings_errors),
-        *(f"final: {error}" for error in capture_errors),
-    ]
-    if initial_projection is None:
-        errors.append("initial exact-candidate state capture failed")
-    if not (
-        _command_ok(settings_result, "settings set name")
-        and settings_result.get("persisted") is True
-        and settings_result.get("node_name")
-        == expected_canary["settings_node_name"]
-    ):
-        errors.append("settings canary mutation failed")
-    canary = derived_canary or expected_canary
-    canary_errors: list[str] = []
-    if projection is not None and derived_canary is not None:
-        canary_ok, canary_errors = canary_check(
-            projection,
-            canary=derived_canary,
-        )
-        if not canary_ok:
-            errors.extend(canary_errors)
-    else:
-        errors.append(
-            "final retained projection or raw-derived canary is unavailable"
-        )
+            finalize_json_output(child_handle, cycle)
+            row = relative_file_row(child, root, f"cold cycle {ordinal}")
+            cycle_rows.append(row)
+            previous_sha = row["sha256"]
+            execution["current_cycle_key"] = None
+            execution["current_cycle_path"] = None
+            execution["current_cycle"] = None
+            all_cycles_ok = all_cycles_ok and cycle.get("ok") is True
+            if not cycle.get("ok"):
+                break
+
+    finalize_unused_cycle_reservations(
+        cycle_reservations,
+        commit=commit,
+        run_id=run_id,
+        run_attempt=run_attempt,
+        reason=(
+            "not executed because an earlier reboot/persistence cycle "
+            "did not close"
+        ),
+    )
+    complete = len(cycle_rows) == SOFTWARE_CYCLE_COUNT + COLD_CYCLE_COUNT
+    execution["stage"] = "assembling_matrix"
     report = {
         "schema": 1,
-        "kind": "core_retained_state_seed",
+        "kind": "core_reboot_persistence_matrix",
         "mode": "hardware",
-        "ok": not errors,
-        "closure_eligible": False,
+        "ok": bool(all_cycles_ok and complete),
+        "closure_eligible": bool(all_cycles_ok and complete),
         "hardware_required": True,
-        "physical_observed": True,
+        "physical_observed": bool(execution["physical_observed"]),
+        "matrix_id": matrix_id,
         "port": D1L_CORE_PORT,
         "baud": D1L_BAUD,
         "commit": commit,
@@ -2378,45 +3499,75 @@ def seed_retained_state(
         "workflow_run_attempt": run_attempt,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": SD_HISTORY_MODE,
+        "claim": CLAIM,
+        "cross_version_migration_proven": False,
+        "predecessor_evidence_used": False,
         "git": source_git,
-        "captured_at": now(),
-        "canary": canary,
-        "initial_state_capture": initial,
-        "local_retained_canary_mutation": local_mutation,
-        "settings_canary_mutation": settings_mutation,
-        "state_capture": final,
-        "projection_sha256": (
-            projection_sha256(projection) if projection is not None else None
-        ),
-        "checks": {
-            "exact_candidate": not initial_errors and not capture_errors,
-            "candidate_local_retained_mutation_proven": (
-                derived_canary is not None and not local_errors
-            ),
-            "settings_canary_persisted": not any(
-                error.startswith("settings canary") for error in errors
-            ),
-            "retained_public_and_dm_canaries_present": (
-                projection is not None
-                and derived_canary is not None
-                and not canary_errors
-            ),
-            "canonical_contact_canary_present": (
-                projection is not None
-                and derived_canary is not None
-                and not canary_errors
-            ),
-            "errors": errors,
-        },
+        "seed_receipt": seed_row,
+        "closing_flash_receipt": flash_row,
+        "post_reinstall_live_capture": live_capture,
+        "post_reinstall_projection_sha256": projection_sha256(live_projection),
+        "software_cycle_count": SOFTWARE_CYCLE_COUNT,
+        "cold_cycle_count": COLD_CYCLE_COUNT,
+        "cycle_receipts": cycle_rows,
+        "all_child_receipts_unique": len(
+            {row["sha256"] for row in cycle_rows}
+        )
+        == len(cycle_rows),
+        "hash_chain_tail": previous_sha,
+        "started_at": seed.get("captured_at"),
+        "ended_at": now(),
         "public_rf_tx": False,
         "dm_rf_tx": False,
-        "sd_access": False,
-        "rp2040_access": False,
         "formats_sd": False,
-        "predecessor_evidence_used": False,
     }
-    write_json_once(out, root, report)
+    if report["ok"]:
+        execution["stage"] = "validating_matrix_before_finalize"
+        validated, validation_errors, _ = _validate_core_reboot_persistence_report(
+            report,
+            root=root,
+            expected_commit=commit,
+            expected_run_id=run_id,
+            expected_run_attempt=run_attempt,
+        )
+        if not validated:
+            report["ok"] = False
+            report["closure_eligible"] = False
+            report["producer_validation_errors"] = validation_errors
+            finalize_json_output(final_handle, report)
+            raise ValueError(
+                "reboot matrix failed validation before finalization: "
+                + "; ".join(validation_errors)
+            )
+    execution["stage"] = "finalizing_matrix"
+    finalize_json_output(final_handle, report)
+    execution["stage"] = "complete"
     return report
+
+
+def _failed_cycle_receipt(
+    cycle: dict[str, Any],
+    exc: BaseException,
+    *,
+    now: Callable[[], str],
+) -> dict[str, Any]:
+    possible_action = bool(
+        cycle.get("reboot_or_power_action_may_have_executed")
+    )
+    cycle["ok"] = False
+    cycle["closure_eligible"] = False
+    cycle["physical_observed"] = bool(
+        cycle.get("physical_observed") or cycle.get("serial_opened")
+    )
+    cycle["physical_state_outcome_uncertain"] = possible_action
+    cycle["mutation_outcome_uncertain"] = possible_action
+    cycle["failure"] = {
+        "stage": cycle.get("stage"),
+        "type": type(exc).__name__,
+        "detail": str(exc),
+    }
+    cycle["ended_at"] = now()
+    return cycle
 
 
 def verify_reboot_matrix(
@@ -2447,193 +3598,167 @@ def verify_reboot_matrix(
         or not positive_decimal(run_attempt)
     ):
         raise ValueError("reboot matrix candidate identity is invalid")
-    if out.exists():
-        raise ValueError(f"refusing to overwrite evidence: {out}")
-    child_dir = _inside_output(
-        root, out.with_suffix("").with_name(out.stem + "_cycles"), "cycle directory"
-    )
-    if child_dir.exists():
-        raise ValueError(f"refusing to reuse cycle evidence directory: {child_dir}")
 
-    seed = load_json(seed_path, root, "seed receipt")
-    baseline, seed_errors = validate_seed_receipt(
-        seed,
-        commit=commit,
-        run_id=run_id,
-        run_attempt=run_attempt,
+    # The final matrix and all eight child receipts are exclusively reserved
+    # before any COM enumeration/open, reboot command, or cold-cycle prompt.
+    _, final_handle, cycle_reservations = reserve_reboot_outputs(
+        out, root
     )
-    if seed_errors or baseline is None:
-        raise ValueError("seed receipt failed validation: " + "; ".join(seed_errors))
-    flash = load_json(flash_path, root, "closing flash receipt")
-    flash_errors = validate_closing_flash_receipt(
-        flash,
-        root=root,
-        commit=commit,
-        run_id=run_id,
-        run_attempt=run_attempt,
-        canary=seed.get("canary", {}),
-    )
-    if flash_errors:
-        raise ValueError(
-            "closing flash receipt failed validation: " + "; ".join(flash_errors)
-        )
-    seed_row = relative_file_row(seed_path, root, "seed receipt")
-    flash_row = relative_file_row(flash_path, root, "closing flash receipt")
-
-    # Verify the live post-reinstall state before any reboot.
-    with _open_serial(serial_module, timeout) as ser:
-        if hasattr(ser, "reset_input_buffer"):
-            ser.reset_input_buffer()
-        live_capture = capture_state(ser, timeout, clock=clock, now=now)
-    live_projection, live_errors, _ = recompute_state_capture(
-        live_capture, commit
-    )
-    if live_projection is None:
-        raise ValueError(
-            "post-reinstall live state capture failed: " + "; ".join(live_errors)
-        )
-    live_preserved, live_state_errors = state_preserved(
-        baseline, live_projection
-    )
-    if live_errors or not live_preserved:
-        raise ValueError(
-            "post-reinstall live state does not preserve the seed: "
-            + "; ".join([*live_errors, *live_state_errors])
-        )
-
-    matrix_id = uuid.uuid4().hex
-    child_dir.mkdir(parents=True, exist_ok=False)
-    previous_sha = flash_row["sha256"]
-    cycle_rows: list[dict[str, Any]] = []
-    all_cycles_ok = True
-    for ordinal in range(1, SOFTWARE_CYCLE_COUNT + 1):
-        cycle = _cycle_base(
-            matrix_id=matrix_id,
-            cycle_type="software",
-            ordinal=ordinal,
+    execution: dict[str, Any] = {
+        "stage": "all_outputs_reserved_before_io",
+        "serial_open_attempted": False,
+        "serial_opened": False,
+        "physical_observed": False,
+        "partial_command_receipts": [],
+        "post_reinstall_live_capture": None,
+        "cycle_receipts": [],
+        "current_cycle_key": None,
+        "current_cycle_path": None,
+        "current_cycle": None,
+    }
+    try:
+        return _verify_reboot_matrix_after_reservation(
+            root=root,
+            final_handle=final_handle,
+            cycle_reservations=cycle_reservations,
+            execution=execution,
+            seed_path=seed_path,
+            flash_path=flash_path,
+            serial_module=serial_module,
+            port_lister=port_lister,
+            prompt=prompt,
             commit=commit,
             run_id=run_id,
             run_attempt=run_attempt,
-            seed_sha256=seed_row["sha256"],
-            flash_sha256=flash_row["sha256"],
-            previous_sha256=previous_sha,
-        )
-        cycle = run_software_cycle(
-            serial_module=serial_module,
-            port_lister=port_lister,
             timeout=timeout,
             transition_timeout=transition_timeout,
-            commit=commit,
-            baseline=baseline,
-            report=cycle,
-            clock=clock,
+            port_timeout=port_timeout,
+            port_poll_sec=port_poll_sec,
+            minimum_power_off_sec=minimum_power_off_sec,
+            source_git=source_git,
             now=now,
+            clock=clock,
             sleep=sleep,
         )
-        child = child_dir / f"software_{ordinal}.json"
-        write_json_once(child, root, cycle)
-        row = relative_file_row(child, root, f"software cycle {ordinal}")
-        cycle_rows.append(row)
-        previous_sha = row["sha256"]
-        all_cycles_ok = all_cycles_ok and cycle.get("ok") is True
-        if not cycle.get("ok"):
-            break
-
-    if all_cycles_ok:
-        for ordinal in range(1, COLD_CYCLE_COUNT + 1):
-            cycle = _cycle_base(
-                matrix_id=matrix_id,
-                cycle_type="cold",
-                ordinal=ordinal,
+    except BaseException as exc:
+        receipt_finalize_errors: list[str] = []
+        current_key = execution.get("current_cycle_key")
+        current_cycle = execution.get("current_cycle")
+        if (
+            isinstance(current_key, tuple)
+            and current_key in cycle_reservations
+            and isinstance(current_cycle, dict)
+        ):
+            _, current_handle = cycle_reservations[current_key]
+            execution["physical_observed"] = bool(
+                execution["physical_observed"]
+                or current_cycle.get("physical_observed")
+                or current_cycle.get("serial_opened")
+            )
+            if not current_handle.closed:
+                try:
+                    finalize_json_output(
+                        current_handle,
+                        _failed_cycle_receipt(
+                            current_cycle, exc, now=now
+                        ),
+                    )
+                except BaseException as finalize_exc:
+                    receipt_finalize_errors.append(
+                        "current cycle failure receipt: "
+                        f"{type(finalize_exc).__name__}: {finalize_exc}"
+                    )
+        try:
+            finalize_unused_cycle_reservations(
+                cycle_reservations,
                 commit=commit,
                 run_id=run_id,
                 run_attempt=run_attempt,
-                seed_sha256=seed_row["sha256"],
-                flash_sha256=flash_row["sha256"],
-                previous_sha256=previous_sha,
+                reason=(
+                    "not executed because the verify producer failed before "
+                    "this reserved cycle"
+                ),
             )
-            cycle = run_cold_cycle(
-                serial_module=serial_module,
-                port_lister=port_lister,
-                prompt=prompt,
-                timeout=timeout,
-                port_timeout=port_timeout,
-                port_poll_sec=port_poll_sec,
-                minimum_power_off_sec=minimum_power_off_sec,
-                commit=commit,
-                baseline=baseline,
-                report=cycle,
-                clock=clock,
-                now=now,
-                sleep=sleep,
+        except BaseException as finalize_exc:
+            receipt_finalize_errors.append(
+                "unused cycle reservations: "
+                f"{type(finalize_exc).__name__}: {finalize_exc}"
             )
-            child = child_dir / f"cold_{ordinal}.json"
-            write_json_once(child, root, cycle)
-            row = relative_file_row(child, root, f"cold cycle {ordinal}")
-            cycle_rows.append(row)
-            previous_sha = row["sha256"]
-            all_cycles_ok = all_cycles_ok and cycle.get("ok") is True
-            if not cycle.get("ok"):
-                break
 
-    complete = len(cycle_rows) == SOFTWARE_CYCLE_COUNT + COLD_CYCLE_COUNT
-    report = {
-        "schema": 1,
-        "kind": "core_reboot_persistence_matrix",
-        "mode": "hardware",
-        "ok": bool(all_cycles_ok and complete),
-        "closure_eligible": bool(all_cycles_ok and complete),
-        "hardware_required": True,
-        "physical_observed": True,
-        "matrix_id": matrix_id,
-        "port": D1L_CORE_PORT,
-        "baud": D1L_BAUD,
-        "commit": commit,
-        "github_actions_run": run_id,
-        "workflow_run_attempt": run_attempt,
-        "release_profile": CORE_RELEASE_PROFILE,
-        "sd_history_mode": SD_HISTORY_MODE,
-        "claim": CLAIM,
-        "cross_version_migration_proven": False,
-        "predecessor_evidence_used": False,
-        "git": source_git,
-        "seed_receipt": seed_row,
-        "closing_flash_receipt": flash_row,
-        "post_reinstall_live_capture": live_capture,
-        "post_reinstall_projection_sha256": projection_sha256(live_projection),
-        "software_cycle_count": SOFTWARE_CYCLE_COUNT,
-        "cold_cycle_count": COLD_CYCLE_COUNT,
-        "cycle_receipts": cycle_rows,
-        "all_child_receipts_unique": len(
-            {row["sha256"] for row in cycle_rows}
+        possible_action = bool(
+            isinstance(current_cycle, dict)
+            and current_cycle.get(
+                "reboot_or_power_action_may_have_executed"
+            )
         )
-        == len(cycle_rows),
-        "hash_chain_tail": previous_sha,
-        "started_at": seed.get("captured_at"),
-        "ended_at": now(),
-        "public_rf_tx": False,
-        "formats_sd": False,
-    }
-    write_json_once(out, root, report)
-    if report["ok"]:
-        validated, validation_errors, _ = validate_core_reboot_persistence_receipt(
-            out,
-            root=root,
-            expected_commit=commit,
-            expected_run_id=run_id,
-            expected_run_attempt=run_attempt,
-        )
-        if not validated:
-            raise ValueError(
-                "written reboot matrix failed raw validation: "
-                + "; ".join(validation_errors)
-            )
-    return report
+        failure = {
+            "schema": 1,
+            "kind": "core_reboot_persistence_matrix",
+            "mode": "hardware",
+            "ok": False,
+            "closure_eligible": False,
+            "hardware_required": True,
+            "physical_observed": bool(
+                execution["physical_observed"]
+                or execution["serial_opened"]
+            ),
+            "port": D1L_CORE_PORT,
+            "baud": D1L_BAUD,
+            "commit": commit,
+            "github_actions_run": run_id,
+            "workflow_run_attempt": run_attempt,
+            "release_profile": CORE_RELEASE_PROFILE,
+            "sd_history_mode": SD_HISTORY_MODE,
+            "claim": CLAIM,
+            "git": source_git,
+            "post_reinstall_live_capture": execution.get(
+                "post_reinstall_live_capture"
+            ),
+            "partial_command_receipts": execution[
+                "partial_command_receipts"
+            ],
+            "cycle_receipts": execution["cycle_receipts"],
+            "current_cycle_path": execution.get("current_cycle_path"),
+            "current_cycle": current_cycle,
+            "producer_io": {
+                "stage": execution["stage"],
+                "serial_open_attempted": execution[
+                    "serial_open_attempted"
+                ],
+                "serial_opened": execution["serial_opened"],
+                "physical_observed": execution["physical_observed"],
+            },
+            "reboot_or_power_action_may_have_executed": possible_action,
+            "physical_state_outcome_uncertain": possible_action,
+            "mutation_outcome_uncertain": possible_action,
+            "failure": {
+                "stage": execution["stage"],
+                "type": type(exc).__name__,
+                "detail": str(exc),
+                "receipt_finalize_errors": receipt_finalize_errors,
+            },
+            "ended_at": now(),
+            "public_rf_tx": False,
+            "dm_rf_tx": False,
+            "formats_sd": False,
+            "predecessor_evidence_used": False,
+        }
+        if not final_handle.closed:
+            try:
+                finalize_json_output(final_handle, failure)
+            except BaseException as finalize_exc:
+                raise RuntimeError(
+                    "verify operation failed and its reserved final failure "
+                    "receipt could not be finalized; all exclusive "
+                    "reservations were retained"
+                ) from finalize_exc
+        raise
 
 
-def _resolve(root: Path, value: str) -> Path:
+def _resolve(root: Path, value: str, *, for_output: bool = False) -> Path:
     path = Path(value)
-    return path.resolve() if path.is_absolute() else (root / path).resolve()
+    joined = path if path.is_absolute() else root / path
+    return _lexical_absolute(joined) if for_output else joined.resolve()
 
 
 def _serial_runtime() -> tuple[Any, Callable[[], Iterable[object]]]:
@@ -2706,7 +3831,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.operation == "seed":
             report = seed_retained_state(
                 root=root,
-                out=_resolve(root, args.out),
+                out=_resolve(root, args.out, for_output=True),
                 serial_module=serial_module,
                 commit=commit,
                 run_id=run_id,
@@ -2727,7 +3852,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             report = verify_reboot_matrix(
                 root=root,
-                out=_resolve(root, args.out),
+                out=_resolve(root, args.out, for_output=True),
                 seed_path=_resolve(root, args.seed_receipt),
                 flash_path=_resolve(root, args.closing_flash_receipt),
                 serial_module=serial_module,

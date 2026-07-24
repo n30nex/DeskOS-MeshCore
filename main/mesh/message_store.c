@@ -1693,12 +1693,9 @@ esp_err_t d1l_message_store_append_channel_volatile(
         path_hash_bytes, path_hops, delivered, false, NULL);
 }
 
-d1l_message_store_stats_t d1l_message_store_stats(void)
+static d1l_message_store_stats_t message_store_stats_locked(
+    d1l_retained_blob_store_backend_state_t backend_state)
 {
-    d1l_retained_blob_store_backend_state_t backend_state = {0};
-    (void)d1l_retained_blob_store_backend_state(D1L_MESSAGE_STORE_ID,
-                                                &backend_state);
-    d1l_store_lock_take(&s_store_lock);
     s_persistence_dirty = persistence_dirty_locked(backend_state.enabled);
     size_t public_count = 0U;
     for (size_t i = 0U; i < s_count; ++i) {
@@ -1734,6 +1731,17 @@ d1l_message_store_stats_t d1l_message_store_stats(void)
         .sd_primary_reconcile_pending = s_sd_reconcile_pending,
         .nvs_fallback_dirty = s_nvs_fallback_dirty,
     };
+    return stats;
+}
+
+d1l_message_store_stats_t d1l_message_store_stats(void)
+{
+    d1l_retained_blob_store_backend_state_t backend_state = {0};
+    (void)d1l_retained_blob_store_backend_state(D1L_MESSAGE_STORE_ID,
+                                                &backend_state);
+    d1l_store_lock_take(&s_store_lock);
+    const d1l_message_store_stats_t stats =
+        message_store_stats_locked(backend_state);
     d1l_store_lock_give(&s_store_lock);
     return stats;
 }
@@ -1905,6 +1913,83 @@ size_t d1l_message_store_query_page(d1l_message_entry_t *out_entries,
     return d1l_message_store_query_channel_page(
         D1L_CHANNEL_PUBLIC_ID, out_entries, max_entries, skip_newest, query,
         out_total_matches);
+}
+
+size_t d1l_message_store_query_page_snapshot(
+    d1l_message_entry_t *out_entries, size_t max_entries,
+    size_t skip_newest, const char *query, size_t *out_total_matches,
+    d1l_message_store_stats_t *out_stats, uint32_t *out_volatile_seq)
+{
+    if (out_total_matches) {
+        *out_total_matches = 0U;
+    }
+    if (out_stats) {
+        memset(out_stats, 0, sizeof(*out_stats));
+    }
+    if (out_volatile_seq) {
+        *out_volatile_seq = 0U;
+    }
+    if (!out_entries || max_entries == 0U || !out_stats ||
+        !out_volatile_seq) {
+        return 0U;
+    }
+
+    d1l_retained_blob_store_backend_state_t backend_state = {0};
+    (void)d1l_retained_blob_store_backend_state(D1L_MESSAGE_STORE_ID,
+                                                &backend_state);
+    d1l_store_lock_take(&s_store_lock);
+    size_t total_matches = 0U;
+    const size_t oldest = s_count == 0U ? 0U :
+        (s_head + D1L_MESSAGE_STORE_CAPACITY - s_count) %
+            D1L_MESSAGE_STORE_CAPACITY;
+    for (size_t i = 0U; i < s_count; ++i) {
+        const d1l_message_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
+        if (entry->channel_id == D1L_CHANNEL_PUBLIC_ID &&
+            message_matches_query(entry, query)) {
+            total_matches++;
+        }
+    }
+    const bool volatile_matches =
+        s_volatile_valid &&
+        s_volatile_entry.channel_id == D1L_CHANNEL_PUBLIC_ID &&
+        message_matches_query(&s_volatile_entry, query);
+    if (volatile_matches) {
+        total_matches++;
+        *out_volatile_seq = s_volatile_entry.seq;
+    }
+    if (out_total_matches) {
+        *out_total_matches = total_matches;
+    }
+
+    size_t copied = 0U;
+    if (skip_newest < total_matches) {
+        const size_t available = total_matches - skip_newest;
+        copied = available < max_entries ? available : max_entries;
+        const size_t first_match =
+            total_matches - skip_newest - copied;
+        const size_t last_match = first_match + copied;
+        size_t match_index = 0U;
+        for (size_t i = 0U; i < s_count && copied > 0U; ++i) {
+            const d1l_message_entry_t *entry =
+                &s_entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
+            if (entry->channel_id != D1L_CHANNEL_PUBLIC_ID ||
+                !message_matches_query(entry, query)) {
+                continue;
+            }
+            if (match_index >= first_match && match_index < last_match) {
+                out_entries[match_index - first_match] = *entry;
+            }
+            match_index++;
+        }
+        if (volatile_matches && match_index >= first_match &&
+            match_index < last_match) {
+            out_entries[match_index - first_match] = s_volatile_entry;
+        }
+    }
+    *out_stats = message_store_stats_locked(backend_state);
+    d1l_store_lock_give(&s_store_lock);
+    return copied;
 }
 
 size_t d1l_message_store_query(d1l_message_entry_t *out_entries, size_t max_entries,

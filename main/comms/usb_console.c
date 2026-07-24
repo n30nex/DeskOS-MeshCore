@@ -15,9 +15,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "mbedtls/md.h"
 
-#include "ed_25519.h"
 #include "d1l_config.h"
 #include "app/app_model.h"
 #include "app/settings_model.h"
@@ -326,7 +324,7 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "rp2040 double-reset", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
     D1L_RELEASE_RULE_TOKEN(
-        "core retained-canary", D1L_RELEASE_COMMAND_MUTATION,
+        "core retained-witness", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_RETAINED_NVS),
 
     D1L_RELEASE_RULE_EXACT(
@@ -5120,7 +5118,96 @@ static void cmd_packets_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
-static void print_public_message_entry_json(const d1l_message_entry_t *e)
+static bool message_store_stats_snapshot_equal(
+    const d1l_message_store_stats_t *left,
+    const d1l_message_store_stats_t *right)
+{
+    return left && right &&
+        left->next_seq == right->next_seq &&
+        left->total_written == right->total_written &&
+        left->dropped_oldest == right->dropped_oldest &&
+        left->epoch == right->epoch &&
+        left->content_revision == right->content_revision &&
+        left->clear_lineage == right->clear_lineage &&
+        left->persistence_commit_count == right->persistence_commit_count &&
+        left->persistence_fail_count == right->persistence_fail_count &&
+        left->persistence_stale_snapshot_count ==
+            right->persistence_stale_snapshot_count &&
+        left->sd_primary_commit_count == right->sd_primary_commit_count &&
+        left->sd_primary_fail_count == right->sd_primary_fail_count &&
+        left->sd_backend_generation == right->sd_backend_generation &&
+        left->sd_primary_last_error == right->sd_primary_last_error &&
+        left->nvs_fallback_commit_count == right->nvs_fallback_commit_count &&
+        left->nvs_fallback_fail_count == right->nvs_fallback_fail_count &&
+        left->nvs_fallback_last_error == right->nvs_fallback_last_error &&
+        left->persistence_revision == right->persistence_revision &&
+        left->count == right->count &&
+        left->public_count == right->public_count &&
+        left->capacity == right->capacity &&
+        left->loaded == right->loaded &&
+        left->persistence_dirty == right->persistence_dirty &&
+        left->sd_primary_required == right->sd_primary_required &&
+        left->sd_primary_dirty == right->sd_primary_dirty &&
+        left->sd_primary_reconcile_pending ==
+            right->sd_primary_reconcile_pending &&
+        left->nvs_fallback_dirty == right->nvs_fallback_dirty;
+}
+
+static bool dm_store_stats_snapshot_equal(
+    const d1l_dm_store_stats_t *left,
+    const d1l_dm_store_stats_t *right)
+{
+    return left && right &&
+        left->next_seq == right->next_seq &&
+        left->total_written == right->total_written &&
+        left->dropped_oldest == right->dropped_oldest &&
+        left->epoch == right->epoch &&
+        left->content_revision == right->content_revision &&
+        left->clear_lineage == right->clear_lineage &&
+        left->persistence_commit_count == right->persistence_commit_count &&
+        left->persistence_fail_count == right->persistence_fail_count &&
+        left->persistence_stale_snapshot_count ==
+            right->persistence_stale_snapshot_count &&
+        left->sd_primary_commit_count == right->sd_primary_commit_count &&
+        left->sd_primary_fail_count == right->sd_primary_fail_count &&
+        left->sd_backend_generation == right->sd_backend_generation &&
+        left->sd_primary_last_error == right->sd_primary_last_error &&
+        left->nvs_fallback_commit_count == right->nvs_fallback_commit_count &&
+        left->nvs_fallback_fail_count == right->nvs_fallback_fail_count &&
+        left->nvs_fallback_last_error == right->nvs_fallback_last_error &&
+        left->persistence_revision == right->persistence_revision &&
+        left->count == right->count &&
+        left->capacity == right->capacity &&
+        left->loaded == right->loaded &&
+        left->persistence_dirty == right->persistence_dirty &&
+        left->sd_primary_required == right->sd_primary_required &&
+        left->sd_primary_dirty == right->sd_primary_dirty &&
+        left->sd_primary_reconcile_pending ==
+            right->sd_primary_reconcile_pending &&
+        left->nvs_fallback_dirty == right->nvs_fallback_dirty;
+}
+
+static bool contact_store_stats_snapshot_equal(
+    const d1l_contact_store_stats_t *left,
+    const d1l_contact_store_stats_t *right)
+{
+    return left && right &&
+        left->next_seq == right->next_seq &&
+        left->total_written == right->total_written &&
+        left->dropped_oldest == right->dropped_oldest &&
+        left->persistence_commit_count == right->persistence_commit_count &&
+        left->persistence_coalesced_count ==
+            right->persistence_coalesced_count &&
+        left->persistence_fail_count == right->persistence_fail_count &&
+        left->persistence_revision == right->persistence_revision &&
+        left->persistence_last_error == right->persistence_last_error &&
+        left->count == right->count &&
+        left->capacity == right->capacity &&
+        left->persistence_dirty == right->persistence_dirty;
+}
+
+static void print_public_message_entry_json(const d1l_message_entry_t *e,
+                                            bool retained)
 {
     printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"direction\":",
            (unsigned long)e->seq, (unsigned long)e->uptime_ms);
@@ -5129,14 +5216,13 @@ static void print_public_message_entry_json(const d1l_message_entry_t *e)
     print_json_string(e->author);
     printf(",\"text\":");
     print_json_string(e->text);
-    printf(",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"delivered\":%s}",
+    printf(",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"delivered\":%s,\"retained\":%s,\"volatile_preview\":%s}",
            e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
-           bool_json(e->delivered));
+           bool_json(e->delivered), bool_json(retained), bool_json(!retained));
 }
 
 static void cmd_messages_public(const char *line)
 {
-    d1l_message_store_stats_t stats = d1l_message_store_stats();
     static d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY];
     char search[D1L_MESSAGE_TEXT_LEN] = {0};
     bool filtered = false;
@@ -5174,14 +5260,20 @@ static void cmd_messages_public(const char *line)
     }
 
     size_t total_matches = 0;
-    const size_t copied = d1l_message_store_query_page(entries,
-                                                       D1L_CONSOLE_MESSAGE_PAGE_SIZE,
-                                                       offset, search, &total_matches);
+    d1l_message_store_stats_t stats = {0};
+    uint32_t volatile_preview_seq = 0U;
+    const size_t copied = d1l_message_store_query_page_snapshot(
+        entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE, offset, search,
+        &total_matches, &stats, &volatile_preview_seq);
     const bool has_older = total_matches > offset + copied;
     const size_t next_offset = has_older ? offset + copied : offset;
     ok_begin("messages public");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"history_counters_scope\":\"shared_all_channels\",\"filtered\":%s,\"offset\":%u,\"page_size\":%u,\"page_count\":%u,\"total_matches\":%u,\"has_older\":%s,\"next_offset\":%u",
+    const bool volatile_preview_present = volatile_preview_seq != 0U;
+    printf(",\"count\":%u,\"capacity\":%u,\"retained_store_count\":%u,\"retained_public_count\":%u,\"volatile_preview_present\":%s,\"volatile_preview_seq\":%lu,\"total_written\":%lu,\"dropped_oldest\":%lu,\"history_counters_scope\":\"shared_all_channels\",\"filtered\":%s,\"offset\":%u,\"page_size\":%u,\"page_count\":%u,\"total_matches\":%u,\"has_older\":%s,\"next_offset\":%u",
            (unsigned)stats.public_count, (unsigned)stats.capacity,
+           (unsigned)stats.count, (unsigned)stats.public_count,
+           bool_json(volatile_preview_present),
+           (unsigned long)volatile_preview_seq,
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
            bool_json(filtered), (unsigned)offset,
            (unsigned)D1L_CONSOLE_MESSAGE_PAGE_SIZE, (unsigned)copied,
@@ -5214,7 +5306,9 @@ static void cmd_messages_public(const char *line)
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
-        print_public_message_entry_json(&entries[i]);
+        print_public_message_entry_json(
+            &entries[i],
+            entries[i].seq != volatile_preview_seq);
     }
     printf("],\"persisted\":%s,\"note\":\"Public messages are kept in bounded retained storage; optional search filters retained rows and offset pages older rows\"}\n",
            bool_json(stats.loaded && !stats.persistence_dirty));
@@ -5237,7 +5331,7 @@ static void cmd_messages_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
-static void print_dm_entry_json(const d1l_dm_entry_t *e)
+static void print_dm_entry_json(const d1l_dm_entry_t *e, bool retained)
 {
     printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"fingerprint\":",
            (unsigned long)e->seq, (unsigned long)e->uptime_ms);
@@ -5259,34 +5353,38 @@ static void print_dm_entry_json(const d1l_dm_entry_t *e)
     print_json_string(d1l_dm_ack_dispatch_kind_name(e->ack_dispatch_kind));
     printf(",\"last_error\":");
     print_json_string(esp_err_to_name(e->ack_last_error));
-    printf("}}");
+    printf("},\"retained\":%s,\"volatile_preview\":%s}",
+           bool_json(retained), bool_json(!retained));
 }
 
 static void cmd_messages_dm(const char *line)
 {
-    d1l_dm_store_stats_t stats = d1l_dm_store_stats();
     static d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
     char thread_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
     bool filtered = false;
     size_t offset = 0;
     size_t total_matches = 0;
     size_t copied = 0;
+    d1l_dm_store_stats_t stats = {0};
+    uint32_t volatile_preview_seq = 0U;
 
     const char *args = line + strlen("messages dm");
     while (*args == ' ') {
         args++;
     }
     if (*args == '\0') {
-        copied = d1l_dm_store_copy_recent_page(entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE,
-                                              offset, &total_matches);
+        copied = d1l_dm_store_copy_recent_page_snapshot(
+            entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE, offset, &total_matches,
+            &stats, &volatile_preview_seq);
     } else if (strncmp(args, "offset", 6) == 0) {
         if (!parse_message_offset_clause(args, &offset)) {
             err_result("messages dm", "INVALID_OFFSET",
                        "usage: messages dm [offset <n>] [fingerprint [offset <n>]]");
             return;
         }
-        copied = d1l_dm_store_copy_recent_page(entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE,
-                                              offset, &total_matches);
+        copied = d1l_dm_store_copy_recent_page_snapshot(
+            entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE, offset, &total_matches,
+            &stats, &volatile_preview_seq);
     } else if (parse_fingerprint_token(args, thread_fingerprint,
                                      sizeof(thread_fingerprint))) {
         filtered = true;
@@ -5299,9 +5397,9 @@ static void cmd_messages_dm(const char *line)
                        "usage: messages dm [offset <n>] [fingerprint [offset <n>]]");
             return;
         }
-        copied = d1l_dm_store_copy_thread_page(thread_fingerprint, entries,
-                                               D1L_CONSOLE_MESSAGE_PAGE_SIZE,
-                                               offset, &total_matches);
+        copied = d1l_dm_store_copy_thread_page_snapshot(
+            thread_fingerprint, entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE,
+            offset, &total_matches, &stats, &volatile_preview_seq);
     } else {
         err_result("messages dm", "INVALID_TARGET",
                    "usage: messages dm [offset <n>] [fingerprint [offset <n>]]");
@@ -5311,8 +5409,11 @@ static void cmd_messages_dm(const char *line)
     const bool has_older = total_matches > offset + copied;
     const size_t next_offset = has_older ? offset + copied : offset;
     ok_begin("messages dm");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filtered\":%s,\"offset\":%u,\"page_size\":%u,\"page_count\":%u,\"total_matches\":%u,\"has_older\":%s,\"next_offset\":%u",
+    const bool volatile_preview_present = volatile_preview_seq != 0U;
+    printf(",\"count\":%u,\"capacity\":%u,\"retained_count\":%u,\"volatile_preview_present\":%s,\"volatile_preview_seq\":%lu,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filtered\":%s,\"offset\":%u,\"page_size\":%u,\"page_count\":%u,\"total_matches\":%u,\"has_older\":%s,\"next_offset\":%u",
            (unsigned)stats.count, (unsigned)stats.capacity,
+           (unsigned)stats.count, bool_json(volatile_preview_present),
+           (unsigned long)volatile_preview_seq,
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
            bool_json(filtered), (unsigned)offset,
            (unsigned)D1L_CONSOLE_MESSAGE_PAGE_SIZE, (unsigned)copied,
@@ -5345,7 +5446,9 @@ static void cmd_messages_dm(const char *line)
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
-        print_dm_entry_json(&entries[i]);
+        print_dm_entry_json(
+            &entries[i],
+            entries[i].seq != volatile_preview_seq);
     }
     printf("],\"persisted\":%s,\"note\":\"MeshCore direct-message rows are kept in bounded retained storage; optional fingerprint filters one retained thread and offset pages older rows\"}\n",
            bool_json(stats.loaded && !stats.persistence_dirty));
@@ -5608,13 +5711,25 @@ static void cmd_channels_select(const char *line)
 
 static void cmd_contacts(void)
 {
-    d1l_contact_store_stats_t stats = d1l_contact_store_stats();
-    static d1l_contact_entry_t entries[8];
-    size_t copied = d1l_contact_store_copy_recent(entries, 8);
+    const d1l_contact_store_stats_t stats_before =
+        d1l_contact_store_stats();
+    static d1l_contact_entry_t entries[D1L_CONTACT_STORE_CAPACITY];
+    size_t copied = d1l_contact_store_copy_recent(
+        entries, D1L_CONTACT_STORE_CAPACITY);
+    const d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    if (!contact_store_stats_snapshot_equal(&stats_before, &stats) ||
+        copied != stats.count) {
+        err_result("contacts", "RETAINED_SNAPSHOT_CHANGED",
+                   "contact retained state changed during the bounded snapshot; retry");
+        return;
+    }
     ok_begin("contacts");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"persistence_revision\":%llu,\"persistence_dirty\":%s,\"persistence_last_error\":\"%s\",\"entries\":[",
            (unsigned)stats.count, (unsigned)stats.capacity,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
+           (unsigned long long)stats.persistence_revision,
+           bool_json(stats.persistence_dirty),
+           esp_err_to_name(stats.persistence_last_error));
     for (size_t i = 0; i < copied; ++i) {
         const d1l_contact_entry_t *e = &entries[i];
         printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":",
@@ -5648,7 +5763,9 @@ static void cmd_contacts(void)
                (unsigned long)e->out_path_updated_ms, bool_json(e->favorite),
                bool_json(e->muted));
     }
-    printf("],\"persisted\":true,\"note\":\"Canonical contacts require a full-key signed advert or validated MeshCore URI import; heard-only placeholders cannot DM\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"Canonical contacts require a full-key signed advert or validated MeshCore URI import; heard-only placeholders cannot DM\"}\n",
+           bool_json(!stats.persistence_dirty &&
+                     stats.persistence_last_error == ESP_OK));
 }
 
 static const char *contact_import_result_name(d1l_contact_import_result_t result)
@@ -5799,7 +5916,7 @@ static void cmd_contacts_import(const char *line)
            bool_json(d1l_contact_store_can_admin(&contact)));
 }
 
-static bool core_retained_canary_nvs_only(void)
+static bool core_retained_witness_nvs_only(void)
 {
     for (size_t i = 0U; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
         d1l_retained_blob_store_backend_state_t state = {0};
@@ -5812,63 +5929,132 @@ static bool core_retained_canary_nvs_only(void)
     return true;
 }
 
-static bool core_retained_canary_public_key(
-    const char *token,
-    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN])
+static bool core_retained_public_witness(
+    const d1l_message_store_stats_t *expected,
+    d1l_message_entry_t *out_entry)
 {
-    static const char prefix[] = "sigui-core-retained-canary:";
-    static const char hex[] = "0123456789abcdef";
-    char material[sizeof(prefix) + 31U] = {0};
-    uint8_t seed[32] = {0};
-    uint8_t public_key[32] = {0};
-    uint8_t private_key[64] = {0};
-    const int material_len = snprintf(
-        material, sizeof(material), "%s%s", prefix, token ? token : "");
-    const mbedtls_md_info_t *md =
-        mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    bool ok =
-        token && public_key_hex && material_len > 0 &&
-        (size_t)material_len < sizeof(material) && md &&
-        mbedtls_md(md, (const unsigned char *)material,
-                   (size_t)material_len, seed) == 0;
-    if (ok) {
-        ed25519_create_keypair(public_key, private_key, seed);
-        for (size_t i = 0U; i < sizeof(public_key); ++i) {
-            public_key_hex[i * 2U] =
-                hex[(public_key[i] >> 4U) & 0x0FU];
-            public_key_hex[i * 2U + 1U] =
-                hex[public_key[i] & 0x0FU];
-        }
-        public_key_hex[sizeof(public_key) * 2U] = '\0';
+    static d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY];
+    if (!expected || !out_entry || expected->count != expected->capacity ||
+        expected->public_count != expected->capacity || !expected->loaded ||
+        expected->persistence_dirty || expected->nvs_fallback_dirty ||
+        expected->nvs_fallback_last_error != ESP_OK ||
+        expected->sd_primary_required || expected->sd_primary_dirty ||
+        expected->sd_primary_reconcile_pending) {
+        return false;
     }
-    wipe_console_bytes(seed, sizeof(seed));
-    wipe_console_bytes(private_key, sizeof(private_key));
-    wipe_console_bytes(public_key, sizeof(public_key));
-    wipe_console_bytes(material, sizeof(material));
-    return ok;
+    const size_t copied = d1l_message_store_copy_recent(
+        entries, D1L_MESSAGE_STORE_CAPACITY);
+    const d1l_message_store_stats_t observed = d1l_message_store_stats();
+    if (copied != expected->count ||
+        observed.next_seq != expected->next_seq ||
+        observed.total_written != expected->total_written ||
+        observed.dropped_oldest != expected->dropped_oldest ||
+        observed.content_revision != expected->content_revision ||
+        observed.persistence_revision != expected->persistence_revision ||
+        observed.count != expected->count ||
+        observed.public_count != expected->public_count ||
+        observed.capacity != expected->capacity) {
+        return false;
+    }
+    for (size_t i = copied; i > 0U; --i) {
+        if (entries[i - 1U].seq != expected->next_seq) {
+            *out_entry = entries[i - 1U];
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool core_retained_dm_witness(
+    const d1l_dm_store_stats_t *expected,
+    d1l_dm_entry_t *out_entry)
+{
+    static d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
+    if (!expected || !out_entry || expected->count != expected->capacity ||
+        expected->count == 0U || !expected->loaded ||
+        expected->persistence_dirty || expected->nvs_fallback_dirty ||
+        expected->nvs_fallback_last_error != ESP_OK ||
+        expected->sd_primary_required || expected->sd_primary_dirty ||
+        expected->sd_primary_reconcile_pending) {
+        return false;
+    }
+    const size_t copied = d1l_dm_store_copy_recent(
+        entries, D1L_DM_STORE_CAPACITY);
+    const d1l_dm_store_stats_t observed = d1l_dm_store_stats();
+    if (copied != expected->count ||
+        observed.next_seq != expected->next_seq ||
+        observed.total_written != expected->total_written ||
+        observed.dropped_oldest != expected->dropped_oldest ||
+        observed.content_revision != expected->content_revision ||
+        observed.persistence_revision != expected->persistence_revision ||
+        observed.count != expected->count ||
+        observed.capacity != expected->capacity) {
+        return false;
+    }
+    for (size_t i = copied; i > 0U; --i) {
+        if (entries[i - 1U].seq != expected->next_seq) {
+            *out_entry = entries[i - 1U];
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool core_retained_contact_witness(
+    const d1l_contact_store_stats_t *expected,
+    d1l_contact_entry_t *out_entry)
+{
+    static d1l_contact_entry_t entries[D1L_CONTACT_STORE_CAPACITY];
+    if (!expected || !out_entry || expected->count != expected->capacity ||
+        expected->count == 0U || expected->persistence_dirty ||
+        expected->persistence_last_error != ESP_OK) {
+        return false;
+    }
+    const size_t copied = d1l_contact_store_copy_recent(
+        entries, D1L_CONTACT_STORE_CAPACITY);
+    const d1l_contact_store_stats_t observed = d1l_contact_store_stats();
+    if (copied != expected->count ||
+        observed.next_seq != expected->next_seq ||
+        observed.total_written != expected->total_written ||
+        observed.dropped_oldest != expected->dropped_oldest ||
+        observed.persistence_revision != expected->persistence_revision ||
+        observed.count != expected->count ||
+        observed.capacity != expected->capacity) {
+        return false;
+    }
+    for (size_t i = 0U; i < copied; ++i) {
+        if (d1l_contact_store_is_canonical(&entries[i]) &&
+            d1l_contact_store_can_dm(&entries[i]) &&
+            d1l_contact_store_has_export_key(&entries[i])) {
+            *out_entry = entries[i];
+            return true;
+        }
+    }
+    return false;
 }
 
 /*
- * Core release persistence evidence must create its own exact-candidate
- * canaries.  This diagnostic mutates only the retained NVS stores and the
- * contact NVS store: it never calls the MeshCore send path, storage manager,
- * SD status refresh, or RP2040 bridge.
+ * A release diagnostic must never consume or evict retained user capacity.
+ * This exact-candidate fallback therefore accepts only three already-full,
+ * clean NVS stores and selects one stable durable witness from each. It never
+ * calls a retained mutation, global flush, MeshCore send, storage manager, SD
+ * status refresh, or RP2040 bridge path.
  */
-static void cmd_core_retained_canary(const char *line)
+static void cmd_core_retained_witness(const char *line)
 {
-    static const char prefix[] = "core retained-canary ";
+    static const char prefix[] = "core retained-witness ";
     char token[32] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
         !copy_storage_canary_token(
             token, sizeof(token), line + strlen(prefix))) {
-        err_result("core retained-canary", "INVALID_TOKEN",
-                   "usage: core retained-canary <token-with-a-z-0-9-dot-dash-underscore>");
+        err_result("core retained-witness", "INVALID_TOKEN",
+                   "usage: core retained-witness <token-with-a-z-0-9-dot-dash-underscore>");
         return;
     }
 
     if (!d1l_release_profile_is_core() ||
         d1l_release_sd_history_mode() != D1L_SD_HISTORY_MODE_DISABLED) {
-        err_result("core retained-canary", "ESP_ERR_NOT_SUPPORTED",
+        err_result("core retained-witness", "ESP_ERR_NOT_SUPPORTED",
                    "requires the Core 1.0 release profile with SD history disabled");
         return;
     }
@@ -5876,7 +6062,7 @@ static void cmd_core_retained_canary(const char *line)
         !d1l_release_feature_available(D1L_RELEASE_FEATURE_PUBLIC_MESSAGES) ||
         !d1l_release_feature_available(D1L_RELEASE_FEATURE_DIRECT_MESSAGES) ||
         !d1l_release_feature_available(D1L_RELEASE_FEATURE_BASIC_CONTACTS)) {
-        err_result("core retained-canary", "ESP_ERR_NOT_SUPPORTED",
+        err_result("core retained-witness", "ESP_ERR_NOT_SUPPORTED",
                    "required retained Core capabilities are unavailable");
         return;
     }
@@ -5885,119 +6071,167 @@ static void cmd_core_retained_canary(const char *line)
         !d1l_retained_blob_store_nvs_markers_complete() ||
         !d1l_retained_blob_store_nvs_anchor_ready() ||
         !d1l_retained_blob_store_nvs_sentinel_ready() ||
-        !core_retained_canary_nvs_only()) {
-        err_result("core retained-canary", "RETAINED_NVS_NOT_READY",
+        !core_retained_witness_nvs_only()) {
+        err_result("core retained-witness", "RETAINED_NVS_NOT_READY",
                    "all retained stores must be ready on NVS with SD backends disabled");
         return;
     }
 
-    char public_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
-    if (!core_retained_canary_public_key(token, public_key)) {
-        err_result("core retained-canary", "ESP_FAIL",
-                   "could not derive the deterministic local contact key");
-        return;
-    }
-    char contact_uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
-    const int uri_len = snprintf(
-        contact_uri, sizeof(contact_uri),
-        "meshcore://contact/add?name=Core+Canary&public_key=%s&type=1",
-        public_key);
-    if (uri_len <= 0 || (size_t)uri_len >= sizeof(contact_uri)) {
-        err_result("core retained-canary", "ESP_ERR_INVALID_SIZE",
-                   "local contact URI exceeded its fixed bound");
-        wipe_console_bytes(public_key, sizeof(public_key));
-        return;
-    }
-
-    d1l_contact_import_result_t contact_result = D1L_CONTACT_IMPORT_NONE;
-    d1l_contact_entry_t contact = {0};
-    esp_err_t ret = d1l_contact_store_import_uri(
-        contact_uri, (size_t)uri_len, &contact_result, &contact);
-    wipe_console_bytes(contact_uri, sizeof(contact_uri));
-    if (ret != ESP_OK ||
-        !d1l_contact_store_is_canonical(&contact) ||
-        !d1l_contact_store_can_dm(&contact)) {
-        err_result("core retained-canary",
-                   ret == ESP_OK ? "CONTACT_NOT_CANONICAL" :
-                                   esp_err_to_name(ret),
-                   "could not persist the deterministic canonical Core contact");
-        wipe_console_bytes(public_key, sizeof(public_key));
-        wipe_console_bytes(&contact, sizeof(contact));
-        return;
-    }
-
-    char text[D1L_MESSAGE_TEXT_LEN] = {0};
-    snprintf(text, sizeof(text), "core-retained-canary %s", token);
-    const uint32_t public_seq = d1l_message_store_stats().next_seq;
-    ret = d1l_message_store_append_public(
-        "rx", "Core Canary", text, 0, 0, 1, 0, true);
-    d1l_message_store_stats_t public_stats = d1l_message_store_stats();
-    if (ret != ESP_OK || public_seq == 0U ||
-        public_stats.next_seq != public_seq + 1U) {
-        err_result("core retained-canary",
-                   ret == ESP_OK ? "PUBLIC_SEQUENCE_RACE" :
-                                   esp_err_to_name(ret),
-                   "could not persist one exact local Public canary row");
-        wipe_console_bytes(public_key, sizeof(public_key));
-        wipe_console_bytes(&contact, sizeof(contact));
-        return;
-    }
-
-    const uint32_t dm_seq = d1l_dm_store_stats().next_seq;
-    ret = d1l_dm_store_append(
-        contact.fingerprint, "Core Canary", "rx", text,
-        0, 0, 1, 0, 0, true, false, retained_canary_hash(token));
-    d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
-    if (ret != ESP_OK || dm_seq == 0U ||
-        dm_stats.next_seq != dm_seq + 1U) {
-        err_result("core retained-canary",
-                   ret == ESP_OK ? "DM_SEQUENCE_RACE" :
-                                   esp_err_to_name(ret),
-                   "could not persist one exact local DM canary row");
-        wipe_console_bytes(public_key, sizeof(public_key));
-        wipe_console_bytes(&contact, sizeof(contact));
-        return;
-    }
-
-    ret = d1l_route_store_worker_force_flush(
-        D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
-    public_stats = d1l_message_store_stats();
-    dm_stats = d1l_dm_store_stats();
-    const d1l_contact_store_stats_t contact_stats =
+    const d1l_contact_store_stats_t contact_before =
         d1l_contact_store_stats();
-    if (ret != ESP_OK || public_stats.persistence_dirty ||
-        public_stats.nvs_fallback_dirty ||
-        public_stats.sd_primary_required ||
-        dm_stats.persistence_dirty || dm_stats.nvs_fallback_dirty ||
-        dm_stats.sd_primary_required || contact_stats.persistence_dirty ||
-        !core_retained_canary_nvs_only()) {
-        err_result("core retained-canary",
-                   ret == ESP_OK ? "RETAINED_NVS_NOT_CLEAN" :
-                                   esp_err_to_name(ret),
-                   "candidate-local Core canaries are not clean on NVS");
+    const d1l_message_store_stats_t public_before =
+        d1l_message_store_stats();
+    const d1l_dm_store_stats_t dm_before = d1l_dm_store_stats();
+    const bool contact_full =
+        contact_before.count == contact_before.capacity;
+    const bool public_full =
+        public_before.count == public_before.capacity &&
+        public_before.public_count == public_before.capacity;
+    const bool dm_full = dm_before.count == dm_before.capacity;
+    if (!contact_full || !public_full || !dm_full) {
+        err_result("core retained-witness", "RETAINED_WITNESS_SET_NOT_FULL",
+                   "safe Core proof requires every shared message row to be retained Public plus full DM and contact stores; no retained state was mutated");
+        return;
+    }
+
+    static const char witness_mode[] = "existing_full_preserved";
+    char public_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_message_entry_t public_witness = {0};
+    d1l_dm_entry_t dm_witness = {0};
+
+    /*
+     * This exact-candidate fallback is deliberately witness-only. Resolve all
+     * three immutable full-store witnesses without calling any retained-store
+     * mutation or global flush path.
+     */
+    if (!core_retained_contact_witness(&contact_before, &contact)) {
+        err_result("core retained-witness", "CONTACT_FULL_NO_DURABLE_WITNESS",
+                   "full contact store has no stable canonical DM-capable witness");
+        return;
+    }
+    strncpy(public_key, contact.public_key_hex, sizeof(public_key) - 1U);
+    if (!core_retained_public_witness(&public_before, &public_witness)) {
+        err_result("core retained-witness", "PUBLIC_FULL_NO_DURABLE_WITNESS",
+                   "full Public store has no stable durable witness");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+    if (!core_retained_dm_witness(&dm_before, &dm_witness)) {
+        err_result("core retained-witness", "DM_FULL_NO_DURABLE_WITNESS",
+                   "full DM store has no stable durable witness");
         wipe_console_bytes(public_key, sizeof(public_key));
         wipe_console_bytes(&contact, sizeof(contact));
         return;
     }
 
-    ok_begin("core retained-canary");
+    char witness_label[D1L_MESSAGE_TEXT_LEN] = {0};
+    snprintf(witness_label, sizeof(witness_label),
+             "core-retained-witness %s", token);
+    const uint32_t public_seq = public_witness.seq;
+    const uint32_t dm_seq = dm_witness.seq;
+    const d1l_message_store_stats_t public_after =
+        d1l_message_store_stats();
+    const d1l_dm_store_stats_t dm_after = d1l_dm_store_stats();
+    const d1l_contact_store_stats_t contact_after =
+        d1l_contact_store_stats();
+    if (!message_store_stats_snapshot_equal(&public_before, &public_after) ||
+        !dm_store_stats_snapshot_equal(&dm_before, &dm_after) ||
+        !contact_store_stats_snapshot_equal(&contact_before, &contact_after) ||
+        public_after.persistence_dirty ||
+        public_after.nvs_fallback_dirty ||
+        public_after.sd_primary_required ||
+        dm_after.persistence_dirty || dm_after.nvs_fallback_dirty ||
+        dm_after.sd_primary_required || contact_after.persistence_dirty ||
+        !core_retained_witness_nvs_only()) {
+        err_result("core retained-witness", "RETAINED_WITNESS_SET_CHANGED",
+                   "full retained witness set changed during the zero-mutation proof");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    ok_begin("core retained-witness");
     printf(",\"token\":");
     print_json_string(token);
-    printf(",\"message_text\":");
-    print_json_string(text);
+    printf(",\"witness_request_label\":");
+    print_json_string(witness_label);
     printf(",\"fingerprint\":");
     print_json_string(contact.fingerprint);
     printf(",\"public_key\":");
     print_json_string(public_key);
     printf(",\"public_seq\":%lu,\"dm_seq\":%lu,\"contact_seq\":%lu,"
-           "\"contact_result\":",
+           "\"public_mode\":",
            (unsigned long)public_seq,
            (unsigned long)dm_seq,
            (unsigned long)contact.seq);
-    print_json_string(contact_import_result_name(contact_result));
+    print_json_string(witness_mode);
+    printf(",\"dm_mode\":");
+    print_json_string(witness_mode);
+    printf(",\"contact_mode\":");
+    print_json_string(witness_mode);
+    printf(",\"contact_result\":");
+    print_json_string(witness_mode);
+    printf(",\"witness_only\":true,\"public_mutated\":false,"
+           "\"dm_mutated\":false,\"contact_mutated\":false,"
+           "\"public_evicted\":false,\"dm_evicted\":false,"
+           "\"contact_evicted\":false");
+    printf(",\"public_store_count_before\":%u,"
+           "\"public_store_count_after\":%u,"
+           "\"public_retained_count_before\":%u,"
+           "\"public_retained_count_after\":%u,"
+           "\"public_capacity\":%u,"
+           "\"public_total_written_before\":%lu,"
+           "\"public_total_written_after\":%lu,"
+           "\"public_dropped_oldest_before\":%lu,"
+           "\"public_dropped_oldest_after\":%lu,"
+           "\"public_content_revision_before\":%lu,"
+           "\"public_content_revision_after\":%lu",
+           (unsigned)public_before.count, (unsigned)public_after.count,
+           (unsigned)public_before.public_count,
+           (unsigned)public_after.public_count,
+           (unsigned)public_before.capacity,
+           (unsigned long)public_before.total_written,
+           (unsigned long)public_after.total_written,
+           (unsigned long)public_before.dropped_oldest,
+           (unsigned long)public_after.dropped_oldest,
+           (unsigned long)public_before.content_revision,
+           (unsigned long)public_after.content_revision);
+    printf(",\"dm_count_before\":%u,\"dm_count_after\":%u,"
+           "\"dm_capacity\":%u,\"dm_total_written_before\":%lu,"
+           "\"dm_total_written_after\":%lu,"
+           "\"dm_dropped_oldest_before\":%lu,"
+           "\"dm_dropped_oldest_after\":%lu,"
+           "\"dm_content_revision_before\":%lu,"
+           "\"dm_content_revision_after\":%lu",
+           (unsigned)dm_before.count, (unsigned)dm_after.count,
+           (unsigned)dm_before.capacity,
+           (unsigned long)dm_before.total_written,
+           (unsigned long)dm_after.total_written,
+           (unsigned long)dm_before.dropped_oldest,
+           (unsigned long)dm_after.dropped_oldest,
+           (unsigned long)dm_before.content_revision,
+           (unsigned long)dm_after.content_revision);
+    printf(",\"contact_count_before\":%u,\"contact_count_after\":%u,"
+           "\"contact_capacity\":%u,\"contact_total_written_before\":%lu,"
+           "\"contact_total_written_after\":%lu,"
+           "\"contact_dropped_oldest_before\":%lu,"
+           "\"contact_dropped_oldest_after\":%lu,"
+           "\"contact_persistence_revision_before\":%llu,"
+           "\"contact_persistence_revision_after\":%llu",
+           (unsigned)contact_before.count, (unsigned)contact_after.count,
+           (unsigned)contact_before.capacity,
+           (unsigned long)contact_before.total_written,
+           (unsigned long)contact_after.total_written,
+           (unsigned long)contact_before.dropped_oldest,
+           (unsigned long)contact_after.dropped_oldest,
+           (unsigned long long)contact_before.persistence_revision,
+           (unsigned long long)contact_after.persistence_revision);
     printf(",\"persisted\":true,\"retention\":\"nvs\","
-           "\"backend_mode\":\"nvs_disabled\",\"synthetic_local\":true,"
-           "\"retained_flush\":\"ESP_OK\",\"public_rf_tx\":false,"
+           "\"backend_mode\":\"nvs_disabled\",\"synthetic_local\":false,"
+           "\"retained_flush\":\"not_requested_zero_mutation\","
+           "\"public_rf_tx\":false,"
            "\"dm_rf_tx\":false,\"sd_access\":false,"
            "\"rp2040_access\":false,\"formats_sd\":false,"
            "\"predecessor_evidence_used\":false}\n");
@@ -7075,7 +7309,7 @@ static void cmd_help(void)
                "\"ui capture begin\",\"ui capture chunk <offset> <len>\","
                "\"ui capture end\",\"mesh status\",\"companion status\","
                "\"storage status\",\"storage force-nvs [on]\","
-               "\"core retained-canary <token>\","
+               "\"core retained-witness <token>\","
                "\"mesh advert zero\",\"mesh advert flood\","
                "\"mesh send public <text>\","
                "\"mesh send dm <fingerprint> <text>\","
@@ -7584,8 +7818,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_storage_export_data(line);
     } else if (strncmp(line, "storage retained-canary ", strlen("storage retained-canary ")) == 0) {
         cmd_storage_retained_canary(line);
-    } else if (strncmp(line, "core retained-canary ", strlen("core retained-canary ")) == 0) {
-        cmd_core_retained_canary(line);
+    } else if (strncmp(line, "core retained-witness ", strlen("core retained-witness ")) == 0) {
+        cmd_core_retained_witness(line);
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
     } else if (strncmp(line, "packets filter ", 15) == 0) {

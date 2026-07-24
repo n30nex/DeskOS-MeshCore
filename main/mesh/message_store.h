@@ -113,6 +113,13 @@ size_t d1l_message_store_copy_recent(d1l_message_entry_t *out_entries, size_t ma
 size_t d1l_message_store_query_page(d1l_message_entry_t *out_entries, size_t max_entries,
                                     size_t skip_newest, const char *query,
                                     size_t *out_total_matches);
+/* Copies one Public page, its retained stats, and any matching volatile
+ * preview identity under one store lock. This keeps row classification
+ * coherent with the counters emitted by release evidence commands. */
+size_t d1l_message_store_query_page_snapshot(
+    d1l_message_entry_t *out_entries, size_t max_entries,
+    size_t skip_newest, const char *query, size_t *out_total_matches,
+    d1l_message_store_stats_t *out_stats, uint32_t *out_volatile_seq);
 size_t d1l_message_store_query(d1l_message_entry_t *out_entries, size_t max_entries,
                                const char *query);
 size_t d1l_message_store_copy_channel_recent(
