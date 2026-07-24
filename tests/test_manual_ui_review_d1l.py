@@ -26,6 +26,23 @@ def clean_git() -> dict:
     }
 
 
+def d1l_target() -> dict:
+    return core_ui.resolve_core_target(
+        "COM12",
+        platform_name="nt",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+                "location": "1-2",
+            }
+        ],
+    )
+
+
 def health() -> dict:
     return {
         "ok": True,
@@ -164,7 +181,7 @@ def core_ui_receipt() -> dict:
         for probe in unavailable_plan
     ]
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_ui_corruption_probe",
         "mode": "hardware",
         "ok": True,
@@ -173,6 +190,7 @@ def core_ui_receipt() -> dict:
         "physical_observed": True,
         "identity_preflight_only": False,
         "port": "COM12",
+        "d1l_target": d1l_target(),
         "started_at": UTC_START,
         "ended_at": UTC_END,
         "release_profile": "core_1_0",
@@ -331,6 +349,8 @@ def test_producer_validator_and_integrated_manual_gate_accept_exact_receipt(
     assert valid is True
     assert reasons == []
     assert details["automated_ui_file_row_ok"] is True
+    assert report["schema"] == 4
+    assert report["d1l_target"] == core_ui_receipt()["d1l_target"]
     assert report["github_actions_run_attempt"] == RUN_ATTEMPT
     assert report["workflow_run_attempt"] == RUN_ATTEMPT
     assert report["dm_rf_tx"] is False
@@ -472,3 +492,54 @@ def test_optional_png_rows_are_recomputed_and_tamper_evident(tmp_path: Path):
     )
     assert valid is False
     assert "photo_receipt_0_invalid" in reasons
+
+
+def test_manual_review_target_is_derived_and_tamper_evident(tmp_path: Path):
+    ui_path = write_core_ui(tmp_path)
+    out_path = capture_review(tmp_path, ui_path)
+    report = json.loads(out_path.read_text(encoding="ascii"))
+    report["d1l_target"]["location"] = "wrong-port"
+    out_path.write_text(json.dumps(report), encoding="ascii")
+
+    valid, reasons, _details = review.validate_core_manual_ui_review_receipt(
+        out_path,
+        root=tmp_path,
+        core_ui_path=ui_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+    assert valid is False
+    assert "manual_ui_target_binding_invalid" in reasons
+
+
+def test_manual_review_rejects_target_not_matching_automated_receipt(
+    tmp_path: Path,
+):
+    ui_path = write_core_ui(tmp_path)
+    out_path = tmp_path / "manual.json"
+    with pytest.raises(ValueError, match="requires COM12"):
+        review.capture(
+            root=tmp_path,
+            out_path=out_path,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            port="/dev/ttyUSB2",
+            operator="Operator",
+            reviewer="Reviewer",
+            confirmed=set(review.REQUIRED_CONFIRMATIONS),
+            core_ui_path=ui_path,
+        )
+    assert not out_path.exists()
+
+
+def test_manual_review_pi_default_path_uses_safe_slug(tmp_path: Path):
+    path = review.default_out_path(
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        core_ui.D1L_CORE_POSIX_TARGET,
+    )
+    assert "dev-serial-by-id-usb-1a86-usb-serial-if00-port0" in str(path)
+    assert core_ui.D1L_CORE_POSIX_TARGET not in str(path)

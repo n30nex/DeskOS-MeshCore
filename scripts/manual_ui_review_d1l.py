@@ -17,12 +17,22 @@ from typing import Any
 
 try:
     from artifact_metadata import git_metadata
+    from core_smoke_d1l import (
+        D1L_CORE_PORT,
+        enforce_core_port,
+    )
+    from d1l_serial_target import safe_slug, validate_snapshot
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import git_metadata
+    from scripts.core_smoke_d1l import (
+        D1L_CORE_PORT,
+        enforce_core_port,
+    )
+    from scripts.d1l_serial_target import safe_slug, validate_snapshot
 
 
-REVIEW_SCHEMA = 3
-CORE_PORT = "COM12"
+REVIEW_SCHEMA = 4
+CORE_PORT = D1L_CORE_PORT
 CORE_RELEASE_PROFILE = "core_1_0"
 CORE_SD_HISTORY_MODE = "disabled"
 RELEASE_MIN_ROUNDS = 20
@@ -348,6 +358,23 @@ def _profile_ready_health(result: object, commit: str) -> bool:
     )
 
 
+def _validated_ui_target(
+    data: object,
+) -> tuple[bool, str | None, dict[str, Any] | None]:
+    if not isinstance(data, dict):
+        return False, None, None
+    port = data.get("port")
+    try:
+        canonical = enforce_core_port(port)
+        if canonical != port:
+            return False, None, None
+        target = data.get("d1l_target")
+        validate_snapshot(target, canonical)
+    except (KeyError, TypeError, ValueError):
+        return False, None, None
+    return True, canonical, target
+
+
 def _validate_ui_receipt_data(
     data: dict[str, Any],
     *,
@@ -356,6 +383,7 @@ def _validate_ui_receipt_data(
     run_attempt: str,
 ) -> tuple[bool, list[str], dict[str, object]]:
     reasons: list[str] = []
+    target_ok, target_port, target_snapshot = _validated_ui_target(data)
     source_ok, _source = _source_row(data.get("git"), commit)
     checks = data.get("checks")
     timestamps_ok = valid_timestamp_range(data.get("started_at"), data.get("ended_at"))
@@ -374,7 +402,7 @@ def _validate_ui_receipt_data(
     run_alias = data.get("github_actions_run_attempt")
     run_alias_ok = run_alias is None or run_alias == run_attempt
     contract_ok = (
-        data.get("schema") == 1
+        data.get("schema") == 2
         and data.get("kind") == "core_ui_corruption_probe"
         and data.get("mode") == "hardware"
         and data.get("ok") is True
@@ -382,7 +410,8 @@ def _validate_ui_receipt_data(
         and data.get("hardware_required") is True
         and data.get("physical_observed") is True
         and data.get("identity_preflight_only") is False
-        and data.get("port") == CORE_PORT
+        and target_ok
+        and data.get("port") == target_port
         and data.get("release_profile") == CORE_RELEASE_PROFILE
         and data.get("sd_history_mode") == CORE_SD_HISTORY_MODE
         and data.get("github_actions_run") == run_id
@@ -409,6 +438,8 @@ def _validate_ui_receipt_data(
     final_health_ok = _profile_ready_health(data.get("final_health"), commit)
     if not identity_ok:
         reasons.append("automated_ui_identity_invalid")
+    if not target_ok:
+        reasons.append("automated_ui_target_invalid")
     if not contract_ok:
         reasons.append("automated_ui_contract_invalid")
     if not exact_checks:
@@ -426,6 +457,9 @@ def _validate_ui_receipt_data(
             "checks_exact": exact_checks,
             "timestamps_ok": timestamps_ok,
             "final_health_ok": final_health_ok,
+            "target_ok": target_ok,
+            "target_port": target_port,
+            "d1l_target": target_snapshot,
         },
     )
 
@@ -541,6 +575,20 @@ def validate_core_manual_ui_review_receipt(
         run_attempt=normalized_attempt,
     )
     reasons.extend(ui_reasons)
+    ui_target_port = ui_details.get("target_port")
+    ui_target_snapshot = ui_details.get("d1l_target")
+    manual_target_ok = (
+        isinstance(ui_target_port, str)
+        and data.get("port") == ui_target_port
+        and data.get("d1l_target") == ui_target_snapshot
+    )
+    if manual_target_ok:
+        try:
+            validate_snapshot(data.get("d1l_target"), ui_target_port)
+        except (TypeError, ValueError):
+            manual_target_ok = False
+    if not manual_target_ok:
+        reasons.append("manual_ui_target_binding_invalid")
 
     photos_ok, photo_reasons, recomputed_photos = _validate_photos(
         data.get("photo_receipts"), root
@@ -610,7 +658,8 @@ def validate_core_manual_ui_review_receipt(
         and data.get("closure_eligible") is True
         and data.get("hardware_required") is True
         and data.get("physical_observed") is True
-        and data.get("port") == CORE_PORT
+        and manual_target_ok
+        and data.get("port") == ui_target_port
         and data.get("release_profile") == CORE_RELEASE_PROFILE
         and data.get("sd_history_mode") == CORE_SD_HISTORY_MODE
         and exact_sha(data.get("commit")) == normalized_commit
@@ -643,6 +692,7 @@ def validate_core_manual_ui_review_receipt(
         and run_attempts_ok
         and notes_ok
         and contract_ok
+        and manual_target_ok
     )
     details.update(
         {
@@ -663,6 +713,7 @@ def validate_core_manual_ui_review_receipt(
             "rejected_flags_explicitly_false": rejected_flags_ok,
             "run_attempt_aliases_exact": run_attempts_ok,
             "receipt_contract_ok": contract_ok,
+            "manual_target_binding_ok": manual_target_ok,
         }
     )
     return valid, reasons, details
@@ -712,8 +763,7 @@ def capture(
         raise ValueError("candidate commit must be an exact 40-hex SHA")
     if normalized_run is None or normalized_attempt is None:
         raise ValueError("GitHub run ID and attempt must be positive decimals")
-    if not isinstance(port, str) or port.strip().upper() != CORE_PORT:
-        raise ValueError("Core manual UI evidence is restricted to COM12")
+    requested_port = enforce_core_port(port)
     if (
         isinstance(confirmed, (str, bytes, dict))
         or any(not isinstance(name, str) for name in confirmed)
@@ -732,7 +782,7 @@ def capture(
         raise ValueError("current source is not the exact clean candidate")
     core_ui_path = resolve_regular_file(root, core_ui_path)
     core_ui_data = read_json(core_ui_path)
-    ui_valid, ui_reasons, _ui_details = _validate_ui_receipt_data(
+    ui_valid, ui_reasons, ui_details = _validate_ui_receipt_data(
         core_ui_data,
         commit=normalized_commit,
         run_id=normalized_run,
@@ -742,6 +792,17 @@ def capture(
         raise ValueError(
             "automated Core UI receipt is invalid: " + ", ".join(ui_reasons)
         )
+    ui_target_port = ui_details.get("target_port")
+    ui_target_snapshot = ui_details.get("d1l_target")
+    if (
+        not isinstance(ui_target_port, str)
+        or requested_port != ui_target_port
+        or not isinstance(ui_target_snapshot, dict)
+    ):
+        raise ValueError(
+            "manual UI target must exactly match the automated UI receipt"
+        )
+    validate_snapshot(ui_target_snapshot, ui_target_port)
     ui_row = file_receipt(root, core_ui_path)
     if isinstance(photo_specs, (str, bytes)):
         raise ValueError("photo specs must be a sequence of complete specifications")
@@ -772,7 +833,8 @@ def capture(
         "predecessor": False,
         "predecessor_evidence_used": False,
         "reused": False,
-        "port": CORE_PORT,
+        "port": ui_target_port,
+        "d1l_target": ui_target_snapshot,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": CORE_SD_HISTORY_MODE,
         "commit": normalized_commit,
@@ -819,13 +881,19 @@ def capture(
     return report
 
 
-def default_out_path(root: Path, commit: str, run_id: str) -> Path:
+def default_out_path(
+    root: Path,
+    commit: str,
+    run_id: str,
+    target: str = CORE_PORT,
+) -> Path:
+    slug = safe_slug(enforce_core_port(target))
     return (
         root
         / "artifacts"
         / "hardware"
-        / "com12"
-        / f"core_manual_ui_review_{commit[:12]}_run_{run_id}.json"
+        / slug
+        / f"core_manual_ui_review_{commit[:12]}_run_{run_id}_{slug}.json"
     )
 
 
@@ -866,7 +934,11 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--expected-firmware-commit must be an exact 40-hex SHA")
     if run_id is None or run_attempt is None:
         raise SystemExit("GitHub run ID and attempt must be positive decimals")
-    out_path = Path(args.out) if args.out else default_out_path(root, commit, run_id)
+    out_path = (
+        Path(args.out)
+        if args.out
+        else default_out_path(root, commit, run_id, args.port)
+    )
     confirmed = {name for name in REQUIRED_CONFIRMATIONS if getattr(args, name) is True}
     try:
         report = capture(
