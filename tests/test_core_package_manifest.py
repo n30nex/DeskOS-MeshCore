@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from scripts import core_release_gate_audit_d1l, package_release_d1l
+from scripts import (
+    core_flash_only_d1l,
+    core_release_gate_audit_d1l,
+    package_release_d1l,
+)
 from scripts.verify_checksums import verify_checksum_tree
 from tests.test_package_release_d1l import (
     fake_source_identity,
@@ -30,7 +34,8 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
 ):
     root = tmp_path
     build = root / "build"
-    out = root / "release"
+    github_run_dir = root / "github-run"
+    out = github_run_dir / "d1l-release-package"
     write_fake_build(build)
     write_fake_notices(root)
     write_fake_config(root)
@@ -154,6 +159,24 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
             "size": generated.stat().st_size,
             "sha256": package_release_d1l.sha256_file(generated),
         }
+    actions_flash_files = [
+        {
+            "offset": int(row["offset"], 0),
+            "path": f"build/{row['source']}",
+            "size": row["size"],
+            "sha256": row["sha256"],
+        }
+        for row in manifest["flash_files"]
+    ]
+    verified = core_flash_only_d1l.verify_core_package(
+        github_run_dir=github_run_dir,
+        package_dir=package,
+        commit=commit,
+        run_id="123456789",
+        run_attempt="1",
+        actions_verification={"flash_files": actions_flash_files},
+    )
+    assert verified["ok"] is True
 
     ps1 = (package / "flash_project.ps1").read_text(encoding="ascii")
     sh = (package / "flash_project.sh").read_text(encoding="ascii")

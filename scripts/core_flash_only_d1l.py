@@ -22,6 +22,14 @@ try:
     )
     from artifact_metadata import git_metadata
     from capture_core_actions_run_d1l import validate_capture_receipt
+    from core_install_recovery_review_d1l import (
+        CORE_INSTALL_CONTRACT_KEYS,
+        CORE_INSTALL_CONTRACT_SCHEMA,
+        CORE_PACKAGE_SCHEMA,
+        GENERATED_INSTALL_FILES,
+        expected_normal_install_targets,
+        expected_target_policy,
+    )
     from core_smoke_d1l import (
         CORE_RELEASE_PROFILE,
         D1L_CORE_PORT,
@@ -51,6 +59,14 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import git_metadata
     from scripts.capture_core_actions_run_d1l import (
         validate_capture_receipt,
+    )
+    from scripts.core_install_recovery_review_d1l import (
+        CORE_INSTALL_CONTRACT_KEYS,
+        CORE_INSTALL_CONTRACT_SCHEMA,
+        CORE_PACKAGE_SCHEMA,
+        GENERATED_INSTALL_FILES,
+        expected_normal_install_targets,
+        expected_target_policy,
     )
     from scripts.core_smoke_d1l import (
         CORE_RELEASE_PROFILE,
@@ -177,10 +193,23 @@ def verify_core_package(
     workflow = manifest.get("workflow")
     git_info = manifest.get("git")
     install = manifest.get("install_recovery_guide")
+    scripts = manifest.get("scripts")
+    generated_files: dict[str, dict[str, Any]] = {}
+    for relative in GENERATED_INSTALL_FILES:
+        generated = _inside(package / relative, package, "generated install file")
+        if not generated.is_file() or generated.stat().st_size <= 0:
+            raise ValueError(f"Core generated install file is invalid: {relative}")
+        generated_files[relative] = {
+            "size": generated.stat().st_size,
+            "sha256": sha256_file(generated),
+        }
     required_truth = (
-        manifest.get("release_profile") == CORE_RELEASE_PROFILE
+        type(manifest.get("schema")) is int
+        and manifest.get("schema") == CORE_PACKAGE_SCHEMA
+        and manifest.get("release_profile") == CORE_RELEASE_PROFILE
         and exact_commit(manifest.get("firmware_commit")) == commit
         and str(manifest.get("actions_run")) == run_id
+        and str(manifest.get("actions_run_attempt")) == run_attempt
         and manifest.get("sd_history_mode") == EXPECTED_SD_HISTORY_MODE
         and manifest.get("sd_history_state")
         == "disabled_nvs_authoritative"
@@ -197,13 +226,43 @@ def verify_core_package(
         and exact_commit(git_info.get("commit")) == commit
         and git_info.get("dirty") is False
         and git_info.get("dirty_entries") == []
+        and scripts
+        == {
+            "shared_project_flash": "flash_project.py",
+            "serial_target_resolver": "d1l_serial_target.py",
+            "windows_project_flash": "flash_project.ps1",
+            "posix_project_flash": "flash_project.sh",
+            "windows_full_flash": "flash_full_8mb.ps1",
+            "posix_full_flash": None,
+        }
         and isinstance(install, dict)
-        and install.get("normal_install_script") == "flash_project.ps1"
+        and set(install) == CORE_INSTALL_CONTRACT_KEYS
+        and type(install.get("schema")) is int
+        and install.get("schema") == CORE_INSTALL_CONTRACT_SCHEMA
+        and install.get("usb_only") is True
+        and install.get("normal_install_script") == "flash_project.py"
+        and install.get("normal_install_scripts")
+        == {
+            "windows": "flash_project.ps1",
+            "posix": "flash_project.sh",
+        }
         and install.get("normal_install_port") == D1L_CORE_PORT
+        and install.get("normal_install_targets")
+        == expected_normal_install_targets()
+        and install.get("target_policy") == expected_target_policy()
         and install.get("normal_install_preserves_unrelated_nvs") is True
         and install.get("normal_install_package_root_only") is True
         and install.get("normal_install_checksum_verified") is True
+        and install.get("recovery_script") == "flash_full_8mb.ps1"
+        and install.get("recovery_platform") == "windows_only"
+        and install.get("posix_recovery_script") is None
+        and install.get("recovery_requires_typed_confirmation") is True
+        and install.get("recovery_checksum_verified") is True
+        and install.get("recovery_target_identity_verified") is True
+        and install.get("install_guide") == "docs/CORE_INSTALL_RECOVERY.md"
+        and install.get("recovery_guide") == "docs/CORE_INSTALL_RECOVERY.md"
         and install.get("no_on_device_sd_format") is True
+        and install.get("generated_files") == generated_files
     )
     if not required_truth:
         raise ValueError(
