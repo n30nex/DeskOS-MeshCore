@@ -11,6 +11,7 @@ import os
 import re
 import socket
 import stat
+import struct
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -46,6 +47,10 @@ LOCAL_PEER_ADAPTER = "pi5_local_unix_control_socket"
 LOCAL_PEER_STATUS_TRANSPORT = "local-file"
 LOCAL_PEER_CONTROL_REQUEST_TRANSPORT = "local-unix-socket-request"
 LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT = "local-unix-socket-response"
+LOCAL_PEER_MAX_MTIME_STATUS_SKEW_SEC = 30.0
+LOCAL_PEER_CONTROL_UID = 0
+LOCAL_PEER_CONTROL_GID = 0
+LOCAL_PEER_SO_PEERCRED = getattr(socket, "SO_PEERCRED", 17)
 REMOTE_PEER_SSH_HOST = "neonx@192.168.0.24"
 REMOTE_PEER_HOSTNAME = "neopi5"
 REMOTE_PEER_STATUS_PATH = (
@@ -1052,7 +1057,57 @@ def run_remote_peer_operation(
     return envelope["result"]
 
 
+def _local_posix_path_snapshot(
+    path: str,
+    *,
+    final_kind: str,
+) -> tuple[tuple[str, int, int, int], ...]:
+    """Capture a non-linked POSIX path chain and its inode identities."""
+    parts = PurePosixPath(path).parts
+    if (
+        not parts
+        or parts[0] != "/"
+        or final_kind not in {"regular", "socket"}
+    ):
+        raise ValueError("local controlled-peer path is invalid")
+    rows: list[tuple[str, int, int, int]] = []
+    for index in range(1, len(parts)):
+        current = "/" + "/".join(parts[1 : index + 1])
+        current_stat = os.lstat(current)
+        mode = current_stat.st_mode
+        if stat.S_ISLNK(mode):
+            raise ValueError(
+                "local controlled-peer path cannot contain symlinks"
+            )
+        final = index == len(parts) - 1
+        if not final and not stat.S_ISDIR(mode):
+            raise ValueError(
+                "local controlled-peer parent is not a directory"
+            )
+        if final and (
+            (final_kind == "regular" and not stat.S_ISREG(mode))
+            or (final_kind == "socket" and not stat.S_ISSOCK(mode))
+        ):
+            raise ValueError(
+                "local controlled-peer endpoint has the wrong type"
+            )
+        rows.append(
+            (
+                current,
+                current_stat.st_dev,
+                current_stat.st_ino,
+                stat.S_IFMT(mode),
+            )
+        )
+    if not rows:
+        raise ValueError("local controlled-peer endpoint is missing")
+    return tuple(rows)
+
+
 def _read_local_regular_file(path: str) -> tuple[bytes, os.stat_result]:
+    path_before = _local_posix_path_snapshot(
+        path, final_kind="regular"
+    )
     flags = (
         os.O_RDONLY
         | getattr(os, "O_BINARY", 0)
@@ -1062,6 +1117,13 @@ def _read_local_regular_file(path: str) -> tuple[bytes, os.stat_result]:
     fd = os.open(path, flags)
     try:
         before = os.fstat(fd)
+        if (
+            before.st_dev != path_before[-1][1]
+            or before.st_ino != path_before[-1][2]
+        ):
+            raise ValueError(
+                "local controlled-peer status identity changed before open"
+            )
         if not stat.S_ISREG(before.st_mode):
             raise ValueError("local controlled-peer status is not a regular file")
         if not 1 <= before.st_size <= REMOTE_PEER_MAX_STATUS_BYTES:
@@ -1085,6 +1147,13 @@ def _read_local_regular_file(path: str) -> tuple[bytes, os.stat_result]:
             or len(raw) != before.st_size
         ):
             raise ValueError("local controlled-peer status changed during capture")
+        path_after = _local_posix_path_snapshot(
+            path, final_kind="regular"
+        )
+        if path_after != path_before:
+            raise ValueError(
+                "local controlled-peer status path changed during capture"
+            )
         return raw, after
     finally:
         os.close(fd)
@@ -1139,13 +1208,37 @@ def run_local_peer_operation(
         )
     try:
         strict_json_object(request_raw[:-1], "local controlled-peer request")
-        before = os.lstat(config["control_socket"])
-        if not stat.S_ISSOCK(before.st_mode):
-            raise ValueError("local controlled-peer control path is not a Unix socket")
+        socket_before = _local_posix_path_snapshot(
+            config["control_socket"], final_kind="socket"
+        )
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(timeout_sec)
         try:
             client.connect(config["control_socket"])
+            peer_credentials = client.getsockopt(
+                socket.SOL_SOCKET,
+                LOCAL_PEER_SO_PEERCRED,
+                struct.calcsize("3i"),
+            )
+            if (
+                not isinstance(peer_credentials, bytes)
+                or len(peer_credentials) != struct.calcsize("3i")
+            ):
+                raise ValueError(
+                    "local controlled-peer credentials are unavailable"
+                )
+            peer_pid, peer_uid, peer_gid = struct.unpack(
+                "3i", peer_credentials
+            )
+            if (
+                peer_pid <= 0
+                or peer_uid != LOCAL_PEER_CONTROL_UID
+                or peer_gid != LOCAL_PEER_CONTROL_GID
+            ):
+                raise ValueError(
+                    "local controlled-peer credentials do not match "
+                    "the root-owned responder"
+                )
             client.sendall(request_raw)
             client.shutdown(socket.SHUT_WR)
             chunks = []
@@ -1163,12 +1256,10 @@ def run_local_peer_operation(
                     break
         finally:
             client.close()
-        after = os.lstat(config["control_socket"])
-        if (
-            before.st_dev != after.st_dev
-            or before.st_ino != after.st_ino
-            or not stat.S_ISSOCK(after.st_mode)
-        ):
+        socket_after = _local_posix_path_snapshot(
+            config["control_socket"], final_kind="socket"
+        )
+        if socket_after != socket_before:
             raise ValueError(
                 "local controlled-peer control socket changed during exchange"
             )
@@ -1195,6 +1286,9 @@ def run_local_peer_operation(
         "response_size": len(response_raw),
         "response_sha256": hashlib.sha256(response_raw).hexdigest(),
         "response_b64": base64.b64encode(response_raw).decode("ascii"),
+        "peer_pid": peer_pid,
+        "peer_uid": peer_uid,
+        "peer_gid": peer_gid,
     }
 
 
@@ -1430,6 +1524,67 @@ def _fresh_timestamp(
     return -30.0 <= age <= max_age_sec, age
 
 
+def validate_local_status_mtime(
+    value: object,
+    *,
+    status_written_at: object,
+    observed_at: datetime,
+    max_age_sec: float,
+) -> dict:
+    """Bind a local status file's stat mtime to its payload timestamp."""
+    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+        raise ValueError("local status observation time must be timezone-aware")
+    observed = observed_at.astimezone(timezone.utc)
+    mtime: datetime | None = None
+    if (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value > 0
+    ):
+        seconds, nanoseconds = divmod(value, 1_000_000_000)
+        try:
+            mtime = datetime.fromtimestamp(
+                seconds, timezone.utc
+            ).replace(microsecond=nanoseconds // 1000)
+        except (OverflowError, OSError, ValueError):
+            mtime = None
+    status_written = parse_aware_timestamp(status_written_at)
+    mtime_age = (
+        (observed - mtime).total_seconds()
+        if mtime is not None
+        else None
+    )
+    status_delta = (
+        (mtime - status_written).total_seconds()
+        if mtime is not None and status_written is not None
+        else None
+    )
+    checks = {
+        "source_mtime_positive_epoch_ns": mtime is not None,
+        "source_mtime_fresh": (
+            mtime_age is not None
+            and -LOCAL_PEER_MAX_MTIME_STATUS_SKEW_SEC
+            <= mtime_age
+            <= max_age_sec
+        ),
+        "source_mtime_matches_status_timestamp": (
+            status_delta is not None
+            and abs(status_delta)
+            <= LOCAL_PEER_MAX_MTIME_STATUS_SKEW_SEC
+        ),
+    }
+    return {
+        "ok": all(checks.values()),
+        "source_mtime_ns": value,
+        "source_mtime_at": (
+            mtime.isoformat() if mtime is not None else None
+        ),
+        "source_mtime_age_sec": mtime_age,
+        "source_mtime_status_delta_sec": status_delta,
+        "checks": checks,
+    }
+
+
 def validate_remote_peer_status(
     status: object,
     config: dict,
@@ -1507,16 +1662,35 @@ def validate_local_peer_status(
     config: dict,
     *,
     observed_at: datetime | None = None,
+    source_mtime_ns: object,
 ) -> dict:
     local_config = validate_local_peer_config(config)
-    return validate_remote_peer_status(
+    observed = observed_at or datetime.now(timezone.utc)
+    validation = validate_remote_peer_status(
         status,
         {
             "ssh_host": REMOTE_PEER_SSH_HOST,
             **local_config,
         },
-        observed_at=observed_at,
+        observed_at=observed,
     )
+    value = status if isinstance(status, dict) else {}
+    mtime_validation = validate_local_status_mtime(
+        source_mtime_ns,
+        status_written_at=value.get("status_written_at"),
+        observed_at=observed,
+        max_age_sec=local_config["max_status_age_sec"],
+    )
+    checks = {
+        **validation["checks"],
+        **mtime_validation["checks"],
+    }
+    return {
+        **validation,
+        "ok": all(checks.values()),
+        "checks": checks,
+        "source_mtime": mtime_validation,
+    }
 
 
 def _capture_remote_peer_status_reserved(
@@ -1690,6 +1864,7 @@ def _capture_local_peer_status_reserved(
         status,
         config,
         observed_at=observed_at,
+        source_mtime_ns=result["mtime_ns"],
     )
     if validation["ok"] is not True:
         raise RemotePeerError(
@@ -2007,13 +2182,23 @@ def send_local_peer_dm(
             and result.get("request_sha256") == request_digest
             and result.get("response_size") == len(response_raw)
             and result.get("response_sha256") == response_digest
+            and isinstance(result.get("peer_pid"), int)
+            and not isinstance(result.get("peer_pid"), bool)
+            and result.get("peer_pid") > 0
+            and result.get("peer_uid") == LOCAL_PEER_CONTROL_UID
+            and result.get("peer_gid") == LOCAL_PEER_CONTROL_GID
             and 1 <= len(response_raw) <= REMOTE_PEER_MAX_CONTROL_BYTES
         ):
             raise RemotePeerError(
                 "local_control_invalid",
                 "local control exchange metadata does not match its raw bytes",
             )
-        receipt_extra = {"source_hostname": result["hostname"]}
+        receipt_extra = {
+            "source_hostname": result["hostname"],
+            "source_peer_pid": result["peer_pid"],
+            "source_peer_uid": result["peer_uid"],
+            "source_peer_gid": result["peer_gid"],
+        }
         request_receipt = capture_peer_bytes(
             request_raw,
             request_capture_path,

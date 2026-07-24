@@ -1156,6 +1156,61 @@ def local_config() -> dict:
     return rf_accept.local_peer_config()
 
 
+@pytest.mark.parametrize(
+    "mtime_ns",
+    [
+        0,
+        10**100,
+        int(
+            datetime(
+                2026, 7, 23, 15, 0, 31, tzinfo=timezone.utc
+            ).timestamp()
+            * 1_000_000_000
+        ),
+        int(
+            datetime(
+                2026, 7, 23, 14, 59, 0, tzinfo=timezone.utc
+            ).timestamp()
+            * 1_000_000_000
+        ),
+    ],
+)
+def test_local_status_mtime_fails_closed_for_invalid_epoch_or_binding(
+    mtime_ns,
+):
+    observed = datetime(2026, 7, 23, 15, 0, tzinfo=timezone.utc)
+    validation = rf_accept.validate_local_peer_status(
+        remote_status(observed),
+        local_config(),
+        observed_at=observed,
+        source_mtime_ns=mtime_ns,
+    )
+
+    assert validation["ok"] is False
+    assert validation["source_mtime"]["ok"] is False
+
+
+def test_local_status_mtime_accepts_fresh_epoch_bound_to_payload():
+    observed = datetime(2026, 7, 23, 15, 0, tzinfo=timezone.utc)
+    status = remote_status(observed)
+    written = rf_accept.parse_aware_timestamp(
+        status["status_written_at"]
+    )
+    assert written is not None
+
+    validation = rf_accept.validate_local_peer_status(
+        status,
+        local_config(),
+        observed_at=observed,
+        source_mtime_ns=int(
+            written.timestamp() * 1_000_000_000
+        ),
+    )
+
+    assert validation["ok"] is True
+    assert all(validation["source_mtime"]["checks"].values())
+
+
 def test_local_peer_mode_is_mutually_exclusive_before_io(
     monkeypatch,
     capsys,
@@ -1227,6 +1282,11 @@ def test_local_peer_operations_never_ssh_or_open_peer_tty(monkeypatch):
         st_dev=4,
         st_ino=5,
     )
+    directory = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFDIR | 0o755,
+        st_dev=6,
+        st_ino=7,
+    )
     read_chunks = [status_raw, b""]
     opened = []
     socket_paths = []
@@ -1249,6 +1309,12 @@ def test_local_peer_operations_never_ssh_or_open_peer_tty(monkeypatch):
             socket_paths.append(path)
             assert path == rf_accept.REMOTE_PEER_CONTROL_SOCKET
             assert path != rf_accept.REMOTE_PEER_DEVICE
+
+        def getsockopt(self, level, option, size):
+            assert level == rf_accept.socket.SOL_SOCKET
+            assert option == rf_accept.LOCAL_PEER_SO_PEERCRED
+            assert size == rf_accept.struct.calcsize("3i")
+            return rf_accept.struct.pack("3i", 7896, 0, 0)
 
         def sendall(self, value):
             self.sent = value
@@ -1281,15 +1347,24 @@ def test_local_peer_operations_never_ssh_or_open_peer_tty(monkeypatch):
     monkeypatch.setattr(rf_accept.os, "fstat", lambda _fd: regular)
     monkeypatch.setattr(rf_accept.os, "read", lambda _fd, _size: read_chunks.pop(0))
     monkeypatch.setattr(rf_accept.os, "close", lambda _fd: None)
-    monkeypatch.setattr(
-        rf_accept.os,
-        "lstat",
-        lambda path: (
-            unix_socket
-            if path == rf_accept.REMOTE_PEER_CONTROL_SOCKET
-            else (_ for _ in ()).throw(AssertionError(path))
-        ),
-    )
+    def fake_lstat(path):
+        value = str(path).replace("\\", "/")
+        if value == rf_accept.REMOTE_PEER_STATUS_PATH:
+            return regular
+        if value == rf_accept.REMOTE_PEER_CONTROL_SOCKET:
+            return unix_socket
+        if (
+            rf_accept.REMOTE_PEER_STATUS_PATH.startswith(
+                value.rstrip("/") + "/"
+            )
+            or rf_accept.REMOTE_PEER_CONTROL_SOCKET.startswith(
+                value.rstrip("/") + "/"
+            )
+        ):
+            return directory
+        raise AssertionError(path)
+
+    monkeypatch.setattr(rf_accept.os, "lstat", fake_lstat)
     monkeypatch.setattr(
         rf_accept.socket,
         "socket",
@@ -1321,6 +1396,230 @@ def test_local_peer_operations_never_ssh_or_open_peer_tty(monkeypatch):
     assert ssh_calls == []
 
 
+def test_local_status_rejects_linked_parent_before_open(monkeypatch):
+    directory = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFDIR | 0o755,
+        st_dev=1,
+        st_ino=2,
+    )
+    linked = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFLNK | 0o777,
+        st_dev=1,
+        st_ino=3,
+    )
+    regular = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFREG | 0o600,
+        st_dev=1,
+        st_ino=4,
+    )
+    calls = []
+
+    def fake_lstat(path):
+        value = str(path).replace("\\", "/")
+        if value == "/opt/canadaverse":
+            return linked
+        if value == rf_accept.REMOTE_PEER_STATUS_PATH:
+            return regular
+        return directory
+
+    monkeypatch.setattr(
+        rf_accept.socket,
+        "gethostname",
+        lambda: rf_accept.REMOTE_PEER_HOSTNAME,
+    )
+    monkeypatch.setattr(rf_accept.os, "lstat", fake_lstat)
+    monkeypatch.setattr(
+        rf_accept.os,
+        "open",
+        lambda *_args, **_kwargs: calls.append("open"),
+    )
+
+    with pytest.raises(rf_accept.RemotePeerError) as exc_info:
+        rf_accept.run_local_peer_operation(
+            local_config(), "capture_status"
+        )
+
+    assert exc_info.value.code == "local_status_failed"
+    assert calls == []
+
+
+def test_local_control_rejects_linked_parent_before_socket(monkeypatch):
+    directory = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFDIR | 0o755,
+        st_dev=1,
+        st_ino=2,
+    )
+    linked = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFLNK | 0o777,
+        st_dev=1,
+        st_ino=3,
+    )
+    unix_socket = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFSOCK | 0o600,
+        st_dev=1,
+        st_ino=4,
+    )
+    calls = []
+
+    def fake_lstat(path):
+        value = str(path).replace("\\", "/")
+        if value == "/run/canadaverse-control":
+            return linked
+        if value == rf_accept.REMOTE_PEER_CONTROL_SOCKET:
+            return unix_socket
+        return directory
+
+    _, request_raw = rf_accept.remote_control_request(
+        rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        "linked_parent_in",
+    )
+    monkeypatch.setattr(
+        rf_accept.socket,
+        "gethostname",
+        lambda: rf_accept.REMOTE_PEER_HOSTNAME,
+    )
+    monkeypatch.setattr(rf_accept.os, "lstat", fake_lstat)
+    monkeypatch.setattr(
+        rf_accept.socket,
+        "socket",
+        lambda *_args, **_kwargs: calls.append("socket"),
+    )
+
+    with pytest.raises(rf_accept.RemotePeerError) as exc_info:
+        rf_accept.run_local_peer_operation(
+            local_config(),
+            "send_control",
+            control_request=request_raw,
+        )
+
+    assert exc_info.value.code == "local_control_failed"
+    assert calls == []
+
+
+def test_local_control_rejects_non_root_socket_peer_before_send(
+    monkeypatch,
+):
+    directory = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFDIR | 0o755,
+        st_dev=1,
+        st_ino=2,
+    )
+    unix_socket = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFSOCK | 0o600,
+        st_dev=1,
+        st_ino=4,
+    )
+    sent = []
+
+    def fake_lstat(path):
+        if (
+            str(path).replace("\\", "/")
+            == rf_accept.REMOTE_PEER_CONTROL_SOCKET
+        ):
+            return unix_socket
+        return directory
+
+    class FakeSocket:
+        def settimeout(self, _value):
+            return None
+
+        def connect(self, _path):
+            return None
+
+        def getsockopt(self, _level, _option, _size):
+            return rf_accept.struct.pack("3i", 123, 1000, 1000)
+
+        def sendall(self, value):
+            sent.append(value)
+
+        def close(self):
+            return None
+
+    _, request_raw = rf_accept.remote_control_request(
+        rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        "wrong_credentials_in",
+    )
+    monkeypatch.setattr(
+        rf_accept.socket, "AF_UNIX", 1, raising=False
+    )
+    monkeypatch.setattr(
+        rf_accept.socket,
+        "gethostname",
+        lambda: rf_accept.REMOTE_PEER_HOSTNAME,
+    )
+    monkeypatch.setattr(rf_accept.os, "lstat", fake_lstat)
+    monkeypatch.setattr(
+        rf_accept.socket,
+        "socket",
+        lambda *_args, **_kwargs: FakeSocket(),
+    )
+
+    with pytest.raises(rf_accept.RemotePeerError) as exc_info:
+        rf_accept.run_local_peer_operation(
+            local_config(),
+            "send_control",
+            control_request=request_raw,
+        )
+
+    assert exc_info.value.code == "local_control_failed"
+    assert sent == []
+
+
+def test_local_status_rejects_path_identity_change_during_read(
+    monkeypatch,
+):
+    raw = b"{}"
+    file_stat = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFREG | 0o600,
+        st_size=len(raw),
+        st_dev=1,
+        st_ino=2,
+        st_mtime_ns=3,
+    )
+    snapshots = [
+        (
+            ("/opt", 1, 10, rf_accept.stat.S_IFDIR),
+            (
+                rf_accept.REMOTE_PEER_STATUS_PATH,
+                1,
+                2,
+                rf_accept.stat.S_IFREG,
+            ),
+        ),
+        (
+            ("/opt", 1, 11, rf_accept.stat.S_IFDIR),
+            (
+                rf_accept.REMOTE_PEER_STATUS_PATH,
+                1,
+                2,
+                rf_accept.stat.S_IFREG,
+            ),
+        ),
+    ]
+    reads = [raw, b""]
+
+    monkeypatch.setattr(
+        rf_accept,
+        "_local_posix_path_snapshot",
+        lambda *_args, **_kwargs: snapshots.pop(0),
+    )
+    monkeypatch.setattr(rf_accept.os, "open", lambda *_args: 17)
+    monkeypatch.setattr(
+        rf_accept.os, "fstat", lambda _fd: file_stat
+    )
+    monkeypatch.setattr(
+        rf_accept.os,
+        "read",
+        lambda _fd, _size: reads.pop(0),
+    )
+    monkeypatch.setattr(rf_accept.os, "close", lambda _fd: None)
+
+    with pytest.raises(ValueError, match="path changed"):
+        rf_accept._read_local_regular_file(
+            rf_accept.REMOTE_PEER_STATUS_PATH
+        )
+
+
 def test_local_peer_capture_and_control_preserve_exact_sidecars(
     tmp_path: Path,
     monkeypatch,
@@ -1350,7 +1649,9 @@ def test_local_peer_capture_and_control_preserve_exact_sidecars(
                 "path": rf_accept.REMOTE_PEER_STATUS_PATH,
                 "size": len(status_raw),
                 "sha256": hashlib.sha256(status_raw).hexdigest(),
-                "mtime_ns": 123,
+                "mtime_ns": int(
+                    observed.timestamp() * 1_000_000_000
+                ),
                 "hostname": rf_accept.REMOTE_PEER_HOSTNAME,
                 "raw_b64": base64.b64encode(status_raw).decode("ascii"),
             }
@@ -1364,6 +1665,9 @@ def test_local_peer_capture_and_control_preserve_exact_sidecars(
             "response_size": len(response_raw),
             "response_sha256": hashlib.sha256(response_raw).hexdigest(),
             "response_b64": base64.b64encode(response_raw).decode("ascii"),
+            "peer_pid": 7896,
+            "peer_uid": rf_accept.LOCAL_PEER_CONTROL_UID,
+            "peer_gid": rf_accept.LOCAL_PEER_CONTROL_GID,
         }
 
     monkeypatch.setattr(rf_accept, "run_local_peer_operation", fake_operation)
@@ -1399,6 +1703,11 @@ def test_local_peer_capture_and_control_preserve_exact_sidecars(
     assert (
         control["response_receipt"]["transport"]
         == rf_accept.LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT
+    )
+    assert control["request_receipt"]["source_peer_pid"] == 7896
+    assert (
+        control["request_receipt"]["source_peer_uid"]
+        == rf_accept.LOCAL_PEER_CONTROL_UID
     )
 
 

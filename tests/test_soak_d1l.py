@@ -921,9 +921,16 @@ def test_active_listener_flow_requires_exact_counters_and_12_hex_sender():
     )[0] is False
 
 
-def test_active_listener_flow_accepts_only_exact_remote_peer_binding():
+@pytest.mark.parametrize("local", [False, True])
+def test_active_listener_flow_accepts_only_exact_pinned_peer_binding(
+    local,
+):
     rf = soak_d1l.rf_acceptance
-    config = rf.remote_peer_config()
+    config = (
+        rf.local_peer_config()
+        if local
+        else rf.remote_peer_config()
+    )
     d1l_public_key = rf.DEFAULT_D1L_PUBLIC_KEY
 
     def status(
@@ -977,7 +984,9 @@ def test_active_listener_flow_accepts_only_exact_remote_peer_binding():
         "peer_fingerprint": rf.REMOTE_PEER_FINGERPRINT,
         "peer_public_key": rf.REMOTE_PEER_PUBLIC_KEY,
         "minimum_send_count": 6,
-        "remote_config": config,
+        (
+            "local_config" if local else "remote_config"
+        ): config,
     }
 
     ok, deltas = soak_d1l.active_listener_flow_ok(
@@ -996,6 +1005,20 @@ def test_active_listener_flow_accepts_only_exact_remote_peer_binding():
             before,
             wrong_device,
             **arguments,
+        )[0]
+        is False
+    )
+
+    mixed_arguments = {
+        **arguments,
+        "remote_config": rf.remote_peer_config(),
+        "local_config": rf.local_peer_config(),
+    }
+    assert (
+        soak_d1l.active_listener_flow_ok(
+            before,
+            after,
+            **mixed_arguments,
         )[0]
         is False
     )

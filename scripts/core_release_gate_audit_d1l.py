@@ -2293,21 +2293,44 @@ def remote_rf_gate(
     after_observed = rf_acceptance.parse_aware_timestamp(
         after_row.get("captured_at")
     )
-    status_validator = (
-        rf_acceptance.validate_local_peer_status
-        if local_mode
-        else rf_acceptance.validate_remote_peer_status
-    )
     if config is not None and before_observed is not None:
-        before_validation = status_validator(
-            before_raw, config, observed_at=before_observed
-        )
+        if local_mode:
+            before_validation = (
+                rf_acceptance.validate_local_peer_status(
+                    before_raw,
+                    config,
+                    observed_at=before_observed,
+                    source_mtime_ns=before_row.get(
+                        "source_mtime_ns"
+                    ),
+                )
+            )
+        else:
+            before_validation = (
+                rf_acceptance.validate_remote_peer_status(
+                    before_raw, config, observed_at=before_observed
+                )
+            )
     else:
         before_validation = {"ok": False, "checks": {}}
     if config is not None and after_observed is not None:
-        after_validation = status_validator(
-            after_raw, config, observed_at=after_observed
-        )
+        if local_mode:
+            after_validation = (
+                rf_acceptance.validate_local_peer_status(
+                    after_raw,
+                    config,
+                    observed_at=after_observed,
+                    source_mtime_ns=after_row.get(
+                        "source_mtime_ns"
+                    ),
+                )
+            )
+        else:
+            after_validation = (
+                rf_acceptance.validate_remote_peer_status(
+                    after_raw, config, observed_at=after_observed
+                )
+            )
     else:
         after_validation = {"ok": False, "checks": {}}
 
@@ -2487,10 +2510,10 @@ def remote_rf_gate(
         )
 
     def control_source_exact(row: object, transport: str) -> bool:
-        return (
-            isinstance(row, dict)
-            and config is not None
-            and row.get("source_path") == config["control_socket"]
+        if not isinstance(row, dict) or config is None:
+            return False
+        common = (
+            row.get("source_path") == config["control_socket"]
             and row.get("source_host")
             == (
                 config["hostname"]
@@ -2499,6 +2522,25 @@ def remote_rf_gate(
             )
             and row.get("source_hostname") == config["hostname"]
             and row.get("transport") == transport
+        )
+        if local_mode:
+            return (
+                common
+                and isinstance(row.get("source_peer_pid"), int)
+                and not isinstance(
+                    row.get("source_peer_pid"), bool
+                )
+                and row.get("source_peer_pid") > 0
+                and row.get("source_peer_uid")
+                == rf_acceptance.LOCAL_PEER_CONTROL_UID
+                and row.get("source_peer_gid")
+                == rf_acceptance.LOCAL_PEER_CONTROL_GID
+            )
+        return (
+            common
+            and "source_peer_pid" not in row
+            and "source_peer_uid" not in row
+            and "source_peer_gid" not in row
         )
 
     request_transport = (
@@ -3507,11 +3549,18 @@ def active_soak_peer_flow_ok(
     after_row = after_row if isinstance(after_row, dict) else {}
     peer = rf.get("controlled_peer")
     peer = peer if isinstance(peer, dict) else {}
+    evidence_source = peer.get("evidence_source")
     remote_mode = (
-        peer.get("evidence_source")
+        evidence_source
         == rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
     )
+    local_mode = (
+        evidence_source
+        == rf_acceptance.LOCAL_PEER_EVIDENCE_SOURCE
+    )
+    pinned_mode = remote_mode or local_mode
     remote_config: dict | None = None
+    local_config: dict | None = None
     if remote_mode:
         try:
             remote_config = rf_acceptance.validate_remote_peer_config(
@@ -3529,16 +3578,33 @@ def active_soak_peer_flow_ok(
             )
         except (TypeError, ValueError):
             remote_config = None
+    elif local_mode:
+        try:
+            local_config = rf_acceptance.validate_local_peer_config(
+                {
+                    "hostname": peer.get("hostname"),
+                    "status_path": peer.get("status_path"),
+                    "control_socket": peer.get("control_socket"),
+                    "device": peer.get("device"),
+                    "public_key": peer.get("public_key"),
+                    "max_status_age_sec": peer.get(
+                        "max_status_age_sec"
+                    ),
+                }
+            )
+        except (TypeError, ValueError):
+            local_config = None
+    pinned_config = local_config or remote_config
 
     try:
-        if remote_mode:
+        if pinned_mode:
             before = rf_acceptance.strict_json_object(
                 before_path.read_bytes() if before_path else b"",
-                "remote active-soak peer before status",
+                "pinned active-soak peer before status",
             )
             after = rf_acceptance.strict_json_object(
                 after_path.read_bytes() if after_path else b"",
-                "remote active-soak peer after status",
+                "pinned active-soak peer after status",
             )
         else:
             before = read_json(before_path)
@@ -3568,6 +3634,23 @@ def active_soak_peer_flow_ok(
                 and isinstance(row.get("remote_mtime_ns"), int)
                 and not isinstance(row.get("remote_mtime_ns"), bool)
             )
+        if local_mode:
+            return (
+                local_config is not None
+                and row.get("source_path")
+                == local_config["status_path"]
+                and row.get("source_host")
+                == local_config["hostname"]
+                and row.get("source_hostname")
+                == local_config["hostname"]
+                and row.get("transport")
+                == rf_acceptance.LOCAL_PEER_STATUS_TRANSPORT
+                and row.get("source_sha256") == row.get("sha256")
+                and isinstance(row.get("source_mtime_ns"), int)
+                and not isinstance(row.get("source_mtime_ns"), bool)
+                and "remote_sha256" not in row
+                and "remote_mtime_ns" not in row
+            )
         source = row.get("source_path")
         try:
             return (
@@ -3596,21 +3679,47 @@ def active_soak_peer_flow_ok(
         after_row.get("captured_at")
     )
     if (
-        remote_config is not None
+        pinned_config is not None
         and before_observed is not None
         and after_observed is not None
     ):
-        before_validation = rf_acceptance.validate_remote_peer_status(
-            before,
-            remote_config,
-            observed_at=before_observed,
-        )
-        after_validation = rf_acceptance.validate_remote_peer_status(
-            after,
-            remote_config,
-            observed_at=after_observed,
-        )
-        remote_validation_ok = (
+        if local_mode:
+            before_validation = (
+                rf_acceptance.validate_local_peer_status(
+                    before,
+                    pinned_config,
+                    observed_at=before_observed,
+                    source_mtime_ns=before_row.get(
+                        "source_mtime_ns"
+                    ),
+                )
+            )
+            after_validation = (
+                rf_acceptance.validate_local_peer_status(
+                    after,
+                    pinned_config,
+                    observed_at=after_observed,
+                    source_mtime_ns=after_row.get(
+                        "source_mtime_ns"
+                    ),
+                )
+            )
+        else:
+            before_validation = (
+                rf_acceptance.validate_remote_peer_status(
+                    before,
+                    pinned_config,
+                    observed_at=before_observed,
+                )
+            )
+            after_validation = (
+                rf_acceptance.validate_remote_peer_status(
+                    after,
+                    pinned_config,
+                    observed_at=after_observed,
+                )
+            )
+        pinned_validation_ok = (
             before_validation.get("ok") is True
             and after_validation.get("ok") is True
             and before_observed <= after_observed
@@ -3618,7 +3727,7 @@ def active_soak_peer_flow_ok(
     else:
         before_validation = None
         after_validation = None
-        remote_validation_ok = not remote_mode
+        pinned_validation_ok = not pinned_mode
 
     flow_ok, deltas = soak_runner.active_listener_flow_ok(
         before,
@@ -3629,15 +3738,16 @@ def active_soak_peer_flow_ok(
         peer_public_key=peer.get("public_key"),
         minimum_send_count=expected_send_count or sys.maxsize,
         remote_config=remote_config if remote_mode else None,
+        local_config=local_config if local_mode else None,
     )
     controlled_peer_remote = data.get("controlled_peer_remote")
-    if remote_mode:
-        remote_report_exact = controlled_peer_remote == {
+    if pinned_mode:
+        pinned_report_exact = controlled_peer_remote == {
             "before_validation": before_validation,
             "after_validation": after_validation,
         }
     else:
-        remote_report_exact = controlled_peer_remote in (None, {})
+        pinned_report_exact = controlled_peer_remote in (None, {})
     report_exact = (
         data.get("controlled_peer_before")
         == rf_acceptance.status_snapshot(before)
@@ -3649,7 +3759,7 @@ def active_soak_peer_flow_ok(
         and data.get("controlled_peer_expected_send_count")
         == expected_send_count
         and data.get("controlled_peer_flow_ok") is True
-        and remote_report_exact
+        and pinned_report_exact
     )
     files_exact = (
         raw_parse_ok
@@ -3684,6 +3794,22 @@ def active_soak_peer_flow_ok(
             and peer.get("fingerprint")
             == rf_acceptance.REMOTE_PEER_FINGERPRINT
         )
+    elif local_mode:
+        binding_exact = (
+            common_binding
+            and local_config is not None
+            and rf.get("controlled_peer_adapter")
+            == rf_acceptance.LOCAL_PEER_ADAPTER
+            and peer.get("port") is None
+            and peer.get("access_mode") == "local"
+            and "ssh_host" not in peer
+            and local_config["device"]
+            == rf_acceptance.REMOTE_PEER_DEVICE
+            and local_config["public_key"]
+            == rf_acceptance.REMOTE_PEER_PUBLIC_KEY
+            and peer.get("fingerprint")
+            == rf_acceptance.REMOTE_PEER_FINGERPRINT
+        )
     else:
         try:
             peer_status_exact = (
@@ -3704,7 +3830,7 @@ def active_soak_peer_flow_ok(
         and binding_exact
         and report_exact
         and flow_ok
-        and remote_validation_ok
+        and pinned_validation_ok
         and expected_send_count is not None
         and successful_send_count >= max(6, expected_send_count)
     )
@@ -3721,7 +3847,9 @@ def active_soak_peer_flow_ok(
         "binding_exact": binding_exact,
         "flow_ok": flow_ok,
         "remote_mode": remote_mode,
-        "remote_status_validation_ok": remote_validation_ok,
+        "local_mode": local_mode,
+        "pinned_status_validation_ok": pinned_validation_ok,
+        "remote_status_validation_ok": pinned_validation_ok,
         "remote_before_validation": before_validation,
         "remote_after_validation": after_validation,
     }

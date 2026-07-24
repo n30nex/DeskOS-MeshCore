@@ -1282,8 +1282,12 @@ def write_remote_rf_receipt(
     before_path = write_json(sidecar_dir / "before.json", before)
     after_path = write_json(sidecar_dir / "after.json", after)
 
-    def status_row(path: Path) -> dict:
+    def status_row(path: Path, value: dict) -> dict:
         digest = audit.sha256_file(path)
+        status_written = rf.parse_aware_timestamp(
+            value["status_written_at"]
+        )
+        assert status_written is not None
         return {
             "path": path.relative_to(tmp_path).as_posix(),
             "size": path.stat().st_size,
@@ -1301,7 +1305,9 @@ def write_remote_rf_receipt(
             "captured_at": observed.isoformat(),
             **(
                 {
-                    "source_mtime_ns": 1,
+                    "source_mtime_ns": int(
+                        status_written.timestamp() * 1_000_000_000
+                    ),
                     "source_sha256": digest,
                 }
                 if local
@@ -1312,19 +1318,33 @@ def write_remote_rf_receipt(
             ),
         }
 
-    before_row = status_row(before_path)
-    after_row = status_row(after_path)
+    before_row = status_row(before_path, before)
+    after_row = status_row(after_path, after)
     status_validator = (
         rf.validate_local_peer_status
         if local
         else rf.validate_remote_peer_status
     )
-    before_validation = status_validator(
-        before, config, observed_at=observed
-    )
-    after_validation = status_validator(
-        after, config, observed_at=observed
-    )
+    if local:
+        before_validation = status_validator(
+            before,
+            config,
+            observed_at=observed,
+            source_mtime_ns=before_row["source_mtime_ns"],
+        )
+        after_validation = status_validator(
+            after,
+            config,
+            observed_at=observed,
+            source_mtime_ns=after_row["source_mtime_ns"],
+        )
+    else:
+        before_validation = status_validator(
+            before, config, observed_at=observed
+        )
+        after_validation = status_validator(
+            after, config, observed_at=observed
+        )
     token = "rf_remote"
     inbound_token = f"{token}_in"
     request, request_raw = rf.remote_control_request(
@@ -1371,6 +1391,19 @@ def write_remote_rf_receipt(
             "source_hostname": config["hostname"],
             "transport": transport,
             "captured_at": observed.isoformat(),
+            **(
+                {
+                    "source_peer_pid": 7896,
+                    "source_peer_uid": (
+                        rf.LOCAL_PEER_CONTROL_UID
+                    ),
+                    "source_peer_gid": (
+                        rf.LOCAL_PEER_CONTROL_GID
+                    ),
+                }
+                if local
+                else {}
+            ),
         }
 
     control_validation = rf.validate_remote_control_exchange(
@@ -1706,6 +1739,55 @@ def test_local_rf_gate_recomputes_raw_status_and_control_sidecars(
 
 
 @pytest.mark.parametrize(
+    "source_mtime_ns",
+    [
+        0,
+        10**100,
+        int(
+            datetime(
+                2026, 7, 23, 15, 0, 31, tzinfo=timezone.utc
+            ).timestamp()
+            * 1_000_000_000
+        ),
+        int(
+            datetime(
+                2026, 7, 23, 14, 59, 0, tzinfo=timezone.utc
+            ).timestamp()
+            * 1_000_000_000
+        ),
+    ],
+)
+def test_local_core_rf_gate_rejects_invalid_source_mtime(
+    tmp_path: Path,
+    source_mtime_ns: int,
+):
+    receipt = write_remote_rf_receipt(tmp_path, local=True)
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    report["controlled_peer_before_receipt"][
+        "source_mtime_ns"
+    ] = source_mtime_ns
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+
+    gate = audit.rf_gate(
+        receipt,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert gate.details["raw_status_ok"] is False
+    assert (
+        gate.details["derived_checks"][
+            "controlled_peer_observed"
+        ]
+        is False
+    )
+
+
+@pytest.mark.parametrize(
     ("section", "field", "value"),
     [
         ("controlled_peer", "hostname", "forged-pi"),
@@ -1747,6 +1829,11 @@ def test_local_rf_gate_recomputes_raw_status_and_control_sidecars(
             "controlled_peer_control.request_receipt",
             "transport",
             "ssh-unix-socket-request",
+        ),
+        (
+            "controlled_peer_control.request_receipt",
+            "source_peer_uid",
+            1000,
         ),
     ],
 )
@@ -1892,23 +1979,79 @@ def test_remote_core_rf_gate_recomputes_after_coordinated_raw_digest_tamper(
     assert gate.details["raw_status_ok"] is False
 
 
-def test_remote_active_soak_recomputes_status_sidecars_and_binding(
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        (
+            "controlled_peer_before_receipt",
+            "transport",
+            "ssh",
+        ),
+        (
+            "controlled_peer_control.request_receipt",
+            "transport",
+            "ssh-unix-socket-request",
+        ),
+        (
+            "controlled_peer",
+            "ssh_host",
+            "neonx@192.168.0.24",
+        ),
+    ],
+)
+def test_active_soak_rejects_mixed_local_rf_receipt_before_capture(
     tmp_path: Path,
+    section: str,
+    field: str,
+    value,
 ):
-    rf_receipt = write_remote_rf_receipt(tmp_path)
+    receipt = write_remote_rf_receipt(tmp_path, local=True)
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    target = report
+    for part in section.split("."):
+        target = target[part]
+    target[field] = value
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="does not match the exact qualified",
+    ):
+        soak_runner.qualified_controlled_peer_receipt(
+            path=receipt,
+            root=tmp_path,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            fingerprint=(
+                audit.rf_acceptance.REMOTE_PEER_FINGERPRINT
+            ),
+        )
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
+    tmp_path: Path,
+    local: bool,
+):
+    rf_receipt = write_remote_rf_receipt(tmp_path, local=local)
     rf_report = json.loads(rf_receipt.read_text(encoding="utf-8"))
     rf = audit.rf_acceptance
     peer = rf_report["controlled_peer"]
-    config = rf.validate_remote_peer_config(
-        {
-            "ssh_host": peer["ssh_host"],
-            "hostname": peer["hostname"],
-            "status_path": peer["status_path"],
-            "control_socket": peer["control_socket"],
-            "device": peer["device"],
-            "public_key": peer["public_key"],
-            "max_status_age_sec": peer["max_status_age_sec"],
-        }
+    common_config = {
+        "hostname": peer["hostname"],
+        "status_path": peer["status_path"],
+        "control_socket": peer["control_socket"],
+        "device": peer["device"],
+        "public_key": peer["public_key"],
+        "max_status_age_sec": peer["max_status_age_sec"],
+    }
+    config = (
+        rf.validate_local_peer_config(common_config)
+        if local
+        else rf.validate_remote_peer_config(
+            {"ssh_host": peer["ssh_host"], **common_config}
+        )
     )
     qualified, _ = soak_runner.qualified_controlled_peer_receipt(
         path=rf_receipt,
@@ -1973,33 +2116,67 @@ def test_remote_active_soak_recomputes_status_sidecars_and_binding(
     before_path = write_json(sidecar_dir / "before.json", before)
     after_path = write_json(sidecar_dir / "after.json", after)
 
-    def row(path: Path, observed: datetime, mtime_ns: int) -> dict:
+    def row(path: Path, observed: datetime, value: dict) -> dict:
         digest = audit.sha256_file(path)
+        written = rf.parse_aware_timestamp(
+            value["status_written_at"]
+        )
+        assert written is not None
+        mtime_ns = int(written.timestamp() * 1_000_000_000)
         return {
             "path": path.relative_to(tmp_path).as_posix(),
             "size": path.stat().st_size,
             "sha256": digest,
             "source_path": config["status_path"],
-            "source_host": config["ssh_host"],
+            "source_host": (
+                config["hostname"] if local else config["ssh_host"]
+            ),
             "source_hostname": config["hostname"],
-            "transport": "ssh",
+            "transport": (
+                rf.LOCAL_PEER_STATUS_TRANSPORT
+                if local
+                else "ssh"
+            ),
             "captured_at": observed.isoformat(),
-            "remote_mtime_ns": mtime_ns,
-            "remote_sha256": digest,
+            **(
+                {
+                    "source_mtime_ns": mtime_ns,
+                    "source_sha256": digest,
+                }
+                if local
+                else {
+                    "remote_mtime_ns": mtime_ns,
+                    "remote_sha256": digest,
+                }
+            ),
         }
 
-    before_row = row(before_path, before_observed, 101)
-    after_row = row(after_path, after_observed, 102)
-    before_validation = rf.validate_remote_peer_status(
-        before,
-        config,
-        observed_at=before_observed,
-    )
-    after_validation = rf.validate_remote_peer_status(
-        after,
-        config,
-        observed_at=after_observed,
-    )
+    before_row = row(before_path, before_observed, before)
+    after_row = row(after_path, after_observed, after)
+    if local:
+        before_validation = rf.validate_local_peer_status(
+            before,
+            config,
+            observed_at=before_observed,
+            source_mtime_ns=before_row["source_mtime_ns"],
+        )
+        after_validation = rf.validate_local_peer_status(
+            after,
+            config,
+            observed_at=after_observed,
+            source_mtime_ns=after_row["source_mtime_ns"],
+        )
+    else:
+        before_validation = rf.validate_remote_peer_status(
+            before,
+            config,
+            observed_at=before_observed,
+        )
+        after_validation = rf.validate_remote_peer_status(
+            after,
+            config,
+            observed_at=after_observed,
+        )
 
     data = passing_soak(active=True)
     text = "core soak test"
@@ -2045,7 +2222,9 @@ def test_remote_active_soak_recomputes_status_sidecars_and_binding(
         tmp_path,
     )
     assert ok is True
-    assert details["remote_mode"] is True
+    assert details["remote_mode"] is (not local)
+    assert details["local_mode"] is local
+    assert details["pinned_status_validation_ok"] is True
     assert details["remote_status_validation_ok"] is True
     assert details["canonical_status_sources"] is True
 
@@ -2063,6 +2242,33 @@ def test_remote_active_soak_recomputes_status_sidecars_and_binding(
         "source_hostname"
     ] = rf.REMOTE_PEER_HOSTNAME
 
+    if local:
+        data["controlled_peer_before_receipt"][
+            "transport"
+        ] = "ssh"
+        ok, details = audit.active_soak_peer_flow_ok(
+            data,
+            rf_report,
+            tmp_path,
+        )
+        assert ok is False
+        assert details["canonical_status_sources"] is False
+        data["controlled_peer_before_receipt"][
+            "transport"
+        ] = rf.LOCAL_PEER_STATUS_TRANSPORT
+
+        rf_report["controlled_peer"][
+            "ssh_host"
+        ] = rf.REMOTE_PEER_SSH_HOST
+        ok, details = audit.active_soak_peer_flow_ok(
+            data,
+            rf_report,
+            tmp_path,
+        )
+        assert ok is False
+        assert details["binding_exact"] is False
+        del rf_report["controlled_peer"]["ssh_host"]
+
     after["serial"]["port"] = "/dev/krab-other"
     write_json(after_path, after)
     tampered_digest = audit.sha256_file(after_path)
@@ -2070,7 +2276,11 @@ def test_remote_active_soak_recomputes_status_sidecars_and_binding(
         {
             "size": after_path.stat().st_size,
             "sha256": tampered_digest,
-            "remote_sha256": tampered_digest,
+            (
+                "source_sha256"
+                if local
+                else "remote_sha256"
+            ): tampered_digest,
         }
     )
     ok, details = audit.active_soak_peer_flow_ok(

@@ -175,6 +175,137 @@ def expected_active_send_count(
     return max(1, math.ceil(duration_sec / active_interval_sec))
 
 
+def pinned_peer_evidence_metadata_ok(
+    data: dict,
+    config: dict,
+    *,
+    local_mode: bool,
+) -> bool:
+    before_row = data.get("controlled_peer_before_receipt")
+    after_row = data.get("controlled_peer_after_receipt")
+    control = data.get("controlled_peer_control")
+    if not all(
+        isinstance(value, dict)
+        for value in (before_row, after_row, control)
+    ):
+        return False
+    request_row = control.get("request_receipt")
+    response_row = control.get("response_receipt")
+    if not all(
+        isinstance(value, dict)
+        for value in (request_row, response_row)
+    ):
+        return False
+
+    def status_row_ok(row: dict, snapshot: object) -> bool:
+        common = (
+            row.get("source_path") == config["status_path"]
+            and row.get("source_hostname") == config["hostname"]
+            and rf_acceptance.parse_aware_timestamp(
+                row.get("captured_at")
+            )
+            is not None
+        )
+        if not local_mode:
+            return (
+                common
+                and row.get("source_host") == config["ssh_host"]
+                and row.get("transport") == "ssh"
+                and row.get("remote_sha256") == row.get("sha256")
+                and isinstance(row.get("remote_mtime_ns"), int)
+                and not isinstance(row.get("remote_mtime_ns"), bool)
+            )
+        observed = rf_acceptance.parse_aware_timestamp(
+            row.get("captured_at")
+        )
+        status_written_at = (
+            snapshot.get("status_written_at")
+            if isinstance(snapshot, dict)
+            else None
+        )
+        mtime = (
+            rf_acceptance.validate_local_status_mtime(
+                row.get("source_mtime_ns"),
+                status_written_at=status_written_at,
+                observed_at=observed,
+                max_age_sec=config["max_status_age_sec"],
+            )
+            if observed is not None
+            else {"ok": False}
+        )
+        return (
+            common
+            and row.get("source_host") == config["hostname"]
+            and row.get("transport")
+            == rf_acceptance.LOCAL_PEER_STATUS_TRANSPORT
+            and row.get("source_sha256") == row.get("sha256")
+            and "remote_sha256" not in row
+            and "remote_mtime_ns" not in row
+            and mtime.get("ok") is True
+        )
+
+    def control_row_ok(row: dict, transport: str) -> bool:
+        common = (
+            row.get("source_path") == config["control_socket"]
+            and row.get("source_host")
+            == (
+                config["hostname"]
+                if local_mode
+                else config["ssh_host"]
+            )
+            and row.get("source_hostname") == config["hostname"]
+            and row.get("transport") == transport
+            and rf_acceptance.parse_aware_timestamp(
+                row.get("captured_at")
+            )
+            is not None
+        )
+        if local_mode:
+            return (
+                common
+                and isinstance(row.get("source_peer_pid"), int)
+                and not isinstance(
+                    row.get("source_peer_pid"), bool
+                )
+                and row.get("source_peer_pid") > 0
+                and row.get("source_peer_uid")
+                == rf_acceptance.LOCAL_PEER_CONTROL_UID
+                and row.get("source_peer_gid")
+                == rf_acceptance.LOCAL_PEER_CONTROL_GID
+            )
+        return (
+            common
+            and "source_peer_pid" not in row
+            and "source_peer_uid" not in row
+            and "source_peer_gid" not in row
+        )
+
+    return (
+        status_row_ok(
+            before_row, data.get("controlled_peer_before")
+        )
+        and status_row_ok(
+            after_row, data.get("controlled_peer_after")
+        )
+        and control_row_ok(
+            request_row,
+            (
+                rf_acceptance.LOCAL_PEER_CONTROL_REQUEST_TRANSPORT
+                if local_mode
+                else "ssh-unix-socket-request"
+            ),
+        )
+        and control_row_ok(
+            response_row,
+            (
+                rf_acceptance.LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT
+                if local_mode
+                else "ssh-unix-socket-response"
+            ),
+        )
+    )
+
+
 def qualified_controlled_peer_receipt(
     *,
     path: Path,
@@ -213,7 +344,8 @@ def qualified_controlled_peer_receipt(
         if isinstance(peer, dict)
         else None
     )
-    local_peer_ok = False
+    serial_peer_ok = False
+    pinned_local_peer_ok = False
     remote_peer_ok = False
     if evidence_source == "explicit_peer_status":
         try:
@@ -222,7 +354,7 @@ def qualified_controlled_peer_receipt(
             ).resolve()
         except (OSError, RuntimeError, TypeError, ValueError):
             peer_status_path = None
-        local_peer_ok = (
+        serial_peer_ok = (
             data.get("controlled_peer_adapter")
             == rf_acceptance.RADIO_LISTENER_PROFILE
             and peer.get("port") == rf_acceptance.RADIO_LISTENER_PORT
@@ -249,6 +381,54 @@ def qualified_controlled_peer_receipt(
             == rf_acceptance.REMOTE_PEER_DEVICE
             and peer.get("public_key")
             == rf_acceptance.REMOTE_PEER_PUBLIC_KEY
+            and pinned_peer_evidence_metadata_ok(
+                data,
+                rf_acceptance.validate_remote_peer_config(
+                    {
+                        "ssh_host": peer.get("ssh_host"),
+                        "hostname": peer.get("hostname"),
+                        "status_path": peer.get("status_path"),
+                        "control_socket": peer.get("control_socket"),
+                        "device": peer.get("device"),
+                        "public_key": peer.get("public_key"),
+                        "max_status_age_sec": peer.get(
+                            "max_status_age_sec"
+                        ),
+                    }
+                ),
+                local_mode=False,
+            )
+            and rf_acceptance.remote_peer_report_shape_ok(data)
+        )
+    elif (
+        evidence_source
+        == rf_acceptance.LOCAL_PEER_EVIDENCE_SOURCE
+    ):
+        try:
+            local_config = rf_acceptance.validate_local_peer_config(
+                {
+                    "hostname": peer.get("hostname"),
+                    "status_path": peer.get("status_path"),
+                    "control_socket": peer.get("control_socket"),
+                    "device": peer.get("device"),
+                    "public_key": peer.get("public_key"),
+                    "max_status_age_sec": peer.get(
+                        "max_status_age_sec"
+                    ),
+                }
+            )
+        except (TypeError, ValueError):
+            local_config = None
+        pinned_local_peer_ok = (
+            local_config is not None
+            and data.get("controlled_peer_adapter")
+            == rf_acceptance.LOCAL_PEER_ADAPTER
+            and peer.get("port") is None
+            and peer.get("access_mode") == "local"
+            and "ssh_host" not in peer
+            and pinned_peer_evidence_metadata_ok(
+                data, local_config, local_mode=True
+            )
             and rf_acceptance.remote_peer_report_shape_ok(data)
         )
     if not (
@@ -262,7 +442,11 @@ def qualified_controlled_peer_receipt(
         and data.get("target_fingerprint") == fingerprint
         and isinstance(peer, dict)
         and peer.get("fingerprint") == fingerprint
-        and (local_peer_ok or remote_peer_ok)
+        and (
+            serial_peer_ok
+            or pinned_local_peer_ok
+            or remote_peer_ok
+        )
         and peer_public_key is not None
         and rf_acceptance.public_key_fingerprint(peer_public_key)
         == fingerprint
@@ -310,6 +494,7 @@ def active_listener_flow_ok(
     peer_public_key: object,
     minimum_send_count: int = 1,
     remote_config: dict | None = None,
+    local_config: dict | None = None,
 ) -> tuple[bool, dict[str, int | None]]:
     deltas = {
         field: rf_acceptance.counter_delta(before, after, field)
@@ -337,21 +522,35 @@ def active_listener_flow_ok(
         and rf_acceptance.public_key_fingerprint(expected_peer_key)
         == peer_fingerprint
     )
-    if remote_config is not None:
+    if remote_config is not None and local_config is not None:
+        normalized_pinned = None
+    elif local_config is not None:
         try:
-            normalized_remote = (
+            normalized_pinned = (
+                rf_acceptance.validate_local_peer_config(
+                    local_config
+                )
+            )
+        except ValueError:
+            normalized_pinned = None
+    elif remote_config is not None:
+        try:
+            normalized_pinned = (
                 rf_acceptance.validate_remote_peer_config(
                     remote_config
                 )
             )
         except ValueError:
-            normalized_remote = None
+            normalized_pinned = None
+    else:
+        normalized_pinned = None
+    if remote_config is not None or local_config is not None:
         continuity_binding_ok = (
-            normalized_remote is not None
+            normalized_pinned is not None
             and rf_acceptance.get_path(before, "serial", "port")
-            == normalized_remote["device"]
+            == normalized_pinned["device"]
             and rf_acceptance.get_path(after, "serial", "port")
-            == normalized_remote["device"]
+            == normalized_pinned["device"]
             and rf_acceptance.get_path(
                 before, "serial", "mesh_connected"
             )
@@ -360,7 +559,7 @@ def active_listener_flow_ok(
                 after, "serial", "mesh_connected"
             )
             is True
-            and expected_peer_key == normalized_remote["public_key"]
+            and expected_peer_key == normalized_pinned["public_key"]
         )
     else:
         continuity_binding_ok = (
@@ -1059,8 +1258,9 @@ def _run_serial_soak_reserved(
     peer_expected_send_count: int | None = None
     peer_flow_ok: bool | None = None
     remote_peer_config: dict | None = None
-    peer_remote_before_validation: dict | None = None
-    peer_remote_after_validation: dict | None = None
+    local_peer_config: dict | None = None
+    peer_status_before_validation: dict | None = None
+    peer_status_after_validation: dict | None = None
     peer_before_reservation: rf_acceptance.EvidenceReservation | None = None
     peer_after_reservation: rf_acceptance.EvidenceReservation | None = None
     after_capture: Path | None = None
@@ -1108,6 +1308,25 @@ def _run_serial_soak_reserved(
                     ),
                 }
             )
+        elif (
+            peer.get("evidence_source")
+            == rf_acceptance.LOCAL_PEER_EVIDENCE_SOURCE
+        ):
+            local_peer_config = (
+                rf_acceptance.validate_local_peer_config(
+                    {
+                        "hostname": peer.get("hostname"),
+                        "status_path": peer.get("status_path"),
+                        "control_socket": peer.get("control_socket"),
+                        "device": peer.get("device"),
+                        "public_key": peer.get("public_key"),
+                        "max_status_age_sec": peer.get(
+                            "max_status_age_sec"
+                        ),
+                    }
+                )
+            )
+            rf_acceptance.require_local_peer_hostname()
         capture_dir = (
             peer_capture_dir
             or root / "artifacts" / "soak" / "rf-peer"
@@ -1135,9 +1354,21 @@ def _run_serial_soak_reserved(
             (
                 peer_before,
                 peer_before_receipt,
-                peer_remote_before_validation,
+                peer_status_before_validation,
             ) = rf_acceptance.capture_remote_peer_status(
                 remote_peer_config,
+                before_capture,
+                root,
+                reservation=peer_before_reservation,
+                evidence_bundle=evidence_bundle,
+            )
+        elif local_peer_config is not None:
+            (
+                peer_before,
+                peer_before_receipt,
+                peer_status_before_validation,
+            ) = rf_acceptance.capture_local_peer_status(
+                local_peer_config,
                 before_capture,
                 root,
                 reservation=peer_before_reservation,
@@ -1167,11 +1398,14 @@ def _run_serial_soak_reserved(
             and rf_acceptance.public_key_fingerprint(expected_peer_key)
             == str(active_dm_fingerprint).upper()
         )
-        if remote_peer_config is not None:
+        if (
+            remote_peer_config is not None
+            or local_peer_config is not None
+        ):
             identity_ready = (
                 identity_ready
-                and peer_remote_before_validation is not None
-                and peer_remote_before_validation.get("ok") is True
+                and peer_status_before_validation is not None
+                and peer_status_before_validation.get("ok") is True
             )
         else:
             identity_ready = (
@@ -1344,9 +1578,21 @@ def _run_serial_soak_reserved(
             (
                 peer_after,
                 peer_after_receipt,
-                peer_remote_after_validation,
+                peer_status_after_validation,
             ) = rf_acceptance.capture_remote_peer_status(
                 remote_peer_config,
+                after_capture,
+                root,
+                reservation=peer_after_reservation,
+                evidence_bundle=evidence_bundle,
+            )
+        elif local_peer_config is not None:
+            (
+                peer_after,
+                peer_after_receipt,
+                peer_status_after_validation,
+            ) = rf_acceptance.capture_local_peer_status(
+                local_peer_config,
                 after_capture,
                 root,
                 reservation=peer_after_reservation,
@@ -1380,6 +1626,7 @@ def _run_serial_soak_reserved(
             ),
             minimum_send_count=peer_expected_send_count or 1,
             remote_config=remote_peer_config,
+            local_config=local_peer_config,
         )
 
     ended_at = datetime.now(timezone.utc)
@@ -1470,10 +1717,13 @@ def _run_serial_soak_reserved(
         "controlled_peer_after_receipt": peer_after_receipt,
         "controlled_peer_remote": (
             {
-                "before_validation": peer_remote_before_validation,
-                "after_validation": peer_remote_after_validation,
+                "before_validation": peer_status_before_validation,
+                "after_validation": peer_status_after_validation,
             }
-            if remote_peer_config is not None
+            if (
+                remote_peer_config is not None
+                or local_peer_config is not None
+            )
             else None
         ),
         "controlled_peer_counter_deltas": peer_counter_deltas,
