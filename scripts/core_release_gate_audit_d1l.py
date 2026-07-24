@@ -2205,20 +2205,38 @@ def remote_rf_gate(
     control = control if isinstance(control, dict) else {}
     remote = data.get("controlled_peer_remote")
     remote = remote if isinstance(remote, dict) else {}
+    evidence_source = peer.get("evidence_source")
+    local_mode = (
+        evidence_source == rf_acceptance.LOCAL_PEER_EVIDENCE_SOURCE
+    )
     try:
-        config = rf_acceptance.validate_remote_peer_config(
-            {
-                "ssh_host": peer.get("ssh_host"),
-                "hostname": peer.get("hostname"),
-                "status_path": peer.get("status_path"),
-                "control_socket": peer.get("control_socket"),
-                "device": peer.get("device"),
-                "public_key": peer.get("public_key"),
-                "max_status_age_sec": peer.get(
-                    "max_status_age_sec"
-                ),
-            }
-        )
+        if local_mode:
+            config = rf_acceptance.validate_local_peer_config(
+                {
+                    "hostname": peer.get("hostname"),
+                    "status_path": peer.get("status_path"),
+                    "control_socket": peer.get("control_socket"),
+                    "device": peer.get("device"),
+                    "public_key": peer.get("public_key"),
+                    "max_status_age_sec": peer.get(
+                        "max_status_age_sec"
+                    ),
+                }
+            )
+        else:
+            config = rf_acceptance.validate_remote_peer_config(
+                {
+                    "ssh_host": peer.get("ssh_host"),
+                    "hostname": peer.get("hostname"),
+                    "status_path": peer.get("status_path"),
+                    "control_socket": peer.get("control_socket"),
+                    "device": peer.get("device"),
+                    "public_key": peer.get("public_key"),
+                    "max_status_age_sec": peer.get(
+                        "max_status_age_sec"
+                    ),
+                }
+            )
         config_ok = True
     except (TypeError, ValueError):
         config = None
@@ -2275,14 +2293,19 @@ def remote_rf_gate(
     after_observed = rf_acceptance.parse_aware_timestamp(
         after_row.get("captured_at")
     )
+    status_validator = (
+        rf_acceptance.validate_local_peer_status
+        if local_mode
+        else rf_acceptance.validate_remote_peer_status
+    )
     if config is not None and before_observed is not None:
-        before_validation = rf_acceptance.validate_remote_peer_status(
+        before_validation = status_validator(
             before_raw, config, observed_at=before_observed
         )
     else:
         before_validation = {"ok": False, "checks": {}}
     if config is not None and after_observed is not None:
-        after_validation = rf_acceptance.validate_remote_peer_status(
+        after_validation = status_validator(
             after_raw, config, observed_at=after_observed
         )
     else:
@@ -2436,11 +2459,27 @@ def remote_rf_gate(
     )
 
     def status_source_exact(row: dict) -> bool:
-        return (
-            config is not None
-            and row.get("source_path") == config["status_path"]
-            and row.get("source_host") == config["ssh_host"]
+        if config is None:
+            return False
+        common = (
+            row.get("source_path") == config["status_path"]
             and row.get("source_hostname") == config["hostname"]
+        )
+        if local_mode:
+            return (
+                common
+                and row.get("source_host") == config["hostname"]
+                and row.get("transport")
+                == rf_acceptance.LOCAL_PEER_STATUS_TRANSPORT
+                and row.get("source_sha256") == row.get("sha256")
+                and isinstance(row.get("source_mtime_ns"), int)
+                and not isinstance(row.get("source_mtime_ns"), bool)
+                and "remote_sha256" not in row
+                and "remote_mtime_ns" not in row
+            )
+        return (
+            common
+            and row.get("source_host") == config["ssh_host"]
             and row.get("transport") == "ssh"
             and row.get("remote_sha256") == row.get("sha256")
             and isinstance(row.get("remote_mtime_ns"), int)
@@ -2452,21 +2491,34 @@ def remote_rf_gate(
             isinstance(row, dict)
             and config is not None
             and row.get("source_path") == config["control_socket"]
-            and row.get("source_host") == config["ssh_host"]
+            and row.get("source_host")
+            == (
+                config["hostname"]
+                if local_mode
+                else config["ssh_host"]
+            )
             and row.get("source_hostname") == config["hostname"]
             and row.get("transport") == transport
         )
 
+    request_transport = (
+        rf_acceptance.LOCAL_PEER_CONTROL_REQUEST_TRANSPORT
+        if local_mode
+        else "ssh-unix-socket-request"
+    )
+    response_transport = (
+        rf_acceptance.LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT
+        if local_mode
+        else "ssh-unix-socket-response"
+    )
     source_rows_ok = (
         status_source_exact(before_row)
         and status_source_exact(after_row)
         and control_source_exact(
-            control.get("request_receipt"),
-            "ssh-unix-socket-request",
+            control.get("request_receipt"), request_transport
         )
         and control_source_exact(
-            control.get("response_receipt"),
-            "ssh-unix-socket-response",
+            control.get("response_receipt"), response_transport
         )
     )
     raw_status_ok = (
@@ -2594,14 +2646,30 @@ def remote_rf_gate(
         config_ok
         and config is not None
         and peer.get("evidence_source")
-        == rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
+        == (
+            rf_acceptance.LOCAL_PEER_EVIDENCE_SOURCE
+            if local_mode
+            else rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
+        )
         and peer.get("port") is None
         and peer.get("fingerprint")
         == rf_acceptance.REMOTE_PEER_FINGERPRINT
         and peer.get("public_key")
         == rf_acceptance.REMOTE_PEER_PUBLIC_KEY
         and data.get("controlled_peer_adapter")
-        == rf_acceptance.REMOTE_PEER_ADAPTER
+        == (
+            rf_acceptance.LOCAL_PEER_ADAPTER
+            if local_mode
+            else rf_acceptance.REMOTE_PEER_ADAPTER
+        )
+        and (
+            (
+                peer.get("access_mode") == "local"
+                and "ssh_host" not in peer
+            )
+            if local_mode
+            else "access_mode" not in peer
+        )
     )
     ok = (
         real_evidence(data)
@@ -2679,7 +2747,10 @@ def rf_gate(
     if (
         isinstance(peer_row, dict)
         and peer_row.get("evidence_source")
-        == rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE
+        in {
+            rf_acceptance.REMOTE_PEER_EVIDENCE_SOURCE,
+            rf_acceptance.LOCAL_PEER_EVIDENCE_SOURCE,
+        }
     ):
         return remote_rf_gate(
             data,

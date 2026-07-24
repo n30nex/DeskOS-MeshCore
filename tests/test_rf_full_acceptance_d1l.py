@@ -1152,6 +1152,318 @@ def test_remote_control_exchange_binds_exact_target_token_and_ack():
     )["ok"] is False
 
 
+def local_config() -> dict:
+    return rf_accept.local_peer_config()
+
+
+def test_local_peer_mode_is_mutually_exclusive_before_io(
+    monkeypatch,
+    capsys,
+):
+    calls = []
+    monkeypatch.setattr(
+        rf_accept.subprocess,
+        "run",
+        lambda *_args, **_kwargs: calls.append("ssh"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "rf_full_acceptance_d1l.py",
+            "--dry-run",
+            "--peer-local",
+            "--peer-ssh-host",
+            rf_accept.REMOTE_PEER_SSH_HOST,
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        rf_accept.main()
+
+    assert "mutually exclusive" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_local_peer_mode_rejects_wrong_hostname_before_io(monkeypatch):
+    calls = []
+    monkeypatch.setattr(rf_accept.socket, "gethostname", lambda: "other-pi")
+    monkeypatch.setattr(
+        rf_accept.os,
+        "open",
+        lambda *_args, **_kwargs: calls.append("open"),
+    )
+    monkeypatch.setattr(
+        rf_accept.subprocess,
+        "run",
+        lambda *_args, **_kwargs: calls.append("ssh"),
+    )
+
+    with pytest.raises(rf_accept.RemotePeerError) as exc_info:
+        rf_accept.run_local_peer_operation(local_config(), "capture_status")
+
+    assert exc_info.value.code == "local_hostname_mismatch"
+    assert calls == []
+
+
+def test_local_peer_operations_never_ssh_or_open_peer_tty(monkeypatch):
+    observed = datetime.now(timezone.utc)
+    status_raw = json.dumps(remote_status(observed), separators=(",", ":")).encode(
+        "utf-8"
+    )
+    request_raw, response_raw = remote_control_response(
+        rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        "rf_local_in",
+    )
+    regular = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFREG | 0o600,
+        st_size=len(status_raw),
+        st_dev=1,
+        st_ino=2,
+        st_mtime_ns=3,
+    )
+    unix_socket = SimpleNamespace(
+        st_mode=rf_accept.stat.S_IFSOCK | 0o600,
+        st_dev=4,
+        st_ino=5,
+    )
+    read_chunks = [status_raw, b""]
+    opened = []
+    socket_paths = []
+    ssh_calls = []
+
+    def fake_open(path, _flags):
+        opened.append(path)
+        assert path == rf_accept.REMOTE_PEER_STATUS_PATH
+        assert path != rf_accept.REMOTE_PEER_DEVICE
+        return 17
+
+    class FakeUnixSocket:
+        def __init__(self):
+            self.sent = b""
+
+        def settimeout(self, value):
+            assert value == rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC
+
+        def connect(self, path):
+            socket_paths.append(path)
+            assert path == rf_accept.REMOTE_PEER_CONTROL_SOCKET
+            assert path != rf_accept.REMOTE_PEER_DEVICE
+
+        def sendall(self, value):
+            self.sent = value
+
+        def shutdown(self, how):
+            assert how == rf_accept.socket.SHUT_WR
+
+        def recv(self, _size):
+            value = response_raw
+            response_raw_holder[0] = b""
+            return value
+
+        def close(self):
+            return None
+
+    response_raw_holder = [response_raw]
+
+    def fake_recv(self, _size):
+        value = response_raw_holder[0]
+        response_raw_holder[0] = b""
+        return value
+
+    FakeUnixSocket.recv = fake_recv
+    client = FakeUnixSocket()
+    monkeypatch.setattr(rf_accept.socket, "AF_UNIX", 1, raising=False)
+    monkeypatch.setattr(
+        rf_accept.socket, "gethostname", lambda: rf_accept.REMOTE_PEER_HOSTNAME
+    )
+    monkeypatch.setattr(rf_accept.os, "open", fake_open)
+    monkeypatch.setattr(rf_accept.os, "fstat", lambda _fd: regular)
+    monkeypatch.setattr(rf_accept.os, "read", lambda _fd, _size: read_chunks.pop(0))
+    monkeypatch.setattr(rf_accept.os, "close", lambda _fd: None)
+    monkeypatch.setattr(
+        rf_accept.os,
+        "lstat",
+        lambda path: (
+            unix_socket
+            if path == rf_accept.REMOTE_PEER_CONTROL_SOCKET
+            else (_ for _ in ()).throw(AssertionError(path))
+        ),
+    )
+    monkeypatch.setattr(
+        rf_accept.socket,
+        "socket",
+        lambda family, kind: (
+            client
+            if (family, kind)
+            == (rf_accept.socket.AF_UNIX, rf_accept.socket.SOCK_STREAM)
+            else (_ for _ in ()).throw(AssertionError((family, kind)))
+        ),
+    )
+    monkeypatch.setattr(
+        rf_accept.subprocess,
+        "run",
+        lambda *_args, **_kwargs: ssh_calls.append(True),
+    )
+
+    captured = rf_accept.run_local_peer_operation(local_config(), "capture_status")
+    exchange = rf_accept.run_local_peer_operation(
+        local_config(),
+        "send_control",
+        control_request=request_raw,
+    )
+
+    assert base64.b64decode(captured["raw_b64"]) == status_raw
+    assert base64.b64decode(exchange["response_b64"]) == response_raw
+    assert client.sent == request_raw
+    assert opened == [rf_accept.REMOTE_PEER_STATUS_PATH]
+    assert socket_paths == [rf_accept.REMOTE_PEER_CONTROL_SOCKET]
+    assert ssh_calls == []
+
+
+def test_local_peer_capture_and_control_preserve_exact_sidecars(
+    tmp_path: Path,
+    monkeypatch,
+):
+    observed = datetime.now(timezone.utc)
+    status = remote_status(observed)
+    status_raw = json.dumps(status, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    token = "rf_local_in"
+    request_raw, response_raw = remote_control_response(
+        rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token,
+    )
+
+    def fake_operation(
+        _config,
+        operation,
+        *,
+        control_request=None,
+        timeout_sec=rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC,
+    ):
+        assert timeout_sec == rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC
+        if operation == "capture_status":
+            assert control_request is None
+            return {
+                "path": rf_accept.REMOTE_PEER_STATUS_PATH,
+                "size": len(status_raw),
+                "sha256": hashlib.sha256(status_raw).hexdigest(),
+                "mtime_ns": 123,
+                "hostname": rf_accept.REMOTE_PEER_HOSTNAME,
+                "raw_b64": base64.b64encode(status_raw).decode("ascii"),
+            }
+        assert operation == "send_control"
+        assert control_request == request_raw
+        return {
+            "socket_path": rf_accept.REMOTE_PEER_CONTROL_SOCKET,
+            "hostname": rf_accept.REMOTE_PEER_HOSTNAME,
+            "request_size": len(request_raw),
+            "request_sha256": hashlib.sha256(request_raw).hexdigest(),
+            "response_size": len(response_raw),
+            "response_sha256": hashlib.sha256(response_raw).hexdigest(),
+            "response_b64": base64.b64encode(response_raw).decode("ascii"),
+        }
+
+    monkeypatch.setattr(rf_accept, "run_local_peer_operation", fake_operation)
+    status_path = tmp_path / "evidence" / "status.json"
+    request_path = tmp_path / "evidence" / "request.jsonl"
+    response_path = tmp_path / "evidence" / "response.jsonl"
+
+    captured_status, status_receipt, validation = rf_accept.capture_local_peer_status(
+        local_config(), status_path, tmp_path
+    )
+    control = rf_accept.send_local_peer_dm(
+        local_config(),
+        d1l_public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token=token,
+        request_capture_path=request_path,
+        response_capture_path=response_path,
+        root=tmp_path,
+    )
+
+    assert captured_status == status
+    assert validation["ok"] is True
+    assert status_path.read_bytes() == status_raw
+    assert request_path.read_bytes() == request_raw
+    assert response_path.read_bytes() == response_raw
+    assert status_receipt["transport"] == rf_accept.LOCAL_PEER_STATUS_TRANSPORT
+    assert status_receipt["source_path"] == rf_accept.REMOTE_PEER_STATUS_PATH
+    assert status_receipt["source_hostname"] == rf_accept.REMOTE_PEER_HOSTNAME
+    assert status_receipt["source_sha256"] == status_receipt["sha256"]
+    assert (
+        control["request_receipt"]["transport"]
+        == rf_accept.LOCAL_PEER_CONTROL_REQUEST_TRANSPORT
+    )
+    assert (
+        control["response_receipt"]["transport"]
+        == rf_accept.LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT
+    )
+
+
+def test_local_sidecar_collision_prevents_serial_socket_and_ssh(
+    tmp_path: Path,
+    monkeypatch,
+):
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        rf_accept,
+        "__file__",
+        str(tmp_path / "scripts" / "rf_full_acceptance_d1l.py"),
+    )
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace())
+    monkeypatch.setattr(
+        rf_accept,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        rf_accept.socket, "gethostname", lambda: rf_accept.REMOTE_PEER_HOSTNAME
+    )
+    external_calls = []
+
+    def unexpected_external(*_args, **_kwargs):
+        external_calls.append(True)
+        raise AssertionError("collision must fail before external I/O")
+
+    monkeypatch.setattr(rf_accept, "open_d1l_serial", unexpected_external)
+    monkeypatch.setattr(rf_accept, "run_local_peer_operation", unexpected_external)
+    monkeypatch.setattr(rf_accept.subprocess, "run", unexpected_external)
+    capture_dir = tmp_path / "artifacts" / "rf-peer"
+    capture_dir.mkdir(parents=True)
+    collision = capture_dir / "collision_peer_after.json"
+    collision.write_bytes(b"sentinel")
+
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        rf_accept.run_hardware(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            wait_sec=1.0,
+            poll_sec=0.1,
+            peer_status_path=None,
+            peer_port=None,
+            fingerprint=rf_accept.REMOTE_PEER_FINGERPRINT,
+            public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+            token="collision",
+            send_outbound=True,
+            expected_commit="a" * 40,
+            github_run_id="1",
+            workflow_run_attempt="1",
+            peer_capture_dir=capture_dir,
+            local_peer=local_config(),
+        )
+
+    assert external_calls == []
+    assert collision.read_bytes() == b"sentinel"
+    assert not (capture_dir / "collision_peer_before.json").exists()
+
+
 def test_remote_peer_ssh_uses_fixed_argv_stdin_and_no_shell(monkeypatch):
     calls = []
     response = {

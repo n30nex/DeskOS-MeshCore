@@ -9,6 +9,8 @@ import hashlib
 import json
 import os
 import re
+import socket
+import stat
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -39,6 +41,11 @@ RADIO_LISTENER_STATUS_PATH = Path(
 )
 REMOTE_PEER_EVIDENCE_SOURCE = "remote_peer_status_ssh"
 REMOTE_PEER_ADAPTER = "pi5_unix_control_socket"
+LOCAL_PEER_EVIDENCE_SOURCE = "local_peer_status_file"
+LOCAL_PEER_ADAPTER = "pi5_local_unix_control_socket"
+LOCAL_PEER_STATUS_TRANSPORT = "local-file"
+LOCAL_PEER_CONTROL_REQUEST_TRANSPORT = "local-unix-socket-request"
+LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT = "local-unix-socket-response"
 REMOTE_PEER_SSH_HOST = "neonx@192.168.0.24"
 REMOTE_PEER_HOSTNAME = "neopi5"
 REMOTE_PEER_STATUS_PATH = (
@@ -787,6 +794,91 @@ def remote_peer_config(
     )
 
 
+def validate_local_peer_config(config: object) -> dict:
+    if not isinstance(config, dict):
+        raise ValueError("local controlled-peer configuration is required")
+    expected_keys = {
+        "hostname",
+        "status_path",
+        "control_socket",
+        "device",
+        "public_key",
+        "max_status_age_sec",
+    }
+    if set(config) != expected_keys:
+        raise ValueError("local controlled-peer configuration has invalid fields")
+    validated = validate_remote_peer_config(
+        {
+            "ssh_host": REMOTE_PEER_SSH_HOST,
+            **config,
+        }
+    )
+    return {key: validated[key] for key in expected_keys}
+
+
+def local_peer_config(
+    *,
+    hostname: str = REMOTE_PEER_HOSTNAME,
+    status_path: str = REMOTE_PEER_STATUS_PATH,
+    control_socket: str = REMOTE_PEER_CONTROL_SOCKET,
+    device: str = REMOTE_PEER_DEVICE,
+    public_key: str = REMOTE_PEER_PUBLIC_KEY,
+    max_status_age_sec: float = REMOTE_PEER_MAX_STATUS_AGE_SEC,
+) -> dict:
+    return validate_local_peer_config(
+        {
+            "hostname": hostname,
+            "status_path": status_path,
+            "control_socket": control_socket,
+            "device": device,
+            "public_key": public_key,
+            "max_status_age_sec": max_status_age_sec,
+        }
+    )
+
+
+def require_local_peer_hostname() -> str:
+    observed = socket.gethostname()
+    if observed != REMOTE_PEER_HOSTNAME:
+        raise RemotePeerError(
+            "local_hostname_mismatch",
+            "local controlled-peer mode requires hostname "
+            f"{REMOTE_PEER_HOSTNAME}; observed {observed!r}",
+        )
+    return observed
+
+
+def controlled_peer_report_row(
+    config: dict,
+    fingerprint: str,
+    *,
+    local_mode: bool,
+) -> dict:
+    validated = (
+        validate_local_peer_config(config)
+        if local_mode
+        else validate_remote_peer_config(config)
+    )
+    row = {
+        "fingerprint": fingerprint,
+        "evidence_source": (
+            LOCAL_PEER_EVIDENCE_SOURCE if local_mode else REMOTE_PEER_EVIDENCE_SOURCE
+        ),
+        "port": None,
+        "status_path": validated["status_path"],
+        "hostname": validated["hostname"],
+        "control_socket": validated["control_socket"],
+        "device": validated["device"],
+        "public_key": validated["public_key"],
+        "max_status_age_sec": validated["max_status_age_sec"],
+    }
+    if local_mode:
+        row["access_mode"] = "local"
+    else:
+        row["ssh_host"] = validated["ssh_host"]
+    return row
+
+
 def _remote_peer_request(config: dict, operation: str, raw: bytes | None) -> bytes:
     request = {
         "schema": REMOTE_PEER_HELPER_SCHEMA,
@@ -958,6 +1050,152 @@ def run_remote_peer_operation(
             "remote controlled-peer success response is incomplete",
         )
     return envelope["result"]
+
+
+def _read_local_regular_file(path: str) -> tuple[bytes, os.stat_result]:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    fd = os.open(path, flags)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("local controlled-peer status is not a regular file")
+        if not 1 <= before.st_size <= REMOTE_PEER_MAX_STATUS_BYTES:
+            raise ValueError("local controlled-peer status size is out of bounds")
+        chunks: list[bytes] = []
+        remaining = REMOTE_PEER_MAX_STATUS_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(fd)
+        if (
+            len(raw) > REMOTE_PEER_MAX_STATUS_BYTES
+            or before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or len(raw) != before.st_size
+        ):
+            raise ValueError("local controlled-peer status changed during capture")
+        return raw, after
+    finally:
+        os.close(fd)
+
+
+def run_local_peer_operation(
+    config: dict,
+    operation: str,
+    *,
+    control_request: bytes | None = None,
+    timeout_sec: float = REMOTE_PEER_SSH_TIMEOUT_SEC,
+) -> dict:
+    config = validate_local_peer_config(config)
+    hostname = require_local_peer_hostname()
+    if (
+        isinstance(timeout_sec, bool)
+        or not isinstance(timeout_sec, (int, float))
+        or not 0.1 <= float(timeout_sec) <= REMOTE_PEER_SSH_TIMEOUT_SEC
+    ):
+        raise ValueError(
+            "local controlled-peer timeout must be bounded to 0.1-45 seconds"
+        )
+    if operation not in {"capture_status", "send_control"}:
+        raise ValueError("unsupported local controlled-peer operation")
+    if (operation == "capture_status") != (control_request is None):
+        raise ValueError("local controlled-peer operation payload mismatch")
+    if operation == "capture_status":
+        try:
+            raw, status_stat = _read_local_regular_file(config["status_path"])
+        except (OSError, ValueError) as exc:
+            raise RemotePeerError(
+                "local_status_failed",
+                "local controlled-peer status capture failed closed",
+            ) from exc
+        return {
+            "path": config["status_path"],
+            "size": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "mtime_ns": status_stat.st_mtime_ns,
+            "hostname": hostname,
+            "raw_b64": base64.b64encode(raw).decode("ascii"),
+        }
+
+    request_raw = control_request or b""
+    if (
+        not request_raw.endswith(b"\n")
+        or request_raw.count(b"\n") != 1
+        or not 3 <= len(request_raw) <= 16384
+    ):
+        raise ValueError(
+            "local control request must be one bounded newline JSON object"
+        )
+    try:
+        strict_json_object(request_raw[:-1], "local controlled-peer request")
+        before = os.lstat(config["control_socket"])
+        if not stat.S_ISSOCK(before.st_mode):
+            raise ValueError("local controlled-peer control path is not a Unix socket")
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(timeout_sec)
+        try:
+            client.connect(config["control_socket"])
+            client.sendall(request_raw)
+            client.shutdown(socket.SHUT_WR)
+            chunks = []
+            total = 0
+            while True:
+                remaining = REMOTE_PEER_MAX_CONTROL_BYTES + 1 - total
+                chunk = client.recv(min(8192, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > REMOTE_PEER_MAX_CONTROL_BYTES:
+                    raise ValueError("local control response exceeds the bounded size")
+                if b"\n" in chunk:
+                    break
+        finally:
+            client.close()
+        after = os.lstat(config["control_socket"])
+        if (
+            before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or not stat.S_ISSOCK(after.st_mode)
+        ):
+            raise ValueError(
+                "local controlled-peer control socket changed during exchange"
+            )
+        response_raw = b"".join(chunks)
+        if (
+            not response_raw.endswith(b"\n")
+            or response_raw.count(b"\n") != 1
+            or not 3 <= len(response_raw) <= REMOTE_PEER_MAX_CONTROL_BYTES
+        ):
+            raise ValueError(
+                "local control response is not one bounded newline JSON object"
+            )
+        strict_json_object(response_raw[:-1], "local controlled-peer response")
+    except (OSError, ValueError) as exc:
+        raise RemotePeerError(
+            "local_control_failed",
+            "local controlled-peer Unix-socket exchange failed closed",
+        ) from exc
+    return {
+        "socket_path": config["control_socket"],
+        "hostname": hostname,
+        "request_size": len(request_raw),
+        "request_sha256": hashlib.sha256(request_raw).hexdigest(),
+        "response_size": len(response_raw),
+        "response_sha256": hashlib.sha256(response_raw).hexdigest(),
+        "response_b64": base64.b64encode(response_raw).decode("ascii"),
+    }
 
 
 def enforce_port_policy(port: str, peer_port: str | None = None) -> tuple[str, str | None]:
@@ -1264,6 +1502,23 @@ def validate_remote_peer_status(
     }
 
 
+def validate_local_peer_status(
+    status: object,
+    config: dict,
+    *,
+    observed_at: datetime | None = None,
+) -> dict:
+    local_config = validate_local_peer_config(config)
+    return validate_remote_peer_status(
+        status,
+        {
+            "ssh_host": REMOTE_PEER_SSH_HOST,
+            **local_config,
+        },
+        observed_at=observed_at,
+    )
+
+
 def _capture_remote_peer_status_reserved(
     config: dict,
     capture_path: Path,
@@ -1366,6 +1621,112 @@ def capture_remote_peer_status(
         )
         owned_bundle.mark_external_io_started()
         return _capture_remote_peer_status_reserved(
+            config,
+            capture_path,
+            root,
+            reservation=owned_reservation,
+            evidence_bundle=owned_bundle,
+        )
+
+
+def _capture_local_peer_status_reserved(
+    config: dict,
+    capture_path: Path,
+    root: Path,
+    *,
+    reservation: EvidenceReservation,
+    evidence_bundle: EvidenceBundle,
+) -> tuple[dict, dict, dict]:
+    config = validate_local_peer_config(config)
+    if not evidence_bundle.external_io_started:
+        raise ValueError(
+            "local status reservation must belong to an external-I/O bundle"
+        )
+    result = run_local_peer_operation(config, "capture_status")
+    try:
+        raw = base64.b64decode(
+            str(result.get("raw_b64") or "").encode("ascii"),
+            validate=True,
+        )
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise RemotePeerError(
+            "local_status_invalid",
+            "local status capture has invalid base64",
+        ) from exc
+    digest = hashlib.sha256(raw).hexdigest()
+    if not (
+        result.get("path") == config["status_path"]
+        and result.get("size") == len(raw)
+        and result.get("sha256") == digest
+        and isinstance(result.get("mtime_ns"), int)
+        and not isinstance(result.get("mtime_ns"), bool)
+        and result.get("hostname") == config["hostname"]
+        and 1 <= len(raw) <= REMOTE_PEER_MAX_STATUS_BYTES
+    ):
+        raise RemotePeerError(
+            "local_status_invalid",
+            "local status capture metadata does not match its raw bytes",
+        )
+    try:
+        status = strict_json_object(raw, "local controlled-peer status")
+    except ValueError as exc:
+        raise RemotePeerError("local_status_invalid", str(exc)) from exc
+    receipt = capture_peer_bytes(
+        raw,
+        capture_path,
+        root,
+        source_path=config["status_path"],
+        source_host=config["hostname"],
+        transport=LOCAL_PEER_STATUS_TRANSPORT,
+        extra={
+            "source_hostname": result["hostname"],
+            "source_mtime_ns": result["mtime_ns"],
+            "source_sha256": digest,
+        },
+        reservation=reservation,
+    )
+    observed_at = parse_aware_timestamp(receipt["captured_at"])
+    validation = validate_local_peer_status(
+        status,
+        config,
+        observed_at=observed_at,
+    )
+    if validation["ok"] is not True:
+        raise RemotePeerError(
+            "local_status_not_ready",
+            "local controlled-peer status failed identity/readiness checks",
+        )
+    return status, receipt, validation
+
+
+def capture_local_peer_status(
+    config: dict,
+    capture_path: Path,
+    root: Path,
+    *,
+    reservation: EvidenceReservation | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
+) -> tuple[dict, dict, dict]:
+    if reservation is not None:
+        if evidence_bundle is None:
+            raise ValueError("local status reservation requires its evidence bundle")
+        return _capture_local_peer_status_reserved(
+            config,
+            capture_path,
+            root,
+            reservation=reservation,
+            evidence_bundle=evidence_bundle,
+        )
+    if evidence_bundle is not None:
+        raise ValueError("local status evidence bundle requires a reservation")
+    with EvidenceBundle(root) as owned_bundle:
+        owned_reservation = owned_bundle.reserve(
+            "local_status",
+            capture_path,
+            label="local controlled-peer status",
+        )
+        owned_bundle.mark_external_io_started()
+        return _capture_local_peer_status_reserved(
             config,
             capture_path,
             root,
@@ -1585,6 +1946,126 @@ def send_remote_peer_dm(
             owned_bundle.close()
 
 
+def send_local_peer_dm(
+    config: dict,
+    *,
+    d1l_public_key: str,
+    token: str,
+    request_capture_path: Path,
+    response_capture_path: Path,
+    root: Path,
+    request_reservation: EvidenceReservation | None = None,
+    response_reservation: EvidenceReservation | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
+) -> dict:
+    config = validate_local_peer_config(config)
+    request, request_raw = remote_control_request(d1l_public_key, token)
+    owned_bundle: EvidenceBundle | None = None
+    if request_reservation is None or response_reservation is None:
+        if request_reservation is not None or response_reservation is not None:
+            raise ValueError(
+                "local control request/response reservations must be paired"
+            )
+        owned_bundle = EvidenceBundle(root)
+        request_reservation = owned_bundle.reserve(
+            "request",
+            request_capture_path,
+            label="local control request",
+        )
+        response_reservation = owned_bundle.reserve(
+            "response",
+            response_capture_path,
+            label="local control response",
+        )
+        owned_bundle.mark_external_io_started()
+    elif evidence_bundle is None or not evidence_bundle.external_io_started:
+        raise ValueError(
+            "local control reservations must belong to an external-I/O bundle"
+        )
+    try:
+        result = run_local_peer_operation(
+            config,
+            "send_control",
+            control_request=request_raw,
+        )
+        try:
+            response_raw = base64.b64decode(
+                str(result.get("response_b64") or "").encode("ascii"),
+                validate=True,
+            )
+        except (ValueError, UnicodeEncodeError) as exc:
+            raise RemotePeerError(
+                "local_control_invalid",
+                "local control response has invalid base64",
+            ) from exc
+        request_digest = hashlib.sha256(request_raw).hexdigest()
+        response_digest = hashlib.sha256(response_raw).hexdigest()
+        if not (
+            result.get("socket_path") == config["control_socket"]
+            and result.get("hostname") == config["hostname"]
+            and result.get("request_size") == len(request_raw)
+            and result.get("request_sha256") == request_digest
+            and result.get("response_size") == len(response_raw)
+            and result.get("response_sha256") == response_digest
+            and 1 <= len(response_raw) <= REMOTE_PEER_MAX_CONTROL_BYTES
+        ):
+            raise RemotePeerError(
+                "local_control_invalid",
+                "local control exchange metadata does not match its raw bytes",
+            )
+        receipt_extra = {"source_hostname": result["hostname"]}
+        request_receipt = capture_peer_bytes(
+            request_raw,
+            request_capture_path,
+            root,
+            source_path=config["control_socket"],
+            source_host=config["hostname"],
+            transport=LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
+            extra=receipt_extra,
+            reservation=request_reservation,
+        )
+        response_receipt = capture_peer_bytes(
+            response_raw,
+            response_capture_path,
+            root,
+            source_path=config["control_socket"],
+            source_host=config["hostname"],
+            transport=LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
+            extra=receipt_extra,
+            reservation=response_reservation,
+        )
+        validation = validate_remote_control_exchange(
+            request_raw,
+            response_raw,
+            d1l_public_key=d1l_public_key,
+            token=token,
+        )
+        if validation["ok"] is not True:
+            raise RemotePeerError(
+                "local_control_delivery_failed",
+                "local radio.send_dm did not return exact acknowledged delivery",
+            )
+        return {
+            "op": "radio.send_dm",
+            "socket_path": config["control_socket"],
+            "request_id": request["id"],
+            "request": request,
+            "response": validation["response"],
+            "request_receipt": request_receipt,
+            "response_receipt": response_receipt,
+            "request_sha256": validation["request_sha256"],
+            "response_sha256": validation["response_sha256"],
+            "validation": validation,
+        }
+    except Exception as exc:
+        if owned_bundle is not None:
+            owned_bundle.mark_incomplete(exc)
+        raise
+    finally:
+        if owned_bundle is not None:
+            owned_bundle.close()
+
+
 def contains_token(value, token: str) -> bool:
     return token in json.dumps(value, sort_keys=True)
 
@@ -1769,44 +2250,60 @@ def remote_peer_report_shape_ok(data: object) -> bool:
     remote = data.get("controlled_peer_remote")
     if not isinstance(peer, dict) or not isinstance(remote, dict):
         return False
+    evidence_source = peer.get("evidence_source")
+    local_mode = evidence_source == LOCAL_PEER_EVIDENCE_SOURCE
     try:
-        config = validate_remote_peer_config(
-            {
-                "ssh_host": peer.get("ssh_host"),
-                "hostname": peer.get("hostname"),
-                "status_path": peer.get("status_path"),
-                "control_socket": peer.get("control_socket"),
-                "device": peer.get("device"),
-                "public_key": peer.get("public_key"),
-                "max_status_age_sec": peer.get(
-                    "max_status_age_sec"
-                ),
-            }
-        )
+        if local_mode:
+            config = validate_local_peer_config(
+                {
+                    "hostname": peer.get("hostname"),
+                    "status_path": peer.get("status_path"),
+                    "control_socket": peer.get("control_socket"),
+                    "device": peer.get("device"),
+                    "public_key": peer.get("public_key"),
+                    "max_status_age_sec": peer.get("max_status_age_sec"),
+                }
+            )
+            binding_shape_ok = (
+                peer.get("access_mode") == "local"
+                and "ssh_host" not in peer
+                and data.get("controlled_peer_adapter") == LOCAL_PEER_ADAPTER
+            )
+        elif evidence_source == REMOTE_PEER_EVIDENCE_SOURCE:
+            config = validate_remote_peer_config(
+                {
+                    "ssh_host": peer.get("ssh_host"),
+                    "hostname": peer.get("hostname"),
+                    "status_path": peer.get("status_path"),
+                    "control_socket": peer.get("control_socket"),
+                    "device": peer.get("device"),
+                    "public_key": peer.get("public_key"),
+                    "max_status_age_sec": peer.get("max_status_age_sec"),
+                }
+            )
+            binding_shape_ok = (
+                "access_mode" not in peer
+                and data.get("controlled_peer_adapter") == REMOTE_PEER_ADAPTER
+            )
+        else:
+            return False
     except ValueError:
         return False
     before_validation = remote.get("before_validation")
     after_validation = remote.get("after_validation")
     flow = remote.get("flow")
     before_checks = (
-        before_validation.get("checks")
-        if isinstance(before_validation, dict)
-        else None
+        before_validation.get("checks") if isinstance(before_validation, dict) else None
     )
     after_checks = (
-        after_validation.get("checks")
-        if isinstance(after_validation, dict)
-        else None
+        after_validation.get("checks") if isinstance(after_validation, dict) else None
     )
-    flow_checks = (
-        flow.get("checks") if isinstance(flow, dict) else None
-    )
+    flow_checks = flow.get("checks") if isinstance(flow, dict) else None
     return (
-        peer.get("evidence_source") == REMOTE_PEER_EVIDENCE_SOURCE
+        binding_shape_ok
         and peer.get("port") is None
         and peer.get("fingerprint") == REMOTE_PEER_FINGERPRINT
         and config["public_key"] == REMOTE_PEER_PUBLIC_KEY
-        and data.get("controlled_peer_adapter") == REMOTE_PEER_ADAPTER
         and isinstance(before_validation, dict)
         and before_validation.get("ok") is True
         and isinstance(before_checks, dict)
@@ -2226,13 +2723,23 @@ def dry_run_report(
     github_run_id: str | None = None,
     workflow_run_attempt: str | None = None,
     remote_peer: dict | None = None,
+    local_peer: dict | None = None,
 ) -> dict:
     token = validate_safe_token(token)
+    if remote_peer is not None and local_peer is not None:
+        raise ValueError(
+            "SSH and Pi-local controlled-peer modes are mutually exclusive"
+        )
     remote_config = (
-        validate_remote_peer_config(remote_peer)
-        if remote_peer is not None
-        else None
+        validate_remote_peer_config(remote_peer) if remote_peer is not None else None
     )
+    local_config = (
+        validate_local_peer_config(local_peer) if local_peer is not None else None
+    )
+    if local_config is not None:
+        require_local_peer_hostname()
+    pinned_config = local_config or remote_config
+    local_mode = local_config is not None
     outbound_token = f"{token}_out"
     inbound_token = f"{token}_in"
     direct_token = f"{token}_direct"
@@ -2259,21 +2766,12 @@ def dry_run_report(
             ]
         )
     commands.extend(["packets", f"routes trace {fingerprint}", "health"])
-    if remote_config is not None:
-        controlled_peer = {
-            "fingerprint": fingerprint,
-            "evidence_source": REMOTE_PEER_EVIDENCE_SOURCE,
-            "port": None,
-            "status_path": remote_config["status_path"],
-            "ssh_host": remote_config["ssh_host"],
-            "hostname": remote_config["hostname"],
-            "control_socket": remote_config["control_socket"],
-            "device": remote_config["device"],
-            "public_key": remote_config["public_key"],
-            "max_status_age_sec": remote_config[
-                "max_status_age_sec"
-            ],
-        }
+    if pinned_config is not None:
+        controlled_peer = controlled_peer_report_row(
+            pinned_config,
+            fingerprint,
+            local_mode=local_mode,
+        )
     else:
         controlled_peer = {
             "fingerprint": fingerprint,
@@ -2284,9 +2782,7 @@ def dry_run_report(
             ),
             "port": peer_port,
             "status_path": (
-                str(peer_status_path)
-                if peer_status_path is not None
-                else None
+                str(peer_status_path) if peer_status_path is not None else None
             ),
         }
     return {
@@ -2306,17 +2802,21 @@ def dry_run_report(
         "port": port,
         "controlled_peer": controlled_peer,
         "controlled_peer_adapter": (
-            REMOTE_PEER_ADAPTER if remote_config is not None else None
+            LOCAL_PEER_ADAPTER
+            if local_mode
+            else REMOTE_PEER_ADAPTER
+            if remote_config is not None
+            else None
         ),
         "controlled_peer_control_plan": (
             {
                 "op": "radio.send_dm",
-                "socket_path": remote_config["control_socket"],
+                "socket_path": pinned_config["control_socket"],
                 "target": public_key,
                 "text": inbound_token,
-                "transport": "ssh-stdin-json",
+                "transport": ("local-unix-socket" if local_mode else "ssh-stdin-json"),
             }
-            if remote_config is not None
+            if pinned_config is not None
             else None
         ),
         "target_fingerprint": fingerprint,
@@ -2327,9 +2827,7 @@ def dry_run_report(
             str(github_run_id) if github_run_id is not None else None
         ),
         "workflow_run_attempt": (
-            str(workflow_run_attempt)
-            if workflow_run_attempt is not None
-            else None
+            str(workflow_run_attempt) if workflow_run_attempt is not None else None
         ),
         "device_release_profile": None,
         "device_sd_history_mode": None,
@@ -2341,7 +2839,7 @@ def dry_run_report(
         "expected_identity_fingerprint": public_key_fingerprint(public_key),
         "discord_command": (
             None
-            if remote_config is not None
+            if pinned_config is not None
             else discord_command(public_key, inbound_token)
         ),
         "public_rf_transmit": False,
@@ -2370,6 +2868,7 @@ def build_report(
     github_run_id: str | None = None,
     workflow_run_attempt: str | None = None,
     remote_peer: dict | None = None,
+    local_peer: dict | None = None,
     remote_before_validation: dict | None = None,
     remote_after_validation: dict | None = None,
     remote_control: dict | None = None,
@@ -2378,11 +2877,22 @@ def build_report(
     outbound_token = f"{token}_out"
     inbound_token = f"{token}_in"
     direct_token = f"{token}_direct"
-    remote_config = (
+    if remote_peer is not None and local_peer is not None:
+        raise ValueError(
+            "SSH and Pi-local controlled-peer modes are mutually exclusive"
+        )
+    ssh_config = (
         validate_remote_peer_config(remote_peer)
         if remote_peer is not None
         else None
     )
+    local_config = (
+        validate_local_peer_config(local_peer)
+        if local_peer is not None
+        else None
+    )
+    remote_config = local_config or ssh_config
+    local_mode = local_config is not None
     remote_mode = remote_config is not None
     listener_mode = remote_mode or (
         peer_port == RADIO_LISTENER_PORT
@@ -2667,20 +3177,11 @@ def build_report(
             version_result, expected_commit
         )
     if remote_mode:
-        controlled_peer = {
-            "fingerprint": fingerprint,
-            "evidence_source": REMOTE_PEER_EVIDENCE_SOURCE,
-            "port": None,
-            "status_path": remote_config["status_path"],
-            "ssh_host": remote_config["ssh_host"],
-            "hostname": remote_config["hostname"],
-            "control_socket": remote_config["control_socket"],
-            "device": remote_config["device"],
-            "public_key": remote_config["public_key"],
-            "max_status_age_sec": remote_config[
-                "max_status_age_sec"
-            ],
-        }
+        controlled_peer = controlled_peer_report_row(
+            remote_config,
+            fingerprint,
+            local_mode=local_mode,
+        )
     else:
         controlled_peer = {
             "fingerprint": fingerprint,
@@ -2720,7 +3221,9 @@ def build_report(
         "baud": baud,
         "controlled_peer": controlled_peer,
         "controlled_peer_adapter": (
-            REMOTE_PEER_ADAPTER
+            LOCAL_PEER_ADAPTER
+            if local_mode
+            else REMOTE_PEER_ADAPTER
             if remote_mode
             else RADIO_LISTENER_PROFILE
             if listener_mode
@@ -2829,6 +3332,7 @@ def _run_hardware_reserved(
     workflow_run_attempt: str,
     peer_capture_dir: Path | None = None,
     remote_peer: dict | None = None,
+    local_peer: dict | None = None,
     evidence_bundle: EvidenceBundle,
 ) -> dict:
     try:
@@ -2842,11 +3346,24 @@ def _run_hardware_reserved(
     outbound_token = f"{token}_out"
     inbound_token = f"{token}_in"
     direct_token = f"{token}_direct"
-    remote_config = (
+    if remote_peer is not None and local_peer is not None:
+        raise ValueError(
+            "SSH and Pi-local controlled-peer modes are mutually exclusive"
+        )
+    ssh_config = (
         validate_remote_peer_config(remote_peer)
         if remote_peer is not None
         else None
     )
+    local_config = (
+        validate_local_peer_config(local_peer)
+        if local_peer is not None
+        else None
+    )
+    if local_config is not None:
+        require_local_peer_hostname()
+    remote_config = local_config or ssh_config
+    local_mode = local_config is not None
     remote_mode = remote_config is not None
     normalized_commit = exact_commit(expected_commit)
     if normalized_commit is None:
@@ -2886,7 +3403,7 @@ def _run_hardware_reserved(
         peer_status_path is not None or peer_port is not None
     ):
         raise ValueError(
-            "remote and local controlled-peer modes are mutually exclusive"
+            "pinned Pi and serial controlled-peer modes are mutually exclusive"
         )
     if (
         not remote_mode
@@ -2997,22 +3514,11 @@ def _run_hardware_reserved(
                 "firmware_identity_required": True,
                 "firmware_identity_ok": False,
                 "controlled_peer": (
-                    {
-                        "fingerprint": fingerprint,
-                        "evidence_source": REMOTE_PEER_EVIDENCE_SOURCE,
-                        "port": None,
-                        "status_path": remote_config["status_path"],
-                        "ssh_host": remote_config["ssh_host"],
-                        "hostname": remote_config["hostname"],
-                        "control_socket": remote_config[
-                            "control_socket"
-                        ],
-                        "device": remote_config["device"],
-                        "public_key": remote_config["public_key"],
-                        "max_status_age_sec": remote_config[
-                            "max_status_age_sec"
-                        ],
-                    }
+                    controlled_peer_report_row(
+                        remote_config,
+                        fingerprint,
+                        local_mode=local_mode,
+                    )
                     if remote_mode
                     else {
                         "fingerprint": fingerprint,
@@ -3035,7 +3541,19 @@ def _run_hardware_reserved(
                 "steps": steps,
                 "ok": False,
             }
-        if remote_mode:
+        if local_mode:
+            (
+                peer_before,
+                peer_before_receipt,
+                remote_before_validation,
+            ) = capture_local_peer_status(
+                remote_config,
+                before_capture,
+                root,
+                reservation=before_reservation,
+                evidence_bundle=evidence_bundle,
+            )
+        elif remote_mode:
             (
                 peer_before,
                 peer_before_receipt,
@@ -3109,7 +3627,12 @@ def _run_hardware_reserved(
             time.sleep(2.0)
             run_command(ser, f"packets search {outbound_token}")
         if remote_mode:
-            remote_control = send_remote_peer_dm(
+            send_peer_dm = (
+                send_local_peer_dm
+                if local_mode
+                else send_remote_peer_dm
+            )
+            remote_control = send_peer_dm(
                 remote_config,
                 d1l_public_key=public_key,
                 token=inbound_token,
@@ -3171,7 +3694,19 @@ def _run_hardware_reserved(
             ):
                 break
             time.sleep(max(0.25, poll_sec))
-    if remote_mode:
+    if local_mode:
+        (
+            peer_after,
+            peer_after_receipt,
+            remote_after_validation,
+        ) = capture_local_peer_status(
+            remote_config,
+            after_capture,
+            root,
+            reservation=after_reservation,
+            evidence_bundle=evidence_bundle,
+        )
+    elif remote_mode:
         (
             peer_after,
             peer_after_receipt,
@@ -3208,7 +3743,8 @@ def _run_hardware_reserved(
         peer_after_receipt=peer_after_receipt,
         github_run_id=str(github_run_id),
         workflow_run_attempt=str(workflow_run_attempt),
-        remote_peer=remote_config,
+        remote_peer=ssh_config,
+        local_peer=local_config,
         remote_before_validation=remote_before_validation,
         remote_after_validation=remote_after_validation,
         remote_control=remote_control,
@@ -3346,6 +3882,11 @@ def main() -> int:
         default=os.environ.get("MESH_PEER_SSH_HOST"),
     )
     parser.add_argument(
+        "--peer-local",
+        action="store_true",
+        help="use the pinned neopi5 status file and Unix socket locally",
+    )
+    parser.add_argument(
         "--peer-remote-status",
         default=os.environ.get("MESH_PEER_REMOTE_STATUS_PATH"),
     )
@@ -3388,56 +3929,70 @@ def main() -> int:
         args.peer_public_key,
         args.peer_max_status_age_sec,
     )
-    if args.peer_ssh_host:
+    if args.peer_local and args.peer_ssh_host:
+        parser.error(
+            "--peer-local and --peer-ssh-host are mutually exclusive"
+        )
+    pinned_peer_requested = bool(args.peer_local or args.peer_ssh_host)
+    if pinned_peer_requested:
         if args.peer_status or args.peer_port:
             parser.error(
-                "Remote --peer-ssh-host mode cannot be combined with "
-                "local --peer-status/--peer-port"
+                "Pinned Pi peer mode cannot be combined with "
+                "--peer-status/--peer-port"
             )
+        common_config = {
+            "status_path": (
+                args.peer_remote_status or REMOTE_PEER_STATUS_PATH
+            ),
+            "control_socket": (
+                args.peer_control_socket or REMOTE_PEER_CONTROL_SOCKET
+            ),
+            "device": args.peer_device or REMOTE_PEER_DEVICE,
+            "public_key": (
+                args.peer_public_key or REMOTE_PEER_PUBLIC_KEY
+            ),
+            "max_status_age_sec": (
+                args.peer_max_status_age_sec
+                if args.peer_max_status_age_sec is not None
+                else REMOTE_PEER_MAX_STATUS_AGE_SEC
+            ),
+        }
         try:
-            remote_config = remote_peer_config(
-                ssh_host=args.peer_ssh_host,
-                status_path=(
-                    args.peer_remote_status
-                    or REMOTE_PEER_STATUS_PATH
-                ),
-                control_socket=(
-                    args.peer_control_socket
-                    or REMOTE_PEER_CONTROL_SOCKET
-                ),
-                device=args.peer_device or REMOTE_PEER_DEVICE,
-                public_key=(
-                    args.peer_public_key or REMOTE_PEER_PUBLIC_KEY
-                ),
-                max_status_age_sec=(
-                    args.peer_max_status_age_sec
-                    if args.peer_max_status_age_sec is not None
-                    else REMOTE_PEER_MAX_STATUS_AGE_SEC
-                ),
-            )
-        except ValueError as exc:
+            if args.peer_local:
+                require_local_peer_hostname()
+                local_config = local_peer_config(**common_config)
+                remote_config = None
+            else:
+                remote_config = remote_peer_config(
+                    ssh_host=args.peer_ssh_host,
+                    **common_config,
+                )
+                local_config = None
+        except (RemotePeerError, ValueError) as exc:
             parser.error(str(exc))
     else:
         remote_config = None
+        local_config = None
         if any(value is not None for value in remote_options):
             parser.error(
-                "Remote peer path/device options require "
-                "--peer-ssh-host"
+                "Pinned peer path/device options require "
+                "--peer-local or --peer-ssh-host"
             )
+    pinned_config = local_config or remote_config
     fingerprint = str(
         args.fingerprint
         or (
             REMOTE_PEER_FINGERPRINT
-            if remote_config is not None
+            if pinned_config is not None
             else DEFAULT_TARGET_FINGERPRINT
         )
     ).upper()
     if (
-        remote_config is not None
+        pinned_config is not None
         and fingerprint != REMOTE_PEER_FINGERPRINT
     ):
         parser.error(
-            "Remote peer fingerprint must match the pinned public key"
+            "Pinned peer fingerprint must match the pinned public key"
         )
     if bool(args.peer_status) != bool(args.peer_port):
         parser.error("--peer-status and --peer-port must be supplied together")
@@ -3446,13 +4001,13 @@ def main() -> int:
         try:
             port, peer_port = enforce_port_policy(
                 args.port,
-                None if remote_config is not None else args.peer_port,
+                None if pinned_config is not None else args.peer_port,
             )
         except ValueError as exc:
             parser.error(str(exc))
     elif args.dry_run:
         port = D1L_REQUIRED_PORT
-        if args.peer_port and remote_config is None:
+        if args.peer_port and pinned_config is None:
             try:
                 _, peer_port = enforce_port_policy(D1L_REQUIRED_PORT, args.peer_port)
             except ValueError as exc:
@@ -3478,7 +4033,7 @@ def main() -> int:
         )
     if (
         not args.dry_run
-        and remote_config is None
+        and pinned_config is None
         and (peer_status_path is None or peer_port is None)
     ):
         parser.error(
@@ -3512,6 +4067,7 @@ def main() -> int:
                 github_run_id=args.github_run_id,
                 workflow_run_attempt=args.github_run_attempt,
                 remote_peer=remote_config,
+                local_peer=local_config,
             )
         else:
             if peer_status_path is not None and not peer_status_path.exists():
@@ -3534,6 +4090,7 @@ def main() -> int:
                 github_run_id=str(args.github_run_id),
                 workflow_run_attempt=str(args.github_run_attempt),
                 remote_peer=remote_config,
+                local_peer=local_config,
                 evidence_bundle=evidence_bundle,
             )
 
@@ -3550,10 +4107,18 @@ def main() -> int:
                 f"{report['discord_command']}"
             )
         elif report.get("controlled_peer_control_plan"):
+            local_plan = (
+                get_path(report, "controlled_peer", "access_mode")
+                == "local"
+            )
             print(
                 "Controlled-peer inbound plan: "
-                "SSH to the pinned Pi peer and send one exact "
-                "radio.send_dm request through its Unix socket"
+                + (
+                    "use the pinned Pi-local Unix socket for one exact "
+                    if local_plan
+                    else "SSH to the pinned Pi peer and send one exact "
+                )
+                + "radio.send_dm request"
             )
     return 0 if report["ok"] else 1
 

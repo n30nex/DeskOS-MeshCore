@@ -1230,11 +1230,17 @@ def test_protocol_migration_gate_fails_closed_for_missing_invalid_or_rejected(
     ]
 
 
-def write_remote_rf_receipt(tmp_path: Path) -> Path:
+def write_remote_rf_receipt(
+    tmp_path: Path, *, local: bool = False
+) -> Path:
     rf = audit.rf_acceptance
     observed = datetime(2026, 7, 23, 15, 0, tzinfo=timezone.utc)
-    config = rf.remote_peer_config(
-        ssh_host="neonx@192.168.0.24"
+    config = (
+        rf.local_peer_config()
+        if local
+        else rf.remote_peer_config(
+            ssh_host="neonx@192.168.0.24"
+        )
     )
 
     def status(*, after: bool) -> dict:
@@ -1283,20 +1289,40 @@ def write_remote_rf_receipt(tmp_path: Path) -> Path:
             "size": path.stat().st_size,
             "sha256": digest,
             "source_path": rf.REMOTE_PEER_STATUS_PATH,
-            "source_host": config["ssh_host"],
+            "source_host": (
+                config["hostname"] if local else config["ssh_host"]
+            ),
             "source_hostname": config["hostname"],
-            "transport": "ssh",
+            "transport": (
+                rf.LOCAL_PEER_STATUS_TRANSPORT
+                if local
+                else "ssh"
+            ),
             "captured_at": observed.isoformat(),
-            "remote_mtime_ns": 1,
-            "remote_sha256": digest,
+            **(
+                {
+                    "source_mtime_ns": 1,
+                    "source_sha256": digest,
+                }
+                if local
+                else {
+                    "remote_mtime_ns": 1,
+                    "remote_sha256": digest,
+                }
+            ),
         }
 
     before_row = status_row(before_path)
     after_row = status_row(after_path)
-    before_validation = rf.validate_remote_peer_status(
+    status_validator = (
+        rf.validate_local_peer_status
+        if local
+        else rf.validate_remote_peer_status
+    )
+    before_validation = status_validator(
         before, config, observed_at=observed
     )
-    after_validation = rf.validate_remote_peer_status(
+    after_validation = status_validator(
         after, config, observed_at=observed
     )
     token = "rf_remote"
@@ -1339,7 +1365,9 @@ def write_remote_rf_receipt(tmp_path: Path) -> Path:
             "size": path.stat().st_size,
             "sha256": audit.sha256_file(path),
             "source_path": rf.REMOTE_PEER_CONTROL_SOCKET,
-            "source_host": config["ssh_host"],
+            "source_host": (
+                config["hostname"] if local else config["ssh_host"]
+            ),
             "source_hostname": config["hostname"],
             "transport": transport,
             "captured_at": observed.isoformat(),
@@ -1358,10 +1386,16 @@ def write_remote_rf_receipt(tmp_path: Path) -> Path:
         "request": request,
         "response": response,
         "request_receipt": control_row(
-            request_path, "ssh-unix-socket-request"
+            request_path,
+            rf.LOCAL_PEER_CONTROL_REQUEST_TRANSPORT
+            if local
+            else "ssh-unix-socket-request",
         ),
         "response_receipt": control_row(
-            response_path, "ssh-unix-socket-response"
+            response_path,
+            rf.LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT
+            if local
+            else "ssh-unix-socket-response",
         ),
         "request_sha256": control_validation["request_sha256"],
         "response_sha256": control_validation["response_sha256"],
@@ -1584,7 +1618,8 @@ def write_remote_rf_receipt(tmp_path: Path) -> Path:
         peer_after_receipt=after_row,
         github_run_id=RUN_ID,
         workflow_run_attempt=RUN_ATTEMPT,
-        remote_peer=config,
+        remote_peer=None if local else config,
+        local_peer=config if local else None,
         remote_before_validation=before_validation,
         remote_after_validation=after_validation,
         remote_control=control,
@@ -1641,6 +1676,107 @@ def test_remote_rf_gate_recomputes_raw_status_and_control_sidecars(
         is False
     )
 
+
+def test_local_rf_gate_recomputes_raw_status_and_control_sidecars(
+    tmp_path: Path,
+):
+    receipt = write_remote_rf_receipt(tmp_path, local=True)
+
+    gate = audit.rf_gate(
+        receipt,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is True
+    assert gate.details["raw_status_ok"] is True
+    assert gate.details["control_exchange_ok"] is True
+    assert gate.details["source_rows_ok"] is True
+    assert gate.details["peer_binding_ok"] is True
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    assert report["controlled_peer"]["access_mode"] == "local"
+    assert "ssh_host" not in report["controlled_peer"]
+    assert (
+        report["controlled_peer_before_receipt"]["transport"]
+        == audit.rf_acceptance.LOCAL_PEER_STATUS_TRANSPORT
+    )
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("controlled_peer", "hostname", "forged-pi"),
+        ("controlled_peer", "status_path", "/tmp/status.json"),
+        ("controlled_peer", "control_socket", "/tmp/control.sock"),
+        ("controlled_peer", "access_mode", "ssh"),
+        ("controlled_peer", "ssh_host", "neonx@192.168.0.24"),
+        (
+            "controlled_peer_before_receipt",
+            "source_path",
+            "/tmp/status.json",
+        ),
+        (
+            "controlled_peer_before_receipt",
+            "source_host",
+            "forged-pi",
+        ),
+        (
+            "controlled_peer_before_receipt",
+            "source_hostname",
+            "forged-pi",
+        ),
+        (
+            "controlled_peer_before_receipt",
+            "transport",
+            "ssh",
+        ),
+        (
+            "controlled_peer_control.request_receipt",
+            "source_path",
+            "/tmp/control.sock",
+        ),
+        (
+            "controlled_peer_control.request_receipt",
+            "source_hostname",
+            "forged-pi",
+        ),
+        (
+            "controlled_peer_control.request_receipt",
+            "transport",
+            "ssh-unix-socket-request",
+        ),
+    ],
+)
+def test_local_core_rf_gate_rejects_forged_source_binding(
+    tmp_path: Path,
+    section: str,
+    field: str,
+    value,
+):
+    receipt = write_remote_rf_receipt(tmp_path, local=True)
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    target = report
+    for part in section.split("."):
+        target = target[part]
+    target[field] = value
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+
+    gate = audit.rf_gate(
+        receipt,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+    assert gate.ok is False
+    assert (
+        gate.details["source_rows_ok"] is False
+        or gate.details["peer_binding_ok"] is False
+    )
 
 @pytest.mark.parametrize(
     ("ready", "block"),
