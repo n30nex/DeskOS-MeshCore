@@ -13,11 +13,27 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 try:
     from verify_checksums import is_link_or_reparse, verify_checksum_tree
 except ModuleNotFoundError:
     from scripts.verify_checksums import is_link_or_reparse, verify_checksum_tree
+
+try:
+    from d1l_serial_target import (
+        EXPECTED_PID,
+        EXPECTED_VID,
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+    )
+except ModuleNotFoundError:
+    from scripts.d1l_serial_target import (
+        EXPECTED_PID,
+        EXPECTED_VID,
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+    )
 
 if __package__:
     from .meshcore_conformance_d1l import (
@@ -102,6 +118,16 @@ MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
 MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
 MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT = MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
 CORE_RELEASE_PROFILE = "core_1_0"
+CORE_PACKAGE_SCHEMA = 2
+CORE_INSTALL_CONTRACT_SCHEMA = 2
+CORE_GENERATED_INSTALL_FILES = (
+    "d1l_serial_target.py",
+    "flash_project.py",
+    "flash_project.ps1",
+    "flash_project.sh",
+    "flash_full_8mb.ps1",
+    "docs/CORE_INSTALL_RECOVERY.md",
+)
 RELEASE_PROFILES = frozenset({"development", CORE_RELEASE_PROFILE, "full_feature"})
 SD_HISTORY_MODES = frozenset({"disabled", "conditional", "supported_optional"})
 CORE_SUPPORTED_CAPABILITIES_BASE = (
@@ -1303,7 +1329,312 @@ def powershell_checksum_guard_lines() -> list[str]:
     ]
 
 
+def copy_core_serial_target_resolver(
+    root: Path,
+    package_dir: Path,
+) -> dict:
+    root = root.resolve(strict=True)
+    source_candidate = root / "scripts" / "d1l_serial_target.py"
+    if is_link_or_reparse(source_candidate):
+        raise ValueError("Core serial target resolver source is linked")
+    source = source_candidate.resolve(strict=True)
+    try:
+        source.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Core serial target resolver escaped the source root") from exc
+    if (
+        not source.is_file()
+        or is_link_or_reparse(source)
+        or source.stat().st_size <= 0
+    ):
+        raise ValueError("Core serial target resolver source is invalid")
+    target = package_dir / "d1l_serial_target.py"
+    shutil.copyfile(source, target)
+    if is_link_or_reparse(target) or target.stat().st_size <= 0:
+        raise ValueError("Packaged Core serial target resolver is invalid")
+    return {
+        "path": target.name,
+        "size": target.stat().st_size,
+        "sha256": sha256_file(target),
+    }
+
+
+def core_flash_runner_source(
+    entries: list[dict],
+    *,
+    flash_mode: str,
+    flash_size: str,
+    flash_freq: str,
+) -> str:
+    flash_plan = [
+        [entry["offset"], entry["path"]]
+        for entry in sorted(entries, key=lambda item: parse_offset(item["offset"]))
+    ]
+    template = r'''#!/usr/bin/env python3
+"""Checksum- and identity-guarded Core 1.0 project flasher."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import re
+import stat
+import subprocess
+import sys
+import types
+from pathlib import Path, PurePosixPath
+from typing import Any, Callable
+
+
+WINDOWS_D1L_TARGET = __WINDOWS_TARGET__
+POSIX_D1L_TARGET = __POSIX_TARGET__
+EXPECTED_VID = __EXPECTED_VID__
+EXPECTED_PID = __EXPECTED_PID__
+FLASH_BAUD = __FLASH_BAUD__
+FLASH_MODE = __FLASH_MODE__
+FLASH_SIZE = __FLASH_SIZE__
+FLASH_FREQ = __FLASH_FREQ__
+FLASH_PLAN = __FLASH_PLAN__
+_CHECKSUM_ROW = re.compile(r"([0-9A-Fa-f]{64})  \./(.+)\Z")
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        info = path.stat(follow_symlinks=False)
+    except OSError:
+        return True
+    attributes = getattr(info, "st_file_attributes", 0)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return path.is_symlink() or bool(attributes & reparse_flag)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _checked_package_file(root: Path, relative: str) -> Path:
+    if (
+        not relative
+        or "\\" in relative
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in relative)
+    ):
+        raise ValueError(f"Unsafe checksum path: {relative!r}")
+    posix_path = PurePosixPath(relative)
+    if posix_path.is_absolute() or any(
+        part in {"", ".", ".."} for part in posix_path.parts
+    ):
+        raise ValueError(f"Unsafe checksum path: {relative!r}")
+    cursor = root
+    for part in posix_path.parts:
+        cursor /= part
+        if _is_link_or_reparse(cursor):
+            raise ValueError(f"Linked/reparse package path rejected: {relative}")
+    resolved = cursor.resolve(strict=True)
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Checksum path escapes package: {relative}") from exc
+    if not resolved.is_file():
+        raise ValueError(f"Missing checksummed file: {relative}")
+    return resolved
+
+
+def verify_complete_package(package_root: Path) -> None:
+    root = package_root.resolve(strict=True)
+    manifest = root / "SHA256SUMS.txt"
+    if (
+        not manifest.is_file()
+        or _is_link_or_reparse(manifest)
+        or manifest.stat().st_size <= 0
+    ):
+        raise ValueError("Missing or linked package SHA256SUMS.txt")
+
+    expected: dict[str, tuple[str, str]] = {}
+    for raw_line in manifest.read_text(encoding="ascii").splitlines():
+        match = _CHECKSUM_ROW.fullmatch(raw_line)
+        if match is None:
+            raise ValueError(f"Invalid SHA256SUMS.txt row: {raw_line}")
+        digest, relative = match.groups()
+        folded = relative.casefold()
+        if folded in expected:
+            raise ValueError(f"Duplicate checksum path: {relative}")
+        target = _checked_package_file(root, relative)
+        actual = _sha256(target)
+        if actual != digest.lower():
+            raise ValueError(f"SHA256 mismatch: {relative}")
+        expected[folded] = (relative, actual)
+
+    actual_paths: dict[str, str] = {}
+    for candidate in sorted(root.rglob("*")):
+        if _is_link_or_reparse(candidate):
+            raise ValueError(f"Linked/reparse package entry rejected: {candidate}")
+        if not candidate.is_file() or candidate == manifest:
+            continue
+        relative = candidate.relative_to(root).as_posix()
+        folded = relative.casefold()
+        if folded in actual_paths:
+            raise ValueError(f"Ambiguous package path: {relative}")
+        actual_paths[folded] = relative
+    if not expected or set(expected) != set(actual_paths):
+        missing = sorted(set(actual_paths) - set(expected))
+        extra = sorted(set(expected) - set(actual_paths))
+        raise ValueError(
+            "SHA256SUMS.txt is not a complete one-to-one package file "
+            f"inventory (unchecksummed={missing}, missing={extra})"
+        )
+    for folded, (relative, _digest) in expected.items():
+        if actual_paths[folded] != relative:
+            raise ValueError(f"Checksum path spelling mismatch: {relative}")
+
+
+def _load_resolver(root: Path) -> types.ModuleType:
+    path = root / "d1l_serial_target.py"
+    source = path.read_text(encoding="utf-8")
+    module = types.ModuleType("_packaged_d1l_serial_target")
+    module.__file__ = str(path)
+    exec(compile(source, str(path), "exec"), module.__dict__)
+    if (
+        module.WINDOWS_D1L_TARGET != WINDOWS_D1L_TARGET
+        or module.POSIX_D1L_TARGET != POSIX_D1L_TARGET
+        or module.EXPECTED_VID != EXPECTED_VID
+        or module.EXPECTED_PID != EXPECTED_PID
+    ):
+        raise ValueError("Packaged D1L serial target policy is inconsistent")
+    return module
+
+
+def _default_port_lister() -> list[Any]:
+    try:
+        from serial.tools import list_ports
+    except ImportError as exc:
+        raise ValueError("pyserial is required to identify the D1L target") from exc
+    return list(list_ports.comports())
+
+
+def run_flash(
+    port: str,
+    *,
+    package_root: Path | None = None,
+    platform_name: str | None = None,
+    port_lister: Callable[[], list[Any]] | None = None,
+    command_runner: Callable[..., Any] | None = None,
+    resolver_module: Any | None = None,
+    resolver_hooks: dict[str, Any] | None = None,
+    validate_only: bool = False,
+) -> dict[str, Any]:
+    raw_root = (
+        Path(__file__).parent
+        if package_root is None
+        else Path(package_root)
+    )
+    if _is_link_or_reparse(raw_root):
+        raise ValueError("Linked/reparse package root rejected")
+    root = raw_root.resolve(strict=True)
+    verify_complete_package(root)
+    resolver = resolver_module or _load_resolver(root)
+    hooks = dict(resolver_hooks or {})
+    snapshot = resolver.resolve_target(
+        port,
+        port_lister=port_lister or _default_port_lister,
+        platform_name=platform_name,
+        **hooks,
+    )
+    resolver.validate_snapshot(snapshot, snapshot["requested_path"])
+    authorized_port = snapshot["requested_path"]
+    if authorized_port not in {WINDOWS_D1L_TARGET, POSIX_D1L_TARGET}:
+        raise ValueError("Resolver returned an unauthorized D1L target")
+    if validate_only:
+        return {"target": snapshot, "command": None}
+
+    command = [
+        sys.executable,
+        "-m",
+        "esptool",
+        "--chip",
+        "esp32s3",
+        "--port",
+        authorized_port,
+        "--baud",
+        str(FLASH_BAUD),
+        "--before",
+        "default-reset",
+        "--after",
+        "hard-reset",
+        "write-flash",
+        "--flash-mode",
+        FLASH_MODE,
+        "--flash-size",
+        FLASH_SIZE,
+        "--flash-freq",
+        FLASH_FREQ,
+    ]
+    for offset, relative in FLASH_PLAN:
+        command.extend((offset, str(root / relative)))
+    runner = command_runner or subprocess.run
+    result = runner(command, cwd=root)
+    returncode = getattr(result, "returncode", result if type(result) is int else None)
+    if returncode != 0:
+        raise RuntimeError(f"Project flash failed with exit code {returncode!r}")
+    return {"target": snapshot, "command": command}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", default=os.environ.get("D1L_PORT"))
+    parser.add_argument("--validate-only", action="store_true")
+    args = parser.parse_args(argv)
+    if not isinstance(args.port, str) or not args.port.strip():
+        parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
+    try:
+        run_flash(args.port, validate_only=args.validate_only)
+    except (OSError, RuntimeError, ValueError) as exc:
+        parser.error(str(exc))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+    replacements = {
+        "__WINDOWS_TARGET__": repr(WINDOWS_D1L_TARGET),
+        "__POSIX_TARGET__": repr(POSIX_D1L_TARGET),
+        "__EXPECTED_VID__": str(EXPECTED_VID),
+        "__EXPECTED_PID__": str(EXPECTED_PID),
+        "__FLASH_BAUD__": str(FLASH_BAUD),
+        "__FLASH_MODE__": repr(str(flash_mode)),
+        "__FLASH_SIZE__": repr(str(flash_size)),
+        "__FLASH_FREQ__": repr(str(flash_freq)),
+        "__FLASH_PLAN__": json.dumps(flash_plan, separators=(",", ":")),
+    }
+    for marker, replacement in replacements.items():
+        template = template.replace(marker, replacement)
+    return template
+
+
+def core_install_file_bindings(package_dir: Path) -> dict[str, dict[str, Any]]:
+    bindings: dict[str, dict[str, Any]] = {}
+    for relative in CORE_GENERATED_INSTALL_FILES:
+        path = package_dir / relative
+        if (
+            not path.is_file()
+            or is_link_or_reparse(path)
+            or path.stat().st_size <= 0
+        ):
+            raise ValueError(f"Core generated install file is invalid: {relative}")
+        bindings[relative] = {
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+    return bindings
+
+
 def write_flash_scripts(
+    root: Path,
     package_dir: Path,
     entries: list[dict],
     flasher_args: dict,
@@ -1316,98 +1647,153 @@ def write_flash_scripts(
     flash_freq = flash_settings.get("flash_freq", "80m")
     project_args = command_flash_files(entries)
 
-    ps_project = package_dir / "flash_project.ps1"
-    core_port_guard_ps = (
-        'if ($Port.Trim().ToUpperInvariant() -ne "COM12") { throw "Core 1.0 D1L flashing requires COM12." }'
-        if release_profile == CORE_RELEASE_PROFILE
-        else None
-    )
-    ps_project_lines = [
-        "param([string]$Port = $env:D1L_PORT)",
-        '$ErrorActionPreference = "Stop"',
-        'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
-    ]
-    if core_port_guard_ps:
-        ps_project_lines.append(core_port_guard_ps)
-    ps_project_lines.extend(
-        [
-            "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
-            *powershell_checksum_guard_lines(),
-            "$Firmware = Join-Path $Root 'firmware'",
-            "python -m esptool --chip esp32s3 --port $Port --baud "
-            f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
-            f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
-            + " ".join(
-                f"{project_args[i]} (Join-Path $Root '{project_args[i + 1]}')"
-                for i in range(0, len(project_args), 2)
+    if release_profile == CORE_RELEASE_PROFILE:
+        resolver = copy_core_serial_target_resolver(root, package_dir)
+        py_project = package_dir / "flash_project.py"
+        py_project.write_text(
+            core_flash_runner_source(
+                entries,
+                flash_mode=str(flash_mode),
+                flash_size=str(flash_size),
+                flash_freq=str(flash_freq),
             ),
-            'if ($LASTEXITCODE -ne 0) { throw "Project flash failed with exit code $LASTEXITCODE" }',
-            "",
-        ]
-    )
-    ps_project.write_text(
-        "\n".join(ps_project_lines),
-        encoding="ascii",
-    )
+            encoding="ascii",
+        )
 
-    ps_full = package_dir / "flash_full_8mb.ps1"
-    ps_full_lines = [
-        "param([string]$Port = $env:D1L_PORT)",
-        '$ErrorActionPreference = "Stop"',
-        'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
-    ]
-    if core_port_guard_ps:
-        ps_full_lines.append(core_port_guard_ps)
-    ps_full_lines.extend(
-        [
+        ps_project = package_dir / "flash_project.ps1"
+        ps_project.write_text(
+            "\n".join(
+                (
+                    "param([string]$Port = $env:D1L_PORT)",
+                    '$ErrorActionPreference = "Stop"',
+                    'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+                    "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
+                    f'if ($ValidatedPort -ne "{WINDOWS_D1L_TARGET}") {{ throw "Core 1.0 Windows D1L flashing requires {WINDOWS_D1L_TARGET}." }}',
+                    "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
+                    "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort",
+                    'if ($LASTEXITCODE -ne 0) { throw "Project flash failed with exit code $LASTEXITCODE" }',
+                    "",
+                )
+            ),
+            encoding="ascii",
+        )
+
+        sh_project = package_dir / "flash_project.sh"
+        sh_project.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env sh",
+                    "set -eu",
+                    ': "${D1L_PORT:?Set D1L_PORT to the stable D1L by-id path.}"',
+                    f'if [ "$D1L_PORT" != "{POSIX_D1L_TARGET}" ]; then',
+                    f'  printf "%s\\n" "Core 1.0 POSIX D1L flashing requires {POSIX_D1L_TARGET}." >&2',
+                    "  exit 2",
+                    "fi",
+                    'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+                    'PYTHON_BIN="${D1L_PYTHON:-python3}"',
+                    '"$PYTHON_BIN" "$ROOT/flash_project.py" --port "$D1L_PORT"',
+                    "",
+                )
+            ),
+            encoding="ascii",
+        )
+        sh_project.chmod(0o755)
+
+        ps_full = package_dir / "flash_full_8mb.ps1"
+        ps_full_lines = [
+            "param([string]$Port = $env:D1L_PORT)",
+            '$ErrorActionPreference = "Stop"',
+            'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+            "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
+            f'if ($ValidatedPort -ne "{WINDOWS_D1L_TARGET}") {{ throw "Core 1.0 Windows recovery requires {WINDOWS_D1L_TARGET}." }}',
             "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
             *powershell_checksum_guard_lines(),
-            'Write-Warning "This writes the full 8MB image at 0x0 and can overwrite persisted settings/logs."',
-            '$Confirm = Read-Host "Type FULL-FLASH-$Port to continue"',
-            'if ($Confirm -ne "FULL-FLASH-$Port") { throw "Full flash confirmation failed." }',
-            "python -m esptool --chip esp32s3 --port $Port --baud "
+            "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --validate-only",
+            'if ($LASTEXITCODE -ne 0) { throw "D1L identity validation failed with exit code $LASTEXITCODE" }',
+            'Write-Warning "WINDOWS-ONLY RECOVERY: this writes the full 8MB image at 0x0 and can overwrite persisted settings/logs."',
+            '$Confirm = Read-Host "Type FULL-FLASH-$ValidatedPort to continue"',
+            'if ($Confirm -ne "FULL-FLASH-$ValidatedPort") { throw "Full flash confirmation failed." }',
+            "python -m esptool --chip esp32s3 --port $ValidatedPort --baud "
             f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
             f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
             f"{full_image['flash_offset']} (Join-Path $Root '{full_image['path']}')",
             'if ($LASTEXITCODE -ne 0) { throw "Full flash failed with exit code $LASTEXITCODE" }',
             "",
         ]
-    )
-    ps_full.write_text(
-        "\n".join(ps_full_lines),
-        encoding="ascii",
-    )
+        ps_full.write_text("\n".join(ps_full_lines), encoding="ascii")
+        return {
+            "shared_project_flash": py_project.name,
+            "serial_target_resolver": resolver["path"],
+            "windows_project_flash": ps_project.name,
+            "posix_project_flash": sh_project.name,
+            "windows_full_flash": ps_full.name,
+            "posix_full_flash": None,
+        }
+
+    ps_project = package_dir / "flash_project.ps1"
+    ps_project_lines = [
+        "param([string]$Port = $env:D1L_PORT)",
+        '$ErrorActionPreference = "Stop"',
+        'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+        "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
+        *powershell_checksum_guard_lines(),
+        "$Firmware = Join-Path $Root 'firmware'",
+        "python -m esptool --chip esp32s3 --port $Port --baud "
+        f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+        f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+        + " ".join(
+            f"{project_args[i]} (Join-Path $Root '{project_args[i + 1]}')"
+            for i in range(0, len(project_args), 2)
+        ),
+        'if ($LASTEXITCODE -ne 0) { throw "Project flash failed with exit code $LASTEXITCODE" }',
+        "",
+    ]
+    ps_project.write_text("\n".join(ps_project_lines), encoding="ascii")
+
+    ps_full = package_dir / "flash_full_8mb.ps1"
+    ps_full_lines = [
+        "param([string]$Port = $env:D1L_PORT)",
+        '$ErrorActionPreference = "Stop"',
+        'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+        "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
+        *powershell_checksum_guard_lines(),
+        'Write-Warning "This writes the full 8MB image at 0x0 and can overwrite persisted settings/logs."',
+        '$Confirm = Read-Host "Type FULL-FLASH-$Port to continue"',
+        'if ($Confirm -ne "FULL-FLASH-$Port") { throw "Full flash confirmation failed." }',
+        "python -m esptool --chip esp32s3 --port $Port --baud "
+        f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+        f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+        f"{full_image['flash_offset']} (Join-Path $Root '{full_image['path']}')",
+        'if ($LASTEXITCODE -ne 0) { throw "Full flash failed with exit code $LASTEXITCODE" }',
+        "",
+    ]
+    ps_full.write_text("\n".join(ps_full_lines), encoding="ascii")
 
     sh_project = package_dir / "flash_project.sh"
-    if release_profile != CORE_RELEASE_PROFILE:
-        sh_lines = [
-            "#!/usr/bin/env sh",
-            "set -eu",
-            ': "${D1L_PORT:?Set D1L_PORT to the D1L serial port.}"',
-            'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
-            "python -m esptool --chip esp32s3 --port \"$D1L_PORT\" --baud "
-            f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
-            f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
-            + " ".join(
-                f"{project_args[i]} \"$ROOT/{project_args[i + 1]}\""
-                for i in range(0, len(project_args), 2)
-            ),
-            "",
-        ]
-        sh_project.write_text(
-            "\n".join(sh_lines),
-            encoding="ascii",
-        )
-        sh_project.chmod(0o755)
-
+    sh_project.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env sh",
+                "set -eu",
+                ': "${D1L_PORT:?Set D1L_PORT to the D1L serial port.}"',
+                'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+                "python -m esptool --chip esp32s3 --port \"$D1L_PORT\" --baud "
+                f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+                f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+                + " ".join(
+                    f'{project_args[i]} "$ROOT/{project_args[i + 1]}"'
+                    for i in range(0, len(project_args), 2)
+                ),
+                "",
+            )
+        ),
+        encoding="ascii",
+    )
+    sh_project.chmod(0o755)
     return {
         "windows_project_flash": ps_project.name,
         "windows_full_flash": ps_full.name,
-        "posix_project_flash": (
-            None
-            if release_profile == CORE_RELEASE_PROFILE
-            else sh_project.name
-        ),
+        "posix_project_flash": sh_project.name,
     }
 
 
@@ -1513,25 +1899,40 @@ SD history mode: `{sd_history_mode}`
 
 ## Before installing
 
-1. Use the Seeed SenseCAP Indicator D1L connected as `COM12`.
-2. Never use COM8, COM11, COM16, or COM29 for the ESP32 Core install.
-3. Verify every file against `SHA256SUMS.txt`.
-4. Read `SUPPORTED_FEATURES.md`. Map, Wi-Fi, BLE, OTA, multi-channel
+1. Use one of the two supported stable targets:
+   - Windows: `{WINDOWS_D1L_TARGET}`
+   - POSIX/Pi 5: `{POSIX_D1L_TARGET}`
+2. The device must report USB VID:PID `{EXPECTED_VID:04X}:{EXPECTED_PID:04X}`.
+3. On POSIX, `/dev/ttyUSB<number>` is observational evidence only. Never pass
+   a raw tty path to a package flash command.
+4. Never use COM8, COM11, COM16, or COM29 for the ESP32 Core install.
+5. The generated entrypoint verifies every file against `SHA256SUMS.txt` and
+   rejects missing, extra, linked, duplicate, or mismatched files.
+6. Read `SUPPORTED_FEATURES.md`. Map, Wi-Fi, BLE, OTA, multi-channel
    management, administration, Observer/MQTT, and location are unavailable.
-5. Never format an SD card on the device.
+7. Never format an SD card on the device.
 
 ## Normal non-erasing USB install
 
 The normal project flash writes the Actions-built bootloader, partition table,
 and application at their declared ESP-IDF offsets. It does not issue an erase
-and preserves unrelated NVS regions. Extract the package, open PowerShell in
-the package root, and invoke only the package-root `flash_project.ps1`. The
-script verifies the complete package checksum tree before running esptool.
+and preserves unrelated NVS regions. Both wrappers invoke the package-root
+`flash_project.py`, which verifies the complete checksum inventory, resolves
+the exact USB identity, and gives esptool only the stable requested target.
+
+### Windows
 
 ```powershell
 $PackageRoot = (Get-Location).Path
-$env:D1L_PORT = "COM12"
-& (Join-Path $PackageRoot "flash_project.ps1") -Port COM12
+$env:D1L_PORT = "{WINDOWS_D1L_TARGET}"
+& (Join-Path $PackageRoot "flash_project.ps1") -Port {WINDOWS_D1L_TARGET}
+```
+
+### POSIX / Raspberry Pi 5
+
+```sh
+export D1L_PORT="{POSIX_D1L_TARGET}"
+./flash_project.sh
 ```
 
 After flashing, query `version` and `health`. Require the exact commit above,
@@ -1542,15 +1943,14 @@ any evidence from the device.
 
 Try the normal project flash first. The full 8MB recovery image is a last
 resort: it can overwrite settings, contacts, messages, and other retained
-state. `flash_full_8mb.ps1` requires the operator to type
-`FULL-FLASH-COM12` before it writes. Use only the package-root recovery script;
-it verifies the complete package checksum tree before displaying the data-loss
-warning and accepting the typed confirmation.
+state. Core recovery is Windows-only. No POSIX recovery wrapper is shipped.
+`flash_full_8mb.ps1` verifies the complete checksum inventory and the COM12
+USB identity before it asks the operator to type `FULL-FLASH-COM12`.
 
 ```powershell
 $PackageRoot = (Get-Location).Path
-$env:D1L_PORT = "COM12"
-& (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port COM12
+$env:D1L_PORT = "{WINDOWS_D1L_TARGET}"
+& (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port {WINDOWS_D1L_TARGET}
 ```
 
 Re-verify `version`, `health`, display, touch, and retained-state expectations
@@ -1565,7 +1965,6 @@ support OTA or signed SD update.
         "size": path.stat().st_size,
         "sha256": sha256_file(path),
     }
-
 
 def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -> None:
     readme = package_dir / "README_RELEASE.md"
@@ -1657,15 +2056,17 @@ are explicitly deferred.
 {checksum_lines}
 
 `SHA256SUMS.txt` contains the authoritative SHA-256 value for every other file
-in the package except itself. Both Windows flash scripts verify that complete
-checksum tree before writing.
+in the package except itself. The generated Python entrypoint and both
+normal-install wrappers verify that complete checksum tree before writing. The Windows-only recovery wrapper also
+performs the same inventory and USB identity checks before its warning.
 
-## Normal USB Install (COM12)
+## Normal USB Install
 
 Normal project flashing writes the exact Actions-built bootloader, partition
 table, and app at their ESP-IDF offsets without erasing unrelated NVS regions.
-Extract the package, open PowerShell in the package root, and invoke only the
-package-root `flash_project.ps1`.
+It accepts exactly `COM12` on Windows or
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` on POSIX, and requires
+VID:PID `1A86:7523`.
 
 ```powershell
 $PackageRoot = (Get-Location).Path
@@ -1673,13 +2074,19 @@ $env:D1L_PORT = "COM12"
 & (Join-Path $PackageRoot "flash_project.ps1") -Port COM12
 ```
 
-Verify `SHA256SUMS.txt` before flashing. The Core flash script rejects any D1L
-port other than COM12. Never use COM8, COM11, or COM29.
+```sh
+export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+./flash_project.sh
+```
+
+On POSIX, `/dev/ttyUSB<number>` is observational only and is never an
+authorized open target. Never use COM8, COM11, COM16, or COM29.
 
 ## Recovery
 
 Read `docs/CORE_INSTALL_RECOVERY.md` before recovery. The full 8MB recovery image
 requires an explicit typed confirmation and can overwrite retained state.
+Recovery remains Windows-only; no POSIX full-flash wrapper is included.
 USB install/recovery is the only supported update path in Core 1.0.
 
 Never format an SD card on the device.
@@ -1878,6 +2285,7 @@ def create_release_package(
             "Core supported_optional SD requires the exact paired RP2040 artifacts"
         )
     scripts = write_flash_scripts(
+        root,
         package_dir,
         entries,
         flasher_args,
@@ -1895,7 +2303,11 @@ def create_release_package(
         ]
 
     manifest = {
-        "schema": 1,
+        "schema": (
+            CORE_PACKAGE_SCHEMA
+            if release_profile == CORE_RELEASE_PROFILE
+            else 1
+        ),
         "project": PROJECT,
         "app_version": d1l_firmware_version(root),
         "package": package_name,
@@ -1939,19 +2351,47 @@ def create_release_package(
                 "storage_authority": capability_truth["storage_authority"],
                 "full_feature_release_ready": False,
                 "install_recovery_guide": {
-                    "schema": 1,
+                    "schema": CORE_INSTALL_CONTRACT_SCHEMA,
                     "usb_only": True,
-                    "normal_install_script": "flash_project.ps1",
-                    "normal_install_port": "COM12",
+                    "normal_install_script": "flash_project.py",
+                    "normal_install_scripts": {
+                        "windows": "flash_project.ps1",
+                        "posix": "flash_project.sh",
+                    },
+                    "normal_install_port": WINDOWS_D1L_TARGET,
+                    "normal_install_targets": {
+                        "windows": {
+                            "requested_path": WINDOWS_D1L_TARGET,
+                            "target_kind": "windows_com",
+                            "vid": EXPECTED_VID,
+                            "pid": EXPECTED_PID,
+                        },
+                        "posix": {
+                            "requested_path": POSIX_D1L_TARGET,
+                            "target_kind": "posix_by_id",
+                            "vid": EXPECTED_VID,
+                            "pid": EXPECTED_PID,
+                        },
+                    },
+                    "target_policy": {
+                        "stable_requested_path_only": True,
+                        "resolved_tty_observational_only": True,
+                        "hardware_identity_required": True,
+                        "raw_posix_tty_forbidden": True,
+                    },
                     "normal_install_preserves_unrelated_nvs": True,
                     "normal_install_package_root_only": True,
                     "normal_install_checksum_verified": True,
                     "recovery_script": "flash_full_8mb.ps1",
+                    "recovery_platform": "windows_only",
+                    "posix_recovery_script": None,
                     "recovery_requires_typed_confirmation": True,
                     "recovery_checksum_verified": True,
+                    "recovery_target_identity_verified": True,
                     "install_guide": "docs/CORE_INSTALL_RECOVERY.md",
                     "recovery_guide": "docs/CORE_INSTALL_RECOVERY.md",
                     "no_on_device_sd_format": True,
+                    "generated_files": core_install_file_bindings(package_dir),
                 },
             }
         )

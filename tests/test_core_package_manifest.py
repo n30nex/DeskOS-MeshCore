@@ -1,5 +1,8 @@
 import copy
 import json
+import os
+import types
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +17,13 @@ from tests.test_package_release_d1l import (
     write_fake_rp2040_artifacts,
 )
 
+
+def load_generated_flash_runner(package: Path) -> types.ModuleType:
+    path = package / "flash_project.py"
+    module = types.ModuleType("generated_core_flash_runner")
+    module.__file__ = str(path)
+    exec(compile(path.read_text(encoding="ascii"), str(path), "exec"), module.__dict__)
+    return module
 
 def test_core_disabled_package_binds_truth_and_omits_rp2040(
     tmp_path, monkeypatch
@@ -94,25 +104,185 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert manifest["supported_features"]["sha256"] == (
         package_release_d1l.sha256_file(package / "SUPPORTED_FEATURES.md")
     )
-    assert manifest["install_recovery_guide"]["normal_install_port"] == "COM12"
-    assert manifest["install_recovery_guide"]["install_guide"] == (
-        "docs/CORE_INSTALL_RECOVERY.md"
-    )
-    assert (
-        manifest["install_recovery_guide"]["no_on_device_sd_format"] is True
-    )
-    assert "Core 1.0 D1L flashing requires COM12" in (
-        package / "flash_project.ps1"
+    assert manifest["schema"] == 2
+    install = manifest["install_recovery_guide"]
+    assert install["schema"] == 2
+    assert install["normal_install_script"] == "flash_project.py"
+    assert install["normal_install_scripts"] == {
+        "windows": "flash_project.ps1",
+        "posix": "flash_project.sh",
+    }
+    assert install["normal_install_port"] == "COM12"
+    assert install["normal_install_targets"] == {
+        "windows": {
+            "requested_path": "COM12",
+            "target_kind": "windows_com",
+            "vid": 0x1A86,
+            "pid": 0x7523,
+        },
+        "posix": {
+            "requested_path": (
+                "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+            ),
+            "target_kind": "posix_by_id",
+            "vid": 0x1A86,
+            "pid": 0x7523,
+        },
+    }
+    assert install["target_policy"] == {
+        "stable_requested_path_only": True,
+        "resolved_tty_observational_only": True,
+        "hardware_identity_required": True,
+        "raw_posix_tty_forbidden": True,
+    }
+    assert install["recovery_platform"] == "windows_only"
+    assert install["posix_recovery_script"] is None
+    assert install["install_guide"] == "docs/CORE_INSTALL_RECOVERY.md"
+    assert install["no_on_device_sd_format"] is True
+    assert manifest["scripts"] == {
+        "shared_project_flash": "flash_project.py",
+        "serial_target_resolver": "d1l_serial_target.py",
+        "windows_project_flash": "flash_project.ps1",
+        "posix_project_flash": "flash_project.sh",
+        "windows_full_flash": "flash_full_8mb.ps1",
+        "posix_full_flash": None,
+    }
+    for relative, binding in install["generated_files"].items():
+        generated = package / relative
+        assert generated.is_file()
+        assert binding == {
+            "size": generated.stat().st_size,
+            "sha256": package_release_d1l.sha256_file(generated),
+        }
+
+    ps1 = (package / "flash_project.ps1").read_text(encoding="ascii")
+    sh = (package / "flash_project.sh").read_text(encoding="ascii")
+    runner_text = (package / "flash_project.py").read_text(encoding="ascii")
+    recovery = (package / "flash_full_8mb.ps1").read_text(encoding="ascii")
+    guide = (
+        package / "docs" / "CORE_INSTALL_RECOVERY.md"
     ).read_text(encoding="ascii")
-    flash_script = (package / "flash_project.ps1").read_text(
-        encoding="ascii"
+    assert "Windows D1L flashing requires COM12" in ps1
+    assert "flash_project.py" in ps1
+    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in sh
+    assert os.access(package / "flash_project.sh", os.X_OK)
+    assert "/dev/ttyUSB<number>" in guide
+    assert "No POSIX recovery wrapper is shipped" in guide
+    assert "verify_complete_package(root)" in runner_text
+    assert "authorized_port = snapshot[\"requested_path\"]" in runner_text
+    assert "erase-flash" not in runner_text
+    assert runner_text.index("verify_complete_package(root)") < runner_text.index(
+        "runner(command, cwd=root)"
     )
-    assert "Duplicate checksum path" in flash_script
-    assert "Unchecksummed package file" in flash_script
-    assert "complete one-to-one package file inventory" in flash_script
-    assert flash_script.index("Assert-PackageChecksums") < flash_script.index(
+    assert recovery.index("--validate-only") < recovery.index(
         "python -m esptool"
     )
+
+    runner = load_generated_flash_runner(package)
+    commands: list[list[str]] = []
+
+    def record_command(command, **_kwargs):
+        commands.append(command)
+        return 0
+
+    windows = runner.run_flash(
+        "COM12",
+        package_root=package,
+        platform_name="nt",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "hwid": "USB VID:PID=1A86:7523",
+            }
+        ],
+        command_runner=record_command,
+    )
+    windows_command = windows["command"]
+    assert windows_command[windows_command.index("--port") + 1] == "COM12"
+
+    stable_posix = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+    raw_tty = "/dev/ttyUSB2"
+    posix_hooks = {
+        "exists": lambda path: path in {stable_posix, raw_tty},
+        "is_symlink": lambda path: path == stable_posix,
+        "realpath": lambda path: raw_tty if path == stable_posix else path,
+        "access": lambda path, _mode: path == raw_tty,
+        "hostname": lambda: "neopi5",
+    }
+    posix = runner.run_flash(
+        stable_posix,
+        package_root=package,
+        platform_name="posix",
+        port_lister=lambda: [
+            {
+                "device": raw_tty,
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "hwid": "USB VID:PID=1A86:7523",
+            }
+        ],
+        resolver_hooks=posix_hooks,
+        command_runner=record_command,
+    )
+    posix_command = posix["command"]
+    assert posix_command[posix_command.index("--port") + 1] == stable_posix
+    assert raw_tty not in posix_command
+
+    def esptool_must_not_run(*_args, **_kwargs):
+        pytest.fail("esptool command ran after a rejected package or target")
+
+    with pytest.raises(ValueError, match="forbidden"):
+        runner.run_flash(
+            "COM11",
+            package_root=package,
+            platform_name="nt",
+            port_lister=lambda: [],
+            command_runner=esptool_must_not_run,
+        )
+    for wrong_vid, wrong_pid, expected_error in (
+        (0x10C4, 0x7523, "VID"),
+        (0x1A86, 0xEA60, "PID"),
+    ):
+        with pytest.raises(ValueError, match=expected_error):
+            runner.run_flash(
+                "COM12",
+                package_root=package,
+                platform_name="nt",
+                port_lister=lambda: [
+                    {
+                        "device": "COM12",
+                        "vid": wrong_vid,
+                        "pid": wrong_pid,
+                        "hwid": "wrong adapter",
+                    }
+                ],
+                command_runner=esptool_must_not_run,
+            )
+    with pytest.raises(ValueError, match="exactly"):
+        runner.run_flash(
+            raw_tty,
+            package_root=package,
+            platform_name="posix",
+            port_lister=lambda: [],
+            command_runner=esptool_must_not_run,
+        )
+
+    readme_path = package / "README_RELEASE.md"
+    original_readme = readme_path.read_bytes()
+    readme_path.write_bytes(original_readme + b"tampered\n")
+    try:
+        with pytest.raises(ValueError, match="SHA256 mismatch"):
+            runner.run_flash(
+                "COM12",
+                package_root=package,
+                platform_name="nt",
+                port_lister=lambda: [],
+                command_runner=esptool_must_not_run,
+            )
+    finally:
+        readme_path.write_bytes(original_readme)
     assert "./rp2040/" not in (package / "SHA256SUMS.txt").read_text(
         encoding="ascii"
     )

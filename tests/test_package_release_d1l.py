@@ -138,6 +138,9 @@ def write_fake_notices(root: Path) -> None:
         "scripts/compare_release_reproducibility_d1l.py": "# comparator fixture\n",
         "scripts/meshcore_conformance_d1l.py": "# conformance fixture\n",
         "scripts/meshcore_signed_advert_runtime_d1l.py": "# signed runtime fixture\n",
+        "scripts/d1l_serial_target.py": (
+            ROOT / "scripts" / "d1l_serial_target.py"
+        ).read_text(encoding="ascii"),
         "scripts/package_release_d1l.py": "# package fixture\n",
         "scripts/provenance_d1l.py": "# provenance fixture\n",
         "scripts/sbom_d1l.py": "# sbom fixture\n",

@@ -10,8 +10,9 @@ COM_PATTERN = re.compile(r"\bCOM\d+\b", re.IGNORECASE)
 # product contract.  Keep that exception reviewable and closed: a new literal,
 # a new file, or a changed port set must update this policy explicitly.  The
 # Core runner tests separately prove that COM8/COM11/COM29 are rejection values,
-# COM12 is the only D1L target, COM16 is not a Core D1L/RF target, and COM15 is
-# the assigned read-only/controlled-peer listener.
+# COM12 is the only Windows D1L target, the POSIX target is an exact stable
+# by-id path, COM16 is not a Core D1L/RF target, and COM15 is the assigned
+# read-only/controlled-peer listener.
 REVIEWED_CORE_RELEASE_PORT_LITERALS = {
     "scripts/d1l_serial_target.py": {
         "COM8", "COM11", "COM12", "COM16", "COM29",
@@ -19,7 +20,6 @@ REVIEWED_CORE_RELEASE_PORT_LITERALS = {
     "scripts/core_flash_only_d1l.py": {
         "COM8", "COM11", "COM16", "COM29",
     },
-    "scripts/core_install_recovery_review_d1l.py": {"COM12"},
     "scripts/core_reboot_persistence_d1l.py": {
         "COM8", "COM11", "COM12", "COM16", "COM29",
     },
