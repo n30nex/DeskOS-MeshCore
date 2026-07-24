@@ -11,11 +11,12 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 try:
     import rf_full_acceptance_d1l as rf_acceptance
     from artifact_metadata import git_metadata, stamp_report
+    from core_smoke_d1l import enforce_core_port, resolve_core_target
     from smoke_d1l import (
         exact_commit,
         firmware_identity_matches,
@@ -26,6 +27,7 @@ try:
 except ModuleNotFoundError:
     from scripts import rf_full_acceptance_d1l as rf_acceptance
     from scripts.artifact_metadata import git_metadata, stamp_report
+    from scripts.core_smoke_d1l import enforce_core_port, resolve_core_target
     from scripts.smoke_d1l import (
         exact_commit,
         firmware_identity_matches,
@@ -314,6 +316,7 @@ def qualified_controlled_peer_receipt(
     run_id: str,
     run_attempt: str,
     fingerprint: str,
+    expected_d1l_target_sha256: str | None = None,
 ) -> dict:
     try:
         resolved = path.resolve(strict=True)
@@ -457,6 +460,26 @@ def qualified_controlled_peer_receipt(
             "active soak controlled-peer receipt does not match the exact "
             "qualified candidate/run/peer"
         )
+    if expected_d1l_target_sha256 is not None:
+        before_target = data.get("d1l_target")
+        after_target = data.get("d1l_target_after")
+        if not (
+            data.get("schema") == 2
+            and isinstance(before_target, dict)
+            and isinstance(after_target, dict)
+            and before_target.get("stable_identity_sha256")
+            == expected_d1l_target_sha256
+            and after_target.get("stable_identity_sha256")
+            == expected_d1l_target_sha256
+            and data.get("target_identity_continuity_ok") is True
+            and data.get("port") == before_target.get("requested_path")
+            and after_target.get("requested_path")
+            == before_target.get("requested_path")
+        ):
+            raise ValueError(
+                "controlled-peer RF receipt is not bound to the exact "
+                "D1L serial target"
+            )
     return data, {
         "path": resolved.relative_to(root.resolve()).as_posix(),
         "size": resolved.stat().st_size,
@@ -1174,6 +1197,8 @@ def _run_serial_soak_reserved(
     expected_sd_history_mode: str | None = None,
     controlled_peer_receipt: Path | None = None,
     peer_capture_dir: Path | None = None,
+    port_lister: Callable[[], Iterable[object]] | None = None,
+    platform_name: str | None = None,
     evidence_bundle: rf_acceptance.EvidenceBundle,
 ) -> dict:
     root = Path(__file__).resolve().parents[1]
@@ -1212,14 +1237,16 @@ def _run_serial_soak_reserved(
         expected_release_profile == "core_1_0"
         and expected_sd_history_mode == "disabled"
     )
+    d1l_target: dict[str, Any] | None = None
+    d1l_target_after: dict[str, Any] | None = None
     if core_disabled:
-        normalized_port = rf_acceptance.normalize_port(port)
-        if normalized_port != rf_acceptance.D1L_REQUIRED_PORT:
+        try:
+            port = enforce_core_port(port)
+        except ValueError as exc:
             raise ValueError(
-                "Core 1.0 soak requires COM12; got "
-                f"{normalized_port or '<missing>'}"
-            )
-        port = normalized_port
+                "Core 1.0 soak requires COM12 or the exact Pi D1L by-id "
+                "target"
+            ) from exc
     if core_disabled and not (
         sample_storage
         and allow_sd_unavailable
@@ -1235,6 +1262,20 @@ def _run_serial_soak_reserved(
         import serial
     except ImportError as exc:
         raise SystemExit("pyserial is required for hardware soak: python -m pip install pyserial") from exc
+    if core_disabled:
+        try:
+            from serial.tools import list_ports
+        except ImportError as exc:
+            raise SystemExit(
+                "pyserial list_ports is required to identify the Core D1L target"
+            ) from exc
+        d1l_target = resolve_core_target(
+            port,
+            port_lister=port_lister
+            or (lambda: list_ports.comports(include_links=True)),
+            platform_name=platform_name,
+        )
+        port = d1l_target["requested_path"]
 
     active_command = active_dm_command(
         active_public_text, active_dm_fingerprint, active_dm_text
@@ -1276,6 +1317,11 @@ def _run_serial_soak_reserved(
             run_id=str(github_run_id),
             run_attempt=str(workflow_run_attempt),
             fingerprint=str(active_dm_fingerprint).upper(),
+            expected_d1l_target_sha256=(
+                d1l_target["stable_identity_sha256"]
+                if d1l_target is not None
+                else None
+            ),
         )
         if not listener_test_text_ok(active_dm_text):
             raise ValueError(
@@ -1567,6 +1613,19 @@ def _run_serial_soak_reserved(
             if final_sample.get("aborted_after_timeout"):
                 fatal_timeout_command = final_sample["aborted_after_timeout"]
 
+    if d1l_target is not None:
+        d1l_target_after = resolve_core_target(
+            port,
+            port_lister=port_lister
+            or (lambda: list_ports.comports(include_links=True)),
+            platform_name=platform_name,
+        )
+        if (
+            d1l_target_after["stable_identity_sha256"]
+            != d1l_target["stable_identity_sha256"]
+        ):
+            raise ValueError("D1L serial target identity changed during soak")
+
     if peer_before is not None:
         if (
             peer_receipt is None
@@ -1663,8 +1722,8 @@ def _run_serial_soak_reserved(
         )
         summary["ok"] = False
 
-    return {
-        "schema": 1,
+    report = {
+        "schema": 2 if core_disabled else 1,
         "mode": "hardware",
         "hardware_required": True,
         "physical_observed": True,
@@ -1752,6 +1811,15 @@ def _run_serial_soak_reserved(
         "active_events": active_events,
         "samples": samples,
     }
+    if core_disabled:
+        report.update(
+            {
+                "d1l_target": d1l_target,
+                "d1l_target_after": d1l_target_after,
+                "target_identity_continuity_ok": True,
+            }
+        )
+    return report
 
 
 def run_serial_soak(

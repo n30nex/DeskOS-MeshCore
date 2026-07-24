@@ -1045,10 +1045,14 @@ def test_openclaw_active_soak_text_and_send_floor_are_fail_fast():
     assert soak_d1l.expected_active_send_count(3600, 0) is None
 
 
-def test_core_disabled_soak_rejects_non_com12_before_serial_open():
+@pytest.mark.parametrize(
+    "port",
+    ["COM8", "COM11", "COM16", "COM29", "/dev/ttyUSB2"],
+)
+def test_core_disabled_soak_rejects_unsafe_target_before_serial_open(port):
     with pytest.raises(ValueError, match="requires COM12"):
         run_soak_for_timeout_test(
-            port="COM8",
+            port=port,
             expected_release_profile="core_1_0",
             expected_sd_history_mode="disabled",
             sample_storage=True,
@@ -1092,6 +1096,123 @@ def run_soak_for_timeout_test(**overrides):
     }
     args.update(overrides)
     return soak_d1l.run_serial_soak(**args)
+
+
+def windows_target_row(*, vid=0x1A86, pid=0x7523, location="1-2"):
+    return {
+        "device": "COM12",
+        "vid": vid,
+        "pid": pid,
+        "serial_number": None,
+        "hwid": f"USB VID:PID={vid:04X}:{pid:04X} LOCATION={location}",
+        "location": location,
+    }
+
+
+def test_core_soak_binds_target_before_and_after_serial(monkeypatch):
+    lister_calls = []
+    opened = []
+
+    def list_target():
+        lister_calls.append(True)
+        return [windows_target_row()]
+
+    def fake_collect(_ser, _timeout, label, elapsed_sec, *_args, **_kwargs):
+        row = sample(
+            label,
+            elapsed_sec,
+            base_health(),
+            {"rx_packets": 0, "tx_packets": 0},
+        )
+        row["aborted_after_timeout"] = None
+        return row
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **kwargs: (
+            opened.append(kwargs["port"]) or FakeSoakPort()
+        ),
+    )
+    monkeypatch.setattr(soak_d1l, "collect_sample", fake_collect)
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        expected_release_profile="core_1_0",
+        expected_sd_history_mode="disabled",
+        sample_storage=True,
+        allow_sd_unavailable=True,
+        port_lister=list_target,
+        platform_name="nt",
+    )
+
+    assert report["schema"] == 2
+    assert report["port"] == "COM12"
+    assert report["d1l_target"]["requested_path"] == "COM12"
+    assert report["d1l_target_after"]["requested_path"] == "COM12"
+    assert report["target_identity_continuity_ok"] is True
+    assert (
+        report["d1l_target"]["stable_identity_sha256"]
+        == report["d1l_target_after"]["stable_identity_sha256"]
+    )
+    assert opened == ["COM12"]
+    assert len(lister_calls) == 2
+
+
+def test_core_soak_rejects_wrong_usb_identity_before_serial(monkeypatch):
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail(
+            "serial must not open for the wrong USB identity"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="VID"):
+        run_soak_for_timeout_test(
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+            port_lister=lambda: [windows_target_row(vid=0x10C4)],
+            platform_name="nt",
+        )
+
+
+def test_core_soak_rejects_target_drift_after_serial(monkeypatch):
+    locations = iter(("1-2", "1-9"))
+
+    def fake_collect(_ser, _timeout, label, elapsed_sec, *_args, **_kwargs):
+        row = sample(
+            label,
+            elapsed_sec,
+            base_health(),
+            {"rx_packets": 0, "tx_packets": 0},
+        )
+        row["aborted_after_timeout"] = None
+        return row
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSoakPort(),
+    )
+    monkeypatch.setattr(soak_d1l, "collect_sample", fake_collect)
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(ValueError, match="identity changed"):
+        run_soak_for_timeout_test(
+            duration_sec=0.001,
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+            port_lister=lambda: [
+                windows_target_row(location=next(locations))
+            ],
+            platform_name="nt",
+        )
 
 
 def test_release_active_soak_rejects_non_test_text_before_peer_capture(
