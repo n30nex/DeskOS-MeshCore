@@ -3,6 +3,9 @@ import pytest
 from scripts import core_ui_corruption_probe_d1l as core_ui
 
 
+PUBLIC_KEY = "ab" * 32
+
+
 def test_core_ui_sequence_is_exact_and_excludes_unavailable_destinations():
     assert core_ui.CORE_TAB_SEQUENCE == (
         "home",
@@ -290,6 +293,7 @@ def test_core_ui_invalid_target_fails_before_serial_open(monkeypatch):
             clear_crashlog_before_start=False,
             skip_data_canary=False,
             expected_commit=commit,
+            expected_d1l_public_key=PUBLIC_KEY,
             expected_sd_history_mode="disabled",
             github_run_id="123",
             workflow_run_attempt="1",
@@ -304,6 +308,134 @@ def test_core_ui_invalid_target_fails_before_serial_open(monkeypatch):
                     "location": "1-9",
                 }
             ],
+        )
+
+
+def test_core_ui_wrong_full_key_stops_before_health_or_ui_actions(
+    monkeypatch,
+):
+    commit = "a" * 40
+    wrong_key = PUBLIC_KEY[:16] + "cd" * 24
+    commands = []
+
+    class FakePort:
+        def reset_input_buffer(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(
+        core_ui,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        core_ui,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakePort(),
+    )
+
+    def fake_send(_ser, command, _timeout):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": commit,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+                "idf": "v5.5.4",
+            }
+        if command == "identity status":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "identity status",
+                "public_key_ready": True,
+                "public_key": wrong_key,
+                "fingerprint": wrong_key[:16].upper(),
+                "role": "desk_companion",
+            }
+        pytest.fail(f"unexpected command after identity mismatch: {command}")
+
+    monkeypatch.setattr(core_ui, "send_console_command", fake_send)
+    monkeypatch.setattr(core_ui.time, "sleep", lambda _seconds: None)
+
+    report = core_ui.run_probe(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        rounds=20,
+        settle_sec=0.0,
+        poll_sec=0.01,
+        clear_crashlog_before_start=True,
+        skip_data_canary=False,
+        expected_commit=commit,
+        expected_d1l_public_key=PUBLIC_KEY,
+        expected_sd_history_mode="disabled",
+        github_run_id="123",
+        workflow_run_attempt="1",
+        platform_name="nt",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+                "location": "1-2",
+            }
+        ],
+    )
+
+    assert commands == ["version", "identity status"]
+    assert report["expected_d1l_public_key"] == PUBLIC_KEY
+    assert report["d1l_identity_status"]["public_key"] == wrong_key
+    assert report["d1l_identity_ok"] is False
+    assert report["identity_preflight_only"] is True
+    assert report["events"] == []
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
+    assert report["closure_eligible"] is False
+    assert report["ok"] is False
+
+
+def test_core_ui_rejects_missing_key_before_serial_or_source_io(monkeypatch):
+    monkeypatch.setattr(
+        core_ui,
+        "git_metadata",
+        lambda _root: pytest.fail("source access must not begin"),
+    )
+    monkeypatch.setattr(
+        core_ui,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail("serial must not open"),
+    )
+
+    with pytest.raises(ValueError, match="exact 64-hex"):
+        core_ui.run_probe(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            rounds=20,
+            settle_sec=0.0,
+            poll_sec=0.01,
+            clear_crashlog_before_start=False,
+            skip_data_canary=False,
+            expected_commit="a" * 40,
+            expected_d1l_public_key="short",
+            expected_sd_history_mode="disabled",
+            github_run_id="123",
+            workflow_run_attempt="1",
         )
 
 

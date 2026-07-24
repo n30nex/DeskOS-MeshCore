@@ -12,6 +12,7 @@ from scripts import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+PUBLIC_KEY = "ab" * 32
 
 
 class FakeSerial:
@@ -447,6 +448,7 @@ def test_scroll_probe_core_identity_preflight_precedes_mutation(
         github_actions_run="123",
         workflow_run_attempt="1",
         expected_sd_history_mode="disabled",
+        expected_d1l_public_key=PUBLIC_KEY,
         platform_name="nt",
         port_lister=lambda: [
             {
@@ -459,7 +461,7 @@ def test_scroll_probe_core_identity_preflight_precedes_mutation(
             }
         ],
     )
-    assert commands == ["version", "health"]
+    assert commands == ["version"]
     assert report["ok"] is False
     assert report["closure_eligible"] is False
     assert report["clear_crashlog_before_start"] is False
@@ -506,6 +508,7 @@ def test_scroll_probe_invalid_core_target_fails_before_serial_open(
             github_actions_run="123",
             workflow_run_attempt="1",
             expected_sd_history_mode="disabled",
+            expected_d1l_public_key=PUBLIC_KEY,
             platform_name="nt",
             port_lister=lambda: [
                 {
@@ -517,6 +520,146 @@ def test_scroll_probe_invalid_core_target_fails_before_serial_open(
                     "location": "1-9",
                 }
             ],
+        )
+
+
+def test_scroll_probe_wrong_full_key_stops_before_health_or_mutation(
+    monkeypatch,
+):
+    class SerialContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def reset_input_buffer(self):
+            pass
+
+    commit = "a" * 40
+    wrong_key = PUBLIC_KEY[:16] + "cd" * 24
+    commands = []
+
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "short_commit": commit[:7],
+            "branch": "release/24h-core",
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: SerialContext(),
+    )
+
+    def response(_ser, command, _timeout):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": commit,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+                "idf": "v5.5.4",
+            }
+        if command == "identity status":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "identity status",
+                "public_key_ready": True,
+                "public_key": wrong_key,
+                "fingerprint": wrong_key[:16].upper(),
+                "role": "desk_companion",
+            }
+        pytest.fail(f"unexpected command after identity mismatch: {command}")
+
+    monkeypatch.setattr(
+        scroll_probe_d1l, "send_console_command", response
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l.time, "sleep", lambda _value: None
+    )
+
+    report = scroll_probe_d1l.run_scroll_probe(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        screens=list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+        dwell_sec=0.0,
+        manual_touch=False,
+        clear_crashlog_before_start=True,
+        poll_sec=0.01,
+        release_profile="core_1_0",
+        expected_firmware_commit=commit,
+        github_actions_run="123",
+        workflow_run_attempt="1",
+        expected_sd_history_mode="disabled",
+        expected_d1l_public_key=PUBLIC_KEY,
+        platform_name="nt",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+                "location": "1-2",
+            }
+        ],
+    )
+
+    assert commands == ["version", "identity status"]
+    assert report["expected_d1l_public_key"] == PUBLIC_KEY
+    assert report["d1l_identity_status"]["public_key"] == wrong_key
+    assert report["d1l_identity_ok"] is False
+    assert report["identity_preflight_only"] is True
+    assert report["clear_crashlog_before_start"] is False
+    assert report["clear_crashlog_requested"] is True
+    assert report["events"] == []
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
+    assert report["closure_eligible"] is False
+    assert report["ok"] is False
+
+
+def test_scroll_probe_rejects_missing_key_before_source_or_serial_io(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "git_metadata",
+        lambda _root: pytest.fail("source access must not begin"),
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail("serial must not open"),
+    )
+
+    with pytest.raises(ValueError, match="exact 64-hex"):
+        scroll_probe_d1l.run_scroll_probe(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            screens=list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+            dwell_sec=0.0,
+            manual_touch=False,
+            clear_crashlog_before_start=False,
+            poll_sec=0.01,
+            release_profile="core_1_0",
+            expected_firmware_commit="a" * 40,
+            github_actions_run="123",
+            workflow_run_attempt="1",
+            expected_sd_history_mode="disabled",
+            expected_d1l_public_key="short",
         )
 
 

@@ -28,6 +28,10 @@ try:
         send_exact_console_command,
     )
     from d1l_serial_target import safe_slug
+    from rf_full_acceptance_d1l import (
+        d1l_identity_status_ok,
+        exact_public_key,
+    )
     from smoke_d1l import exact_commit, open_d1l_serial, send_console_command
     from ui_corruption_probe_d1l import (
         data_refresh_step,
@@ -53,6 +57,10 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         send_exact_console_command,
     )
     from scripts.d1l_serial_target import safe_slug
+    from scripts.rf_full_acceptance_d1l import (
+        d1l_identity_status_ok,
+        exact_public_key,
+    )
     from scripts.smoke_d1l import exact_commit, open_d1l_serial, send_console_command
     from scripts.ui_corruption_probe_d1l import (
         data_refresh_step,
@@ -384,10 +392,12 @@ def _identity_failure_report(
     port: str,
     d1l_target: dict[str, Any],
     expected_commit: str,
+    expected_d1l_public_key: str,
     expected_sd_history_mode: str | None,
     version: dict,
     github_run_id: str,
     workflow_run_attempt: str,
+    d1l_identity_status: dict | None = None,
     health: dict | None = None,
 ) -> dict:
     observed_sd_mode = version.get("sd_history_mode")
@@ -406,6 +416,9 @@ def _identity_failure_report(
         "sd_history_mode": observed_sd_mode,
         "expected_sd_history_mode": expected_sd_history_mode,
         "expected_firmware_commit": expected_commit,
+        "expected_d1l_public_key": expected_d1l_public_key,
+        "d1l_identity_status": d1l_identity_status or {},
+        "d1l_identity_ok": False,
         "github_actions_run": github_run_id,
         "workflow_run_attempt": workflow_run_attempt,
         "device_build_commit": version.get("build_commit"),
@@ -416,7 +429,9 @@ def _identity_failure_report(
         "tabs": list(CORE_TAB_SEQUENCE),
         "events": [],
         "unavailable_events": [],
-        "identity_results": [version] + ([health] if health else []),
+        "identity_results": [version]
+        + ([d1l_identity_status] if d1l_identity_status else [])
+        + ([health] if health else []),
         "public_rf_tx": False,
         "network_tx": False,
         "map_network_requests": False,
@@ -435,12 +450,18 @@ def run_probe(
     clear_crashlog_before_start: bool,
     skip_data_canary: bool,
     expected_commit: str,
+    expected_d1l_public_key: str,
     expected_sd_history_mode: str | None,
     github_run_id: str,
     workflow_run_attempt: str,
     port_lister: Callable[[], Iterable[object]] | None = None,
     platform_name: str | None = None,
 ) -> dict:
+    normalized_public_key = exact_public_key(expected_d1l_public_key)
+    if normalized_public_key is None:
+        raise ValueError(
+            "expected_d1l_public_key must be an exact 64-hex public key"
+        )
     try:
         import serial
         from serial.tools import list_ports
@@ -518,8 +539,27 @@ def run_probe(
                 port=port,
                 d1l_target=d1l_target,
                 expected_commit=normalized_commit,
+                expected_d1l_public_key=normalized_public_key,
                 expected_sd_history_mode=expected_sd_history_mode,
                 version=version,
+                github_run_id=str(github_run_id),
+                workflow_run_attempt=str(workflow_run_attempt),
+            )
+        d1l_identity_status = send_console_command(
+            ser, "identity status", timeout
+        )
+        if not d1l_identity_status_ok(
+            d1l_identity_status,
+            normalized_public_key,
+        ):
+            return _identity_failure_report(
+                port=port,
+                d1l_target=d1l_target,
+                expected_commit=normalized_commit,
+                expected_d1l_public_key=normalized_public_key,
+                expected_sd_history_mode=expected_sd_history_mode,
+                version=version,
+                d1l_identity_status=d1l_identity_status,
                 github_run_id=str(github_run_id),
                 workflow_run_attempt=str(workflow_run_attempt),
             )
@@ -531,8 +571,10 @@ def run_probe(
                 port=port,
                 d1l_target=d1l_target,
                 expected_commit=normalized_commit,
+                expected_d1l_public_key=normalized_public_key,
                 expected_sd_history_mode=expected_sd_history_mode,
                 version=version,
+                d1l_identity_status=d1l_identity_status,
                 health=health_preflight,
                 github_run_id=str(github_run_id),
                 workflow_run_attempt=str(workflow_run_attempt),
@@ -541,6 +583,10 @@ def run_probe(
         setup_events.extend(
             (
                 {"command": "version", "result": version},
+                {
+                    "command": "identity status",
+                    "result": d1l_identity_status,
+                },
                 {"command": "health", "result": health_preflight},
                 {
                     "command": "ui status",
@@ -555,9 +601,13 @@ def run_probe(
         if not crashlog_clean(setup_events[-1]["result"]):
             return {
                 **_identity_failure_report(
+                    port=port,
+                    d1l_target=d1l_target,
                     expected_commit=normalized_commit,
+                    expected_d1l_public_key=normalized_public_key,
                     expected_sd_history_mode=expected_sd_history_mode,
                     version=version,
+                    d1l_identity_status=d1l_identity_status,
                     health=health_preflight,
                     github_run_id=str(github_run_id),
                     workflow_run_attempt=str(workflow_run_attempt),
@@ -752,6 +802,9 @@ def run_probe(
         "sd_history_mode": required_sd_mode,
         "expected_sd_history_mode": expected_sd_history_mode,
         "expected_firmware_commit": normalized_commit,
+        "expected_d1l_public_key": normalized_public_key,
+        "d1l_identity_status": d1l_identity_status,
+        "d1l_identity_ok": True,
         "github_actions_run": str(github_run_id),
         "workflow_run_attempt": str(workflow_run_attempt),
         "device_build_commit": version.get("build_commit"),
@@ -787,7 +840,7 @@ def run_probe(
             "esp_idf_v5_5_4": version.get("idf") == "v5.5.4",
             "core_profile": not identity_failures,
             "pre_ui_crashlog_clean": crashlog_clean(
-                setup_events[3]["result"]
+                setup_events[4]["result"]
             ),
             "core_tab_sequence_exact": True,
             "core_scroll_surfaces_exact": not scroll_failures,
@@ -851,6 +904,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--clear-crashlog-before-start", action="store_true")
     parser.add_argument("--skip-data-canary", action="store_true")
     parser.add_argument("--expected-firmware-commit", required=True)
+    parser.add_argument("--expected-d1l-public-key", required=True)
     parser.add_argument("--github-run-id", required=True)
     parser.add_argument("--github-run-attempt", required=True)
     parser.add_argument(
@@ -868,6 +922,11 @@ def main(argv: list[str] | None = None) -> int:
     if commit is None:
         parser.error(
             "--expected-firmware-commit must be an exact 40-character hexadecimal SHA"
+        )
+    public_key = exact_public_key(args.expected_d1l_public_key)
+    if public_key is None:
+        parser.error(
+            "--expected-d1l-public-key must be an exact 64-hex value"
         )
     if args.rounds < RELEASE_MIN_ROUNDS:
         parser.error(f"--rounds must be at least {RELEASE_MIN_ROUNDS}")
@@ -897,6 +956,7 @@ def main(argv: list[str] | None = None) -> int:
         clear_crashlog_before_start=args.clear_crashlog_before_start,
         skip_data_canary=args.skip_data_canary,
         expected_commit=commit,
+        expected_d1l_public_key=public_key,
         expected_sd_history_mode=args.expected_sd_history_mode,
         github_run_id=str(args.github_run_id),
         workflow_run_attempt=str(args.github_run_attempt),

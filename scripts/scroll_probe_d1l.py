@@ -21,6 +21,10 @@ try:
         exact_version_identity,
         resolve_core_target,
     )
+    from rf_full_acceptance_d1l import (
+        d1l_identity_status_ok,
+        exact_public_key,
+    )
     from smoke_d1l import exact_commit
 except ModuleNotFoundError:
     from scripts.artifact_metadata import git_metadata, stamp_report
@@ -30,6 +34,10 @@ except ModuleNotFoundError:
         exact_identity,
         exact_version_identity,
         resolve_core_target,
+    )
+    from scripts.rf_full_acceptance_d1l import (
+        d1l_identity_status_ok,
+        exact_public_key,
     )
     from scripts.smoke_d1l import (
         exact_commit,
@@ -414,6 +422,71 @@ def wait_for_tab(ser, tab: str, timeout: float, poll_sec: float) -> tuple[bool, 
     return False, statuses
 
 
+def _core_identity_failure_report(
+    *,
+    port: str,
+    baud: int,
+    started_at: datetime,
+    d1l_target: dict,
+    expected_firmware_commit: str,
+    expected_d1l_public_key: str,
+    github_actions_run: str,
+    workflow_run_attempt: str,
+    expected_sd_history_mode: str,
+    setup_events: list[dict],
+    clear_crashlog_requested: bool,
+    git: dict,
+) -> dict:
+    ended_at = datetime.now(timezone.utc)
+    version = (
+        setup_events[0].get("result", {})
+        if setup_events
+        else {}
+    )
+    identity_status = (
+        setup_events[1].get("result", {})
+        if len(setup_events) > 1
+        else {}
+    )
+    return {
+        "schema": 2,
+        "mode": "hardware",
+        "ok": False,
+        "closure_eligible": False,
+        "hardware_required": True,
+        "physical_observed": True,
+        "identity_preflight_only": True,
+        "port": port,
+        "d1l_target": d1l_target,
+        "baud": baud,
+        "started_at": started_at.isoformat().replace("+00:00", "Z"),
+        "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
+        "release_profile": CORE_RELEASE_PROFILE,
+        "expected_firmware_commit": expected_firmware_commit,
+        "expected_d1l_public_key": expected_d1l_public_key,
+        "d1l_identity_status": identity_status,
+        "d1l_identity_ok": False,
+        "github_actions_run": github_actions_run,
+        "workflow_run_attempt": workflow_run_attempt,
+        "expected_sd_history_mode": expected_sd_history_mode,
+        "device_build_commit": version.get("build_commit"),
+        "firmware_identity_ok": False,
+        "clear_crashlog_before_start": False,
+        "clear_crashlog_requested": clear_crashlog_requested,
+        "failure_count": 1,
+        "failures": [
+            {
+                "kind": "firmware_identity_preflight",
+                "code": "IDENTITY_MISMATCH",
+            }
+        ],
+        "setup_events": setup_events,
+        "events": [],
+        "git": git,
+        **probe_safety(clear_crashlog_before_start=False),
+    }
+
+
 def run_scroll_probe(
     *,
     port: str,
@@ -429,11 +502,22 @@ def run_scroll_probe(
     github_actions_run: str | None = None,
     workflow_run_attempt: str | None = None,
     expected_sd_history_mode: str | None = None,
+    expected_d1l_public_key: str | None = None,
     port_lister: Callable[[], Iterable[object]] | None = None,
     platform_name: str | None = None,
 ) -> dict:
     validate_setup_actions(screens, clear_crashlog_before_start)
     validate_release_profile_screens(screens, release_profile)
+    normalized_public_key: str | None = None
+    if release_profile == CORE_RELEASE_PROFILE:
+        normalized_public_key = exact_public_key(
+            expected_d1l_public_key
+        )
+        if normalized_public_key is None:
+            raise ValueError(
+                "Core scroll evidence requires an exact 64-hex D1L "
+                "public key"
+            )
     root = Path(__file__).resolve().parents[1]
     core_evidence: dict = {}
     if release_profile == CORE_RELEASE_PROFILE:
@@ -487,20 +571,61 @@ def run_scroll_probe(
 
         if release_profile == CORE_RELEASE_PROFILE:
             version = send_console_command(ser, "version", timeout)
-            health_preflight = send_console_command(ser, "health", timeout)
-            setup_events.extend(
-                (
-                    {"cmd": "version", "result": version},
-                    {"cmd": "health", "result": health_preflight},
+            setup_events.append(
+                {"cmd": "version", "result": version}
+            )
+            if not exact_version_identity(
+                version,
+                expected_firmware_commit,
+                expected_sd_history_mode,
+            ):
+                return _core_identity_failure_report(
+                    port=port,
+                    baud=baud,
+                    started_at=started_at,
+                    d1l_target=d1l_target,
+                    expected_firmware_commit=expected_firmware_commit,
+                    expected_d1l_public_key=normalized_public_key,
+                    github_actions_run=github_actions_run,
+                    workflow_run_attempt=workflow_run_attempt,
+                    expected_sd_history_mode=expected_sd_history_mode,
+                    setup_events=setup_events,
+                    clear_crashlog_requested=clear_crashlog_before_start,
+                    git=core_evidence["git"],
                 )
+            d1l_identity_status = send_console_command(
+                ser, "identity status", timeout
+            )
+            setup_events.append(
+                {
+                    "cmd": "identity status",
+                    "result": d1l_identity_status,
+                }
+            )
+            if not d1l_identity_status_ok(
+                d1l_identity_status,
+                normalized_public_key,
+            ):
+                return _core_identity_failure_report(
+                    port=port,
+                    baud=baud,
+                    started_at=started_at,
+                    d1l_target=d1l_target,
+                    expected_firmware_commit=expected_firmware_commit,
+                    expected_d1l_public_key=normalized_public_key,
+                    github_actions_run=github_actions_run,
+                    workflow_run_attempt=workflow_run_attempt,
+                    expected_sd_history_mode=expected_sd_history_mode,
+                    setup_events=setup_events,
+                    clear_crashlog_requested=clear_crashlog_before_start,
+                    git=core_evidence["git"],
+                )
+            health_preflight = send_console_command(ser, "health", timeout)
+            setup_events.append(
+                {"cmd": "health", "result": health_preflight}
             )
             preflight_ok = (
-                exact_version_identity(
-                    version,
-                    expected_firmware_commit,
-                    expected_sd_history_mode,
-                )
-                and exact_identity(
+                exact_identity(
                     health_preflight,
                     expected_firmware_commit,
                     expected_sd_history_mode,
@@ -508,48 +633,20 @@ def run_scroll_probe(
                 and health_preflight.get("cmd") == "health"
             )
             if not preflight_ok:
-                ended_at = datetime.now(timezone.utc)
-                return {
-                    "schema": 2,
-                    "mode": "hardware",
-                    "ok": False,
-                    "closure_eligible": False,
-                    "hardware_required": True,
-                    "physical_observed": True,
-                    "port": port,
-                    "d1l_target": d1l_target,
-                    "baud": baud,
-                    "started_at": started_at.isoformat().replace(
-                        "+00:00", "Z"
-                    ),
-                    "ended_at": ended_at.isoformat().replace(
-                        "+00:00", "Z"
-                    ),
-                    "release_profile": release_profile,
-                    "expected_firmware_commit":
-                        expected_firmware_commit,
-                    "github_actions_run": github_actions_run,
-                    "workflow_run_attempt": workflow_run_attempt,
-                    "expected_sd_history_mode":
-                        expected_sd_history_mode,
-                    "firmware_identity_ok": False,
-                    "clear_crashlog_before_start": False,
-                    "clear_crashlog_requested":
-                        clear_crashlog_before_start,
-                    "failure_count": 1,
-                    "failures": [
-                        {
-                            "kind": "firmware_identity_preflight",
-                            "code": "IDENTITY_MISMATCH",
-                        }
-                    ],
-                    "setup_events": setup_events,
-                    "events": [],
-                    "git": core_evidence["git"],
-                    **probe_safety(
-                        clear_crashlog_before_start=False
-                    ),
-                }
+                return _core_identity_failure_report(
+                    port=port,
+                    baud=baud,
+                    started_at=started_at,
+                    d1l_target=d1l_target,
+                    expected_firmware_commit=expected_firmware_commit,
+                    expected_d1l_public_key=normalized_public_key,
+                    github_actions_run=github_actions_run,
+                    workflow_run_attempt=workflow_run_attempt,
+                    expected_sd_history_mode=expected_sd_history_mode,
+                    setup_events=setup_events,
+                    clear_crashlog_requested=clear_crashlog_before_start,
+                    git=core_evidence["git"],
+                )
 
         if clear_crashlog_before_start:
             setup_events.append(
@@ -684,6 +781,9 @@ def run_scroll_probe(
                 .get("build_commit")
             ),
             "firmware_identity_ok": firmware_identity_ok,
+            "expected_d1l_public_key": normalized_public_key,
+            "d1l_identity_status": d1l_identity_status,
+            "d1l_identity_ok": True,
             "scroll_movement_policy": "positive_raw_overflow",
             "d1l_target": d1l_target,
         }
@@ -750,6 +850,7 @@ def main() -> int:
         "--expected-sd-history-mode",
         choices=sorted(SD_HISTORY_MODES),
     )
+    parser.add_argument("--expected-d1l-public-key")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -800,6 +901,7 @@ def main() -> int:
                 expected_sd_history_mode=(
                     args.expected_sd_history_mode
                 ),
+                expected_d1l_public_key=args.expected_d1l_public_key,
             )
         except ValueError as exc:
             parser.error(str(exc))
