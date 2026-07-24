@@ -1,8 +1,9 @@
 # D1L SD Card Guided Install
 
-Prefer `scripts/autonomous_hardware_validate_d1l.py` for COM12 hardware
-validation and bounded COM16 USB smoke/UF2 maintenance. Use this guided flow
-only when COM12 is working but the RP2040 does
+The legacy `scripts/autonomous_hardware_validate_d1l.py` runner is
+planning-only: its hardware entry point is disabled until full-key D1L
+admission and stable flash binding are implemented. Use this guided flow only
+when COM12 is working but the RP2040 does
 not answer the DeskOS bridge protocol and no autonomous UF2 path appears. The
 only manual action is putting the RP2040 into BOOTSEL/UF2 mode twice: once for
 the official SD smoke proof and once to restore the DeskOS SD bridge.
@@ -24,10 +25,10 @@ From the repository root:
 python .\scripts\guided_sd_install_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
 ```
 
-Autonomous exact-artifact SD refresh:
+The retired autonomous refresh may be reviewed without hardware access:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke --dry-run
 ```
 
 The script will:
@@ -64,16 +65,14 @@ and is never touched. Configured COM16 may be absent while the production
 no-USB bridge runs; that state is accepted only when COM12 proves the bridge
 protocol and explicit bootloader command.
 
-For ESP32/UI-only firmware validation after the RP2040 bridge has already been
-proved, do not run the SD command above. Skip the SD suite entirely when the fix
-does not touch storage:
+For ESP32/UI-only planning after the RP2040 bridge has already been proved,
+the non-hardware plan can skip the SD suite:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes --dry-run
 ```
 
-That path flashes only the ESP32 artifact on COM12 and does not copy any RP2040
-UF2 file.
+That plan performs no flash, serial mutation, or RP2040 UF2 copy.
 
 The report is written to:
 

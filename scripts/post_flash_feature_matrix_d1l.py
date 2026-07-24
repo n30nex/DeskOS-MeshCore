@@ -113,6 +113,11 @@ UNCOVERED_FULL_FEATURE_GATES = (
     "manual_physical_ui_review",
     "full_rf_dm_acceptance",
 )
+HARDWARE_EXECUTION_DISABLED = (
+    "Post-flash feature-matrix hardware execution is disabled until the "
+    "runner admits the exact full D1L public key and stable Pi/Windows target "
+    "before every Wi-Fi or storage mutation. Use the narrow Core runners."
+)
 COVERED_FEATURE_SUBSETS = (
     "com12_smoke_and_settings_persistence",
     "saved_profile_wifi_resilience",
@@ -1239,6 +1244,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
+    if not args.dry_run:
+        print(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "kind": "post_flash_feature_matrix",
+                    "mode": "hardware",
+                    "ok": False,
+                    "classification": "hardware_execution_disabled",
+                    "error": HARDWARE_EXECUTION_DISABLED,
+                    "public_rf_tx": False,
+                    "dm_rf_tx": False,
+                    "formats_sd": False,
+                },
+                sort_keys=True,
+            )
+        )
+        return 2
     try:
         report = run_matrix(args)
     except ValueError as exc:

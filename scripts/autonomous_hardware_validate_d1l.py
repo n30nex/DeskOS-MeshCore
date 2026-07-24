@@ -91,6 +91,11 @@ SD_BOOT_PREPARE_SCENARIOS = (
     "rp2040-unavailable",
 )
 AUTONOMOUS_SAFE_SD_SCENARIOS = ("correct-structure", "missing-structure", "existing-data")
+HARDWARE_EXECUTION_DISABLED = (
+    "Autonomous hardware execution is disabled until this legacy orchestrator "
+    "uses the exact full-key D1L admission and stable flash binding. Use the "
+    "narrow Core flash, smoke, UI, reboot, RF, and soak runners instead."
+)
 
 
 @dataclass(frozen=True)
@@ -3041,6 +3046,23 @@ def console_summary(report: dict, out: Path) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    if not args.dry_run:
+        print(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "kind": "d1l_autonomous_hardware_validation",
+                    "mode": "hardware",
+                    "ok": False,
+                    "classification": "hardware_execution_disabled",
+                    "error": HARDWARE_EXECUTION_DISABLED,
+                    "public_rf_tx": False,
+                    "formats_sd": False,
+                },
+                separators=(",", ":"),
+            )
+        )
+        return 2
     try:
         report = run_validation(args)
     except ValueError as exc:

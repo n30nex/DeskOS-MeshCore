@@ -88,15 +88,16 @@ again.
 
 ## Flash
 
-For unattended validation on the current D1L bench route, use the autonomous
-runner from the repository root only when RP2040 SD smoke/bridge evidence needs
-to be refreshed:
+The legacy autonomous refresh is planning-only until its hardware path has
+full-key D1L admission and stable flash binding. It can be inspected without
+hardware access:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke --dry-run
 ```
 
-The refresh runner first binds the host-success marker and release manifest to
+The dry-run plan describes how the retired refresh runner bound the
+host-success marker and release manifest to
 the requested canonical 40-hex commit and explicitly supplied numeric Actions
 run, and verifies both packaged and standalone firmware hashes. It touches only
 COM12 and, during intentional smoke/UF2 maintenance, COM16; it refuses
