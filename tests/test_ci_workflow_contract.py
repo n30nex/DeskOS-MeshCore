@@ -102,6 +102,7 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert (
         "python ./scripts/core_release_gate_audit_d1l.py --dry-run "
         "--commit ${{ github.sha }} --github-run-id ${{ github.run_id }} "
+        "--github-run-attempt ${{ github.run_attempt }} "
         "--sd-history-mode disabled --out "
         "artifacts/release-gate/core-release-gate-audit-ci.json"
     ) in host

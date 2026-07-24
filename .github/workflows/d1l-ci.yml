@@ -222,7 +222,7 @@ jobs:
         run: python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json
 
       - name: Core release gate audit dry run
-        run: python ./scripts/core_release_gate_audit_d1l.py --dry-run --commit ${{ github.sha }} --github-run-id ${{ github.run_id }} --sd-history-mode disabled --out artifacts/release-gate/core-release-gate-audit-ci.json
+        run: python ./scripts/core_release_gate_audit_d1l.py --dry-run --commit ${{ github.sha }} --github-run-id ${{ github.run_id }} --github-run-attempt ${{ github.run_attempt }} --sd-history-mode disabled --out artifacts/release-gate/core-release-gate-audit-ci.json
 
       - name: Record exact host-check success evidence
         shell: pwsh
