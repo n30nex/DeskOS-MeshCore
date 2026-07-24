@@ -229,10 +229,18 @@ workflow also emits:
 
 `d1l-host-artifacts` includes `ui-sim/` screenshots and `ui-sim-report.json`, including the first-boot onboarding surface.
 
-Download with:
+For qualifying Core evidence, dispatch the exact branch with
+`include_sd_bridge=false`, wait for success, and use the strict capture tool.
+It rejects pull-request merge SHAs, unexpected archive sets, digest drift, and
+an existing destination:
 
 ```powershell
-gh run download <run-id> -D artifacts\github\<run-id>
+gh workflow run d1l-ci.yml --ref release/24h-core -f include_sd_bridge=false
+gh run watch <run-id> --exit-status
+python .\scripts\capture_core_actions_run_d1l.py `
+  --github-run-id <run-id> `
+  --commit <40-hex-sha> `
+  --github-run-dir artifacts\github\<run-id>-<40-hex-sha>
 ```
 
 ### Issue #63 SDK qualification
