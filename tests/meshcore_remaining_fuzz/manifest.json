@@ -41,7 +41,7 @@
     }
   },
   "source_pins": {
-    ".github/workflows/d1l-ci.yml": "1cd9b2ef6bd039247fd7eb3e33400120f2deca031e3d4a8903455ee8ce763f1c",
+    ".github/workflows/d1l-ci.yml": "5052c9ac62ca1174e3c4176e069891bc04257944102a5e8142ecdddb720e9091",
     "main/CMakeLists.txt": "7d63bc76172947e15a2972090ce6fcc20eb85a216f8bcbc373f9e5e8252cd55f",
     "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
     "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",

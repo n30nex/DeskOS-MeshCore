@@ -23,7 +23,7 @@
     "main/comms/usb_command_parser.h"
   ],
   "source_pins": {
-    ".github/workflows/d1l-ci.yml": "1cd9b2ef6bd039247fd7eb3e33400120f2deca031e3d4a8903455ee8ce763f1c",
+    ".github/workflows/d1l-ci.yml": "5052c9ac62ca1174e3c4176e069891bc04257944102a5e8142ecdddb720e9091",
     "main/CMakeLists.txt": "7d63bc76172947e15a2972090ce6fcc20eb85a216f8bcbc373f9e5e8252cd55f",
     "main/comms/usb_console.c": "634f3f0f805d41bfecf6908abfadb3d4406e0fc37a0e1858e27a96ae44664471",
     "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
