@@ -2318,6 +2318,27 @@ def exact_public_key(public_key: object) -> str | None:
     )
 
 
+def d1l_identity_status_ok(
+    result: object,
+    expected_public_key: object,
+) -> bool:
+    """Require the complete live D1L identity before any RF-side effect."""
+
+    public_key = exact_public_key(expected_public_key)
+    return bool(
+        public_key is not None
+        and isinstance(result, dict)
+        and type(result.get("schema")) is int
+        and result.get("schema") == 1
+        and result.get("ok") is True
+        and result.get("cmd") == "identity status"
+        and result.get("public_key_ready") is True
+        and exact_public_key(result.get("public_key")) == public_key
+        and result.get("fingerprint") == public_key[:16].upper()
+        and result.get("role") == "desk_companion"
+    )
+
+
 def listener_sender_matches(
     status: dict | None, d1l_public_key: object
 ) -> bool:
@@ -3202,6 +3223,7 @@ def build_report(
         import_step.get("result", {}) if import_step else {}
     )
     commands = [str(step.get("command", "")) for step in steps]
+    identity_public_key = exact_public_key(identity_result.get("public_key"))
     identity_fingerprint = str(identity_result.get("fingerprint") or "").upper()
     expected_identity = public_key_fingerprint(public_key)
     peer_status_requested = (
@@ -3365,10 +3387,9 @@ def build_report(
         "d1l_target_identity_continuity": (
             target_identity_continuity_ok
         ),
-        "identity_public_key_matches": bool(
-            identity_result.get("ok") is True
-            and expected_identity
-            and identity_fingerprint == expected_identity
+        "identity_public_key_matches": d1l_identity_status_ok(
+            identity_result,
+            public_key,
         ),
         "controlled_peer_observed": controlled_peer_observed,
         "controlled_peer_status_connected": (
@@ -3474,6 +3495,7 @@ def build_report(
         ),
         "target_fingerprint": fingerprint,
         "d1l_public_key": public_key,
+        "identity_public_key": identity_public_key,
         "expected_identity_fingerprint": expected_identity,
         "identity_fingerprint": identity_fingerprint,
         "token": token,
@@ -3830,6 +3852,12 @@ def _run_hardware_reserved(
                 "steps": steps,
                 "ok": False,
             }
+        identity_result = run_command(ser, "identity status")
+        if not d1l_identity_status_ok(identity_result, public_key):
+            raise ValueError(
+                "live D1L identity does not match the exact pinned public key; "
+                "stopped before controlled-peer I/O, mutation, or RF"
+            )
         if local_mode:
             (
                 peer_before,
@@ -3872,7 +3900,6 @@ def _run_hardware_reserved(
             raise ValueError(
                 "COM15 OpenClaw listener status/public-key identity is not ready"
             )
-        run_command(ser, "identity status")
         run_command(ser, "contacts")
         if listener_mode:
             peer_public_key = exact_public_key(

@@ -60,6 +60,19 @@ def windows_target_pair() -> dict:
     }
 
 
+def d1l_identity_status(public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY):
+    normalized = public_key.lower()
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "identity status",
+        "public_key_ready": True,
+        "public_key": normalized,
+        "fingerprint": normalized[:16].upper(),
+        "role": "desk_companion",
+    }
+
+
 def test_rf_full_acceptance_dry_run_is_dm_only():
     report = rf_accept.dry_run_report(
         port="COM12",
@@ -101,7 +114,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
         },
         {
             "command": "identity status",
-            "result": {"ok": True, "cmd": "identity status", "fingerprint": "BA14729E8588E30B"},
+            "result": d1l_identity_status(),
         },
         {
             "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
@@ -219,6 +232,40 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
     assert report["device_release_profile"] == "core_1_0"
     assert report["device_sd_history_mode"] == "disabled"
 
+    same_prefix_wrong_key = (
+        rf_accept.DEFAULT_D1L_PUBLIC_KEY[:16]
+        + ("0" if rf_accept.DEFAULT_D1L_PUBLIC_KEY[16] != "0" else "1")
+        + rf_accept.DEFAULT_D1L_PUBLIC_KEY[17:]
+    )
+    wrong_key_steps = json.loads(json.dumps(steps))
+    wrong_key_steps[1]["result"] = d1l_identity_status(
+        same_prefix_wrong_key
+    )
+    wrong_key_report = rf_accept.build_report(
+        port="COM12",
+        **windows_target_pair(),
+        baud=115200,
+        peer_status_path=Path("status.json"),
+        peer_port="COM17",
+        fingerprint="0BF0A701D5AE2DB6",
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="rf_unit",
+        send_outbound=True,
+        steps=wrong_key_steps,
+        peer_before=peer,
+        peer_after=peer,
+        inbound_seen_at="2026-07-01T00:00:00+00:00",
+        expected_commit="a" * 40,
+    )
+    assert wrong_key_report["identity_fingerprint"] == report[
+        "identity_fingerprint"
+    ]
+    assert (
+        wrong_key_report["checks"]["identity_public_key_matches"] is False
+    )
+    assert wrong_key_report["closure_eligible"] is False
+    assert wrong_key_report["ok"] is False
+
     d1l_observed = rf_accept.build_report(
         port="COM12",
         **windows_target_pair(),
@@ -261,7 +308,7 @@ def test_rf_full_acceptance_rejects_missing_inbound_token():
         token="rf_unit",
         send_outbound=False,
         steps=[
-            {"command": "identity status", "result": {"ok": True, "fingerprint": "BA14729E8588E30B"}},
+            {"command": "identity status", "result": d1l_identity_status()},
             {"command": "messages dm 0BF0A701D5AE2DB6", "result": {"ok": True, "entries": []}},
             {"command": "packets", "result": {"ok": True, "entries": [{"kind": "dm_ack"}]}},
             {
@@ -370,7 +417,7 @@ def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
         token="rf_unit",
         send_outbound=True,
         steps=[
-            {"command": "identity status", "result": {"ok": True, "fingerprint": "BA14729E8588E30B"}},
+            {"command": "identity status", "result": d1l_identity_status()},
             {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out", "result": {"ok": True}},
             {"command": "packets search rf_unit_out", "result": {"ok": True, "entries": [{"note": "rf_unit_out"}]}},
             {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct", "result": {"ok": True}},
@@ -731,6 +778,102 @@ def test_rf_rejects_wrong_usb_identity_before_serial_or_peer(
         )
 
     assert external_calls == []
+
+
+def test_rf_rejects_wrong_full_d1l_key_before_peer_io_or_mutation(
+    tmp_path,
+    monkeypatch,
+):
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    monkeypatch.setattr(
+        rf_accept,
+        "__file__",
+        str(scripts_dir / "rf_full_acceptance_d1l.py"),
+    )
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace())
+    monkeypatch.setattr(
+        rf_accept,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        rf_accept,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSerial(),
+    )
+    monkeypatch.setattr(rf_accept.time, "sleep", lambda _seconds: None)
+    commands = []
+    peer_calls = []
+    wrong_key = (
+        rf_accept.DEFAULT_D1L_PUBLIC_KEY[:16]
+        + ("0" if rf_accept.DEFAULT_D1L_PUBLIC_KEY[16] != "0" else "1")
+        + rf_accept.DEFAULT_D1L_PUBLIC_KEY[17:]
+    )
+
+    def fake_send(_ser, command, _timeout):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": "a" * 40,
+                "idf": "v5.5.4",
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+                "time": {
+                    "protocol_tx_ready": True,
+                    "protocol_tx_block": "none",
+                },
+            }
+        if command == "identity status":
+            return d1l_identity_status(wrong_key)
+        raise AssertionError(
+            f"wrong D1L key reached mutation/RF command: {command}"
+        )
+
+    def unexpected_peer(*_args, **_kwargs):
+        peer_calls.append(True)
+        raise AssertionError("wrong D1L key reached controlled-peer I/O")
+
+    monkeypatch.setattr(rf_accept, "send_acceptance_command", fake_send)
+    monkeypatch.setattr(
+        rf_accept,
+        "capture_peer_status",
+        unexpected_peer,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="exact pinned public key",
+    ):
+        rf_accept.run_hardware(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            wait_sec=1.0,
+            poll_sec=0.1,
+            peer_status_path=tmp_path / "peer-status.json",
+            peer_port="COM17",
+            fingerprint="0BF0A701D5AE2DB6",
+            public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+            token="wrong_d1l_key",
+            send_outbound=True,
+            expected_commit="a" * 40,
+            github_run_id="1",
+            workflow_run_attempt="1",
+            peer_capture_dir=tmp_path / "rf-peer",
+            port_lister=lambda: [windows_target_row()],
+            platform_name="nt",
+        )
+
+    assert commands == ["version", "identity status"]
+    assert peer_calls == []
 
 
 def test_rf_rejects_target_drift_before_peer_capture(
@@ -2924,12 +3067,7 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
         },
     }
     identity = {
-        "ok": True,
-        "cmd": "identity status",
-        "public_key": rf_accept.DEFAULT_D1L_PUBLIC_KEY,
-        "fingerprint": rf_accept.DEFAULT_D1L_PUBLIC_KEY[
-            :16
-        ].upper(),
+        **d1l_identity_status(),
     }
     steps = [
         {"command": "version", "result": version},
