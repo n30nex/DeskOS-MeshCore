@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts import rf_full_acceptance_d1l as rf_accept
+from scripts import d1l_serial_target
 from scripts.smoke_d1l import expected_command_name
 
 
@@ -24,6 +25,39 @@ class FakeSerial:
 
     def __exit__(self, _exc_type, _exc, _traceback):
         return False
+
+
+def windows_target_row(
+    *,
+    vid=0x1A86,
+    pid=0x7523,
+    location="1-2",
+):
+    return {
+        "device": "COM12",
+        "vid": vid,
+        "pid": pid,
+        "serial_number": None,
+        "hwid": "USB VID:PID=1A86:7523",
+        "location": location,
+    }
+
+
+def windows_target() -> dict:
+    return d1l_serial_target.resolve_target(
+        "COM12",
+        port_lister=lambda: [windows_target_row()],
+        platform_name="nt",
+        hostname=lambda: "rf-test-host",
+    )
+
+
+def windows_target_pair() -> dict:
+    before = windows_target()
+    return {
+        "d1l_target": before,
+        "d1l_target_after": json.loads(json.dumps(before)),
+    }
 
 
 def test_rf_full_acceptance_dry_run_is_dm_only():
@@ -149,6 +183,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
 
     report = rf_accept.build_report(
         port="COM12",
+        **windows_target_pair(),
         baud=115200,
         peer_status_path=Path("status.json"),
         peer_port="COM17",
@@ -186,6 +221,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
 
     d1l_observed = rf_accept.build_report(
         port="COM12",
+        **windows_target_pair(),
         baud=115200,
         peer_status_path=None,
         peer_port=None,
@@ -216,6 +252,7 @@ def test_rf_full_acceptance_rejects_missing_inbound_token():
     }
     report = rf_accept.build_report(
         port="COM12",
+        **windows_target_pair(),
         baud=115200,
         peer_status_path=Path("status.json"),
         peer_port="COM17",
@@ -262,6 +299,7 @@ def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
     }
     report = rf_accept.build_report(
         port="COM12",
+        **windows_target_pair(),
         baud=115200,
         peer_status_path=Path("status.json"),
         peer_port="COM17",
@@ -322,6 +360,7 @@ def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
     }
     report = rf_accept.build_report(
         port="COM12",
+        **windows_target_pair(),
         baud=115200,
         peer_status_path=Path("status.json"),
         peer_port="COM17",
@@ -446,6 +485,14 @@ def test_rf_full_acceptance_requires_com12_for_d1l(port):
         rf_accept.enforce_port_policy(port)
 
 
+def test_rf_full_acceptance_accepts_only_the_exact_posix_by_id_target():
+    assert rf_accept.enforce_port_policy(
+        d1l_serial_target.POSIX_D1L_TARGET
+    ) == (d1l_serial_target.POSIX_D1L_TARGET, None)
+    with pytest.raises(ValueError, match="requires COM12"):
+        rf_accept.enforce_port_policy("/dev/ttyUSB2")
+
+
 def test_rf_full_acceptance_rejects_com16_as_rf_peer():
     with pytest.raises(ValueError, match="controlled-peer port COM16"):
         rf_accept.enforce_port_policy("COM12", "COM16")
@@ -507,6 +554,7 @@ def test_rf_report_cannot_use_later_ready_version_to_override_first_block():
     }
     report = rf_accept.build_report(
         port="COM12",
+        **windows_target_pair(),
         baud=115200,
         peer_status_path=None,
         peer_port=None,
@@ -598,6 +646,8 @@ def test_rf_hardware_preflight_stops_before_any_rf_when_protocol_blocked(
         github_run_id="1",
         workflow_run_attempt="1",
         peer_capture_dir=tmp_path / "rf-peer",
+        port_lister=lambda: [windows_target_row()],
+        platform_name="nt",
     )
 
     assert commands == ["version"]
@@ -605,6 +655,278 @@ def test_rf_hardware_preflight_stops_before_any_rf_when_protocol_blocked(
     assert report["dm_rf_tx"] is False
     assert report["public_rf_tx"] is False
     assert report["checks"]["protocol_tx_ready_before_rf"] is False
+    assert report["d1l_target"]["requested_path"] == "COM12"
+    assert report["d1l_target_after"]["requested_path"] == "COM12"
+    assert report["target_identity_continuity_ok"] is True
+    assert (
+        report["checks"]["d1l_target_identity_continuity"] is True
+    )
+
+
+@pytest.mark.parametrize(
+    ("row_kwargs", "error"),
+    [
+        ({"vid": 0x10C4}, "VID must be 0x1A86"),
+        ({"pid": 0x55D4}, "PID must be 0x7523"),
+    ],
+)
+def test_rf_rejects_wrong_usb_identity_before_serial_or_peer(
+    tmp_path,
+    monkeypatch,
+    row_kwargs,
+    error,
+):
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    monkeypatch.setattr(
+        rf_accept,
+        "__file__",
+        str(scripts_dir / "rf_full_acceptance_d1l.py"),
+    )
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace())
+    monkeypatch.setattr(
+        rf_accept,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    external_calls = []
+
+    def unexpected_external(*_args, **_kwargs):
+        external_calls.append(True)
+        raise AssertionError(
+            "wrong USB identity must fail before serial or peer I/O"
+        )
+
+    monkeypatch.setattr(
+        rf_accept, "open_d1l_serial", unexpected_external
+    )
+    monkeypatch.setattr(
+        rf_accept, "run_remote_peer_operation", unexpected_external
+    )
+
+    with pytest.raises(ValueError, match=error):
+        rf_accept.run_hardware(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            wait_sec=1.0,
+            poll_sec=0.1,
+            peer_status_path=None,
+            peer_port=None,
+            fingerprint=rf_accept.REMOTE_PEER_FINGERPRINT,
+            public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+            token="wrong_usb",
+            send_outbound=True,
+            expected_commit="a" * 40,
+            github_run_id="1",
+            workflow_run_attempt="1",
+            remote_peer=remote_config(),
+            port_lister=lambda: [windows_target_row(**row_kwargs)],
+            platform_name="nt",
+        )
+
+    assert external_calls == []
+
+
+def test_rf_rejects_target_drift_before_peer_capture(
+    tmp_path,
+    monkeypatch,
+):
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    monkeypatch.setattr(
+        rf_accept,
+        "__file__",
+        str(scripts_dir / "rf_full_acceptance_d1l.py"),
+    )
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace())
+    monkeypatch.setattr(
+        rf_accept,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        rf_accept,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSerial(),
+    )
+    monkeypatch.setattr(rf_accept.time, "sleep", lambda _seconds: None)
+    peer_calls = []
+
+    def unexpected_peer(*_args, **_kwargs):
+        peer_calls.append(True)
+        raise AssertionError("target drift must stop before peer capture")
+
+    monkeypatch.setattr(
+        rf_accept, "capture_peer_status", unexpected_peer
+    )
+    monkeypatch.setattr(
+        rf_accept,
+        "send_acceptance_command",
+        lambda _ser, _command, _timeout: {
+            "ok": True,
+            "cmd": "version",
+            "build_commit": "a" * 40,
+            "idf": "v5.5.4",
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "time": {
+                "protocol_tx_ready": False,
+                "protocol_tx_block": (
+                    "legacy_protocol_lower_bound_unconfirmed"
+                ),
+            },
+        },
+    )
+    rows = iter(
+        [
+            [windows_target_row(location="1-2")],
+            [windows_target_row(location="1-3")],
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="identity changed during RF preflight",
+    ):
+        rf_accept.run_hardware(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            wait_sec=1.0,
+            poll_sec=0.1,
+            peer_status_path=tmp_path / "peer-status.json",
+            peer_port="COM17",
+            fingerprint="0BF0A701D5AE2DB6",
+            public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+            token="target_drift",
+            send_outbound=True,
+            expected_commit="a" * 40,
+            github_run_id="1",
+            workflow_run_attempt="1",
+            peer_capture_dir=tmp_path / "rf-peer",
+            port_lister=lambda: next(rows),
+            platform_name="nt",
+        )
+
+    assert peer_calls == []
+
+
+def posix_target(resolved_tty: str) -> dict:
+    requested = d1l_serial_target.POSIX_D1L_TARGET
+    return d1l_serial_target.resolve_target(
+        requested,
+        port_lister=lambda: [
+            {
+                "device": resolved_tty,
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523",
+                "location": "1-2",
+            }
+        ],
+        platform_name="posix",
+        exists=lambda path: path in {requested, resolved_tty},
+        is_symlink=lambda path: path == requested,
+        realpath=lambda path: (
+            resolved_tty if path == requested else path
+        ),
+        access=lambda _path, _mode: True,
+        hostname=lambda: "neopi5",
+    )
+
+
+def test_rf_opens_stable_posix_path_and_allows_tty_renumber(
+    tmp_path,
+    monkeypatch,
+):
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    monkeypatch.setattr(
+        rf_accept,
+        "__file__",
+        str(scripts_dir / "rf_full_acceptance_d1l.py"),
+    )
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace())
+    monkeypatch.setattr(
+        rf_accept,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    snapshots = iter(
+        [posix_target("/dev/ttyUSB2"), posix_target("/dev/ttyUSB7")]
+    )
+    monkeypatch.setattr(
+        rf_accept,
+        "resolve_core_target",
+        lambda *_args, **_kwargs: next(snapshots),
+    )
+    opened = []
+    monkeypatch.setattr(
+        rf_accept,
+        "open_d1l_serial",
+        lambda *_args, **kwargs: (
+            opened.append(kwargs["port"]) or FakeSerial()
+        ),
+    )
+    monkeypatch.setattr(rf_accept.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        rf_accept,
+        "send_acceptance_command",
+        lambda _ser, _command, _timeout: {
+            "ok": True,
+            "cmd": "version",
+            "build_commit": "a" * 40,
+            "idf": "v5.5.4",
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "time": {
+                "protocol_tx_ready": False,
+                "protocol_tx_block": (
+                    "legacy_protocol_lower_bound_unconfirmed"
+                ),
+            },
+        },
+    )
+
+    report = rf_accept.run_hardware(
+        port=d1l_serial_target.POSIX_D1L_TARGET,
+        baud=115200,
+        timeout=1.0,
+        wait_sec=1.0,
+        poll_sec=0.1,
+        peer_status_path=tmp_path / "peer-status.json",
+        peer_port="COM17",
+        fingerprint="0BF0A701D5AE2DB6",
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="tty_renumber",
+        send_outbound=True,
+        expected_commit="a" * 40,
+        github_run_id="1",
+        workflow_run_attempt="1",
+        peer_capture_dir=tmp_path / "rf-peer",
+        port_lister=lambda: [],
+        platform_name="posix",
+    )
+
+    assert opened == [d1l_serial_target.POSIX_D1L_TARGET]
+    assert report["port"] == d1l_serial_target.POSIX_D1L_TARGET
+    assert report["d1l_target"]["resolved_tty"] == "/dev/ttyUSB2"
+    assert report["d1l_target_after"]["resolved_tty"] == "/dev/ttyUSB7"
+    assert report["target_identity_continuity_ok"] is True
 
 
 def test_rf_full_acceptance_dry_run_cannot_close_identity():
@@ -1766,6 +2088,8 @@ def test_local_sidecar_collision_prevents_serial_socket_and_ssh(
             workflow_run_attempt="1",
             peer_capture_dir=capture_dir,
             local_peer=local_config(),
+            port_lister=lambda: [windows_target_row()],
+            platform_name="nt",
         )
 
     assert external_calls == []
@@ -2234,6 +2558,8 @@ def test_rf_sidecar_collision_prevents_serial_and_ssh(
             workflow_run_attempt="1",
             peer_capture_dir=capture_dir,
             remote_peer=remote_config(),
+            port_lister=lambda: [windows_target_row()],
+            platform_name="nt",
         )
 
     assert external_calls == []
@@ -2667,6 +2993,7 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
 
     report = rf_accept.build_report(
         port="COM12",
+        **windows_target_pair(),
         baud=115200,
         peer_status_path=None,
         peer_port=None,

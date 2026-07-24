@@ -1109,6 +1109,14 @@ def windows_target_row(*, vid=0x1A86, pid=0x7523, location="1-2"):
     }
 
 
+def windows_target_snapshot():
+    return soak_d1l.resolve_core_target(
+        "COM12",
+        port_lister=lambda: [windows_target_row()],
+        platform_name="nt",
+    )
+
+
 def test_core_soak_binds_target_before_and_after_serial(monkeypatch):
     lister_calls = []
     opened = []
@@ -1158,6 +1166,87 @@ def test_core_soak_binds_target_before_and_after_serial(monkeypatch):
     )
     assert opened == ["COM12"]
     assert len(lister_calls) == 2
+
+
+def test_qualified_rf_receipt_consumes_strict_schema2_target_binding(
+    tmp_path,
+    monkeypatch,
+):
+    rf = soak_d1l.rf_acceptance
+    commit = "a" * 40
+    target = windows_target_snapshot()
+    config = rf.remote_peer_config()
+    report = {
+        "schema": 2,
+        "mode": "rf-full-acceptance",
+        "ok": True,
+        "closure_eligible": True,
+        "expected_firmware_commit": commit,
+        "github_actions_run": "123",
+        "workflow_run_attempt": "1",
+        "target_fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+        "controlled_peer": {
+            "evidence_source": rf.REMOTE_PEER_EVIDENCE_SOURCE,
+            "port": None,
+            "fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+            **config,
+        },
+        "controlled_peer_adapter": rf.REMOTE_PEER_ADAPTER,
+        "d1l_public_key": rf.DEFAULT_D1L_PUBLIC_KEY,
+        "public_rf_tx": False,
+        "port": "COM12",
+        "d1l_target": target,
+        "d1l_target_after": json.loads(json.dumps(target)),
+        "target_identity_continuity_ok": True,
+        "checks": {"d1l_target_identity_continuity": True},
+    }
+    receipt = tmp_path / "rf.json"
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setattr(
+        soak_d1l,
+        "pinned_peer_evidence_metadata_ok",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        rf,
+        "remote_peer_report_shape_ok",
+        lambda _data: True,
+    )
+
+    qualified, row = soak_d1l.qualified_controlled_peer_receipt(
+        path=receipt,
+        root=tmp_path,
+        commit=commit,
+        run_id="123",
+        run_attempt="1",
+        fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+        expected_d1l_target_sha256=target[
+            "stable_identity_sha256"
+        ],
+    )
+
+    assert qualified == report
+    assert row["path"] == "rf.json"
+
+    forged = json.loads(json.dumps(report))
+    forged["d1l_target_after"]["vid"] = 0x10C4
+    receipt.unlink()
+    receipt.write_text(json.dumps(forged), encoding="utf-8")
+    with pytest.raises(
+        ValueError,
+        match="not bound to the exact D1L serial target",
+    ):
+        soak_d1l.qualified_controlled_peer_receipt(
+            path=receipt,
+            root=tmp_path,
+            commit=commit,
+            run_id="123",
+            run_attempt="1",
+            fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+            expected_d1l_target_sha256=target[
+                "stable_identity_sha256"
+            ],
+        )
 
 
 def test_core_soak_rejects_wrong_usb_identity_before_serial(monkeypatch):

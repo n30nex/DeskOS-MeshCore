@@ -14,15 +14,31 @@ import stat
 import struct
 import subprocess
 import time
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 try:
     from artifact_metadata import git_metadata, stamp_report
+    from core_smoke_d1l import enforce_core_port, resolve_core_target
+    from d1l_serial_target import (
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+        safe_slug,
+        validate_snapshot,
+    )
     from smoke_d1l import open_d1l_serial, send_console_command
     from verify_checksums import is_link_or_reparse, sha256_file
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import git_metadata, stamp_report
+    from scripts.core_smoke_d1l import enforce_core_port, resolve_core_target
+    from scripts.d1l_serial_target import (
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+        safe_slug,
+        validate_snapshot,
+    )
     from scripts.smoke_d1l import open_d1l_serial, send_console_command
     from scripts.verify_checksums import is_link_or_reparse, sha256_file
 
@@ -31,7 +47,8 @@ DEFAULT_TARGET_FINGERPRINT = "0BF0A701D5AE2DB6"
 DEFAULT_D1L_PUBLIC_KEY = "ba14729e8588e30b44b36ff9c6c5511b9d88bf787196c6a46de102af6ebafa07"
 RF_FULL_ACCEPTANCE_SCHEMA = 2
 FORBIDDEN_PORTS = {"COM" + str(number) for number in (8, 11, 29)}
-D1L_REQUIRED_PORT = "COM12"
+D1L_REQUIRED_PORT = WINDOWS_D1L_TARGET
+D1L_REQUIRED_POSIX_TARGET = POSIX_D1L_TARGET
 RF_PEER_FORBIDDEN_PORTS = FORBIDDEN_PORTS | {D1L_REQUIRED_PORT, "COM16"}
 RADIO_LISTENER_PORT = "COM15"
 RADIO_LISTENER_REPLY = "Test OK DM."
@@ -588,6 +605,14 @@ def normalize_port(value: str | None) -> str | None:
             normalized = normalized[len(prefix):]
             break
     return normalized
+
+
+def default_d1l_target() -> str:
+    return (
+        D1L_REQUIRED_PORT
+        if os.name == "nt"
+        else D1L_REQUIRED_POSIX_TARGET
+    )
 
 
 def exact_commit(value: object) -> str | None:
@@ -1292,21 +1317,16 @@ def run_local_peer_operation(
     }
 
 
-def enforce_port_policy(port: str, peer_port: str | None = None) -> tuple[str, str | None]:
-    normalized_port = normalize_port(port)
+def enforce_port_policy(
+    port: str, peer_port: str | None = None
+) -> tuple[str, str | None]:
+    legacy_port = normalize_port(port)
+    if legacy_port in FORBIDDEN_PORTS:
+        raise ValueError(f"refusing forbidden D1L port {legacy_port}")
+    normalized_port = enforce_core_port(port)
     normalized_peer = normalize_port(peer_port)
-    if normalized_port in FORBIDDEN_PORTS:
-        raise ValueError(f"refusing forbidden D1L port {normalized_port}")
     if normalized_peer in FORBIDDEN_PORTS:
         raise ValueError(f"refusing forbidden controlled-peer port {normalized_peer}")
-    if normalized_port is None:
-        raise ValueError("an explicit D1L port is required")
-    if re.fullmatch(r"COM[1-9][0-9]*", normalized_port) is None:
-        raise ValueError(f"invalid D1L port {normalized_port}")
-    if normalized_port != D1L_REQUIRED_PORT:
-        raise ValueError(
-            f"D1L RF acceptance requires {D1L_REQUIRED_PORT}; got {normalized_port}"
-        )
     if (
         normalized_peer is not None
         and re.fullmatch(r"COM[1-9][0-9]*", normalized_peer) is None
@@ -1319,6 +1339,28 @@ def enforce_port_policy(port: str, peer_port: str | None = None) -> tuple[str, s
     if normalized_peer is not None and normalized_peer == normalized_port:
         raise ValueError("D1L and controlled-peer ports must be distinct")
     return normalized_port, normalized_peer
+
+
+def d1l_target_continuity_ok(
+    *,
+    port: object,
+    before: object,
+    after: object,
+) -> bool:
+    try:
+        requested = enforce_core_port(port)
+        validate_snapshot(before, requested)
+        validate_snapshot(after, requested)
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        isinstance(before, dict)
+        and isinstance(after, dict)
+        and before.get("requested_path") == requested
+        and after.get("requested_path") == requested
+        and before.get("stable_identity_sha256")
+        == after.get("stable_identity_sha256")
+    )
 
 
 def firmware_identity_matches(
@@ -3036,6 +3078,8 @@ def dry_run_report(
 def build_report(
     *,
     port: str,
+    d1l_target: dict[str, Any],
+    d1l_target_after: dict[str, Any],
     baud: int,
     peer_status_path: Path | None,
     peer_port: str | None,
@@ -3059,6 +3103,11 @@ def build_report(
     remote_control: dict | None = None,
 ) -> dict:
     token = validate_safe_token(token)
+    target_identity_continuity_ok = d1l_target_continuity_ok(
+        port=port,
+        before=d1l_target,
+        after=d1l_target_after,
+    )
     outbound_token = f"{token}_out"
     inbound_token = f"{token}_in"
     direct_token = f"{token}_direct"
@@ -3313,6 +3362,9 @@ def build_report(
         else inbound_ok and ack_path_ok and direct_route_ok
     )
     checks = {
+        "d1l_target_identity_continuity": (
+            target_identity_continuity_ok
+        ),
         "identity_public_key_matches": bool(
             identity_result.get("ok") is True
             and expected_identity
@@ -3403,6 +3455,11 @@ def build_report(
         "public_rf_tx": False,
         "formats_sd": False,
         "port": port,
+        "d1l_target": d1l_target,
+        "d1l_target_after": d1l_target_after,
+        "target_identity_continuity_ok": (
+            target_identity_continuity_ok
+        ),
         "baud": baud,
         "controlled_peer": controlled_peer,
         "controlled_peer_adapter": (
@@ -3518,6 +3575,8 @@ def _run_hardware_reserved(
     peer_capture_dir: Path | None = None,
     remote_peer: dict | None = None,
     local_peer: dict | None = None,
+    port_lister: Callable[[], Iterable[object]] | None = None,
+    platform_name: str | None = None,
     evidence_bundle: EvidenceBundle,
 ) -> dict:
     try:
@@ -3584,6 +3643,24 @@ def _run_hardware_reserved(
             "RF acceptance must run from the exact clean candidate source"
         )
     port, peer_port = enforce_port_policy(port, peer_port)
+    if port_lister is None:
+        try:
+            from serial.tools import list_ports
+        except ImportError as exc:
+            raise SystemExit(
+                "pyserial list_ports is required to identify the Core D1L target"
+            ) from exc
+
+        def default_port_lister() -> Iterable[object]:
+            return list_ports.comports(include_links=True)
+
+        port_lister = default_port_lister
+    d1l_target = resolve_core_target(
+        port,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
+    port = d1l_target["requested_path"]
     if remote_mode and (
         peer_status_path is not None or peer_port is not None
     ):
@@ -3619,7 +3696,11 @@ def _run_hardware_reserved(
     inbound_seen_at = None
     capture_dir = (
         peer_capture_dir
-        or root / "artifacts" / "hardware" / "com12" / "rf-peer"
+        or root
+        / "artifacts"
+        / "hardware"
+        / safe_slug(port)
+        / "rf-peer"
     )
     safe_token = re.sub(r"[^A-Za-z0-9_.-]", "_", token)
     before_capture = capture_dir / f"{safe_token}_peer_before.json"
@@ -3668,6 +3749,20 @@ def _run_hardware_reserved(
             and version.get("sd_history_mode") == "disabled"
             and protocol_tx_ready_for_rf(version)
         ):
+            d1l_target_after = resolve_core_target(
+                port,
+                port_lister=port_lister,
+                platform_name=platform_name,
+            )
+            target_identity_continuity_ok = d1l_target_continuity_ok(
+                port=port,
+                before=d1l_target,
+                after=d1l_target_after,
+            )
+            if not target_identity_continuity_ok:
+                raise ValueError(
+                    "D1L serial target identity changed during RF preflight"
+                )
             return {
                 "schema": RF_FULL_ACCEPTANCE_SCHEMA,
                 "mode": "rf-full-acceptance",
@@ -3683,6 +3778,11 @@ def _run_hardware_reserved(
                 "public_rf_tx": False,
                 "formats_sd": False,
                 "port": port,
+                "d1l_target": d1l_target,
+                "d1l_target_after": d1l_target_after,
+                "target_identity_continuity_ok": (
+                    target_identity_continuity_ok
+                ),
                 "baud": baud,
                 "expected_firmware_commit": normalized_commit,
                 "github_actions_run": str(github_run_id),
@@ -3717,6 +3817,9 @@ def _run_hardware_reserved(
                     }
                 ),
                 "checks": {
+                    "d1l_target_identity_continuity": (
+                        target_identity_continuity_ok
+                    ),
                     "exact_candidate": False,
                     "protocol_tx_ready_before_rf": (
                         protocol_tx_ready_for_rf(version)
@@ -3865,6 +3968,20 @@ def _run_hardware_reserved(
         run_command(ser, f"routes trace {fingerprint}")
         run_command(ser, "health")
 
+    d1l_target_after = resolve_core_target(
+        port,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
+    if not d1l_target_continuity_ok(
+        port=port,
+        before=d1l_target,
+        after=d1l_target_after,
+    ):
+        raise ValueError(
+            "D1L serial target identity changed during RF acceptance"
+        )
+
     if not remote_mode and peer_port == RADIO_LISTENER_PORT:
         status_deadline = time.time() + max(10.0, wait_sec)
         while time.time() < status_deadline:
@@ -3912,6 +4029,8 @@ def _run_hardware_reserved(
         )
     return build_report(
         port=port,
+        d1l_target=d1l_target,
+        d1l_target_after=d1l_target_after,
         baud=baud,
         peer_status_path=peer_status_path,
         peer_port=peer_port,
@@ -3961,7 +4080,7 @@ def run_hardware(
 def default_out_path(report: dict) -> Path:
     if report.get("mode") == "dry-run-rf-full-acceptance":
         return Path("artifacts") / "smoke" / f"d1l-rf-full-acceptance-dry-run-{utc_stamp()}.json"
-    port = str(report.get("port") or "unknown").lower()
+    port = safe_slug(str(report.get("port") or "unknown"))
     token = str(report.get("token") or utc_stamp()).replace(":", "_")
     return Path("artifacts") / "hardware" / port / f"rf_full_acceptance_{token}.json"
 
@@ -3989,7 +4108,7 @@ def planned_report_path(
             root
             / "artifacts"
             / "hardware"
-            / port.lower()
+            / safe_slug(port)
             / f"rf_full_acceptance_{safe_token}.json"
         )
     root_resolved = root.resolve(strict=True)
@@ -4191,10 +4310,10 @@ def main() -> int:
         except ValueError as exc:
             parser.error(str(exc))
     elif args.dry_run:
-        port = D1L_REQUIRED_PORT
+        port = default_d1l_target()
         if args.peer_port and pinned_config is None:
             try:
-                _, peer_port = enforce_port_policy(D1L_REQUIRED_PORT, args.peer_port)
+                _, peer_port = enforce_port_policy(port, args.peer_port)
             except ValueError as exc:
                 parser.error(str(exc))
         else:

@@ -17,6 +17,7 @@ try:
     import rf_full_acceptance_d1l as rf_acceptance
     from artifact_metadata import git_metadata, stamp_report
     from core_smoke_d1l import enforce_core_port, resolve_core_target
+    from d1l_serial_target import validate_snapshot
     from smoke_d1l import (
         exact_commit,
         firmware_identity_matches,
@@ -28,6 +29,7 @@ except ModuleNotFoundError:
     from scripts import rf_full_acceptance_d1l as rf_acceptance
     from scripts.artifact_metadata import git_metadata, stamp_report
     from scripts.core_smoke_d1l import enforce_core_port, resolve_core_target
+    from scripts.d1l_serial_target import validate_snapshot
     from scripts.smoke_d1l import (
         exact_commit,
         firmware_identity_matches,
@@ -463,10 +465,21 @@ def qualified_controlled_peer_receipt(
     if expected_d1l_target_sha256 is not None:
         before_target = data.get("d1l_target")
         after_target = data.get("d1l_target_after")
+        try:
+            receipt_port = enforce_core_port(data.get("port"))
+            before_snapshot_ok = validate_snapshot(
+                before_target, receipt_port
+            )
+            after_snapshot_ok = validate_snapshot(
+                after_target, receipt_port
+            )
+        except (TypeError, ValueError):
+            before_snapshot_ok = False
+            after_snapshot_ok = False
         if not (
             data.get("schema") == 2
-            and isinstance(before_target, dict)
-            and isinstance(after_target, dict)
+            and before_snapshot_ok is True
+            and after_snapshot_ok is True
             and before_target.get("stable_identity_sha256")
             == expected_d1l_target_sha256
             and after_target.get("stable_identity_sha256")
@@ -475,6 +488,9 @@ def qualified_controlled_peer_receipt(
             and data.get("port") == before_target.get("requested_path")
             and after_target.get("requested_path")
             == before_target.get("requested_path")
+            and isinstance(data.get("checks"), dict)
+            and data["checks"].get("d1l_target_identity_continuity")
+            is True
         ):
             raise ValueError(
                 "controlled-peer RF receipt is not bound to the exact "
