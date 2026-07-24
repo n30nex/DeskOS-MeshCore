@@ -885,11 +885,13 @@ export D1L_RUN_ATTEMPT='<numeric-attempt>'
 export D1L_PUBLIC_KEY='<64-hex-D1L-public-key>'
 export D1L_PEER_FINGERPRINT='<16-hex-controlled-peer>'
 export D1L_CONTROLLED_PEER_RECEIPT='<qualified-controlled-peer-receipt.json>'
+export D1L_HARDWARE_DIR='artifacts/hardware/dev-serial-by-id-usb-1a86-usb-serial-if00-port0'
 ```
 
 If the device is intentionally moved to Windows, set
-`$env:D1L_PORT = "COM12"` instead. Never substitute `/dev/ttyUSB2` or another
-raw `/dev/ttyUSB*` name.
+`$env:D1L_PORT = "COM12"` and
+`$env:D1L_HARDWARE_DIR = "artifacts/hardware/com12"` instead. Never
+substitute `/dev/ttyUSB2` or another raw `/dev/ttyUSB*` name.
 
 ### Actions
 
@@ -925,7 +927,7 @@ python ./scripts/core_smoke_d1l.py \
   --expected-sd-history-mode disabled \
   --persistence-test \
   --manual-touch \
-  --out artifacts/hardware/neopi5/core_smoke_${D1L_COMMIT}_by-id.json
+  --out "$D1L_HARDWARE_DIR/core_smoke_${D1L_COMMIT}_by-id.json"
 ```
 
 ### UI
@@ -940,7 +942,7 @@ python ./scripts/core_ui_corruption_probe_d1l.py \
   --expected-sd-history-mode disabled \
   --rounds 20 \
   --clear-crashlog-before-start \
-  --out artifacts/hardware/neopi5/core_ui_corruption_probe_${D1L_COMMIT}_by-id.json
+  --out "$D1L_HARDWARE_DIR/core_ui_corruption_probe_${D1L_COMMIT}_by-id.json"
 
 python ./scripts/scroll_probe_d1l.py \
   --port "$D1L_PORT" \
@@ -953,7 +955,7 @@ python ./scripts/scroll_probe_d1l.py \
   --screens home,public_messages,dm_thread,nodes,packets,settings \
   --manual-touch \
   --clear-crashlog-before-start \
-  --out artifacts/hardware/neopi5/core_scroll_probe_${D1L_COMMIT}_by-id.json
+  --out "$D1L_HARDWARE_DIR/core_scroll_probe_${D1L_COMMIT}_by-id.json"
 ```
 
 Use the existing compose capture with only Core callers or add a profile-aware
