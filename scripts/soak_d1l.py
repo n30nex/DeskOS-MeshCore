@@ -1127,6 +1127,7 @@ def dry_run_report(
     active_dm_fingerprint: str | None = None,
     active_dm_text: str | None = None,
     expected_firmware_commit: str | None = None,
+    expected_d1l_public_key: str | None = None,
     github_run_id: str | None = None,
     workflow_run_attempt: str | None = None,
 ) -> dict:
@@ -1138,6 +1139,18 @@ def dry_run_report(
     if expected_firmware_commit is not None and normalized_commit is None:
         raise ValueError(
             "expected_firmware_commit must be an exact 40-character hexadecimal SHA"
+        )
+    normalized_public_key = (
+        rf_acceptance.exact_public_key(expected_d1l_public_key)
+        if expected_d1l_public_key is not None
+        else None
+    )
+    if (
+        expected_d1l_public_key is not None
+        and normalized_public_key is None
+    ):
+        raise ValueError(
+            "expected_d1l_public_key must be an exact 64-hex public key"
         )
     active_command = active_dm_command(
         active_public_text, active_dm_fingerprint, active_dm_text
@@ -1160,6 +1173,10 @@ def dry_run_report(
         "device_build_commit": None,
         "firmware_identity_required": normalized_commit is not None,
         "firmware_identity_ok": None,
+        "d1l_identity_required": False,
+        "expected_d1l_public_key": normalized_public_key,
+        "d1l_identity_status": {},
+        "d1l_identity_ok": None,
         "duration_sec": duration_sec,
         "sample_interval_sec": sample_interval_sec,
         "commands": soak_commands(sample_storage=sample_storage, sd_file_canary=sd_file_canary),
@@ -1207,6 +1224,7 @@ def _run_serial_soak_reserved(
     active_dm_fingerprint: str | None = None,
     active_dm_text: str | None = None,
     expected_firmware_commit: str | None = None,
+    expected_d1l_public_key: str | None = None,
     github_run_id: str | None = None,
     workflow_run_attempt: str | None = None,
     expected_release_profile: str | None = None,
@@ -1243,11 +1261,19 @@ def _run_serial_soak_reserved(
         expected_release_profile == "core_1_0"
         and expected_sd_history_mode == "disabled"
     )
+    normalized_d1l_public_key = (
+        rf_acceptance.exact_public_key(expected_d1l_public_key)
+        if expected_d1l_public_key is not None
+        else None
+    )
     if release_bound and (
-        normalized_commit is None or not core_disabled
+        normalized_commit is None
+        or not core_disabled
+        or normalized_d1l_public_key is None
     ):
         raise ValueError(
             "release-bound hardware soak requires an exact firmware commit, "
+            "an exact D1L public key, "
             "--expected-release-profile core_1_0, and "
             "--expected-sd-history-mode disabled"
         )
@@ -1331,7 +1357,7 @@ def _run_serial_soak_reserved(
     before_capture: Path | None = None
     after_capture: Path | None = None
     peer: dict[str, Any] | None = None
-    expected_d1l_public_key: str | None = None
+    controlled_peer_d1l_public_key: str | None = None
     if active_command is not None and release_bound:
         if controlled_peer_receipt is None or normalized_commit is None:
             raise ValueError(
@@ -1350,17 +1376,22 @@ def _run_serial_soak_reserved(
                 else None
             ),
         )
-        expected_d1l_public_key = rf_acceptance.exact_public_key(
+        controlled_peer_d1l_public_key = rf_acceptance.exact_public_key(
             peer_receipt.get("d1l_public_key")
         )
-        if expected_d1l_public_key is None:
-            raise ValueError(
-                "controlled-peer receipt has no exact D1L public key"
-            )
         if not listener_test_text_ok(active_dm_text):
             raise ValueError(
                 "controlled-peer active soak DM text must contain the "
                 "case-insensitive word 'test'"
+            )
+        if (
+            controlled_peer_d1l_public_key is None
+            or controlled_peer_d1l_public_key
+            != normalized_d1l_public_key
+        ):
+            raise ValueError(
+                "controlled-peer receipt D1L public key does not match the "
+                "exact pinned soak target"
             )
         peer_expected_send_count = expected_active_send_count(
             duration_sec, active_interval_sec
@@ -1477,15 +1508,10 @@ def _run_serial_soak_reserved(
             elif not firmware_identity_ok:
                 preflight_failure = "firmware_identity_mismatch"
 
-        if active_command is not None and release_bound:
-            if (
-                peer is None
-                or before_capture is None
-                or peer_before_reservation is None
-                or expected_d1l_public_key is None
-            ):
+        if release_bound:
+            if normalized_d1l_public_key is None:
                 raise ValueError(
-                    "active soak identity/capture state is incomplete"
+                    "release-bound soak D1L identity state is incomplete"
                 )
             if preflight_failure is None:
                 d1l_identity_preflight = send_soak_command(
@@ -1505,12 +1531,22 @@ def _run_serial_soak_reserved(
                 d1l_identity_ok = (
                     rf_acceptance.d1l_identity_status_ok(
                         d1l_identity_preflight,
-                        expected_d1l_public_key,
+                        normalized_d1l_public_key,
                     )
                 )
                 if not d1l_identity_ok:
                     preflight_failure = "d1l_identity_mismatch"
 
+        if active_command is not None and release_bound:
+            if (
+                peer is None
+                or before_capture is None
+                or peer_before_reservation is None
+                or controlled_peer_d1l_public_key is None
+            ):
+                raise ValueError(
+                    "active soak identity/capture state is incomplete"
+                )
             if preflight_failure is None:
                 if remote_peer_config is not None:
                     (
@@ -1832,10 +1868,8 @@ def _run_serial_soak_reserved(
         "firmware_identity_required": normalized_commit is not None,
         "firmware_identity_ok": firmware_identity_ok,
         "version_preflight": version_preflight,
-        "d1l_identity_required": (
-            active_command is not None and release_bound
-        ),
-        "expected_d1l_public_key": expected_d1l_public_key,
+        "d1l_identity_required": release_bound,
+        "expected_d1l_public_key": normalized_d1l_public_key,
         "d1l_identity_status": d1l_identity_preflight,
         "d1l_identity_ok": d1l_identity_ok,
         "preflight_failure": preflight_failure,
@@ -1963,6 +1997,7 @@ def main() -> int:
     parser.add_argument("--sd-file-canary", action="store_true")
     parser.add_argument("--allow-sd-unavailable", action="store_true")
     parser.add_argument("--expected-firmware-commit", default=None)
+    parser.add_argument("--expected-d1l-public-key")
     parser.add_argument("--github-run-id")
     parser.add_argument("--github-run-attempt")
     parser.add_argument("--expected-release-profile")
@@ -2030,6 +2065,7 @@ def main() -> int:
                     active_dm_fingerprint=args.active_dm_fingerprint,
                     active_dm_text=args.active_dm_text,
                     expected_firmware_commit=normalized_commit,
+                    expected_d1l_public_key=args.expected_d1l_public_key,
                     github_run_id=args.github_run_id,
                     workflow_run_attempt=args.github_run_attempt,
                 )
@@ -2041,6 +2077,16 @@ def main() -> int:
                 if normalized_commit is None:
                     parser.error(
                         "Hardware soak requires --expected-firmware-commit."
+                    )
+                expected_d1l_public_key = (
+                    rf_acceptance.exact_public_key(
+                        args.expected_d1l_public_key
+                    )
+                )
+                if expected_d1l_public_key is None:
+                    parser.error(
+                        "Hardware soak requires "
+                        "--expected-d1l-public-key as an exact 64-hex value."
                     )
                 if (
                     not str(args.github_run_id or "").isdigit()
@@ -2076,6 +2122,7 @@ def main() -> int:
                     active_dm_fingerprint=args.active_dm_fingerprint,
                     active_dm_text=args.active_dm_text,
                     expected_firmware_commit=normalized_commit,
+                    expected_d1l_public_key=expected_d1l_public_key,
                     github_run_id=str(args.github_run_id),
                     workflow_run_attempt=str(args.github_run_attempt),
                     expected_release_profile=args.expected_release_profile,

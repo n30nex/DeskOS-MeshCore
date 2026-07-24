@@ -22,6 +22,10 @@ try:
         enforce_core_port,
     )
     from d1l_serial_target import safe_slug, validate_snapshot
+    from rf_full_acceptance_d1l import (
+        d1l_identity_status_ok,
+        exact_public_key,
+    )
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import git_metadata
     from scripts.core_smoke_d1l import (
@@ -29,6 +33,10 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         enforce_core_port,
     )
     from scripts.d1l_serial_target import safe_slug, validate_snapshot
+    from scripts.rf_full_acceptance_d1l import (
+        d1l_identity_status_ok,
+        exact_public_key,
+    )
 
 
 REVIEW_SCHEMA = 4
@@ -392,11 +400,25 @@ def _validate_ui_receipt_data(
         and set(checks) == REQUIRED_UI_CHECKS
         and all(checks[name] is True for name in REQUIRED_UI_CHECKS)
     )
+    expected_d1l_public_key = exact_public_key(
+        data.get("expected_d1l_public_key")
+    )
+    d1l_identity_status = data.get("d1l_identity_status")
+    d1l_identity_ok = (
+        expected_d1l_public_key is not None
+        and data.get("expected_d1l_public_key") == expected_d1l_public_key
+        and data.get("d1l_identity_ok") is True
+        and d1l_identity_status_ok(
+            d1l_identity_status,
+            expected_d1l_public_key,
+        )
+    )
     identity_ok = (
         exact_sha(data.get("expected_firmware_commit")) == commit
         and exact_sha(data.get("device_build_commit")) == commit
         and data.get("firmware_identity_required") is True
         and data.get("firmware_identity_ok") is True
+        and d1l_identity_ok
         and source_ok
     )
     run_alias = data.get("github_actions_run_attempt")
@@ -460,6 +482,9 @@ def _validate_ui_receipt_data(
             "target_ok": target_ok,
             "target_port": target_port,
             "d1l_target": target_snapshot,
+            "expected_d1l_public_key": expected_d1l_public_key,
+            "d1l_identity_status": d1l_identity_status,
+            "d1l_identity_ok": d1l_identity_ok,
         },
     )
 
@@ -577,6 +602,17 @@ def validate_core_manual_ui_review_receipt(
     reasons.extend(ui_reasons)
     ui_target_port = ui_details.get("target_port")
     ui_target_snapshot = ui_details.get("d1l_target")
+    ui_public_key = ui_details.get("expected_d1l_public_key")
+    ui_identity_status = ui_details.get("d1l_identity_status")
+    manual_identity_ok = (
+        isinstance(ui_public_key, str)
+        and data.get("expected_d1l_public_key") == ui_public_key
+        and data.get("d1l_identity_status") == ui_identity_status
+        and data.get("d1l_identity_ok") is True
+        and d1l_identity_status_ok(ui_identity_status, ui_public_key)
+    )
+    if not manual_identity_ok:
+        reasons.append("manual_ui_d1l_identity_binding_invalid")
     manual_target_ok = (
         isinstance(ui_target_port, str)
         and data.get("port") == ui_target_port
@@ -659,6 +695,7 @@ def validate_core_manual_ui_review_receipt(
         and data.get("hardware_required") is True
         and data.get("physical_observed") is True
         and manual_target_ok
+        and manual_identity_ok
         and data.get("port") == ui_target_port
         and data.get("release_profile") == CORE_RELEASE_PROFILE
         and data.get("sd_history_mode") == CORE_SD_HISTORY_MODE
@@ -693,6 +730,7 @@ def validate_core_manual_ui_review_receipt(
         and notes_ok
         and contract_ok
         and manual_target_ok
+        and manual_identity_ok
     )
     details.update(
         {
@@ -714,6 +752,8 @@ def validate_core_manual_ui_review_receipt(
             "run_attempt_aliases_exact": run_attempts_ok,
             "receipt_contract_ok": contract_ok,
             "manual_target_binding_ok": manual_target_ok,
+            "manual_d1l_identity_binding_ok": manual_identity_ok,
+            "expected_d1l_public_key": ui_public_key,
         }
     )
     return valid, reasons, details
@@ -794,13 +834,18 @@ def capture(
         )
     ui_target_port = ui_details.get("target_port")
     ui_target_snapshot = ui_details.get("d1l_target")
+    ui_public_key = ui_details.get("expected_d1l_public_key")
+    ui_identity_status = ui_details.get("d1l_identity_status")
     if (
         not isinstance(ui_target_port, str)
         or requested_port != ui_target_port
         or not isinstance(ui_target_snapshot, dict)
+        or not isinstance(ui_public_key, str)
+        or not d1l_identity_status_ok(ui_identity_status, ui_public_key)
     ):
         raise ValueError(
-            "manual UI target must exactly match the automated UI receipt"
+            "manual UI target and full D1L identity must exactly match the "
+            "automated UI receipt"
         )
     validate_snapshot(ui_target_snapshot, ui_target_port)
     ui_row = file_receipt(root, core_ui_path)
@@ -835,6 +880,9 @@ def capture(
         "reused": False,
         "port": ui_target_port,
         "d1l_target": ui_target_snapshot,
+        "expected_d1l_public_key": ui_public_key,
+        "d1l_identity_status": ui_identity_status,
+        "d1l_identity_ok": True,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": CORE_SD_HISTORY_MODE,
         "commit": normalized_commit,

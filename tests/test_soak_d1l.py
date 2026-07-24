@@ -7,6 +7,9 @@ import pytest
 from scripts import soak_d1l
 
 
+D1L_PUBLIC_KEY = soak_d1l.rf_acceptance.DEFAULT_D1L_PUBLIC_KEY
+
+
 def base_health(uptime_ms=1000):
     return {
         "uptime_ms": uptime_ms,
@@ -1100,6 +1103,37 @@ def test_release_bound_soak_requires_exact_core_contract_before_io(
         )
 
 
+@pytest.mark.parametrize("public_key", [None, "", "abc123"])
+def test_release_bound_soak_requires_exact_d1l_key_before_io(
+    public_key,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: pytest.fail(
+            "source or hardware I/O must not begin without the exact D1L key"
+        ),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail(
+            "serial must not open without the exact D1L key"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="release-bound hardware soak"):
+        run_soak_for_timeout_test(
+            expected_firmware_commit="a" * 40,
+            expected_d1l_public_key=public_key,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+        )
+
+
 def test_release_bound_active_soak_rejects_raw_tty_before_peer_or_serial(
     monkeypatch,
 ):
@@ -1182,6 +1216,7 @@ def run_soak_for_timeout_test(**overrides):
         "sd_file_canary": False,
         "allow_sd_unavailable": False,
         "expected_firmware_commit": None,
+        "expected_d1l_public_key": D1L_PUBLIC_KEY,
     }
     args.update(overrides)
     return soak_d1l.run_serial_soak(**args)
@@ -1580,6 +1615,87 @@ def test_release_active_soak_wrong_full_d1l_key_has_no_peer_or_rf_io(
     assert report["samples"] == []
     assert report["controlled_peer_before"] == {}
     assert report["controlled_peer_after"] == {}
+    assert report["dm_rf_tx"] is False
+    assert report["closure_eligible"] is False
+    assert report["ok"] is False
+
+
+def test_release_idle_soak_wrong_full_d1l_key_stops_before_sampling(
+    monkeypatch,
+):
+    commit = "a" * 40
+    wrong_key = D1L_PUBLIC_KEY[:16] + "cd" * 24
+    commands = []
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSoakPort(),
+    )
+
+    def fake_send(_ser, command, *_args, **_kwargs):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": commit,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+            }
+        if command == "identity status":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "identity status",
+                "public_key_ready": True,
+                "public_key": wrong_key,
+                "fingerprint": wrong_key[:16].upper(),
+                "role": "desk_companion",
+            }
+        pytest.fail(f"unexpected command after identity mismatch: {command}")
+
+    monkeypatch.setattr(soak_d1l, "send_soak_command", fake_send)
+    monkeypatch.setattr(
+        soak_d1l,
+        "collect_sample",
+        lambda *_args, **_kwargs: pytest.fail(
+            "idle sampling must not begin for the wrong D1L key"
+        ),
+    )
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        expected_firmware_commit=commit,
+        github_run_id="123",
+        workflow_run_attempt="1",
+        expected_release_profile="core_1_0",
+        expected_sd_history_mode="disabled",
+        sample_storage=True,
+        allow_sd_unavailable=True,
+        port_lister=lambda: [windows_target_row()],
+        platform_name="nt",
+    )
+
+    assert commands == ["version", "identity status"]
+    assert report["preflight_commands"] == ["version", "identity status"]
+    assert report["d1l_identity_required"] is True
+    assert report["expected_d1l_public_key"] == D1L_PUBLIC_KEY
+    assert report["d1l_identity_status"]["public_key"] == wrong_key
+    assert report["d1l_identity_ok"] is False
+    assert report["preflight_failure"] == "d1l_identity_mismatch"
+    assert report["samples"] == []
     assert report["dm_rf_tx"] is False
     assert report["closure_eligible"] is False
     assert report["ok"] is False

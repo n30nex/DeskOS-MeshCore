@@ -14,6 +14,7 @@ RUN_ID = "123456"
 RUN_ATTEMPT = "1"
 UTC_START = "2026-07-18T18:00:00Z"
 UTC_END = "2026-07-18T18:01:00Z"
+PUBLIC_KEY = "ab" * 32
 
 
 def clean_git() -> dict:
@@ -52,6 +53,19 @@ def health() -> dict:
         "sd_history_mode": "disabled",
         "board_ready": True,
         "ui_ready": True,
+    }
+
+
+def identity_status(public_key: str = PUBLIC_KEY) -> dict:
+    normalized = public_key.lower()
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "identity status",
+        "public_key_ready": True,
+        "public_key": normalized,
+        "fingerprint": normalized[:16].upper(),
+        "role": "desk_companion",
     }
 
 
@@ -191,6 +205,9 @@ def core_ui_receipt() -> dict:
         "identity_preflight_only": False,
         "port": "COM12",
         "d1l_target": d1l_target(),
+        "expected_d1l_public_key": PUBLIC_KEY,
+        "d1l_identity_status": identity_status(),
+        "d1l_identity_ok": True,
         "started_at": UTC_START,
         "ended_at": UTC_END,
         "release_profile": "core_1_0",
@@ -231,6 +248,10 @@ def core_ui_receipt() -> dict:
                     "release_profile": "core_1_0",
                     "sd_history_mode": "disabled",
                 },
+            },
+            {
+                "command": "identity status",
+                "result": identity_status(),
             },
             {"command": "health", "result": health()},
             {
@@ -351,6 +372,9 @@ def test_producer_validator_and_integrated_manual_gate_accept_exact_receipt(
     assert details["automated_ui_file_row_ok"] is True
     assert report["schema"] == 4
     assert report["d1l_target"] == core_ui_receipt()["d1l_target"]
+    assert report["expected_d1l_public_key"] == PUBLIC_KEY
+    assert report["d1l_identity_status"] == identity_status()
+    assert report["d1l_identity_ok"] is True
     assert report["github_actions_run_attempt"] == RUN_ATTEMPT
     assert report["workflow_run_attempt"] == RUN_ATTEMPT
     assert report["dm_rf_tx"] is False
@@ -511,6 +535,50 @@ def test_manual_review_target_is_derived_and_tamper_evident(tmp_path: Path):
     )
     assert valid is False
     assert "manual_ui_target_binding_invalid" in reasons
+
+
+def test_manual_review_full_key_is_inherited_and_tamper_evident(
+    tmp_path: Path,
+):
+    ui_path = write_core_ui(tmp_path)
+    out_path = capture_review(tmp_path, ui_path)
+    report = json.loads(out_path.read_text(encoding="ascii"))
+    report["expected_d1l_public_key"] = "cd" * 32
+    out_path.write_text(json.dumps(report), encoding="ascii")
+
+    valid, reasons, details = review.validate_core_manual_ui_review_receipt(
+        out_path,
+        root=tmp_path,
+        core_ui_path=ui_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+    assert valid is False
+    assert "manual_ui_d1l_identity_binding_invalid" in reasons
+    assert details["manual_d1l_identity_binding_ok"] is False
+
+    ui_data = json.loads(ui_path.read_text(encoding="ascii"))
+    ui_data["d1l_identity_status"] = identity_status(
+        PUBLIC_KEY[:16] + "cd" * 24
+    )
+    ui_path.write_text(json.dumps(ui_data), encoding="ascii")
+    with pytest.raises(
+        ValueError,
+        match="automated Core UI receipt is invalid",
+    ):
+        review.capture(
+            root=tmp_path,
+            out_path=tmp_path / "manual-wrong-key.json",
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            port="COM12",
+            operator="Operator",
+            reviewer="Reviewer",
+            confirmed=set(review.REQUIRED_CONFIRMATIONS),
+            core_ui_path=ui_path,
+        )
 
 
 def test_manual_review_rejects_target_not_matching_automated_receipt(
