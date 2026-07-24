@@ -1,5 +1,6 @@
 schema_version: 1
 generated_at: '2026-07-18'
+last_execution_target_update: '2026-07-24'
 repository: n30nex/SIGUI
 starting_main_observed: 846f728dd3faded85451c6d39ba6a07cb8ca7f44
 code_baseline_observed: bd6ea0e685442d8a820766f4686395e50ca5397f
@@ -12,8 +13,33 @@ release:
   full_feature_release_ready_expected: false
 constraints:
   actions_only_firmware_build: true
-  d1l_port: COM12
+  current_d1l_target:
+    platform: linux
+    host: neopi5
+    account: siguidev
+    authentication: key_only
+    selector: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+    expected_usb_vid_pid: '1A86:7523'
+    observed_resolved_tty: /dev/ttyUSB2
+    observed_resolved_tty_authoritative: false
+    require_symlink: true
+    require_read_write_access: true
+  windows_alternative_d1l_port: COM12
+  controlled_peer_narrow_access_ready: false
+  target_move_closes_release_gate: false
+  remaining_fail_closed_gates:
+  - exact_sha_actions_package
+  - non_erasing_flash
+  - ui_and_manual_review
+  - software_and_cold_reboots
+  - retained_state
+  - protocol_time_migration
+  - controlled_rf_dm
+  - active_and_idle_soak
+  - install_review
+  - final_core_audit
   rp2040_port_when_sd_only: COM16
+  rp2040_port_is_core_d1l_target: false
   forbidden_ports:
   - COM8
   - COM11
@@ -323,7 +349,10 @@ work_packages:
   - UI receipts
   - reboot/cold-boot receipt
   acceptance:
-  - COM12 exact SHA
+  - qualified D1L target exact SHA
+  - neopi5 evidence binds stable by-id selector and USB VID:PID 1A86:7523
+  - raw /dev/ttyUSB* is observational only
+  - COM12 remains the valid Windows alternative
   - display/touch green
   - 20 UI rounds
   - 5 software reboots
@@ -339,6 +368,7 @@ work_packages:
   outputs:
   - rf_full_acceptance exact receipt
   acceptance:
+  - narrowly scoped local peer status/control access proven for siguidev
   - outbound DM
   - inbound DM
   - ACK/PATH

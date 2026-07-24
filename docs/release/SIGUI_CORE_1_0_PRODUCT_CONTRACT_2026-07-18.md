@@ -10,6 +10,34 @@
 
 ---
 
+## Current Core hardware route (2026-07-24)
+
+The release-closing D1L is currently attached to the Raspberry Pi 5 host
+`neopi5`. Hardware work runs from the unprivileged, key-only development
+account `siguidev` and must select the device only through:
+
+```text
+/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+```
+
+The expected USB identity is `1A86:7523`. The link currently resolves to
+`/dev/ttyUSB2`, but that kernel-assigned name is observational only and must
+not be used as the release target. `COM12` remains the valid Windows
+alternative when the D1L is moved back to the Windows host. `COM8`, `COM11`,
+and `COM29` remain forbidden. `COM16` remains reserved for separately
+authorized SD/RP2040 work and is never the Core D1L app, console, or flash
+target.
+
+The move to `neopi5`, successful login, or discovery of the USB device does
+not close a release gate. Exact-SHA Actions/package binding, a non-erasing
+flash, UI and manual review, reboot and retained-state proof, protocol-time
+migration, controlled RF/DM, active and idle soak, installation review, and
+the final Core audit all remain fail-closed. Controlled-peer RF/soak work also
+remains blocked until the `siguidev` account has narrowly scoped, verified
+access to the required peer status and control resources.
+
+---
+
 ## 1. Product statement
 
 MeshCore DeskOS D1L Core 1.0 is a touch-first, non-forwarding MeshCore desk client focused on reliable messaging and local mesh visibility.
@@ -208,7 +236,10 @@ When conditional qualification fails:
 - Direct messages must have truthful queued/sent/acknowledged/retrying/failed state.
 - No malformed, unauthenticated, duplicate, or replayed payload may create a visible duplicate or incorrect ACK.
 - COM8, COM11, and COM29 are forbidden.
-- COM12 is the D1L app/console path.
+- The current D1L app/console path is the exact `neopi5` stable by-id link
+  declared above; `COM12` remains the valid Windows alternative.
+- A raw `/dev/ttyUSB*` name is never authoritative release identity.
+- COM16 is never the Core D1L app/console/flash target.
 - A controlled peer must use a distinct explicitly assigned allowed path.
 
 ---
@@ -220,7 +251,9 @@ Core 1.0 requires:
 1. exact Actions workflow green;
 2. exact downloaded artifacts and verified checksums;
 3. package profile binding;
-4. non-erasing COM12 flash receipt;
+4. non-erasing exact-target flash receipt, bound to the stable device identity
+   (`neopi5` by-id path for the current route, or `COM12` on the Windows
+   alternative);
 5. profile-aware core smoke;
 6. display/touch manual confirmation;
 7. supported UI corruption/navigation/scroll/compose evidence;

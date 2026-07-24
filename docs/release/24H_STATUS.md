@@ -25,12 +25,25 @@ The authoritative product boundary, roadmap, and work graph are:
 | Candidate SHA | pending replacement R15 freeze; `f0fef39eb37f5795ebd683338c11a37ff2fc8399` is superseded |
 | Candidate Actions run | pending replacement workflow dispatch; run `29669268575`, attempt 1, succeeded only for superseded `f0fef39...` |
 | SD history mode | `disabled` |
+| Current D1L host | Raspberry Pi 5 `neopi5` |
+| Development account | `siguidev`; unprivileged, key-only |
+| Current D1L selector | `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` |
+| Expected USB identity | `1A86:7523` |
+| Current raw resolution | `/dev/ttyUSB2`; observational only, never release identity |
+| Windows D1L alternative | `COM12` |
+| Controlled-peer access | pending narrowly scoped status/control access for `siguidev` |
 
 ## Immutable safety rules
 
 - Firmware builds run only in GitHub Actions.
-- D1L app/console/flash work uses `COM12`.
-- `COM16` is allowed only when the final SD/RP2040 qualification requires it.
+- Current D1L app/console/flash work on `neopi5` uses only
+  `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after verifying
+  `1A86:7523`, readability, writability, and symlink resolution.
+- `/dev/ttyUSB2` is the current observation only; raw `/dev/ttyUSB*` names are
+  never release identity.
+- `COM12` remains the valid Windows D1L alternative.
+- `COM16` is allowed only when separately authorized SD/RP2040 qualification
+  requires it and is never the Core D1L target.
 - `COM8`, `COM11`, and `COM29` are forbidden.
 - Never format SD.
 - Normal candidate flashing is non-erasing.
@@ -701,3 +714,33 @@ release is authorized by the evidence currently recorded.
 - C: free space is monitored before long phases with a 4 GiB safety floor;
   it was 4.89 GiB at this update. Test temporary files are redirected to F:,
   and no background or visible terminal processes are used.
+
+### `2026-07-24T05:46:00-04:00`
+
+- The operator moved the release-closing D1L from the Windows host to the
+  Raspberry Pi 5 development host `neopi5`. Future physical Core evidence must
+  use the unprivileged, key-only account `siguidev` and the stable device link
+  `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`.
+- Read-only enumeration identifies that link as USB VID:PID `1A86:7523`. It
+  currently resolves to `/dev/ttyUSB2`, but that raw kernel-assigned name is
+  observational only and must never be substituted in a flash, serial, audit,
+  or evidence command. `COM12` remains a valid Windows alternative only if the
+  D1L is intentionally moved back.
+- Historical COM12 receipts remain immutable evidence for the exact candidates
+  they name. They are superseded for release closure and are not rewritten as
+  Pi evidence. `COM8`, `COM11`, and `COM29` remain forbidden; `COM16` remains
+  reserved for separately authorized SD/RP2040 work and is never the Core D1L
+  target.
+- The Pi move, key-only login, serial permissions, and read-only device
+  handshake do not make the firmware release-ready. A fresh exact-SHA Actions
+  candidate, verified package, non-erasing flash, Core UI/manual review,
+  software/cold reboot and retained-state proof, protocol-time migration,
+  controlled RF/DM, 60-minute active plus 30-minute idle soak, install review,
+  and final Core audit all remain fail-closed.
+- Controlled-peer RF and active-soak evidence remain blocked until `siguidev`
+  receives and proves narrowly scoped access to only the required peer status
+  and control resources. Broad service-group membership is not recorded as a
+  completed prerequisite.
+- This routing correction changed documentation only. It did not build or
+  flash firmware, transmit RF, touch SD, qualify a candidate, or authorize a
+  tag/release.

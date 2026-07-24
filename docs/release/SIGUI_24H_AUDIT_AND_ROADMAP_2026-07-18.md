@@ -11,6 +11,26 @@
 
 > This is a source, issue, pull-request, CI, workflow, and release-contract audit. It does not claim that a new firmware image was built, flashed, or physically qualified during this audit.
 
+### 2026-07-24 execution-target correction
+
+The operator has moved the release-closing D1L to Raspberry Pi 5 host
+`neopi5`. Current hardware execution uses the unprivileged, key-only account
+`siguidev` and only the stable selector
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`, after proving USB VID:PID
+`1A86:7523`. The present `/dev/ttyUSB2` resolution is observational only and
+must never identify release evidence. `COM12` remains the valid Windows
+alternative; existing COM12 evidence is retained as historical evidence for
+its named candidate, not rewritten as Pi evidence. `COM8`, `COM11`, and
+`COM29` remain forbidden. `COM16` remains restricted to separately authorized
+SD/RP2040 work and is never the Core D1L target.
+
+This correction changes the route, not the release standard. Exact-SHA
+Actions/package identity, non-erasing flash, UI/manual review, reboots and
+retained-state proof, protocol-time migration, controlled RF/DM, 60-minute
+active plus 30-minute idle soak, installation review, and final audit remain
+fail-closed. Controlled-peer RF/soak is not ready until narrowly scoped peer
+status/control access for `siguidev` is provisioned and verified.
+
 ---
 
 ## Executive decision
@@ -238,7 +258,8 @@ Most remaining failures are no longer “code does not exist.” They are “the
 The Core release still cannot waive:
 
 - exact Actions artifact identity;
-- non-erasing COM12 flash;
+- non-erasing flash bound to the qualified D1L target (`neopi5` stable by-id
+  for the current route, or `COM12` on the Windows alternative);
 - board/display/touch readiness;
 - boot and reboot stability;
 - retained-state persistence;
@@ -662,7 +683,10 @@ Use the existing workflow.
 
 ### H7.0–H9.0 — exact flash and core physical sweep
 
-1. Non-erasing exact Actions flash to COM12.
+1. On `neopi5`, prove the stable by-id link, USB identity `1A86:7523`, and
+   read/write access, then perform the non-erasing exact Actions flash. Use
+   `COM12` only if the D1L has been intentionally moved to the Windows
+   alternative.
 2. Confirm `version` exact 40-hex SHA, IDF `v5.5.4`, and `release_profile=core_1_0`.
 3. Run profile-aware core smoke with persistence.
 4. Manually confirm display bars and touch.
@@ -676,9 +700,13 @@ Use the existing workflow.
 
 ### H9.0–H10.5 — controlled RF/DM
 
-1. Use COM12 only for D1L.
-2. Use one explicitly assigned, distinct, non-forbidden controlled peer.
-3. Run exact-candidate full RF acceptance:
+1. Use only the qualified D1L target: the `neopi5` stable by-id link for the
+   current route, or `COM12` on the Windows alternative.
+2. Before any RF command, prove that `siguidev` has narrowly scoped access to
+   the exact local peer status/control resources. SSH and D1L serial access do
+   not satisfy this prerequisite.
+3. Use one explicitly assigned, distinct, non-forbidden controlled peer.
+4. Run exact-candidate full RF acceptance:
    - identity;
    - outbound DM;
    - inbound DM;
@@ -687,8 +715,8 @@ Use the existing workflow.
    - retained thread;
    - health;
    - `public_rf_tx=false`.
-4. Exercise one absent-peer/final-failure case if the existing runner supports it without broad code changes.
-5. Do not automate default Public-channel transmission. Use controlled DM or the configured `#test` channel only.
+5. Exercise one absent-peer/final-failure case if the existing runner supports it without broad code changes.
+6. Do not automate default Public-channel transmission. Use controlled DM or the configured `#test` channel only.
 
 **Exit:** DM is supported, or the release stops. DM is part of Core 1.0 and cannot be papered over.
 
@@ -840,7 +868,26 @@ Explicitly not required for Core 1.0:
 
 ## 8. Candidate commands
 
-Use the repository’s scripts and exact candidate identifiers. Replace placeholders only with recorded values.
+Use the repository’s scripts and exact candidate identifiers. Replace
+placeholders only with recorded values. On the current Pi route, establish the
+stable selector once per shell and fail before any script unless all checks
+pass:
+
+```bash
+export D1L_PORT='/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0'
+test -L "$D1L_PORT" && test -r "$D1L_PORT" && test -w "$D1L_PORT"
+D1L_DEVICE_PROPERTIES="$(udevadm info --query=property --name="$D1L_PORT")"
+grep -qx 'ID_VENDOR_ID=1a86' <<<"$D1L_DEVICE_PROPERTIES"
+grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
+export D1L_COMMIT='<40-hex-sha>'
+export D1L_ACTIONS_RUN='<numeric-run-id>'
+export D1L_RUN_ATTEMPT='<numeric-attempt>'
+export D1L_PEER_FINGERPRINT='<16-hex-controlled-peer>'
+```
+
+If the device is intentionally moved to Windows, set
+`$env:D1L_PORT = "COM12"` instead. Never substitute `/dev/ttyUSB2` or another
+raw `/dev/ttyUSB*` name.
 
 ### Actions
 
@@ -856,90 +903,98 @@ Use `include_sd_bridge=true` only for a candidate that will advertise supported 
 
 ### Core smoke
 
-After adding the profile-aware runner:
+After adding the profile-aware runner, execute on `neopi5`:
 
-```powershell
-python .\scripts\core_smoke_d1l.py `
-  --port COM12 `
-  --expected-firmware-commit <40-hex-sha> `
-  --persistence-test `
-  --manual-touch `
-  --out artifacts\hardware\com12\core_smoke_<sha>_COM12.json
+```bash
+python ./scripts/core_smoke_d1l.py \
+  --port "$D1L_PORT" \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --persistence-test \
+  --manual-touch \
+  --out artifacts/hardware/neopi5/core_smoke_${D1L_COMMIT}_by-id.json
 ```
 
 ### UI
 
-```powershell
-python .\scripts\core_ui_corruption_probe_d1l.py `
-  --port COM12 `
-  --expected-firmware-commit <40-hex-sha> `
-  --rounds 20 `
-  --clear-crashlog-before-start `
-  --out artifacts\hardware\com12\core_ui_corruption_probe_<sha>_COM12.json
+```bash
+python ./scripts/core_ui_corruption_probe_d1l.py \
+  --port "$D1L_PORT" \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --rounds 20 \
+  --clear-crashlog-before-start \
+  --out artifacts/hardware/neopi5/core_ui_corruption_probe_${D1L_COMMIT}_by-id.json
 
-python .\scripts\scroll_probe_d1l.py `
-  --port COM12 `
-  --release-profile core_1_0 `
-  --expected-firmware-commit <40-hex-sha> `
-  --github-actions-run <run-id> `
-  --workflow-run-attempt <attempt> `
-  --expected-sd-history-mode disabled `
-  --screens home,public_messages,dm_thread,nodes,packets,settings `
-  --manual-touch `
-  --clear-crashlog-before-start `
-  --out artifacts\hardware\com12\core_scroll_probe_<sha>_COM12.json
+python ./scripts/scroll_probe_d1l.py \
+  --port "$D1L_PORT" \
+  --release-profile core_1_0 \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --github-actions-run "$D1L_ACTIONS_RUN" \
+  --workflow-run-attempt "$D1L_RUN_ATTEMPT" \
+  --expected-sd-history-mode disabled \
+  --screens home,public_messages,dm_thread,nodes,packets,settings \
+  --manual-touch \
+  --clear-crashlog-before-start \
+  --out artifacts/hardware/neopi5/core_scroll_probe_${D1L_COMMIT}_by-id.json
 ```
 
-Use the existing compose capture with only Core callers or add a profile-aware target list.
+Use the existing compose capture with only Core callers or add a profile-aware
+target list.
 
 ### RF
 
-```powershell
-python .\scripts\rf_full_acceptance_d1l.py `
-  --port COM12 `
-  --peer-port <allowed-peer-port> `
-  --peer-status <controlled-peer-status.json> `
-  --fingerprint <peer-16-hex-fingerprint> `
-  --d1l-public-key <d1l-public-key> `
-  --commit <40-hex-sha> `
-  --out artifacts\hardware\com12\rf_full_acceptance_<sha>_COM12_<peer>.json
+Do not run RF acceptance until the narrow local peer access prerequisite is
+proven. Use only the runner's reviewed, explicit local controlled-peer mode;
+do not invent a peer serial port or SSH back into `neopi5`:
+
+Inspect the merged runner interface first:
+
+```bash
+python ./scripts/rf_full_acceptance_d1l.py --help
 ```
 
-Never use COM8, COM11, or COM29. Never use the same port for D1L and peer.
+The release invocation must then use the reviewed local controlled-peer mode,
+`--port "$D1L_PORT"`, the exact candidate in `$D1L_COMMIT`, and the explicit
+peer fingerprint in `$D1L_PEER_FINGERPRINT`. Do not record or run a guessed
+argument shape while that local mode or its narrow access is pending.
+
+Never use COM8, COM11, or COM29. Never use COM16 or a peer endpoint as the
+Core D1L target. Never automate default Public-channel transmission.
 
 ### Active soak
 
-```powershell
-python .\scripts\soak_d1l.py `
-  --port COM12 `
-  --expected-firmware-commit <40-hex-sha> `
-  --duration-sec 3600 `
-  --sample-interval-sec 300 `
-  --active-dm-fingerprint <peer-16-hex-fingerprint> `
-  --active-dm-text core_soak_<sha7> `
-  --active-interval-sec 300 `
-  --require-rx-delta `
-  --min-rx-delta 1 `
-  --min-tx-delta 6 `
-  --clear-crashlog-before-start `
-  --sample-storage `
-  --allow-sd-unavailable `
-  --out artifacts\soak\core_active_60m_<sha>_COM12.json
+```bash
+python ./scripts/soak_d1l.py \
+  --port "$D1L_PORT" \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --duration-sec 3600 \
+  --sample-interval-sec 300 \
+  --active-dm-fingerprint "$D1L_PEER_FINGERPRINT" \
+  --active-dm-text "core_soak_${D1L_COMMIT:0:7}" \
+  --active-interval-sec 300 \
+  --require-rx-delta \
+  --min-rx-delta 1 \
+  --min-tx-delta 6 \
+  --clear-crashlog-before-start \
+  --sample-storage \
+  --allow-sd-unavailable \
+  --out artifacts/soak/core_active_60m_${D1L_COMMIT}_neopi5_by-id.json
 ```
 
 For supported SD, replace `--allow-sd-unavailable` with `--sd-file-canary`.
+The active soak has the same narrow controlled-peer prerequisite as RF
+acceptance.
 
 ### Idle soak
 
-```powershell
-python .\scripts\soak_d1l.py `
-  --port COM12 `
-  --expected-firmware-commit <40-hex-sha> `
-  --duration-sec 1800 `
-  --sample-interval-sec 300 `
-  --sample-storage `
-  --allow-sd-unavailable `
-  --out artifacts\soak\core_idle_30m_<sha>_COM12.json
+```bash
+python ./scripts/soak_d1l.py \
+  --port "$D1L_PORT" \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --duration-sec 1800 \
+  --sample-interval-sec 300 \
+  --sample-storage \
+  --allow-sd-unavailable \
+  --out artifacts/soak/core_idle_30m_${D1L_COMMIT}_neopi5_by-id.json
 ```
 
 For supported SD, replace `--allow-sd-unavailable` with `--sd-file-canary`.
@@ -957,7 +1012,8 @@ All must be true:
 - artifacts downloaded and checksums verified;
 - build/profile/package identity aligned;
 - Core unsupported paths unreachable and side-effect-free;
-- exact COM12 flash receipt;
+- exact non-erasing flash receipt bound to the qualified D1L identity
+  (`neopi5` stable by-id plus `1A86:7523`, or Windows `COM12`);
 - board/display/touch/core UI green;
 - controlled bidirectional DM/ACK/PATH/direct route green;
 - retained state survives required reboots;

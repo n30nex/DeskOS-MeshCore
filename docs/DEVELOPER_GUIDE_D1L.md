@@ -67,23 +67,61 @@ The package includes:
 
 ## Hardware Validation
 
-Use only the supplied D1L port:
+### Current Pi 5 route
 
-```powershell
-$env:D1L_PORT = "COMx"
-.\scripts\flash_d1l.ps1 -Port $env:D1L_PORT
-python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
-python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_pixel_capture-COM12.json
+The release-closing D1L is attached to the Raspberry Pi 5 host `neopi5`.
+Connect as the unprivileged, key-only account `siguidev`; no password belongs
+in this repository, a command line, an environment file, or an evidence
+receipt. The only accepted current D1L selector is:
+
+```text
+/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
 ```
 
-For current local validation, `COM12` is the D1L ESP32/UI console and the
-production RP2040 bridge control path. `COM16` is used only for bounded RP2040
-USB smoke/UF2 maintenance; the production bridge intentionally exposes no USB
-CDC port. Never open `COM8`, `COM11`, or `COM29` as the D1L serial/flash target;
-`COM11` may be checked separately only as the independent bot/radio endpoint
-for controlled DM evidence.
+Require USB VID:PID `1A86:7523`, a readable and writable symlink, and a
+resolved device before opening it. Its current `/dev/ttyUSB2` resolution is
+observational only and may change after a move or reboot.
 
-The other local MeshCore bot may be used as the controlled DM RF peer for production validation. Keep the bot port explicit, and prefer the targeted DM probe when Public-channel RF should stay quiet.
+Run repository hardware scripts on `neopi5` with the stable selector:
+
+```bash
+export D1L_PORT='/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0'
+test -L "$D1L_PORT" && test -r "$D1L_PORT" && test -w "$D1L_PORT"
+D1L_DEVICE_PROPERTIES="$(udevadm info --query=property --name="$D1L_PORT")"
+grep -qx 'ID_VENDOR_ID=1a86' <<<"$D1L_DEVICE_PROPERTIES"
+grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
+python ./scripts/smoke_d1l.py --port "$D1L_PORT" --manual-touch
+python ./scripts/ui_capture_d1l.py --port "$D1L_PORT" --out artifacts/hardware/neopi5/ui_pixel_capture-by-id.json
+```
+
+Use the exact candidate package's `flash_project.sh` for the non-erasing
+release flash; do not build firmware locally or substitute a repository build
+directory. `COM12` remains the valid Windows alternative if the D1L is moved
+back to that host:
+
+```powershell
+$env:D1L_PORT = "COM12"
+.\scripts\flash_d1l.ps1 -Port $env:D1L_PORT
+python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
+```
+
+`COM16` is used only for separately authorized RP2040 USB smoke/UF2
+maintenance and is never the Core D1L app/console/flash target. Never open
+`COM8`, `COM11`, or `COM29` as the D1L target. Historical COM12 receipts remain
+valid only for the exact candidates they name; they do not qualify the Pi-hosted
+replacement candidate.
+
+A controlled MeshCore peer may be used for production RF/DM validation only
+after `siguidev` has narrowly scoped, verified access to the exact peer status
+and control resources. That access is not complete merely because SSH and D1L
+serial access work. Keep the peer transport explicit, prefer the targeted DM
+probe when Public-channel RF should stay quiet, and do not use a peer serial
+port as the D1L target.
+
+Moving or discovering the device does not close release. Exact-SHA package and
+flash identity, UI and manual review, reboot/retained-state proof,
+protocol-time migration, controlled RF/DM, active and idle soak, installation
+review, and the final Core audit remain fail-closed.
 
 Do not format SD cards from DeskOS firmware, RP2040 firmware, serial commands, UI, or scripts. Production validation assumes users provide FAT32 cards prepared on a computer; the current validation device has a fresh FAT32 32 GB card installed. DeskOS may create the `/deskos` folders/manifests on a mounted FAT32 card and otherwise falls back to NVS.
 
@@ -160,7 +198,11 @@ workload and exact boot nonce. Erase counters cover existing-key mutation and
 commit attempts in the dedicated partition; a missing-key no-op or a pre-read
 failure does not claim an erase attempt.
 
-`ui_capture_d1l.py` is the hardware display truth path for the split-page UI blocker. It reads the 480x480 RGB565 frame back over the COM12 console, writes JSON/PNG/raw artifacts, and must stay non-destructive: no RF send, no SD format, and no manual touch requirement.
+`ui_capture_d1l.py` is the hardware display truth path for the split-page UI
+blocker. It reads the 480x480 RGB565 frame through the explicitly qualified D1L
+target (the `neopi5` stable by-id link for the current route, or `COM12` on the
+Windows alternative), writes JSON/PNG/raw artifacts, and must stay
+non-destructive: no RF send, no SD format, and no manual touch requirement.
 
 ## GitHub Actions
 
@@ -200,9 +242,11 @@ remain unchanged. Retain the run ID, commit, selected image tag, resolved image
 identity when Actions exposes it, lock file, package checksums, and artifact
 metadata as one evidence set.
 
-After that clean repeat build passes, flash only its verified artifact to exact
-COM12. Run `version` first and require the JSON response to contain
-`"idf":"v5.5.4"`, then run the issue #63 board, display/touch, Wi-Fi, RF,
+After that clean repeat build passes, flash only its verified artifact to the
+qualified D1L target: the stable `neopi5` by-id link for the current route, or
+`COM12` on the Windows alternative. Run `version` first and require the JSON
+response to contain `"idf":"v5.5.4"`, then run the issue #63 board,
+display/touch, Wi-Fi, RF,
 RP2040/SD, Map, health, reboot, and post-power-cycle checks. Refresh the relevant
 commit-matched release-gate evidence before calling v5.5.4 the production
 baseline. The `supported_sdk_baseline` audit item checks the workflow selection
@@ -221,7 +265,8 @@ python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<
 
 ## Release Rules
 
-- Keep flash commands explicit-port only.
+- Keep flash commands explicit-target only; require stable by-id plus
+  `1A86:7523` on `neopi5`, or exact `COM12` on the Windows alternative.
 - Keep Wi-Fi/BLE optional and documented when runtime support is disabled.
 - Keep full-flash flows behind typed confirmation.
 - Update `README.md`, `docs/ROADMAP.md`, `docs/KNOWN_LIMITATIONS.md`, and `docs/RELEASE_CHECKLIST.md` when hardware evidence changes.
