@@ -19,6 +19,12 @@ class FakeSerial:
     def reset_input_buffer(self):
         self.reset_count += 1
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback):
+        return False
+
 
 def test_rf_full_acceptance_dry_run_is_dm_only():
     report = rf_accept.dry_run_report(
@@ -53,6 +59,10 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
                 "build_commit": "a" * 40,
                 "release_profile": "core_1_0",
                 "sd_history_mode": "disabled",
+                "time": {
+                    "protocol_tx_ready": True,
+                    "protocol_tx_block": "none",
+                },
             },
         },
         {
@@ -169,6 +179,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
     assert report["checks"]["ack_path"] is True
     assert report["checks"]["direct_route"] is True
     assert report["checks"]["no_public_commands"] is True
+    assert report["checks"]["protocol_tx_ready_before_rf"] is True
     assert report["checks"]["exact_candidate"] is True
     assert report["device_release_profile"] == "core_1_0"
     assert report["device_sd_history_mode"] == "disabled"
@@ -451,6 +462,149 @@ def test_rf_full_acceptance_exact_device_commit_check():
     assert not rf_accept.firmware_identity_matches(
         {"ok": True, "build_commit": "abc123"}, expected
     )
+
+
+@pytest.mark.parametrize(
+    ("ready", "block"),
+    [
+        (False, "none"),
+        (True, "legacy_protocol_lower_bound_unconfirmed"),
+    ],
+)
+def test_rf_full_acceptance_rejects_protocol_tx_not_ready(
+    ready, block
+):
+    version = {
+        "ok": True,
+        "build_commit": "a" * 40,
+        "time": {
+            "protocol_tx_ready": ready,
+            "protocol_tx_block": block,
+        },
+    }
+
+    assert not rf_accept.protocol_tx_ready_for_rf(version)
+
+
+def test_rf_report_cannot_use_later_ready_version_to_override_first_block():
+    blocked = {
+        "ok": True,
+        "cmd": "version",
+        "build_commit": "a" * 40,
+        "time": {
+            "protocol_tx_ready": False,
+            "protocol_tx_block": (
+                "legacy_protocol_lower_bound_unconfirmed"
+            ),
+        },
+    }
+    later_ready = {
+        **blocked,
+        "time": {
+            "protocol_tx_ready": True,
+            "protocol_tx_block": "none",
+        },
+    }
+    report = rf_accept.build_report(
+        port="COM12",
+        baud=115200,
+        peer_status_path=None,
+        peer_port=None,
+        fingerprint="0BF0A701D5AE2DB6",
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="first_version",
+        send_outbound=False,
+        steps=[
+            {"command": "version", "result": blocked},
+            {"command": "version", "result": later_ready},
+        ],
+        peer_before=None,
+        peer_after=None,
+        inbound_seen_at=None,
+        expected_commit="a" * 40,
+    )
+
+    assert report["checks"]["protocol_tx_ready_before_rf"] is False
+    assert report["ok"] is False
+
+
+@pytest.mark.parametrize(
+    ("ready", "block"),
+    [
+        (False, "none"),
+        (True, "legacy_protocol_lower_bound_unconfirmed"),
+    ],
+)
+def test_rf_hardware_preflight_stops_before_any_rf_when_protocol_blocked(
+    tmp_path, monkeypatch, ready, block
+):
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    monkeypatch.setattr(
+        rf_accept,
+        "__file__",
+        str(scripts_dir / "rf_full_acceptance_d1l.py"),
+    )
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace())
+    monkeypatch.setattr(
+        rf_accept,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        rf_accept,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSerial(),
+    )
+    monkeypatch.setattr(rf_accept.time, "sleep", lambda _seconds: None)
+    commands = []
+
+    def fake_send(_ser, command, _timeout):
+        commands.append(command)
+        assert command == "version"
+        return {
+            "ok": True,
+            "cmd": "version",
+            "build_commit": "a" * 40,
+            "idf": "v5.5.4",
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "time": {
+                "protocol_tx_ready": ready,
+                "protocol_tx_block": block,
+            },
+        }
+
+    monkeypatch.setattr(
+        rf_accept, "send_acceptance_command", fake_send
+    )
+    report = rf_accept.run_hardware(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        wait_sec=1.0,
+        poll_sec=0.1,
+        peer_status_path=tmp_path / "peer-status.json",
+        peer_port="COM17",
+        fingerprint="0BF0A701D5AE2DB6",
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="protocol_blocked",
+        send_outbound=True,
+        expected_commit="a" * 40,
+        github_run_id="1",
+        workflow_run_attempt="1",
+        peer_capture_dir=tmp_path / "rf-peer",
+    )
+
+    assert commands == ["version"]
+    assert report["ok"] is False
+    assert report["dm_rf_tx"] is False
+    assert report["public_rf_tx"] is False
+    assert report["checks"]["protocol_tx_ready_before_rf"] is False
 
 
 def test_rf_full_acceptance_dry_run_cannot_close_identity():
@@ -1816,6 +1970,10 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
         "idf": "v5.5.4",
         "release_profile": "core_1_0",
         "sd_history_mode": "disabled",
+        "time": {
+            "protocol_tx_ready": True,
+            "protocol_tx_block": "none",
+        },
     }
     identity = {
         "ok": True,

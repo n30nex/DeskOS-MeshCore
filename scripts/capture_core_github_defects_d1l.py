@@ -63,6 +63,7 @@ AUDIT_EVIDENCE_ARGUMENTS = {
     "core_ui": "--core-ui",
     "manual_review": "--manual-review",
     "reboot_receipt": "--reboot-receipt",
+    "protocol_migration": "--protocol-migration-receipt",
     "rf_receipt": "--rf-receipt",
     "active_soak": "--active-soak",
     "idle_soak": "--idle-soak",

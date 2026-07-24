@@ -21,6 +21,7 @@ try:
     import release_gate_audit_d1l as full_release_audit
     import rf_full_acceptance_d1l as rf_acceptance
     import soak_d1l as soak_runner
+    import time_protocol_migration_d1l as time_protocol_migration
     from artifact_metadata import git_metadata
     from capture_core_actions_run_d1l import (
         EXPECTED_ACTIONS_ARTIFACTS,
@@ -93,6 +94,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts import release_gate_audit_d1l as full_release_audit
     from scripts import rf_full_acceptance_d1l as rf_acceptance
     from scripts import soak_d1l as soak_runner
+    from scripts import time_protocol_migration_d1l as time_protocol_migration
     from scripts.artifact_metadata import git_metadata
     from scripts.capture_core_actions_run_d1l import (
         EXPECTED_ACTIONS_ARTIFACTS,
@@ -2110,6 +2112,84 @@ def reboot_persistence_gate(
     )
 
 
+def protocol_migration_gate(
+    path: Path | None,
+    root: Path,
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+) -> CoreGate:
+    data = read_json(path)
+    reasons: list[str] = []
+    validation_errors: list[str] = []
+    contained = False
+    receipt_sha256 = None
+    if path is not None:
+        try:
+            resolved_root = root.resolve(strict=True)
+            resolved_path = path.resolve(strict=True)
+            resolved_path.relative_to(resolved_root)
+            contained = (
+                resolved_path.is_file()
+                and not is_link_or_reparse(resolved_path)
+            )
+            if contained:
+                receipt_sha256 = sha256_file(resolved_path)
+        except (OSError, RuntimeError, ValueError):
+            contained = False
+
+    if path is None:
+        reasons.append("protocol_migration_receipt_missing")
+    elif not contained:
+        reasons.append("protocol_migration_receipt_not_contained")
+    elif not data:
+        reasons.append("protocol_migration_receipt_invalid_json")
+
+    validation_ok = False
+    if contained and data:
+        try:
+            validation_ok, validation_errors = (
+                time_protocol_migration.validate_receipt(
+                    data,
+                    root=root,
+                )
+            )
+        except Exception as exc:  # strict evidence must fail closed
+            validation_errors = [
+                "strict_protocol_migration_validator_failed:"
+                f"{type(exc).__name__}"
+            ]
+    if not validation_ok:
+        reasons.append("strict_protocol_migration_validation_failed")
+
+    real = real_evidence(data)
+    if not real:
+        reasons.append("protocol_migration_receipt_not_real_evidence")
+    binding_ok = (
+        exact_sha(data.get("commit")) == commit
+        and data.get("github_actions_run") == str(run_id)
+        and data.get("workflow_run_attempt") == str(run_attempt)
+    )
+    if not binding_ok:
+        reasons.append("protocol_migration_exact_candidate_binding_failed")
+
+    ok = contained and validation_ok and real and binding_ok
+    return CoreGate(
+        "protocol_timestamp_migration",
+        ok,
+        "Legacy protocol timestamp migration is exact and TX-safe",
+        path_text(path, root),
+        {
+            "reasons": reasons,
+            "validation_errors": validation_errors,
+            "receipt_sha256": receipt_sha256,
+            "receipt_commit": data.get("commit"),
+            "github_actions_run": data.get("github_actions_run"),
+            "workflow_run_attempt": data.get("workflow_run_attempt"),
+        },
+    )
+
+
 def remote_rf_gate(
     data: dict,
     path: Path | None,
@@ -2282,6 +2362,14 @@ def remote_rf_gate(
         for step in steps
     ]
     version = results[0] if len(results) > 0 else {}
+    version_time = (
+        version.get("time") if isinstance(version, dict) else None
+    )
+    protocol_tx_ready_before_rf = (
+        isinstance(version_time, dict)
+        and version_time.get("protocol_tx_ready") is True
+        and version_time.get("protocol_tx_block") == "none"
+    )
     identity = results[1] if len(results) > 1 else {}
     contacts_before = results[2] if len(results) > 2 else {}
     import_result = results[3] if len(results) > 3 else {}
@@ -2493,6 +2581,7 @@ def remote_rf_gate(
             final_health, commit, sd_history_mode
         ),
         "no_public_commands": structure_ok,
+        "protocol_tx_ready_before_rf": protocol_tx_ready_before_rf,
         "exact_candidate": _profile_version_result(
             version, commit, sd_history_mode
         ),
@@ -2685,6 +2774,14 @@ def rf_gate(
         for step in steps
     ]
     version = results[0] if len(results) > 0 else {}
+    version_time = (
+        version.get("time") if isinstance(version, dict) else None
+    )
+    protocol_tx_ready_before_rf = (
+        isinstance(version_time, dict)
+        and version_time.get("protocol_tx_ready") is True
+        and version_time.get("protocol_tx_block") == "none"
+    )
     identity = results[1] if len(results) > 1 else {}
     contacts_before = results[2] if len(results) > 2 else {}
     import_result = results[3] if len(results) > 3 else {}
@@ -2873,6 +2970,7 @@ def rf_gate(
             command.strip().lower().startswith("mesh send public ")
             for command in commands
         ),
+        "protocol_tx_ready_before_rf": protocol_tx_ready_before_rf,
         "exact_candidate": _profile_version_result(
             version, commit, sd_history_mode
         ),
@@ -3933,6 +4031,12 @@ def build_audit(args: argparse.Namespace) -> dict:
             hardware_dir,
             "core_reboot_persistence*.json",
         ),
+        "protocol_migration": evidence_path(
+            root,
+            args.protocol_migration_receipt,
+            hardware_dir,
+            "time_protocol_migration*.json",
+        ),
         "rf_receipt": evidence_path(
             root,
             args.rf_receipt,
@@ -4051,6 +4155,13 @@ def build_audit(args: argparse.Namespace) -> dict:
             root,
             commit,
             args.sd_history_mode,
+            str(args.github_run_id),
+            str(args.github_run_attempt),
+        ),
+        protocol_migration_gate(
+            paths["protocol_migration"],
+            root,
+            commit,
             str(args.github_run_id),
             str(args.github_run_attempt),
         ),
@@ -4192,6 +4303,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--core-ui")
     parser.add_argument("--manual-review")
     parser.add_argument("--reboot-receipt")
+    parser.add_argument("--protocol-migration-receipt")
     parser.add_argument("--rf-receipt")
     parser.add_argument("--active-soak")
     parser.add_argument("--idle-soak")

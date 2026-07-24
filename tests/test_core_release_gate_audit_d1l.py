@@ -1081,6 +1081,155 @@ def test_reboot_gate_delegates_to_strict_r11_validator(
     ).ok
 
 
+def protocol_migration_receipt() -> dict:
+    return {
+        "mode": "hardware",
+        "commit": COMMIT,
+        "github_actions_run": RUN_ID,
+        "workflow_run_attempt": RUN_ATTEMPT,
+    }
+
+
+def test_protocol_migration_gate_delegates_to_strict_validator(
+    tmp_path: Path, monkeypatch
+):
+    receipt = protocol_migration_receipt()
+    receipt_path = write_json(
+        tmp_path / "time_protocol_migration.json",
+        receipt,
+    )
+    calls = []
+
+    def strict_validator(value, *, root):
+        calls.append((value, root))
+        return True, []
+
+    monkeypatch.setattr(
+        audit.time_protocol_migration,
+        "validate_receipt",
+        strict_validator,
+    )
+    gate = audit.protocol_migration_gate(
+        receipt_path,
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is True
+    assert calls == [(receipt, tmp_path)]
+    assert gate.details["reasons"] == []
+    assert gate.details["validation_errors"] == []
+    assert gate.details["receipt_sha256"] == audit.sha256_file(receipt_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("commit", "b" * 40),
+        ("github_actions_run", "987654321"),
+        ("workflow_run_attempt", "2"),
+    ),
+)
+def test_protocol_migration_gate_rejects_external_binding_mismatch(
+    tmp_path: Path, monkeypatch, field: str, value: str
+):
+    receipt = protocol_migration_receipt()
+    receipt[field] = value
+    receipt_path = write_json(
+        tmp_path / "time_protocol_migration.json",
+        receipt,
+    )
+    monkeypatch.setattr(
+        audit.time_protocol_migration,
+        "validate_receipt",
+        lambda *_args, **_kwargs: (True, []),
+    )
+
+    gate = audit.protocol_migration_gate(
+        receipt_path,
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert (
+        "protocol_migration_exact_candidate_binding_failed"
+        in gate.details["reasons"]
+    )
+
+
+def test_protocol_migration_gate_fails_closed_for_missing_invalid_or_rejected(
+    tmp_path: Path, monkeypatch
+):
+    missing = audit.protocol_migration_gate(
+        None,
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+    assert missing.ok is False
+    assert "protocol_migration_receipt_missing" in missing.details["reasons"]
+
+    invalid_path = tmp_path / "time_protocol_migration_invalid.json"
+    invalid_path.write_text("{", encoding="utf-8")
+    invalid = audit.protocol_migration_gate(
+        invalid_path,
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+    assert invalid.ok is False
+    assert (
+        "protocol_migration_receipt_invalid_json"
+        in invalid.details["reasons"]
+    )
+
+    receipt_path = write_json(
+        tmp_path / "time_protocol_migration.json",
+        protocol_migration_receipt(),
+    )
+    monkeypatch.setattr(
+        audit.time_protocol_migration,
+        "validate_receipt",
+        lambda *_args, **_kwargs: (False, ["tampered"]),
+    )
+    rejected = audit.protocol_migration_gate(
+        receipt_path,
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+    assert rejected.ok is False
+    assert rejected.details["validation_errors"] == ["tampered"]
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("validator failed")
+
+    monkeypatch.setattr(
+        audit.time_protocol_migration,
+        "validate_receipt",
+        explode,
+    )
+    failed = audit.protocol_migration_gate(
+        receipt_path,
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+    assert failed.ok is False
+    assert failed.details["validation_errors"] == [
+        "strict_protocol_migration_validator_failed:RuntimeError"
+    ]
+
+
 def write_remote_rf_receipt(tmp_path: Path) -> Path:
     rf = audit.rf_acceptance
     observed = datetime(2026, 7, 23, 15, 0, tzinfo=timezone.utc)
@@ -1342,6 +1491,10 @@ def write_remote_rf_receipt(tmp_path: Path) -> Path:
         "idf": "v5.5.4",
         "release_profile": "core_1_0",
         "sd_history_mode": "disabled",
+        "time": {
+            "protocol_tx_ready": True,
+            "protocol_tx_block": "none",
+        },
     }
     steps = [
         {"command": "version", "result": version},
@@ -1487,6 +1640,41 @@ def test_remote_rf_gate_recomputes_raw_status_and_control_sidecars(
         ).ok
         is False
     )
+
+
+@pytest.mark.parametrize(
+    ("ready", "block"),
+    [
+        (False, "none"),
+        (True, "legacy_protocol_lower_bound_unconfirmed"),
+    ],
+)
+def test_remote_rf_gate_rejects_protocol_tx_not_ready_before_rf(
+    tmp_path: Path,
+    ready,
+    block,
+):
+    receipt = write_remote_rf_receipt(tmp_path)
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    report["steps"][0]["result"]["time"] = {
+        "protocol_tx_ready": ready,
+        "protocol_tx_block": block,
+    }
+    write_json(receipt, report)
+
+    gate = audit.rf_gate(
+        receipt,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert gate.details["derived_checks"][
+        "protocol_tx_ready_before_rf"
+    ] is False
 
 
 @pytest.mark.parametrize(
@@ -1790,6 +1978,7 @@ def audit_args(tmp_path: Path) -> argparse.Namespace:
         core_ui=None,
         manual_review=None,
         reboot_receipt=None,
+        protocol_migration_receipt=None,
         rf_receipt=None,
         active_soak=None,
         idle_soak=None,
@@ -1847,6 +2036,7 @@ def patch_all_gates(monkeypatch, tmp_path: Path, *, one_failure=False):
         "core_ui_gate",
         "manual_review_gate",
         "reboot_persistence_gate",
+        "protocol_migration_gate",
         "rf_gate",
         "sd_decision_gate",
         "soak_gate",
@@ -1887,6 +2077,30 @@ def test_core_audit_fails_closed_when_one_core_gate_fails(
     assert report["full_feature_release_ready"] is False
     assert report["p0_failed_count"] == 1
 
+
+def test_core_audit_fails_closed_when_protocol_migration_gate_fails(
+    tmp_path,
+    monkeypatch,
+):
+    patch_all_gates(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        audit,
+        "protocol_migration_gate",
+        lambda *_args, **_kwargs: audit.CoreGate(
+            "protocol_timestamp_migration",
+            False,
+            "protocol migration",
+        ),
+    )
+
+    report = audit.build_audit(audit_args(tmp_path))
+
+    assert report["core_release_ready"] is False
+    assert report["p0_failed_count"] == 1
+    assert any(
+        gate["id"] == "protocol_timestamp_migration" and not gate["ok"]
+        for gate in report["gates"]
+    )
 
 def test_core_audit_fails_closed_for_red_non_p0_gate(
     tmp_path, monkeypatch

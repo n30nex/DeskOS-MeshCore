@@ -999,6 +999,17 @@ def firmware_identity_matches(
     )
 
 
+def protocol_tx_ready_for_rf(version_result: object) -> bool:
+    if not isinstance(version_result, dict):
+        return False
+    time_state = version_result.get("time")
+    return (
+        isinstance(time_state, dict)
+        and time_state.get("protocol_tx_ready") is True
+        and time_state.get("protocol_tx_block") == "none"
+    )
+
+
 def read_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
@@ -2417,7 +2428,7 @@ def build_report(
     latest_packets = latest_command_step(steps, "packets")
     latest_route = latest_command_step(steps, f"routes trace {fingerprint}")
     latest_health = latest_command_step(steps, "health")
-    version_step = latest_command_step(steps, "version")
+    version_step = first_command_step(steps, "version")
     identity_result = identity_step.get("result", {}) if identity_step else {}
     route_result = latest_route.get("result", {}) if latest_route else {}
     packets_result = latest_packets.get("result", {}) if latest_packets else {}
@@ -2649,6 +2660,9 @@ def build_report(
         "no_public_commands": not any(command_has_public_tx(command) for command in commands),
     }
     if expected_commit is not None:
+        checks["protocol_tx_ready_before_rf"] = (
+            protocol_tx_ready_for_rf(version_result)
+        )
         checks["exact_candidate"] = firmware_identity_matches(
             version_result, expected_commit
         )
@@ -2950,6 +2964,7 @@ def _run_hardware_reserved(
             and version.get("idf") == "v5.5.4"
             and version.get("release_profile") == "core_1_0"
             and version.get("sd_history_mode") == "disabled"
+            and protocol_tx_ready_for_rf(version)
         ):
             return {
                 "schema": RF_FULL_ACCEPTANCE_SCHEMA,
@@ -2973,6 +2988,12 @@ def _run_hardware_reserved(
                 "device_build_commit": version.get("build_commit"),
                 "device_release_profile": version.get("release_profile"),
                 "device_sd_history_mode": version.get("sd_history_mode"),
+                "device_protocol_tx_ready": get_path(
+                    version, "time", "protocol_tx_ready"
+                ),
+                "device_protocol_tx_block": get_path(
+                    version, "time", "protocol_tx_block"
+                ),
                 "firmware_identity_required": True,
                 "firmware_identity_ok": False,
                 "controlled_peer": (
@@ -3006,6 +3027,9 @@ def _run_hardware_reserved(
                 ),
                 "checks": {
                     "exact_candidate": False,
+                    "protocol_tx_ready_before_rf": (
+                        protocol_tx_ready_for_rf(version)
+                    ),
                     "no_public_commands": True,
                 },
                 "steps": steps,

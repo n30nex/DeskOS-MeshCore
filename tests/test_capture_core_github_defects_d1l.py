@@ -234,6 +234,43 @@ def audit_payload(*, package_ok: bool = True) -> dict:
     }
 
 
+def test_core_audit_recompute_routes_protocol_migration_receipt(
+    tmp_path, monkeypatch
+):
+    audit = audit_payload()
+    receipt = (
+        "artifacts/hardware/com12/"
+        "time_protocol_migration_candidate.json"
+    )
+    audit["evidence_paths"] = {
+        "protocol_migration": receipt,
+    }
+    captured = {}
+
+    class FakeAuditModule:
+        @staticmethod
+        def parse_args(argv):
+            captured["argv"] = list(argv)
+            return list(argv)
+
+        @staticmethod
+        def build_audit(args):
+            return {"argv": args}
+
+    monkeypatch.setattr(
+        defects,
+        "_load_core_audit_module",
+        lambda: FakeAuditModule,
+    )
+
+    result = defects._recompute_core_audit(tmp_path, audit)
+
+    argv = captured["argv"]
+    index = argv.index("--protocol-migration-receipt")
+    assert argv[index + 1] == receipt
+    assert result == {"argv": argv}
+
+
 def test_capture_retains_complete_authenticated_raw_page_sets(
     tmp_path, monkeypatch
 ):
