@@ -8,13 +8,58 @@ import pytest
 from scripts import core_release_gate_audit_d1l as audit
 from scripts import core_smoke_d1l
 from scripts import core_ui_corruption_probe_d1l
+from scripts import d1l_serial_target
 from scripts import release_gate_audit_d1l as full_audit
+from scripts import scroll_probe_d1l
 from scripts import soak_d1l as soak_runner
 
 
 COMMIT = "a" * 40
 RUN_ID = "123456789"
 RUN_ATTEMPT = "1"
+
+
+def d1l_target_snapshot(
+    target: str = d1l_serial_target.WINDOWS_D1L_TARGET,
+    *,
+    hostname: str = "audit-test-host",
+) -> dict:
+    if target == d1l_serial_target.WINDOWS_D1L_TARGET:
+        return d1l_serial_target.resolve_target(
+            target,
+            port_lister=lambda: [
+                {
+                    "device": target,
+                    "vid": d1l_serial_target.EXPECTED_VID,
+                    "pid": d1l_serial_target.EXPECTED_PID,
+                    "serial_number": "D1L-TEST",
+                    "hwid": "USB VID:PID=1A86:7523",
+                    "location": "1-1",
+                }
+            ],
+            platform_name="nt",
+            hostname=lambda: hostname,
+        )
+    resolved = "/dev/ttyUSB2"
+    return d1l_serial_target.resolve_target(
+        target,
+        port_lister=lambda: [
+            {
+                "device": resolved,
+                "vid": d1l_serial_target.EXPECTED_VID,
+                "pid": d1l_serial_target.EXPECTED_PID,
+                "serial_number": "D1L-TEST",
+                "hwid": "USB VID:PID=1A86:7523",
+                "location": "1-1",
+            }
+        ],
+        platform_name="posix",
+        exists=lambda _path: True,
+        is_symlink=lambda path: path == target,
+        realpath=lambda path: resolved if path == target else path,
+        access=lambda _path, _mode: True,
+        hostname=lambda: hostname,
+    )
 
 
 def write_json(path: Path, value: dict) -> Path:
@@ -56,6 +101,7 @@ def passing_core_smoke() -> dict:
                 },
             }
         )
+
     def health(nonce: int, *, reset_reason: str = "SW") -> dict:
         return {
             "schema": 1,
@@ -166,9 +212,7 @@ def passing_core_smoke() -> dict:
                 }
             )
         else:
-            supported_results.append(
-                {"schema": 1, "cmd": cmd, "ok": True}
-            )
+            supported_results.append({"schema": 1, "cmd": cmd, "ok": True})
     original = settings("DeskOS")
     changed = settings("DeskOS-C")
     persistence_steps = [
@@ -201,6 +245,7 @@ def passing_core_smoke() -> dict:
         {"command": "settings get", "result": original},
     ]
     return {
+        "schema": 2,
         "kind": "core_smoke",
         "mode": "hardware",
         "ok": True,
@@ -208,6 +253,7 @@ def passing_core_smoke() -> dict:
         "hardware_required": True,
         "physical_observed": True,
         "port": "COM12",
+        "d1l_target": d1l_target_snapshot(),
         "release_profile": "core_1_0",
         "sd_history_mode": "disabled",
         "expected_firmware_commit": COMMIT,
@@ -335,9 +381,7 @@ def passing_core_ui() -> dict:
             "ok": True,
             "cmd": "ui scroll-probe",
             "surface": surface,
-            "tab": core_ui_corruption_probe_d1l.CORE_SCROLL_TABS[
-                surface
-            ],
+            "tab": core_ui_corruption_probe_d1l.CORE_SCROLL_TABS[surface],
             "surface_supported": True,
             "target_found": True,
             "scrollable": True,
@@ -367,8 +411,7 @@ def passing_core_ui() -> dict:
             "onboarding_visible": target == "onboarding",
             "dock_hidden": True,
             "dm_mode": (
-                target
-                in core_ui_corruption_probe_d1l.CORE_DM_COMPOSE_TARGETS
+                target in core_ui_corruption_probe_d1l.CORE_DM_COMPOSE_TARGETS
             ),
             "tx_suppressed": (
                 target
@@ -421,8 +464,8 @@ def passing_core_ui() -> dict:
         )
 
     unavailable_events = []
-    unavailable_plan = (
-        core_ui_corruption_probe_d1l.unavailable_ui_probe_plan("disabled")
+    unavailable_plan = core_ui_corruption_probe_d1l.unavailable_ui_probe_plan(
+        "disabled"
     )
     for probe in unavailable_plan:
         unavailable_events.append(
@@ -471,7 +514,7 @@ def passing_core_ui() -> dict:
         "idf": "v5.5.4",
     }
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_ui_corruption_probe",
         "mode": "hardware",
         "ok": True,
@@ -479,6 +522,7 @@ def passing_core_ui() -> dict:
         "hardware_required": True,
         "physical_observed": True,
         "port": "COM12",
+        "d1l_target": d1l_target_snapshot(),
         "release_profile": "core_1_0",
         "sd_history_mode": "disabled",
         "expected_firmware_commit": COMMIT,
@@ -570,9 +614,7 @@ def test_core_ui_gate_recomputes_raw_scroll_and_compose_results(tmp_path):
     ).ok
 
     forged_scroll = passing_core_ui()
-    forged_scroll["scroll_events"][0]["result"][
-        "movement_required"
-    ] = True
+    forged_scroll["scroll_events"][0]["result"]["movement_required"] = True
     write_json(path, forged_scroll)
     assert not audit.core_ui_gate(
         path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
@@ -589,21 +631,186 @@ def test_core_ui_gate_recomputes_raw_scroll_and_compose_results(tmp_path):
     ).ok
 
     forged_compose = passing_core_ui()
-    forged_compose["compose_events"][2]["result"][
-        "tx_suppressed"
-    ] = False
+    forged_compose["compose_events"][2]["result"]["tx_suppressed"] = False
     write_json(path, forged_compose)
     assert not audit.core_ui_gate(
         path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
     ).ok
 
     forged_compose = passing_core_ui()
-    forged_compose["compose_events"][2]["result"][
-        "send_enabled"
-    ] = True
+    forged_compose["compose_events"][2]["result"]["send_enabled"] = True
     write_json(path, forged_compose)
     assert not audit.core_ui_gate(
         path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+
+def passing_core_scroll(
+    target: str = d1l_serial_target.WINDOWS_D1L_TARGET,
+) -> dict:
+    def health() -> dict:
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": "health",
+            "build_commit": COMMIT,
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "board_ready": True,
+            "ui_ready": True,
+        }
+
+    events = []
+    for index, screen in enumerate(scroll_probe_d1l.CORE_SCROLL_SEQUENCE):
+        tab = scroll_probe_d1l.SCROLL_SURFACES[screen]["tab"]
+        probe = {
+            "schema": 1,
+            "ok": True,
+            "cmd": "ui scroll-probe",
+            "surface": screen,
+            "tab": tab,
+            "surface_supported": True,
+            "target_found": True,
+            "scrollable": True,
+            "movement_required": True,
+            "moved": True,
+            "before_y": 0,
+            "after_y": index + 1,
+            "scroll_top_before": 0,
+            "scroll_bottom_before": 20,
+            "scroll_top_after": index + 1,
+            "scroll_bottom_after": 0,
+        }
+        events.append(
+            {
+                "screen": screen,
+                "tab": tab,
+                "label": scroll_probe_d1l.SCROLL_SURFACES[screen]["label"],
+                "request": {"schema": 1, "ok": True},
+                "tab_active": True,
+                "statuses": [],
+                "probe": probe,
+                "status": {
+                    "schema": 1,
+                    "ok": True,
+                    "cmd": "ui status",
+                    "active_tab": tab,
+                    "pending": False,
+                },
+                "health": health(),
+                "crashlog": {
+                    "schema": 1,
+                    "ok": True,
+                    "cmd": "crashlog",
+                    "entries": [],
+                },
+                "manual_touch_confirmed": True,
+            }
+        )
+    version = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "version",
+        "build_commit": COMMIT,
+        "idf": "v5.5.4",
+        "release_profile": "core_1_0",
+        "sd_history_mode": "disabled",
+    }
+    return {
+        "schema": 2,
+        "mode": "hardware",
+        "ok": True,
+        "closure_eligible": True,
+        "hardware_required": True,
+        "physical_observed": True,
+        "port": target,
+        "d1l_target": d1l_target_snapshot(target),
+        "baud": 115200,
+        "started_at": "2026-07-24T12:00:00Z",
+        "ended_at": "2026-07-24T12:01:00Z",
+        "screens": list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+        "surface_plan": scroll_probe_d1l.surface_plan(
+            list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE)
+        ),
+        "dwell_sec": 0.5,
+        "manual_touch": True,
+        "release_profile": "core_1_0",
+        "expected_firmware_commit": COMMIT,
+        "github_actions_run": RUN_ID,
+        "workflow_run_attempt": RUN_ATTEMPT,
+        "expected_sd_history_mode": "disabled",
+        "device_build_commit": COMMIT,
+        "firmware_identity_ok": True,
+        "scroll_movement_policy": "positive_raw_overflow",
+        "clear_crashlog_before_start": True,
+        "scroll_movement_optional": [],
+        "failure_count": 0,
+        "failures": [],
+        "setup_events": [
+            {"cmd": "version", "result": version},
+            {"cmd": "health", "result": health()},
+            {
+                "cmd": "crashlog clear",
+                "result": {
+                    "schema": 1,
+                    "ok": True,
+                    "cmd": "crashlog clear",
+                },
+            },
+        ],
+        "probe_results": {event["screen"]: event["probe"] for event in events},
+        "events": events,
+        "map_network_evidence": (
+            scroll_probe_d1l.summarize_map_network_evidence(
+                None, None, measured=False
+            )
+        ),
+        **scroll_probe_d1l.probe_safety(clear_crashlog_before_start=True),
+        "git": {"commit": COMMIT, "dirty": False, "dirty_entries": []},
+    }
+
+
+def test_core_scroll_gate_validates_windows_and_posix_targets(tmp_path):
+    windows = write_json(
+        tmp_path / "core-scroll-windows.json",
+        passing_core_scroll(),
+    )
+    assert audit.core_scroll_gate(
+        windows,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+        d1l_serial_target.WINDOWS_D1L_TARGET,
+    ).ok
+
+    posix_target = d1l_serial_target.POSIX_D1L_TARGET
+    posix = write_json(
+        tmp_path / "core-scroll-posix.json",
+        passing_core_scroll(posix_target),
+    )
+    assert audit.core_scroll_gate(
+        posix,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+        posix_target,
+    ).ok
+
+    forged = passing_core_scroll(posix_target)
+    forged["d1l_target"]["vid"] = 0xFFFF
+    write_json(posix, forged)
+    assert not audit.core_scroll_gate(
+        posix,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+        posix_target,
     ).ok
 
 
@@ -749,9 +956,7 @@ def passing_soak(*, active: bool) -> dict:
         [
             {
                 "elapsed_sec": 1 + index * 600,
-                "command": (
-                    "mesh send dm 0123456789ABCDEF core_soak"
-                ),
+                "command": ("mesh send dm 0123456789ABCDEF core_soak"),
                 "fingerprint": "0123456789ABCDEF",
                 "text": "core_soak",
                 "result": {
@@ -776,12 +981,15 @@ def passing_soak(*, active: bool) -> dict:
         allow_sd_unavailable=True,
     )
     return {
-        "schema": 1,
+        "schema": 2,
         "mode": "hardware",
         "ok": True,
         "closure_eligible": True,
         "physical_observed": True,
         "port": "COM12",
+        "d1l_target": d1l_target_snapshot(),
+        "d1l_target_after": d1l_target_snapshot(),
+        "target_identity_continuity_ok": True,
         "expected_firmware_commit": COMMIT,
         "device_build_commit": COMMIT,
         "github_actions_run": RUN_ID,
@@ -796,9 +1004,7 @@ def passing_soak(*, active: bool) -> dict:
         "device_sd_history_mode": "disabled",
         "started_at": "2026-07-18T00:00:00Z",
         "ended_at": (
-            "2026-07-18T01:00:00Z"
-            if active
-            else "2026-07-18T00:30:00Z"
+            "2026-07-18T01:00:00Z" if active else "2026-07-18T00:30:00Z"
         ),
         "duration_sec": duration,
         "sample_interval_sec": interval,
@@ -963,9 +1169,7 @@ def test_active_soak_peer_flow_recomputes_raw_listener_sidecars(
     )
     before_path = write_json(tmp_path / "before.json", before)
     after_path = write_json(tmp_path / "after.json", after)
-    source_path = str(
-        audit.rf_acceptance.RADIO_LISTENER_STATUS_PATH.resolve()
-    )
+    source_path = str(audit.rf_acceptance.RADIO_LISTENER_STATUS_PATH.resolve())
 
     def row(path: Path) -> dict:
         return {
@@ -1028,15 +1232,21 @@ def test_reboot_gate_delegates_to_strict_r11_validator(
 
     def strict_validator(path, **kwargs):
         calls.append((path, kwargs))
+        target = d1l_target_snapshot()
         return (
             True,
             [],
             {
+                "schema": 2,
+                "port": "COM12",
+                "d1l_target": target,
+                "post_reinstall_d1l_target": target,
+                "expected_target_identity_sha256": target[
+                    "stable_identity_sha256"
+                ],
                 "software_cycle_count": 5,
                 "cold_cycle_count": 3,
-                "claim": (
-                    "same_exact_candidate_non_erasing_reinstall"
-                ),
+                "claim": ("same_exact_candidate_non_erasing_reinstall"),
                 "github_actions_run": RUN_ID,
                 "workflow_run_attempt": RUN_ATTEMPT,
             },
@@ -1082,8 +1292,15 @@ def test_reboot_gate_delegates_to_strict_r11_validator(
 
 
 def protocol_migration_receipt() -> dict:
+    target = d1l_target_snapshot()
     return {
+        "schema": 2,
         "mode": "hardware",
+        "port": "COM12",
+        "d1l_target_before": target,
+        "d1l_target_after": target,
+        "target_identity_sha256": target["stable_identity_sha256"],
+        "target_identity_continuity_ok": True,
         "commit": COMMIT,
         "github_actions_run": RUN_ID,
         "workflow_run_attempt": RUN_ATTEMPT,
@@ -1186,8 +1403,7 @@ def test_protocol_migration_gate_fails_closed_for_missing_invalid_or_rejected(
     )
     assert invalid.ok is False
     assert (
-        "protocol_migration_receipt_invalid_json"
-        in invalid.details["reasons"]
+        "protocol_migration_receipt_invalid_json" in invalid.details["reasons"]
     )
 
     receipt_path = write_json(
@@ -1230,17 +1446,13 @@ def test_protocol_migration_gate_fails_closed_for_missing_invalid_or_rejected(
     ]
 
 
-def write_remote_rf_receipt(
-    tmp_path: Path, *, local: bool = False
-) -> Path:
+def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
     rf = audit.rf_acceptance
     observed = datetime(2026, 7, 23, 15, 0, tzinfo=timezone.utc)
     config = (
         rf.local_peer_config()
         if local
-        else rf.remote_peer_config(
-            ssh_host="neonx@192.168.0.24"
-        )
+        else rf.remote_peer_config(ssh_host="neonx@192.168.0.24")
     )
 
     def status(*, after: bool) -> dict:
@@ -1284,9 +1496,7 @@ def write_remote_rf_receipt(
 
     def status_row(path: Path, value: dict) -> dict:
         digest = audit.sha256_file(path)
-        status_written = rf.parse_aware_timestamp(
-            value["status_written_at"]
-        )
+        status_written = rf.parse_aware_timestamp(value["status_written_at"])
         assert status_written is not None
         return {
             "path": path.relative_to(tmp_path).as_posix(),
@@ -1297,11 +1507,7 @@ def write_remote_rf_receipt(
                 config["hostname"] if local else config["ssh_host"]
             ),
             "source_hostname": config["hostname"],
-            "transport": (
-                rf.LOCAL_PEER_STATUS_TRANSPORT
-                if local
-                else "ssh"
-            ),
+            "transport": (rf.LOCAL_PEER_STATUS_TRANSPORT if local else "ssh"),
             "captured_at": observed.isoformat(),
             **(
                 {
@@ -1369,9 +1575,9 @@ def write_remote_rf_receipt(
         "error": None,
     }
     response_raw = (
-        json.dumps(
-            response, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
+        json.dumps(response, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
         + b"\n"
     )
     request_path = sidecar_dir / "request.jsonl"
@@ -1394,12 +1600,8 @@ def write_remote_rf_receipt(
             **(
                 {
                     "source_peer_pid": 7896,
-                    "source_peer_uid": (
-                        rf.LOCAL_PEER_CONTROL_UID
-                    ),
-                    "source_peer_gid": (
-                        rf.LOCAL_PEER_CONTROL_GID
-                    ),
+                    "source_peer_uid": (rf.LOCAL_PEER_CONTROL_UID),
+                    "source_peer_gid": (rf.LOCAL_PEER_CONTROL_GID),
                 }
                 if local
                 else {}
@@ -1435,9 +1637,7 @@ def write_remote_rf_receipt(
         "validation": control_validation,
     }
     fingerprint = rf.REMOTE_PEER_FINGERPRINT
-    import_command = rf.contact_import_command(
-        rf.REMOTE_PEER_PUBLIC_KEY
-    )
+    import_command = rf.contact_import_command(rf.REMOTE_PEER_PUBLIC_KEY)
     contact = {
         "fingerprint": fingerprint,
         "public_key": rf.REMOTE_PEER_PUBLIC_KEY,
@@ -1509,9 +1709,7 @@ def write_remote_rf_receipt(
                 "seq": 11,
                 "direction": "rx",
                 "kind": "dm_ack",
-                "note": (
-                    f"ack {ack_hash} {rf.RADIO_LISTENER_CONTACT_NAME}"
-                ),
+                "note": (f"ack {ack_hash} {rf.RADIO_LISTENER_CONTACT_NAME}"),
                 "rssi_dbm": -70,
                 "snr_tenths": 80,
                 "path_hash_bytes": 1,
@@ -1571,9 +1769,7 @@ def write_remote_rf_receipt(
                 "ok": True,
                 "cmd": "identity status",
                 "public_key": rf.DEFAULT_D1L_PUBLIC_KEY,
-                "fingerprint": rf.DEFAULT_D1L_PUBLIC_KEY[
-                    :16
-                ].upper(),
+                "fingerprint": rf.DEFAULT_D1L_PUBLIC_KEY[:16].upper(),
             },
         },
         {"command": "contacts", "result": {"ok": True, "entries": []}},
@@ -1593,8 +1789,7 @@ def write_remote_rf_receipt(
         },
         {
             "command": (
-                f"mesh send dm {fingerprint} "
-                "core acceptance test rf_remote_out"
+                f"mesh send dm {fingerprint} core acceptance test rf_remote_out"
             ),
             "result": {"ok": True},
         },
@@ -1633,8 +1828,11 @@ def write_remote_rf_receipt(
             },
         },
     ]
+    target = d1l_target_snapshot()
     report = rf.build_report(
         port="COM12",
+        d1l_target=target,
+        d1l_target_after=target,
         baud=115200,
         peer_status_path=None,
         peer_port=None,
@@ -1744,15 +1942,11 @@ def test_local_rf_gate_recomputes_raw_status_and_control_sidecars(
         0,
         10**100,
         int(
-            datetime(
-                2026, 7, 23, 15, 0, 31, tzinfo=timezone.utc
-            ).timestamp()
+            datetime(2026, 7, 23, 15, 0, 31, tzinfo=timezone.utc).timestamp()
             * 1_000_000_000
         ),
         int(
-            datetime(
-                2026, 7, 23, 14, 59, 0, tzinfo=timezone.utc
-            ).timestamp()
+            datetime(2026, 7, 23, 14, 59, 0, tzinfo=timezone.utc).timestamp()
             * 1_000_000_000
         ),
     ],
@@ -1763,9 +1957,9 @@ def test_local_core_rf_gate_rejects_invalid_source_mtime(
 ):
     receipt = write_remote_rf_receipt(tmp_path, local=True)
     report = json.loads(receipt.read_text(encoding="utf-8"))
-    report["controlled_peer_before_receipt"][
-        "source_mtime_ns"
-    ] = source_mtime_ns
+    report["controlled_peer_before_receipt"]["source_mtime_ns"] = (
+        source_mtime_ns
+    )
     receipt.write_text(json.dumps(report), encoding="utf-8")
 
     gate = audit.rf_gate(
@@ -1779,12 +1973,7 @@ def test_local_core_rf_gate_rejects_invalid_source_mtime(
 
     assert gate.ok is False
     assert gate.details["raw_status_ok"] is False
-    assert (
-        gate.details["derived_checks"][
-            "controlled_peer_observed"
-        ]
-        is False
-    )
+    assert gate.details["derived_checks"]["controlled_peer_observed"] is False
 
 
 @pytest.mark.parametrize(
@@ -1865,6 +2054,7 @@ def test_local_core_rf_gate_rejects_forged_source_binding(
         or gate.details["peer_binding_ok"] is False
     )
 
+
 @pytest.mark.parametrize(
     ("ready", "block"),
     [
@@ -1895,9 +2085,9 @@ def test_remote_rf_gate_rejects_protocol_tx_not_ready_before_rf(
     )
 
     assert gate.ok is False
-    assert gate.details["derived_checks"][
-        "protocol_tx_ready_before_rf"
-    ] is False
+    assert (
+        gate.details["derived_checks"]["protocol_tx_ready_before_rf"] is False
+    )
 
 
 @pytest.mark.parametrize(
@@ -2023,9 +2213,7 @@ def test_active_soak_rejects_mixed_local_rf_receipt_before_capture(
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
-            fingerprint=(
-                audit.rf_acceptance.REMOTE_PEER_FINGERPRINT
-            ),
+            fingerprint=(audit.rf_acceptance.REMOTE_PEER_FINGERPRINT),
         )
 
 
@@ -2063,9 +2251,7 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
     )
     assert qualified == rf_report
 
-    before_observed = datetime(
-        2026, 7, 23, 16, 0, tzinfo=timezone.utc
-    )
+    before_observed = datetime(2026, 7, 23, 16, 0, tzinfo=timezone.utc)
     after_observed = before_observed + timedelta(hours=1)
 
     def status(*, after: bool) -> dict:
@@ -2073,9 +2259,7 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
         return {
             "service": "openclaw-radio-listener",
             "run_id": "pi5-peer-soak-run",
-            "status_written_at": (
-                observed - timedelta(seconds=1)
-            ).isoformat(),
+            "status_written_at": (observed - timedelta(seconds=1)).isoformat(),
             "serial": {
                 "port": rf.REMOTE_PEER_DEVICE,
                 "mesh_connected": True,
@@ -2087,16 +2271,12 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
                     observed - timedelta(seconds=1)
                 ).isoformat(),
                 "last_rx_at": (
-                    "2026-07-23T16:59:58Z"
-                    if after
-                    else "2026-07-23T15:59:58Z"
+                    "2026-07-23T16:59:58Z" if after else "2026-07-23T15:59:58Z"
                 ),
                 "last_rx_kind": "dm",
                 "last_rx_sender": rf.DEFAULT_D1L_PUBLIC_KEY[:12],
                 "last_tx_at": (
-                    "2026-07-23T16:59:59Z"
-                    if after
-                    else "2026-07-23T15:59:59Z"
+                    "2026-07-23T16:59:59Z" if after else "2026-07-23T15:59:59Z"
                 ),
                 "last_tx_kind": "dm",
             },
@@ -2118,9 +2298,7 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
 
     def row(path: Path, observed: datetime, value: dict) -> dict:
         digest = audit.sha256_file(path)
-        written = rf.parse_aware_timestamp(
-            value["status_written_at"]
-        )
+        written = rf.parse_aware_timestamp(value["status_written_at"])
         assert written is not None
         mtime_ns = int(written.timestamp() * 1_000_000_000)
         return {
@@ -2132,11 +2310,7 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
                 config["hostname"] if local else config["ssh_host"]
             ),
             "source_hostname": config["hostname"],
-            "transport": (
-                rf.LOCAL_PEER_STATUS_TRANSPORT
-                if local
-                else "ssh"
-            ),
+            "transport": (rf.LOCAL_PEER_STATUS_TRANSPORT if local else "ssh"),
             "captured_at": observed.isoformat(),
             **(
                 {
@@ -2228,9 +2402,7 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
     assert details["remote_status_validation_ok"] is True
     assert details["canonical_status_sources"] is True
 
-    data["controlled_peer_before_receipt"][
-        "source_hostname"
-    ] = "forged-pi"
+    data["controlled_peer_before_receipt"]["source_hostname"] = "forged-pi"
     ok, details = audit.active_soak_peer_flow_ok(
         data,
         rf_report,
@@ -2238,14 +2410,12 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
     )
     assert ok is False
     assert details["canonical_status_sources"] is False
-    data["controlled_peer_before_receipt"][
-        "source_hostname"
-    ] = rf.REMOTE_PEER_HOSTNAME
+    data["controlled_peer_before_receipt"]["source_hostname"] = (
+        rf.REMOTE_PEER_HOSTNAME
+    )
 
     if local:
-        data["controlled_peer_before_receipt"][
-            "transport"
-        ] = "ssh"
+        data["controlled_peer_before_receipt"]["transport"] = "ssh"
         ok, details = audit.active_soak_peer_flow_ok(
             data,
             rf_report,
@@ -2253,13 +2423,11 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
         )
         assert ok is False
         assert details["canonical_status_sources"] is False
-        data["controlled_peer_before_receipt"][
-            "transport"
-        ] = rf.LOCAL_PEER_STATUS_TRANSPORT
+        data["controlled_peer_before_receipt"]["transport"] = (
+            rf.LOCAL_PEER_STATUS_TRANSPORT
+        )
 
-        rf_report["controlled_peer"][
-            "ssh_host"
-        ] = rf.REMOTE_PEER_SSH_HOST
+        rf_report["controlled_peer"]["ssh_host"] = rf.REMOTE_PEER_SSH_HOST
         ok, details = audit.active_soak_peer_flow_ok(
             data,
             rf_report,
@@ -2276,11 +2444,7 @@ def test_pinned_active_soak_recomputes_status_sidecars_and_binding(
         {
             "size": after_path.stat().st_size,
             "sha256": tampered_digest,
-            (
-                "source_sha256"
-                if local
-                else "remote_sha256"
-            ): tampered_digest,
+            ("source_sha256" if local else "remote_sha256"): tampered_digest,
         }
     )
     ok, details = audit.active_soak_peer_flow_ok(
@@ -2322,6 +2486,7 @@ def audit_args(tmp_path: Path) -> argparse.Namespace:
         actions_run_receipt=None,
         core_smoke=None,
         core_ui=None,
+        core_scroll=None,
         manual_review=None,
         reboot_receipt=None,
         protocol_migration_receipt=None,
@@ -2333,6 +2498,116 @@ def audit_args(tmp_path: Path) -> argparse.Namespace:
         defect_receipt=None,
         out=None,
     )
+
+
+def test_exact_d1l_target_accepts_only_two_canonical_cli_values():
+    assert audit.exact_d1l_target("COM12") == "COM12"
+    assert (
+        audit.exact_d1l_target(d1l_serial_target.POSIX_D1L_TARGET)
+        == d1l_serial_target.POSIX_D1L_TARGET
+    )
+    for rejected in (
+        "com12",
+        "COM12 ",
+        "/dev/ttyUSB2",
+        d1l_serial_target.POSIX_D1L_TARGET.upper(),
+    ):
+        with pytest.raises(ValueError, match="requires exactly"):
+            audit.exact_d1l_target(rejected)
+
+
+def test_physical_target_identity_gate_requires_one_digest(tmp_path):
+    target = d1l_target_snapshot()
+    identity = target["stable_identity_sha256"]
+    payloads = {
+        "flash_receipt": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target": target,
+            "d1l_target_before": target,
+            "d1l_target_after": target,
+            "target_identity_continuity_ok": True,
+        },
+        "core_smoke": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target": target,
+        },
+        "core_ui": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target": target,
+        },
+        "core_scroll": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target": target,
+        },
+        "manual_review": {
+            "schema": 4,
+            "port": "COM12",
+            "d1l_target": target,
+        },
+        "reboot_receipt": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target": target,
+            "post_reinstall_d1l_target": target,
+            "expected_target_identity_sha256": identity,
+        },
+        "protocol_migration": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target_before": target,
+            "d1l_target_after": target,
+            "target_identity_sha256": identity,
+            "target_identity_continuity_ok": True,
+        },
+        "rf_receipt": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target": target,
+            "d1l_target_after": target,
+            "target_identity_continuity_ok": True,
+        },
+        "active_soak": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target": target,
+            "d1l_target_after": target,
+            "target_identity_continuity_ok": True,
+        },
+        "idle_soak": {
+            "schema": 2,
+            "port": "COM12",
+            "d1l_target": target,
+            "d1l_target_after": target,
+            "target_identity_continuity_ok": True,
+        },
+    }
+    paths = {
+        name: write_json(tmp_path / f"{name}.json", payload)
+        for name, payload in payloads.items()
+    }
+    gate = audit.physical_target_identity_gate(
+        root=tmp_path,
+        expected_target="COM12",
+        paths=paths,
+    )
+    assert gate.ok is True
+    assert gate.details["stable_identity_sha256"] == identity
+
+    other = d1l_target_snapshot(hostname="other-host")
+    payloads["active_soak"]["d1l_target"] = other
+    payloads["active_soak"]["d1l_target_after"] = other
+    write_json(paths["active_soak"], payloads["active_soak"])
+    gate = audit.physical_target_identity_gate(
+        root=tmp_path,
+        expected_target="COM12",
+        paths=paths,
+    )
+    assert gate.ok is False
+    assert gate.details["one_stable_identity"] is False
 
 
 def patch_all_gates(monkeypatch, tmp_path: Path, *, one_failure=False):
@@ -2352,13 +2627,12 @@ def patch_all_gates(monkeypatch, tmp_path: Path, *, one_failure=False):
         "actions_run_metadata_gate",
         "core_immutable_source_inputs_gate",
         "core_flash_receipt_gate",
+        "physical_target_identity_gate",
     ):
         monkeypatch.setattr(
             audit,
             name,
-            lambda *_args, **_kwargs: audit.CoreGate(
-                name, True, name
-            ),
+            lambda *_args, **_kwargs: audit.CoreGate(name, True, name),
         )
     for name in (
         "immutable_release_source_inputs_gate",
@@ -2380,6 +2654,7 @@ def patch_all_gates(monkeypatch, tmp_path: Path, *, one_failure=False):
     for name in (
         "core_smoke_gate",
         "core_ui_gate",
+        "core_scroll_gate",
         "manual_review_gate",
         "reboot_persistence_gate",
         "protocol_migration_gate",
@@ -2407,10 +2682,19 @@ def test_core_audit_ready_field_is_independent_and_full_remains_false(
     assert report["github_actions_run_attempt"] == int(RUN_ATTEMPT)
     assert report["workflow_run_attempt"] == int(RUN_ATTEMPT)
     assert (
-        report["github_actions_run_attempt"]
-        == report["workflow_run_attempt"]
+        report["github_actions_run_attempt"] == report["workflow_run_attempt"]
     )
     assert "ready_for_public_release" not in report
+
+
+def test_core_audit_preserves_exact_posix_target(tmp_path, monkeypatch):
+    patch_all_gates(monkeypatch, tmp_path)
+    args = audit_args(tmp_path)
+    args.d1l_port = d1l_serial_target.POSIX_D1L_TARGET
+    report = audit.build_audit(args)
+
+    assert report["core_release_ready"] is True
+    assert report["d1l_port"] == d1l_serial_target.POSIX_D1L_TARGET
 
 
 def test_core_audit_fails_closed_when_one_core_gate_fails(
@@ -2448,9 +2732,8 @@ def test_core_audit_fails_closed_when_protocol_migration_gate_fails(
         for gate in report["gates"]
     )
 
-def test_core_audit_fails_closed_for_red_non_p0_gate(
-    tmp_path, monkeypatch
-):
+
+def test_core_audit_fails_closed_for_red_non_p0_gate(tmp_path, monkeypatch):
     patch_all_gates(monkeypatch, tmp_path)
     monkeypatch.setattr(
         audit,
@@ -2481,17 +2764,19 @@ def test_defect_gate_delegates_to_strict_raw_api_validator(
 
     def validator(receipt, **kwargs):
         calls.append((receipt, kwargs))
-        return True, [], {
-            "raw_capture_ok": True,
-            "release_gate_ok": True,
-        }
+        return (
+            True,
+            [],
+            {
+                "raw_capture_ok": True,
+                "release_gate_ok": True,
+            },
+        )
 
     monkeypatch.setattr(
         audit, "validate_core_github_defect_receipt", validator
     )
-    gate = audit.defect_gate(
-        path, tmp_path, COMMIT, RUN_ID, RUN_ATTEMPT
-    )
+    gate = audit.defect_gate(path, tmp_path, COMMIT, RUN_ID, RUN_ATTEMPT)
 
     assert gate.ok is True
     assert calls == [
@@ -2528,16 +2813,12 @@ def test_defect_gate_delegates_to_strict_raw_api_validator(
             ValueError("tampered")
         ),
     )
-    raised = audit.defect_gate(
-        path, tmp_path, COMMIT, RUN_ID, RUN_ATTEMPT
-    )
+    raised = audit.defect_gate(path, tmp_path, COMMIT, RUN_ID, RUN_ATTEMPT)
     assert raised.ok is False
     assert raised.details["reasons"] == [
         "strict_r8_defect_validator_failed:ValueError"
     ]
-    monkeypatch.setattr(
-        audit, "validate_core_github_defect_receipt", None
-    )
+    monkeypatch.setattr(audit, "validate_core_github_defect_receipt", None)
     assert not audit.defect_gate(
         path, tmp_path, COMMIT, RUN_ID, RUN_ATTEMPT
     ).ok
