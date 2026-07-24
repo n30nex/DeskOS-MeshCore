@@ -112,6 +112,20 @@ PROTOCOL_POLICY_SOURCE_BLOBS = (
 MAX_PREDECESSOR_ALLOCATIONS_PER_SECOND = 1000
 CONFIRMATION = "CONFIRM-EXACT-DEVICE-PROTOCOL-UPPER-BOUND"
 MAX_RAW_LINE_BYTES = 131072
+REJECTED_RECEIPT_TRUE_FLAGS = (
+    "dry_run",
+    "simulated",
+    "simulation",
+    "source_inspection",
+    "source_only",
+    "fabricated",
+    "edited",
+    "predecessor",
+)
+REJECTED_RECEIPT_PRESENT_FIELDS = (
+    "execution_error",
+    "validation_errors",
+)
 
 
 def utc_now() -> str:
@@ -1086,6 +1100,14 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
         return False, ["receipt is not an object"]
     if _value_contains_confirmation(receipt):
         errors.append("confirmation phrase leaked into receipt")
+    if receipt.get("mutation_outcome_uncertain") is True:
+        errors.append("receipt mutation_outcome_uncertain is true")
+    for field in REJECTED_RECEIPT_PRESENT_FIELDS:
+        if field in receipt:
+            errors.append(f"receipt contains rejected field {field}")
+    for flag in REJECTED_RECEIPT_TRUE_FLAGS:
+        if receipt.get(flag) is True:
+            errors.append(f"receipt rejected flag {flag} is true")
     commit = exact_commit(receipt.get("commit"))
     run_id = str(receipt.get("github_actions_run") or "")
     attempt = str(receipt.get("workflow_run_attempt") or "")
@@ -1103,6 +1125,8 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
         "ok": True,
         "closure_eligible": True,
         "physical_observed": True,
+        "mutation_started": True,
+        "mutation_outcome_uncertain": False,
         "release_closure_sufficient": False,
         "hardware_required": True,
         "automatic_migration": False,
@@ -1317,6 +1341,14 @@ def _strict_receipt_shape_errors(
     errors: list[str] = []
     if _value_contains_confirmation(receipt):
         errors.append("confirmation phrase leaked into receipt")
+    if receipt.get("mutation_outcome_uncertain") is True:
+        errors.append("receipt mutation_outcome_uncertain is true")
+    for field in REJECTED_RECEIPT_PRESENT_FIELDS:
+        if field in receipt:
+            errors.append(f"receipt contains rejected field {field}")
+    for flag in REJECTED_RECEIPT_TRUE_FLAGS:
+        if receipt.get(flag) is True:
+            errors.append(f"receipt rejected flag {flag} is true")
     commit = exact_commit(receipt.get("commit"))
     run_id = receipt.get("github_actions_run")
     run_attempt = receipt.get("workflow_run_attempt")
@@ -1338,6 +1370,8 @@ def _strict_receipt_shape_errors(
         "ok": True,
         "closure_eligible": True,
         "physical_observed": True,
+        "mutation_started": True,
+        "mutation_outcome_uncertain": False,
         "release_closure_sufficient": False,
         "hardware_required": True,
         "automatic_migration": False,
@@ -1662,6 +1696,7 @@ def _minimal_redacted_failure(
         "ok": False,
         "closure_eligible": False,
         "release_closure_sufficient": False,
+        "mutation_started": mutation_started,
         "mutation_outcome_uncertain": mutation_started,
         "redaction_applied": True,
         "redaction_reason": "sensitive_serial_material_omitted",
@@ -1859,6 +1894,8 @@ def _execute_migration_reserved(
         "ok": mutation_error is None,
         "closure_eligible": mutation_error is None,
         "physical_observed": True,
+        "mutation_started": mutation_state["started"],
+        "mutation_outcome_uncertain": mutation_error is not None,
         "release_closure_sufficient": False,
         "hardware_required": True,
         "port": D1L_CORE_PORT,
@@ -1894,6 +1931,8 @@ def _execute_migration_reserved(
     if not valid:
         report["ok"] = False
         report["closure_eligible"] = False
+        if mutation_state["started"]:
+            report["mutation_outcome_uncertain"] = True
         report["validation_errors"] = errors
     return write_report_safely(
         out,

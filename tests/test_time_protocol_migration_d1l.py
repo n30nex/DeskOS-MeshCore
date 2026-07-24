@@ -363,6 +363,8 @@ def valid_receipt(root: Path):
         "ok": True,
         "closure_eligible": True,
         "physical_observed": True,
+        "mutation_started": True,
+        "mutation_outcome_uncertain": False,
         "release_closure_sufficient": False,
         "hardware_required": True,
         "port": "COM12",
@@ -517,6 +519,34 @@ def test_receipt_rejects_confirmation_phrase_leak(tmp_path):
     assert "confirmation phrase leaked into receipt" in errors
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("mutation_outcome_uncertain", True),
+        ("execution_error", {"phase": "postcheck"}),
+        ("validation_errors", []),
+        ("dry_run", True),
+        ("simulated", True),
+        ("simulation", True),
+        ("source_inspection", True),
+        ("source_only", True),
+        ("fabricated", True),
+        ("edited", True),
+        ("predecessor", True),
+    ),
+)
+def test_receipt_rejects_contradictory_failure_or_simulation_markers(
+    tmp_path,
+    field,
+    value,
+):
+    row = valid_receipt(tmp_path)
+    row[field] = value
+    ok, errors = migration.validate_receipt(row, root=tmp_path)
+    assert not ok
+    assert any(field in error for error in errors)
+
+
 def test_receipt_rejects_cross_row_confirmation_reconstruction(tmp_path):
     row = valid_receipt(tmp_path)
     secret = migration.CONFIRMATION.encode("ascii")
@@ -567,6 +597,25 @@ def test_receipt_requires_exact_com12_snapshot_device(tmp_path):
     ],
 )
 def test_receipt_rejects_bool_integer_type_confusion(
+    tmp_path,
+    field,
+    value,
+):
+    row = valid_receipt(tmp_path)
+    row[field] = value
+    ok, errors = migration.validate_receipt(row, root=tmp_path)
+    assert not ok
+    assert any(field in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("mutation_started", False),
+        ("mutation_outcome_uncertain", True),
+    ],
+)
+def test_receipt_rejects_contradictory_mutation_truth(
     tmp_path,
     field,
     value,
@@ -929,6 +978,164 @@ def test_post_preflight_serial_error_persists_uncertain_mutation_receipt(
     assert out.exists()
     assert not (tmp_path / ".out.json.reservation").exists()
     assert fake.writes[-1].startswith(b"time migrate-legacy")
+
+
+def execute_fake_migration(tmp_path, monkeypatch, results):
+    fake = FakeSerial(results)
+    module = FakeSerialModule(fake)
+    monkeypatch.setattr(
+        migration,
+        "predecessor_source_metadata",
+        lambda _root, _commit: source(),
+    )
+    out = tmp_path / "out.json"
+    row = migration.execute_migration(
+        root=tmp_path,
+        out=out,
+        serial_module=module,
+        port_lister=lambda: [port()],
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        expected_legacy_value=LEGACY,
+        confirmed_upper_bound=UPPER,
+        attest_exact_device_upper_bound=True,
+        timeout=1.0,
+        source_git=valid_receipt(tmp_path)["git"],
+        actions_metadata_path=install_actions_receipt(tmp_path),
+        now=lambda: "2026-07-23T21:00:00Z",
+    )
+    return row, fake, out
+
+
+def assert_uncertain_mutation_failure(row, out):
+    assert row["ok"] is False
+    assert row["closure_eligible"] is False
+    assert row["mutation_started"] is True
+    assert row["mutation_outcome_uncertain"] is True
+    assert row["validation_errors"]
+    assert out.exists()
+    assert json.loads(out.read_text(encoding="ascii")) == row
+
+
+def test_post_preflight_negative_result_persists_uncertain_mutation_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    rejected = mutation_result()
+    rejected["ok"] = False
+    rejected["code"] = "NVS_WRITE_FAILED"
+    row, fake, out = execute_fake_migration(
+        tmp_path,
+        monkeypatch,
+        [
+            version(False),
+            health(),
+            before_status(),
+            rejected,
+            after_status(),
+            version(True),
+            health(),
+        ],
+    )
+
+    assert_uncertain_mutation_failure(row, out)
+    assert any(value.startswith(b"time migrate-legacy") for value in fake.writes)
+
+
+def test_post_preflight_malformed_result_persists_uncertain_mutation_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    malformed = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "time migrate-legacy",
+    }
+    row, fake, out = execute_fake_migration(
+        tmp_path,
+        monkeypatch,
+        [
+            version(False),
+            health(),
+            before_status(),
+            malformed,
+            after_status(),
+            version(True),
+            health(),
+        ],
+    )
+
+    assert_uncertain_mutation_failure(row, out)
+    assert any(value.startswith(b"time migrate-legacy") for value in fake.writes)
+
+
+def test_post_preflight_timeout_result_persists_uncertain_mutation_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    def timeout_result(ser, *_args, **_kwargs):
+        ser.write(b"time migrate-legacy post-send-timeout\n")
+        ser.flush()
+        return {
+            "command_label": (
+                "time migrate-legacy <redacted-exact-device-attestation>"
+            ),
+            "command_redacted": True,
+            "expected_cmd": "time migrate-legacy",
+            "started_at": STAMP,
+            "ended_at": STAMP,
+            "raw_lines": [],
+            "result": {
+                "schema": 1,
+                "ok": False,
+                "cmd": "time migrate-legacy",
+                "code": "TIMEOUT_OR_INVALID_RAW",
+            },
+            "confirmation_echo_detected": False,
+        }
+
+    monkeypatch.setattr(migration, "migration_command", timeout_result)
+    row, fake, out = execute_fake_migration(
+        tmp_path,
+        monkeypatch,
+        [
+            version(False),
+            health(),
+            before_status(),
+            after_status(),
+            version(True),
+            health(),
+        ],
+    )
+
+    assert_uncertain_mutation_failure(row, out)
+    assert any(value.startswith(b"time migrate-legacy") for value in fake.writes)
+
+
+def test_post_mutation_failed_status_persists_uncertain_mutation_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    failed_status = after_status()
+    failed_status["protocol_tx_ready"] = False
+    failed_status["protocol_tx_block"] = "migration_incomplete"
+    row, fake, out = execute_fake_migration(
+        tmp_path,
+        monkeypatch,
+        [
+            version(False),
+            health(),
+            before_status(),
+            mutation_result(),
+            failed_status,
+            version(True),
+            health(),
+        ],
+    )
+
+    assert_uncertain_mutation_failure(row, out)
+    assert any(value.startswith(b"time migrate-legacy") for value in fake.writes)
 
 
 def test_failed_evidence_write_after_mutation_leaves_reservation(tmp_path, monkeypatch):
