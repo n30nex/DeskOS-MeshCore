@@ -28,7 +28,7 @@ REVIEWED_CORE_RELEASE_PORT_LITERALS = {
     "scripts/package_release_d1l.py": {
         "COM8", "COM11", "COM12", "COM16", "COM29",
     },
-    "scripts/rf_full_acceptance_d1l.py": {"COM12", "COM15", "COM16"},
+    "scripts/rf_full_acceptance_d1l.py": {"COM15", "COM16"},
     "scripts/soak_d1l.py": {"COM12", "COM15"},
 }
 
