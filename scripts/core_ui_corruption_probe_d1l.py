@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exact-candidate Core 1.0 UI corruption/navigation probe for D1L COM12."""
+"""Exact-candidate Core 1.0 UI probe for the verified D1L target."""
 
 from __future__ import annotations
 
@@ -7,21 +7,27 @@ import argparse
 import json
 import os
 import time
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 try:
     from artifact_metadata import git_metadata, stamp_report
     from core_smoke_d1l import (
         CORE_RELEASE_PROFILE,
+        D1L_CORE_PORT,
+        D1L_CORE_POSIX_TARGET,
         SD_HISTORY_MODES,
         crashlog_clean,
         enforce_core_port,
         exact_identity,
         exact_unsupported_result,
         exact_version_identity,
+        resolve_core_target,
         send_exact_console_command,
     )
+    from d1l_serial_target import safe_slug
     from smoke_d1l import exact_commit, open_d1l_serial, send_console_command
     from ui_corruption_probe_d1l import (
         data_refresh_step,
@@ -35,14 +41,18 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import git_metadata, stamp_report
     from scripts.core_smoke_d1l import (
         CORE_RELEASE_PROFILE,
+        D1L_CORE_PORT,
+        D1L_CORE_POSIX_TARGET,
         SD_HISTORY_MODES,
         crashlog_clean,
         enforce_core_port,
         exact_identity,
         exact_unsupported_result,
         exact_version_identity,
+        resolve_core_target,
         send_exact_console_command,
     )
+    from scripts.d1l_serial_target import safe_slug
     from scripts.smoke_d1l import exact_commit, open_d1l_serial, send_console_command
     from scripts.ui_corruption_probe_d1l import (
         data_refresh_step,
@@ -342,14 +352,18 @@ def command_plan(
     for probe in unavailable_plan:
         commands.extend(("ui status", probe["command"], "ui status"))
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_ui_corruption_probe_plan",
         "mode": "plan",
         "ok": False,
         "closure_eligible": False,
         "hardware_required": True,
         "physical_observed": False,
-        "port": "COM12",
+        "port": D1L_CORE_PORT,
+        "supported_targets": [
+            D1L_CORE_PORT,
+            D1L_CORE_POSIX_TARGET,
+        ],
         "release_profile": CORE_RELEASE_PROFILE,
         "rounds": rounds,
         "release_min_rounds": RELEASE_MIN_ROUNDS,
@@ -367,6 +381,8 @@ def command_plan(
 
 def _identity_failure_report(
     *,
+    port: str,
+    d1l_target: dict[str, Any],
     expected_commit: str,
     expected_sd_history_mode: str | None,
     version: dict,
@@ -376,7 +392,7 @@ def _identity_failure_report(
 ) -> dict:
     observed_sd_mode = version.get("sd_history_mode")
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_ui_corruption_probe",
         "mode": "hardware",
         "ok": False,
@@ -384,7 +400,8 @@ def _identity_failure_report(
         "hardware_required": True,
         "physical_observed": True,
         "identity_preflight_only": True,
-        "port": "COM12",
+        "port": port,
+        "d1l_target": d1l_target,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": observed_sd_mode,
         "expected_sd_history_mode": expected_sd_history_mode,
@@ -421,9 +438,12 @@ def run_probe(
     expected_sd_history_mode: str | None,
     github_run_id: str,
     workflow_run_attempt: str,
+    port_lister: Callable[[], Iterable[object]] | None = None,
+    platform_name: str | None = None,
 ) -> dict:
     try:
         import serial
+        from serial.tools import list_ports
     except ImportError as exc:
         raise SystemExit(
             "pyserial is required for Core UI hardware validation: "
@@ -462,6 +482,13 @@ def run_probe(
         raise ValueError(
             "Core UI probe must run from the exact clean candidate source"
         )
+    d1l_target = resolve_core_target(
+        port,
+        port_lister=port_lister
+        or (lambda: list_ports.comports(include_links=True)),
+        platform_name=platform_name,
+    )
+    port = d1l_target["requested_path"]
 
     events: list[dict] = []
     setup_events: list[dict] = []
@@ -488,6 +515,8 @@ def run_probe(
             )
         ):
             return _identity_failure_report(
+                port=port,
+                d1l_target=d1l_target,
                 expected_commit=normalized_commit,
                 expected_sd_history_mode=expected_sd_history_mode,
                 version=version,
@@ -499,6 +528,8 @@ def run_probe(
             health_preflight, normalized_commit, required_sd_mode
         ):
             return _identity_failure_report(
+                port=port,
+                d1l_target=d1l_target,
                 expected_commit=normalized_commit,
                 expected_sd_history_mode=expected_sd_history_mode,
                 version=version,
@@ -704,7 +735,7 @@ def run_probe(
         + telemetry_failures
     )
     report = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_ui_corruption_probe",
         "mode": "hardware",
         "ok": not all_failures,
@@ -713,6 +744,7 @@ def run_probe(
         "physical_observed": True,
         "identity_preflight_only": False,
         "port": port,
+        "d1l_target": d1l_target,
         "baud": baud,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
         "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
@@ -789,18 +821,22 @@ def run_probe(
     return report
 
 
-def resolve_out_path(out_arg: str | None) -> Path:
+def resolve_out_path(
+    out_arg: str | None,
+    target: str = D1L_CORE_PORT,
+) -> Path:
     root = Path(__file__).resolve().parents[1]
     if out_arg:
         path = Path(out_arg)
         return path if path.is_absolute() else root / path
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    slug = safe_slug(enforce_core_port(target))
     return (
         root
         / "artifacts"
         / "hardware"
-        / "com12"
-        / f"core_ui_corruption_probe_{stamp}_COM12.json"
+        / slug
+        / f"core_ui_corruption_probe_{stamp}_{slug}.json"
     )
 
 
@@ -867,7 +903,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     root = Path(__file__).resolve().parents[1]
     stamp_report(report, root)
-    out_path = resolve_out_path(args.out)
+    out_path = resolve_out_path(args.out, report["port"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="ascii")
     print(json.dumps({"ok": report["ok"], "out": str(out_path)}, indent=2))

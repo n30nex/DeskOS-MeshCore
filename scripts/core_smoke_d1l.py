@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed Core 1.0 hardware smoke runner for the D1L on COM12."""
+"""Fail-closed Core 1.0 hardware smoke runner for the verified D1L target."""
 
 from __future__ import annotations
 
@@ -7,11 +7,19 @@ import argparse
 import json
 import os
 import time
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 try:
     from artifact_metadata import git_metadata, stamp_report
+    from d1l_serial_target import (
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+        resolve_target,
+        safe_slug,
+    )
     from smoke_d1l import (
         exact_commit,
         open_d1l_serial,
@@ -25,6 +33,12 @@ try:
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import git_metadata, stamp_report
+    from scripts.d1l_serial_target import (
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+        resolve_target,
+        safe_slug,
+    )
     from scripts.smoke_d1l import (
         exact_commit,
         open_d1l_serial,
@@ -39,7 +53,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 CORE_RELEASE_PROFILE = "core_1_0"
-D1L_CORE_PORT = "COM12"
+D1L_CORE_PORT = WINDOWS_D1L_TARGET
+D1L_CORE_POSIX_TARGET = POSIX_D1L_TARGET
 EXPECTED_IDF_VERSION = "v5.5.4"
 SD_HISTORY_MODES = frozenset({"disabled", "conditional", "supported_optional"})
 
@@ -112,6 +127,8 @@ DISABLED_SD_UNAVAILABLE_STATUS_PROBES = (
 def normalize_port(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
+    if value.strip() == D1L_CORE_POSIX_TARGET:
+        return D1L_CORE_POSIX_TARGET
     normalized = value.strip().upper().replace("/", "\\")
     for prefix in ("\\\\.\\", "\\\\?\\"):
         if normalized.startswith(prefix):
@@ -122,12 +139,29 @@ def normalize_port(value: object) -> str | None:
 
 def enforce_core_port(value: object) -> str:
     normalized = normalize_port(value)
-    if normalized != D1L_CORE_PORT:
+    if normalized not in {D1L_CORE_PORT, D1L_CORE_POSIX_TARGET}:
         raise ValueError(
-            f"Core 1.0 D1L validation requires {D1L_CORE_PORT}; got "
+            "Core 1.0 D1L validation requires COM12 or the exact "
+            f"{D1L_CORE_POSIX_TARGET} by-id target; got "
             f"{normalized or '<missing>'}"
         )
     return normalized
+
+
+def resolve_core_target(
+    value: object,
+    *,
+    port_lister: Callable[[], Iterable[object]],
+    platform_name: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the selected target before any serial endpoint is opened."""
+
+    requested = enforce_core_port(value)
+    return resolve_target(
+        requested,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
 
 
 def exact_identity(
@@ -298,7 +332,7 @@ def unavailable_status_probe_plan(sd_history_mode: str) -> list[dict]:
 def command_plan(sd_history_mode: str) -> dict:
     """Return a non-closing plan suitable for review and contract tests."""
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_smoke_plan",
         "mode": "plan",
         "ok": False,
@@ -306,6 +340,10 @@ def command_plan(sd_history_mode: str) -> dict:
         "hardware_required": True,
         "physical_observed": False,
         "port": D1L_CORE_PORT,
+        "supported_targets": [
+            D1L_CORE_PORT,
+            D1L_CORE_POSIX_TARGET,
+        ],
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": sd_history_mode,
         "preflight_commands": ["version", "health"],
@@ -463,11 +501,12 @@ def identity_failure_report(
     version: dict,
     github_run_id: str,
     workflow_run_attempt: str,
+    d1l_target: dict[str, Any],
     health: dict | None = None,
 ) -> dict:
     health = health or {}
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_smoke",
         "mode": "hardware",
         "ok": False,
@@ -475,6 +514,7 @@ def identity_failure_report(
         "hardware_required": True,
         "physical_observed": True,
         "port": port,
+        "d1l_target": d1l_target,
         "baud": baud,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": expected_sd_history_mode,
@@ -505,9 +545,12 @@ def run_core_smoke(
     manual_touch: bool,
     github_run_id: str,
     workflow_run_attempt: str,
+    port_lister: Callable[[], Iterable[object]] | None = None,
+    platform_name: str | None = None,
 ) -> dict:
     try:
         import serial
+        from serial.tools import list_ports
     except ImportError as exc:
         raise SystemExit(
             "pyserial is required for Core hardware smoke: "
@@ -539,6 +582,13 @@ def run_core_smoke(
         raise ValueError(
             "Core smoke must run from the exact clean candidate source"
         )
+    d1l_target = resolve_core_target(
+        port,
+        port_lister=port_lister
+        or (lambda: list_ports.comports(include_links=True)),
+        platform_name=platform_name,
+    )
+    port = d1l_target["requested_path"]
 
     results: list[dict] = []
     probe_results: list[dict] = []
@@ -564,6 +614,7 @@ def run_core_smoke(
                 version=version,
                 github_run_id=str(github_run_id),
                 workflow_run_attempt=str(workflow_run_attempt),
+                d1l_target=d1l_target,
             )
         health_preflight = send_console_command(ser, "health", timeout)
         if not exact_identity(
@@ -578,6 +629,7 @@ def run_core_smoke(
                 health=health_preflight,
                 github_run_id=str(github_run_id),
                 workflow_run_attempt=str(workflow_run_attempt),
+                d1l_target=d1l_target,
             )
         results.extend([version, health_preflight])
 
@@ -650,7 +702,7 @@ def run_core_smoke(
         and health_final.get("ui_ready") is True
     )
     report = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_smoke",
         "mode": "hardware",
         "ok": bool(
@@ -666,6 +718,7 @@ def run_core_smoke(
         "hardware_required": True,
         "physical_observed": True,
         "port": port,
+        "d1l_target": d1l_target,
         "baud": baud,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": expected_sd_history_mode,
@@ -706,13 +759,23 @@ def run_core_smoke(
     return report
 
 
-def resolve_out_path(out_arg: str | None) -> Path:
+def resolve_out_path(
+    out_arg: str | None,
+    target: str = D1L_CORE_PORT,
+) -> Path:
     root = Path(__file__).resolve().parents[1]
     if out_arg:
         path = Path(out_arg)
         return path if path.is_absolute() else root / path
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return root / "artifacts" / "hardware" / "com12" / f"core_smoke_{stamp}_COM12.json"
+    slug = safe_slug(enforce_core_port(target))
+    return (
+        root
+        / "artifacts"
+        / "hardware"
+        / slug
+        / f"core_smoke_{stamp}_{slug}.json"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -765,7 +828,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     root = Path(__file__).resolve().parents[1]
     stamp_report(report, root)
-    out_path = resolve_out_path(args.out)
+    out_path = resolve_out_path(args.out, report["port"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="ascii")
     print(json.dumps({"ok": report["ok"], "out": str(out_path)}, indent=2))

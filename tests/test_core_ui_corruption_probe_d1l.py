@@ -1,3 +1,5 @@
+import pytest
+
 from scripts import core_ui_corruption_probe_d1l as core_ui
 
 
@@ -21,6 +23,7 @@ def test_core_ui_sequence_is_exact_and_excludes_unavailable_destinations():
 def test_core_ui_plan_is_non_closing_and_only_probes_excluded_ui_fail_closed():
     plan = core_ui.command_plan(20)
 
+    assert plan["schema"] == 2
     assert plan["ok"] is False
     assert plan["closure_eligible"] is False
     assert plan["hardware_required"] is True
@@ -255,3 +258,56 @@ def test_core_compose_result_requires_probe_tx_suppression_and_raw_geometry():
     public = _compose_result("public")
     public["public_rf_tx"] = True
     assert not core_ui.core_compose_result_ok(public, "public")
+
+
+def test_core_ui_invalid_target_fails_before_serial_open(monkeypatch):
+    commit = "a" * 40
+    monkeypatch.setattr(
+        core_ui,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        core_ui,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("invalid target must fail before serial open")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="PID"):
+        core_ui.run_probe(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            rounds=20,
+            settle_sec=0.0,
+            poll_sec=0.01,
+            clear_crashlog_before_start=False,
+            skip_data_canary=False,
+            expected_commit=commit,
+            expected_sd_history_mode="disabled",
+            github_run_id="123",
+            workflow_run_attempt="1",
+            platform_name="nt",
+            port_lister=lambda: [
+                {
+                    "device": "COM12",
+                    "vid": 0x1A86,
+                    "pid": 0x0001,
+                    "serial_number": "wrong",
+                    "hwid": "wrong",
+                    "location": "1-9",
+                }
+            ],
+        )
+
+
+def test_core_ui_pi_output_path_uses_safe_slug():
+    path = core_ui.resolve_out_path(None, core_ui.D1L_CORE_POSIX_TARGET)
+    assert "dev-serial-by-id-usb-1a86-usb-serial-if00-port0" in str(path)
+    assert core_ui.D1L_CORE_POSIX_TARGET not in str(path)

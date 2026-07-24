@@ -6,11 +6,35 @@ from scripts import core_smoke_d1l as core_smoke
 COMMIT = "a" * 40
 
 
+def windows_target():
+    return core_smoke.resolve_core_target(
+        "COM12",
+        platform_name="nt",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+                "location": "1-2",
+            }
+        ],
+    )
+
+
 def test_core_smoke_requires_exact_com12():
     assert core_smoke.enforce_core_port(" com12 ") == "COM12"
     assert core_smoke.enforce_core_port(r"\\.\COM12") == "COM12"
+    assert (
+        core_smoke.enforce_core_port(core_smoke.D1L_CORE_POSIX_TARGET)
+        == core_smoke.D1L_CORE_POSIX_TARGET
+    )
     for port in (None, "COM8", "COM11", "COM16", "COM29", "COM30"):
         with pytest.raises(ValueError, match="requires COM12"):
+            core_smoke.enforce_core_port(port)
+    for port in ("/dev/ttyUSB2", "/dev/ttyACM0", "/dev/serial/by-id/other"):
+        with pytest.raises(ValueError, match="exact"):
             core_smoke.enforce_core_port(port)
 
 
@@ -148,8 +172,11 @@ def test_identity_failure_report_cannot_claim_closure():
         version={"ok": True, "build_commit": "b" * 40},
         github_run_id="123456789",
         workflow_run_attempt="1",
+        d1l_target=windows_target(),
     )
 
+    assert report["schema"] == 2
+    assert report["d1l_target"]["stable_identity_sha256"]
     assert report["ok"] is False
     assert report["closure_eligible"] is False
     assert report["identity_preflight_only"] is True
@@ -172,3 +199,55 @@ def test_hardware_smoke_rejects_zero_run_before_serial_open():
             github_run_id="0",
             workflow_run_attempt="1",
         )
+
+
+def test_invalid_hardware_target_fails_before_serial_open(monkeypatch):
+    monkeypatch.setattr(
+        core_smoke,
+        "git_metadata",
+        lambda _root: {
+            "commit": COMMIT,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        core_smoke,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("invalid identity must fail before serial open")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="VID"):
+        core_smoke.run_core_smoke(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            expected_commit=COMMIT,
+            expected_sd_history_mode="disabled",
+            persistence_test=False,
+            manual_touch=False,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            platform_name="nt",
+            port_lister=lambda: [
+                {
+                    "device": "COM12",
+                    "vid": 0x10C4,
+                    "pid": 0xEA60,
+                    "serial_number": "wrong",
+                    "hwid": "wrong",
+                    "location": "1-9",
+                }
+            ],
+        )
+
+
+def test_pi_target_output_path_never_embeds_absolute_path():
+    path = core_smoke.resolve_out_path(
+        None,
+        core_smoke.D1L_CORE_POSIX_TARGET,
+    )
+    assert "dev-serial-by-id-usb-1a86-usb-serial-if00-port0" in str(path)
+    assert core_smoke.D1L_CORE_POSIX_TARGET not in str(path)
