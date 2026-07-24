@@ -62,7 +62,7 @@ The recommended target is a stable **Core 1.0** release with:
 - packet diagnostics;
 - Canada/USA radio configuration;
 - retained NVS storage and reboot persistence;
-- optional FAT32 SD-backed history only if the short exact-candidate SD gate passes;
+- retained NVS history with SD history disabled;
 - crashlog, health telemetry, USB recovery, checksums, SBOM, and provenance.
 
 The following must be absent from the supported Core 1.0 surface:
@@ -273,22 +273,24 @@ These are the smallest meaningful production gates.
 
 ---
 
-### Finding F — SD can fit the timebox only as a conditional capability
+### Finding F — SD is outside the Core 1.0 closing contract
 
-**Severity:** P0 if advertised as supported; non-blocking if disabled
+**Severity:** P0 if advertised; non-blocking while disabled
 
 Issue #78 remains open because a physically inserted card has intermittently appeared absent. Substantial exact-device work already exists: bounded recovery, asynchronous remount handling, file canaries, retained data across reboot, generation fencing, and short stable windows. The unresolved portion is exact-candidate physical removal/reinsertion and a longer active/idle window.
 
 **Required release rule:**
 
-- Start the candidate with `sd_history=conditional`.
-- Run the exact-candidate SD mini-matrix.
-- If every SD gate passes, package Core 1.0 with `sd_history=supported_optional`.
-- If any SD gate fails or cannot be executed, set `sd_history=disabled`, hide SD data controls, use NVS fallback, omit RP2040 release artifacts, and state that SD support returns in a later release.
-- Never publish `sd_history=supported` based on predecessor evidence.
+- Build and package Core 1.0 only with `sd_history=disabled`.
+- Hide SD data controls, keep NVS authoritative, and omit RP2040 release artifacts.
+- Do not reuse the five-artifact Core capture or disabled-only final audit for
+  an SD candidate.
+- Qualify SD later under a separate artifact, hardware, and final-audit
+  contract.
 - Never format a card.
 
-This prevents SD from consuming the entire deadline while preserving a path to include it.
+This removes the unsupported conditional branch from the Core closing sequence
+without weakening the later SD qualification standard.
 
 ---
 
@@ -337,7 +339,7 @@ The authoritative version is the separate `SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-
 11. Crashlog, health, boot nonce, heap/PSRAM/task/LVGL telemetry.
 12. USB install, non-erasing upgrade, and recovery documentation.
 13. Exact package checksums, provenance, SBOM, license notices.
-14. Optional FAT32 SD history only if its candidate-specific gate passes.
+14. NVS-authoritative history with SD disabled in the Core profile.
 
 ### Deferred and unreachable
 
@@ -545,7 +547,6 @@ Owns:
 
 - PR #197 rebase/cherry-pick;
 - retained NVS tests;
-- SD conditional-mode plumbing;
 - NVS fallback truth;
 - storage feature manifest.
 
@@ -637,7 +638,7 @@ These are maximum elapsed-hour bands, not promises. Move faster when gates pass;
 2. Record exact starting SHA.
 3. Merge the Core 1.0 product contract.
 4. Mark PR #199 deferred.
-5. Define SD as conditional.
+5. Pin SD history to disabled for Core 1.0.
 6. Create a live `docs/release/24H_STATUS.md`.
 7. Assign file ownership to agents.
 
@@ -646,7 +647,7 @@ These are maximum elapsed-hour bands, not promises. Move faster when gates pass;
 ### H0.5–H3.0 — parallel implementation
 
 - Agent A: hide/deactivate unsupported UI.
-- Agent B: rebase/cherry-pick #197; add SD conditional mode.
+- Agent B: rebase/cherry-pick #197; prove NVS-authoritative disabled-SD mode.
 - Agent C: run DM-focused tests; repair only confirmed core failures.
 - Agent D: command/profile admission.
 - Agent E: core audit/package/test support.
@@ -673,8 +674,10 @@ These are maximum elapsed-hour bands, not promises. Move faster when gates pass;
 
 Use the existing workflow.
 
-- `include_sd_bridge=false` initially.
-- Use `include_sd_bridge=true` only after deciding to qualify SD in the same candidate.
+- `include_sd_bridge=false` is mandatory for this Core 1.0 sequence.
+- Do not reuse the Core capture or audit for an SD/RP2040 candidate. The Core
+  capture requires exactly five disabled-profile artifacts and the final audit
+  accepts only `sd_history_mode=disabled`.
 - Require host, conformance, firmware build, package, checksums, provenance, and SBOM.
 - Download all artifacts and verify every checksum.
 - Record run ID, exact SHA, image digest, package digest, and manifests.
@@ -753,8 +756,7 @@ Require:
 - no queue saturation/failure;
 - no negative unbounded heap/PSRAM trend;
 - successful controlled DM deltas;
-- stable NVS/SD backend according to final profile;
-- no SD stale/presence-stale/refresh failure if SD is supported.
+- stable NVS backend with SD history disabled.
 
 This 90-minute gate is an explicit Core 1.0 risk acceptance. It does not satisfy or replace the Full Feature 12-hour gate.
 
@@ -842,14 +844,9 @@ Mandatory Core gates:
 8. 60-minute active + 30-minute idle soak;
 9. install/recovery instructions checked against package.
 
-Conditional SD gates:
-
-1. exact paired artifacts;
-2. ready/card/file canary;
-3. reboot/remount;
-4. removal/reinsertion;
-5. 30-minute stable storage window;
-6. no-format evidence.
+SD/RP2040 qualification is not part of this Core 1.0 closing sequence. A future
+supported-SD candidate needs its own artifact capture and final-audit contract;
+do not switch this command sheet to an SD-enabled workflow.
 
 Explicitly not required for Core 1.0:
 
@@ -869,23 +866,22 @@ Explicitly not required for Core 1.0:
 ## 8. Candidate commands
 
 Use the repository’s scripts and exact candidate identifiers. Replace
-placeholders only with recorded values. On the current Pi route, establish the
-stable selector once per shell and fail before any script unless all checks
+placeholders only with recorded or directly observed values. Run the commands
+from one clean checkout at `$D1L_COMMIT`. On the current Pi route, establish
+the stable selector once per shell and fail before any script unless all checks
 pass:
 
 ```bash
+set -euo pipefail
 export D1L_PORT='/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0'
 test -L "$D1L_PORT" && test -r "$D1L_PORT" && test -w "$D1L_PORT"
 D1L_DEVICE_PROPERTIES="$(udevadm info --query=property --name="$D1L_PORT")"
 grep -qx 'ID_VENDOR_ID=1a86' <<<"$D1L_DEVICE_PROPERTIES"
 grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
 export D1L_COMMIT='<40-hex-sha>'
-export D1L_ACTIONS_RUN='<numeric-run-id>'
-export D1L_RUN_ATTEMPT='<numeric-attempt>'
-export D1L_ACTIONS_RUN_DIR="artifacts/github/${D1L_ACTIONS_RUN}-${D1L_COMMIT}"
 export D1L_PUBLIC_KEY='<64-hex-D1L-public-key>'
-export D1L_PEER_FINGERPRINT='<16-hex-controlled-peer>'
-export D1L_CONTROLLED_PEER_RECEIPT='<qualified-controlled-peer-receipt.json>'
+export D1L_PEER_FINGERPRINT='024999DEDFD26763'
+test "$D1L_PEER_FINGERPRINT" = '024999DEDFD26763'
 export D1L_HARDWARE_DIR='artifacts/hardware/dev-serial-by-id-usb-1a86-usb-serial-if00-port0'
 ```
 
@@ -896,25 +892,63 @@ substitute `/dev/ttyUSB2` or another raw `/dev/ttyUSB*` name.
 
 ### Actions
 
+Dispatch only the SD-disabled Core workflow. Record the new run ID from the
+exact-SHA list; do not select a run merely because it is the newest.
+
 ```bash
 gh workflow run d1l-ci.yml --ref release/24h-core -f include_sd_bridge=false
+gh run list \
+  --workflow d1l-ci.yml \
+  --branch release/24h-core \
+  --event workflow_dispatch \
+  --commit "$D1L_COMMIT" \
+  --limit 10
+export D1L_ACTIONS_RUN='<recorded-run-id-from-this-dispatch>'
 gh run watch "$D1L_ACTIONS_RUN" --exit-status
+test "$(gh run view "$D1L_ACTIONS_RUN" --json headSha --jq '.headSha')" = \
+  "$D1L_COMMIT"
+export D1L_RUN_ATTEMPT="$(
+  gh run view "$D1L_ACTIONS_RUN" --json attempt --jq '.attempt'
+)"
+test "$D1L_RUN_ATTEMPT" -ge 1
+
+export D1L_ACTIONS_RUN_DIR="artifacts/github/${D1L_ACTIONS_RUN}-${D1L_COMMIT}"
+export D1L_ACTIONS_RECEIPT="$D1L_ACTIONS_RUN_DIR/core-actions-run-metadata/core_actions_run_${D1L_ACTIONS_RUN}.json"
+export D1L_PACKAGE_DIR="$D1L_ACTIONS_RUN_DIR/d1l-release-package/d1l-release-$D1L_COMMIT"
+export D1L_BOOTSTRAP_FLASH_RECEIPT="$D1L_HARDWARE_DIR/esp32_flash_bootstrap_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_SMOKE_RECEIPT="$D1L_HARDWARE_DIR/core_smoke_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_UI_RECEIPT="$D1L_HARDWARE_DIR/core_ui_corruption_probe_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_SCROLL_RECEIPT="$D1L_HARDWARE_DIR/core_scroll_probe_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_RF_RECEIPT="$D1L_HARDWARE_DIR/rf_full_acceptance_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_neopi5_by-id.json"
+export D1L_CONTROLLED_PEER_RECEIPT="$D1L_RF_RECEIPT"
+export D1L_ACTIVE_SOAK_RECEIPT="artifacts/soak/core_active_60m_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_neopi5_by-id.json"
+export D1L_IDLE_SOAK_RECEIPT="artifacts/soak/core_idle_30m_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_neopi5_by-id.json"
+export D1L_SEED_RECEIPT="$D1L_HARDWARE_DIR/core_retained_seed_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_CLOSING_FLASH_RECEIPT="$D1L_HARDWARE_DIR/esp32_flash_retained_reflash_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_REBOOT_RECEIPT="$D1L_HARDWARE_DIR/core_reboot_persistence_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_MANUAL_UI_RECEIPT="$D1L_HARDWARE_DIR/core_manual_ui_review_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_PROTOCOL_RECEIPT="$D1L_HARDWARE_DIR/time_protocol_migration_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_by-id.json"
+export D1L_INSTALL_REVIEW_RECEIPT="$D1L_HARDWARE_DIR/core_install_recovery_review_${D1L_COMMIT}_run_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}.json"
+export D1L_PRETAG_AUDIT="artifacts/release-gate/core_release_gate_pretag_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_neopi5_by-id.json"
+export D1L_DEFECT_DIR="$D1L_ACTIONS_RUN_DIR/core-defect-snapshot-attempt-$D1L_RUN_ATTEMPT"
+export D1L_DEFECT_RECEIPT="$D1L_DEFECT_DIR/core_github_defect_snapshot_${D1L_COMMIT:0:12}_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}.json"
+export D1L_FINAL_AUDIT="artifacts/release-gate/core_release_gate_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_attempt_${D1L_RUN_ATTEMPT}_neopi5_by-id.json"
+
 python ./scripts/capture_core_actions_run_d1l.py \
   --github-run-id "$D1L_ACTIONS_RUN" \
   --commit "$D1L_COMMIT" \
   --github-run-dir "$D1L_ACTIONS_RUN_DIR"
 python ./scripts/verify_checksums.py \
   "$D1L_ACTIONS_RUN_DIR/d1l-firmware-artifacts"
-python ./scripts/verify_checksums.py \
-  "$D1L_ACTIONS_RUN_DIR/d1l-release-package/d1l-release-$D1L_COMMIT"
+python ./scripts/verify_checksums.py "$D1L_PACKAGE_DIR"
 ```
 
 Only a successful `workflow_dispatch` run whose `head_sha` is the exact
 candidate is qualifying release evidence. A pull-request run is useful CI, but
 its synthetic merge SHA is not flashable candidate evidence. The capture tool
 requires exactly the five Core archives, verifies their GitHub API digests and
-extracted trees, and records the run attempt. Use `include_sd_bridge=true` only
-for a candidate that will advertise supported SD history.
+extracted trees, and records the run attempt. An SD-enabled run exposes eight
+artifacts and is intentionally rejected by this Core-only capture and audit.
 
 ### Exact non-erasing bootstrap flash
 
@@ -927,20 +961,48 @@ python ./scripts/core_flash_only_d1l.py \
   --github-run-id "$D1L_ACTIONS_RUN" \
   --github-run-attempt "$D1L_RUN_ATTEMPT" \
   --github-run-dir "$D1L_ACTIONS_RUN_DIR" \
+  --package-dir "$D1L_PACKAGE_DIR" \
+  --actions-capture-receipt "$D1L_ACTIONS_RECEIPT" \
   --commit "$D1L_COMMIT" \
   --port "$D1L_PORT" \
   --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
   --phase bootstrap \
-  --out "$D1L_HARDWARE_DIR/esp32_flash_bootstrap_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_by-id.json"
+  --out "$D1L_BOOTSTRAP_FLASH_RECEIPT"
 ```
 
-The flash runner accepts only `write-flash`, rejects erase operations, validates
-the `1a86:7523` by-id target before and after flashing, and derives its Actions
-capture receipt from `$D1L_ACTIONS_RUN_DIR`.
+The flash runner accepts only `write-flash`, rejects erase operations, and
+validates the `1a86:7523` by-id target before and after flashing. Its default
+capture receipt is derived from `$D1L_ACTIONS_RUN_DIR`; the explicit path above
+makes the handoff visible in the command record.
+
+### Legacy time/protocol migration
+
+The two numeric values are exact-device evidence, not tuning knobs. Read the
+legacy value from this D1L and independently calculate a conservative upper
+bound covering every predecessor timestamp allocation, including RAM-only
+fallback. Do not pass the attestation flag with guessed, copied, or
+predecessor-device values. This must pass before RF because the RF runner
+requires `time.protocol_tx_ready=true`.
+
+```bash
+export D1L_EXPECTED_LEGACY_VALUE='<observed-positive-uint32>'
+export D1L_CONFIRMED_TIME_UPPER_BOUND='<reviewed-covering-positive-uint32>'
+python ./scripts/time_protocol_migration_d1l.py \
+  --port "$D1L_PORT" \
+  --commit "$D1L_COMMIT" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --core-actions-run-metadata "$D1L_ACTIONS_RECEIPT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --expected-legacy-value "$D1L_EXPECTED_LEGACY_VALUE" \
+  --confirmed-upper-bound "$D1L_CONFIRMED_TIME_UPPER_BOUND" \
+  --attest-exact-device-upper-bound \
+  --out "$D1L_PROTOCOL_RECEIPT"
+```
 
 ### Core smoke
 
-After adding the profile-aware runner, execute on `neopi5`:
+Execute on `neopi5`:
 
 ```bash
 python ./scripts/core_smoke_d1l.py \
@@ -952,7 +1014,7 @@ python ./scripts/core_smoke_d1l.py \
   --expected-sd-history-mode disabled \
   --persistence-test \
   --manual-touch \
-  --out "$D1L_HARDWARE_DIR/core_smoke_${D1L_COMMIT}_by-id.json"
+  --out "$D1L_SMOKE_RECEIPT"
 ```
 
 ### UI
@@ -967,7 +1029,7 @@ python ./scripts/core_ui_corruption_probe_d1l.py \
   --expected-sd-history-mode disabled \
   --rounds 20 \
   --clear-crashlog-before-start \
-  --out "$D1L_HARDWARE_DIR/core_ui_corruption_probe_${D1L_COMMIT}_by-id.json"
+  --out "$D1L_UI_RECEIPT"
 
 python ./scripts/scroll_probe_d1l.py \
   --port "$D1L_PORT" \
@@ -980,33 +1042,128 @@ python ./scripts/scroll_probe_d1l.py \
   --screens home,public_messages,dm_thread,nodes,packets,settings \
   --manual-touch \
   --clear-crashlog-before-start \
-  --out "$D1L_HARDWARE_DIR/core_scroll_probe_${D1L_COMMIT}_by-id.json"
+  --out "$D1L_SCROLL_RECEIPT"
 ```
 
 Use the existing compose capture with only Core callers or add a profile-aware
 target list.
 
-### RF
+### Two-person manual UI review
 
-Do not run RF acceptance until the narrow local peer access prerequisite is
-proven. Use only the runner's reviewed, explicit local controlled-peer mode;
-do not invent a peer serial port or SSH back into `neopi5`:
-
-Inspect the merged runner interface first:
+Set two distinct real people. Pass the confirmation flags below only after the
+operator has physically observed every named behavior and the reviewer has
+independently checked that observation. Optional current-candidate PNGs may be
+attached with repeated `--photo COVERAGE[,COVERAGE...]=PATH`.
 
 ```bash
-python ./scripts/rf_full_acceptance_d1l.py --help
+export D1L_OPERATOR='<physical-test-operator>'
+export D1L_REVIEWER='<distinct-independent-reviewer>'
+test "$D1L_OPERATOR" != "$D1L_REVIEWER"
+python ./scripts/manual_ui_review_d1l.py \
+  --port "$D1L_PORT" \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --operator "$D1L_OPERATOR" \
+  --reviewer "$D1L_REVIEWER" \
+  --automated-ui-receipt "$D1L_UI_RECEIPT" \
+  --confirm-display-480x480-stable \
+  --confirm-touch-accurate \
+  --confirm-backlight-works \
+  --confirm-home \
+  --confirm-messages-public \
+  --confirm-dm-workflow \
+  --confirm-nodes \
+  --confirm-packets \
+  --confirm-settings \
+  --confirm-unavailable-features-absent \
+  --out "$D1L_MANUAL_UI_RECEIPT"
 ```
 
-The release invocation must then use the reviewed local controlled-peer mode,
-`--port "$D1L_PORT"`, the exact candidate in `$D1L_COMMIT`, and the explicit
-peer fingerprint in `$D1L_PEER_FINGERPRINT`. Do not record or run a guessed
-argument shape while that local mode or its narrow access is pending.
+### RF
+
+Do not run RF acceptance until the pinned local status file and root-owned Unix
+control socket on `neopi5` are available. Use only `--peer-local`; do not invent
+a peer serial port or SSH back into the same host.
+
+```bash
+python ./scripts/rf_full_acceptance_d1l.py \
+  --port "$D1L_PORT" \
+  --fingerprint "$D1L_PEER_FINGERPRINT" \
+  --d1l-public-key "$D1L_PUBLIC_KEY" \
+  --peer-local \
+  --commit "$D1L_COMMIT" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --out "$D1L_RF_RECEIPT"
+test -f "$D1L_CONTROLLED_PEER_RECEIPT"
+```
 
 Never use COM8, COM11, or COM29. Never use COM16 or a peer endpoint as the
 Core D1L target. Never automate default Public-channel transmission.
 
+### Seed retained state
+
+Before this command, use only supported Core UI/commands to populate the
+retained Public, DM, and contact stores to their reported exact capacities.
+The seed command is witness-only and will fail rather than fill or mutate an
+under-capacity store. Confirm the live counts; do not invent them. Then create
+the exact retained-state witness immediately before the closing reflash:
+
+```bash
+python ./scripts/core_reboot_persistence_d1l.py \
+  --port "$D1L_PORT" \
+  --commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  seed \
+  --out "$D1L_SEED_RECEIPT"
+```
+
+### Exact non-erasing closing reflash
+
+Only after the seed succeeds, perform the closing reflash. The runner snapshots
+retained state before and after flashing and emits the only flash receipt
+eligible to close the release gate.
+
+```bash
+python ./scripts/core_flash_only_d1l.py \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --github-run-dir "$D1L_ACTIONS_RUN_DIR" \
+  --package-dir "$D1L_PACKAGE_DIR" \
+  --actions-capture-receipt "$D1L_ACTIONS_RECEIPT" \
+  --commit "$D1L_COMMIT" \
+  --port "$D1L_PORT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --phase retained-reflash \
+  --out "$D1L_CLOSING_FLASH_RECEIPT"
+```
+
+### Reboot and cold-power persistence
+
+The verify command performs five software reboots and then prompts the operator
+for three real cold power cycles. Follow each prompt in real time; do not
+pre-answer it or claim a power removal that was not physically observed.
+
+```bash
+python ./scripts/core_reboot_persistence_d1l.py \
+  --port "$D1L_PORT" \
+  --commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  verify \
+  --seed-receipt "$D1L_SEED_RECEIPT" \
+  --closing-flash-receipt "$D1L_CLOSING_FLASH_RECEIPT" \
+  --out "$D1L_REBOOT_RECEIPT"
+```
+
 ### Active soak
+
+Run the active soak after the closing mutation and reboot/cold-cycle proof so
+it measures the final flashed and rebooted state:
 
 ```bash
 python ./scripts/soak_d1l.py \
@@ -1028,14 +1185,15 @@ python ./scripts/soak_d1l.py \
   --min-tx-delta 6 \
   --sample-storage \
   --allow-sd-unavailable \
-  --out artifacts/soak/core_active_60m_${D1L_COMMIT}_neopi5_by-id.json
+  --out "$D1L_ACTIVE_SOAK_RECEIPT"
 ```
 
-For supported SD, replace `--allow-sd-unavailable` with `--sd-file-canary`.
-The active soak has the same narrow controlled-peer prerequisite as RF
-acceptance.
+The active soak reuses the exact local-peer RF receipt. Keep
+`--allow-sd-unavailable`; this Core profile does not advertise SD history.
 
 ### Idle soak
+
+Run the idle soak immediately after active soak on the same final boot:
 
 ```bash
 python ./scripts/soak_d1l.py \
@@ -1050,31 +1208,97 @@ python ./scripts/soak_d1l.py \
   --sample-interval-sec 300 \
   --sample-storage \
   --allow-sd-unavailable \
-  --out artifacts/soak/core_idle_30m_${D1L_COMMIT}_neopi5_by-id.json
+  --out "$D1L_IDLE_SOAK_RECEIPT"
 ```
 
-For supported SD, replace `--allow-sd-unavailable` with `--sd-file-canary`.
+### Two-person install/recovery review
 
-### Exact non-erasing closing reflash
-
-After the retained settings, messages, contacts, and identity baseline exists
-and all other physical gates above pass, perform the closing reflash. The
-runner snapshots retained state before and after flashing and emits the only
-flash receipt eligible to close the release gate.
+Pass these flags only after the same two-person review has actually checked the
+exact package, both normal-install entrypoints and target policies, the
+Windows-only destructive recovery path and warning, and the no-format rule.
 
 ```bash
-python ./scripts/core_flash_only_d1l.py \
+python ./scripts/core_install_recovery_review_d1l.py \
+  --package-root "$D1L_PACKAGE_DIR" \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --operator "$D1L_OPERATOR" \
+  --reviewer "$D1L_REVIEWER" \
+  --confirm-checksums-reviewed \
+  --confirm-normal-usb-install-reviewed \
+  --confirm-generated-entrypoints-reviewed \
+  --confirm-windows-com12-normal-install-reviewed \
+  --confirm-posix-stable-by-id-normal-install-reviewed \
+  --confirm-usb-identity-policy-reviewed \
+  --confirm-raw-tty-observational-only-reviewed \
+  --confirm-non-erasing-normal-flash \
+  --confirm-recovery-steps-reviewed \
+  --confirm-windows-only-recovery-reviewed \
+  --confirm-full-flash-data-loss-warning \
+  --confirm-no-on-device-sd-format \
+  --confirm-supported-features-reviewed \
+  --out "$D1L_INSTALL_REVIEW_RECEIPT"
+```
+
+### Preliminary pre-tag audit
+
+Issue #71 is the release-tracking umbrella that cannot close until the release
+is tagged. Generate a preliminary audit with the defect receipt deliberately
+omitted. Exit status 1 is expected here; the defect capture will recompute this
+file and accept it only when every non-tag, non-defect gate is green.
+
+```bash
+set +e
+python ./scripts/core_release_gate_audit_d1l.py \
   --github-run-id "$D1L_ACTIONS_RUN" \
   --github-run-attempt "$D1L_RUN_ATTEMPT" \
   --github-run-dir "$D1L_ACTIONS_RUN_DIR" \
   --commit "$D1L_COMMIT" \
-  --port "$D1L_PORT" \
-  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
-  --phase retained-reflash \
-  --out "$D1L_HARDWARE_DIR/esp32_flash_retained_reflash_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_by-id.json"
+  --d1l-port "$D1L_PORT" \
+  --sd-history-mode disabled \
+  --hardware-dir "$D1L_HARDWARE_DIR" \
+  --soak-dir artifacts/soak \
+  --actions-run-receipt "$D1L_ACTIONS_RECEIPT" \
+  --core-smoke "$D1L_SMOKE_RECEIPT" \
+  --core-ui "$D1L_UI_RECEIPT" \
+  --core-scroll "$D1L_SCROLL_RECEIPT" \
+  --manual-review "$D1L_MANUAL_UI_RECEIPT" \
+  --reboot-receipt "$D1L_REBOOT_RECEIPT" \
+  --protocol-migration-receipt "$D1L_PROTOCOL_RECEIPT" \
+  --rf-receipt "$D1L_RF_RECEIPT" \
+  --active-soak "$D1L_ACTIVE_SOAK_RECEIPT" \
+  --idle-soak "$D1L_IDLE_SOAK_RECEIPT" \
+  --install-review "$D1L_INSTALL_REVIEW_RECEIPT" \
+  --out "$D1L_PRETAG_AUDIT"
+D1L_PRETAG_AUDIT_STATUS=$?
+set -e
+test "$D1L_PRETAG_AUDIT_STATUS" -eq 1
 ```
 
-Then run the closing audit against the same Actions and evidence directories:
+### Fresh GitHub defect snapshot
+
+Capture live pre-tag issue state after the preliminary audit. The narrow #71
+pending-tag exception applies only when #71 is the sole raw Core P0 and the
+recomputed preliminary audit proves every other non-tag gate green. A nonzero
+capture result is a real release no-go; do not edit either receipt or
+substitute an older snapshot.
+
+```bash
+python ./scripts/capture_core_github_defects_d1l.py \
+  --commit "$D1L_COMMIT" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --release-phase pre-tag \
+  --non-tag-audit "$D1L_PRETAG_AUDIT" \
+  --out-dir "$D1L_DEFECT_DIR"
+test -f "$D1L_DEFECT_RECEIPT"
+```
+
+### Final audit
+
+Run the closing audit with every receipt path explicit within 15 minutes of
+the defect capture:
 
 ```bash
 python ./scripts/core_release_gate_audit_d1l.py \
@@ -1086,7 +1310,19 @@ python ./scripts/core_release_gate_audit_d1l.py \
   --sd-history-mode disabled \
   --hardware-dir "$D1L_HARDWARE_DIR" \
   --soak-dir artifacts/soak \
-  --out "artifacts/release-gate/core_release_gate_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_neopi5_by-id.json"
+  --actions-run-receipt "$D1L_ACTIONS_RECEIPT" \
+  --core-smoke "$D1L_SMOKE_RECEIPT" \
+  --core-ui "$D1L_UI_RECEIPT" \
+  --core-scroll "$D1L_SCROLL_RECEIPT" \
+  --manual-review "$D1L_MANUAL_UI_RECEIPT" \
+  --reboot-receipt "$D1L_REBOOT_RECEIPT" \
+  --protocol-migration-receipt "$D1L_PROTOCOL_RECEIPT" \
+  --rf-receipt "$D1L_RF_RECEIPT" \
+  --active-soak "$D1L_ACTIVE_SOAK_RECEIPT" \
+  --idle-soak "$D1L_IDLE_SOAK_RECEIPT" \
+  --install-review "$D1L_INSTALL_REVIEW_RECEIPT" \
+  --defect-receipt "$D1L_DEFECT_RECEIPT" \
+  --out "$D1L_FINAL_AUDIT"
 ```
 
 ---
@@ -1114,9 +1350,10 @@ All must be true:
 - zero known Core crash/data-loss/security P1;
 - `core_release_ready=true`.
 
-### Conditional SD pass
+### SD status
 
-All SD gates green, or SD must be disabled. There is no partial claim.
+Core 1.0 closes only with SD history disabled and NVS authoritative. An
+SD-enabled workflow, package, or receipt is a no-go for this command sheet.
 
 ### Hard no-go
 
@@ -1132,7 +1369,7 @@ Any of:
 - false ACK/delivery state;
 - unsupported feature still reachable;
 - heap/task-stack failure;
-- SD advertised despite a failed or missing SD gate;
+- SD advertised by this Core candidate;
 - missing recovery path;
 - evidence manually edited to pass;
 - use of forbidden ports;
@@ -1147,7 +1384,7 @@ Any of:
 Likely candidates after exact Core evidence:
 
 - portions of #7, #63, #66, #69, #70, #71, #74, #75, #76;
-- #78 only if SD is supported and its full stated acceptance is actually met.
+- #78 remains deferred because this Core profile keeps SD history disabled.
 
 Do not close an umbrella issue merely because the Core profile excludes part of it. Instead add a Core-release comment and create/move deferred work to the Full Feature milestone.
 
@@ -1189,6 +1426,7 @@ The fastest honest production path is:
 3. retain the strongest automated pipeline;
 4. rebase the low-risk NVS write-suppression patch;
 5. qualify DM, persistence, UI, boot, and diagnostics on one exact binary;
-6. include SD only if its short exact-candidate matrix passes;
+6. keep SD disabled for Core 1.0 and qualify it later under a separate
+   artifact/audit contract;
 7. replace the 12-hour Core gate with a documented 90-minute risk-accepted gate while preserving the original 12-hour Full Feature gate;
 8. publish only when the separate Core audit is fully green.
