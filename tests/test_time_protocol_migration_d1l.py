@@ -1,10 +1,12 @@
 import copy
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from scripts import time_protocol_migration_d1l as migration
+from scripts import d1l_serial_target as target
 
 
 COMMIT = "a" * 40
@@ -15,6 +17,7 @@ UPPER = 4200000000
 CANDIDATE_AUTHORED_AT = "2026-07-23T20:00:00Z"
 CANDIDATE_COMMITTED_AT = "2026-07-23T20:30:00Z"
 STAMP = "2026-07-23T21:00:00Z"
+POSIX_TTY = "/dev/ttyUSB2"
 
 
 def source(start: str = migration.FIRST_TIMESTAMP_AUTHORED_AT):
@@ -195,8 +198,10 @@ class FakeSerial:
 class FakeSerialModule:
     def __init__(self, fake):
         self.fake = fake
+        self.calls = []
 
-    def Serial(self, **_kwargs):
+    def Serial(self, **kwargs):
+        self.calls.append(dict(kwargs))
         fake = self.fake
 
         def open_port():
@@ -225,6 +230,62 @@ def port():
         "manufacturer": "wch.cn",
         "product": "USB Serial",
     }
+
+
+def windows_target_snapshot():
+    return target.resolve_target(
+        target.WINDOWS_D1L_TARGET,
+        platform_name="nt",
+        port_lister=lambda: [port()],
+        hostname=lambda: "WIN-DEV",
+    )
+
+
+def posix_port(tty=POSIX_TTY, *, location="1-2"):
+    return {
+        **port(),
+        "device": tty,
+        "location": location,
+        "hwid": f"USB VID:PID=1A86:7523 LOCATION={location}",
+    }
+
+
+def posix_target_hooks(*, tty=POSIX_TTY):
+    def exists(path):
+        return path in {target.POSIX_D1L_TARGET, tty}
+
+    def is_symlink(path):
+        return path == target.POSIX_D1L_TARGET
+
+    def realpath(path):
+        return tty if path == target.POSIX_D1L_TARGET else path
+
+    def access(path, mode):
+        assert path == tty
+        assert mode in {os.R_OK, os.W_OK}
+        return True
+
+    return {
+        "target_exists": exists,
+        "target_is_symlink": is_symlink,
+        "target_realpath": realpath,
+        "target_access": access,
+        "target_hostname": lambda: "neopi5",
+    }
+
+
+def posix_target_snapshot(*, tty=POSIX_TTY):
+    hooks = posix_target_hooks(tty=tty)
+    return target.resolve_target(
+        target.POSIX_D1L_TARGET,
+        platform_name="posix",
+        port_lister=lambda: [posix_port(tty)],
+        exists=hooks["target_exists"],
+        is_symlink=hooks["target_is_symlink"],
+        realpath=hooks["target_realpath"],
+        access=hooks["target_access"],
+        hostname=hooks["target_hostname"],
+    )
 
 
 def transaction(result, label=None, redacted=False):
@@ -321,19 +382,25 @@ def local_actions_validator(monkeypatch):
     )
 
 
-def valid_receipt(root: Path):
+def valid_receipt(
+    root: Path,
+    *,
+    requested_target=target.WINDOWS_D1L_TARGET,
+    before_target=None,
+    after_target=None,
+):
     stamp = STAMP
+    before_target = before_target or windows_target_snapshot()
+    after_target = after_target or copy.deepcopy(before_target)
     attestation = migration.derive_bound_attestation(
+        device=requested_target,
         expected_legacy_value=LEGACY,
         confirmed_upper_bound=UPPER,
         source=source(),
         observed_at=stamp,
         attest_exact_device_upper_bound=True,
     )
-    snapshot = migration.port_snapshot(
-        lambda: [port()], now=lambda: stamp, clock=lambda: 1.0
-    )
-    identity = migration.port_identity(snapshot)
+    identity = before_target["stable_identity_sha256"]
     actions_path = install_actions_receipt(root)
     actions_provenance = migration.load_actions_metadata_binding(
         root=root,
@@ -356,7 +423,7 @@ def valid_receipt(root: Path):
         transaction(health()),
     ]
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "time_protocol_migration",
         "mode": "hardware",
         "scope": "exact-device-legacy-protocol-migration",
@@ -367,7 +434,8 @@ def valid_receipt(root: Path):
         "mutation_outcome_uncertain": False,
         "release_closure_sufficient": False,
         "hardware_required": True,
-        "port": "COM12",
+        "port": requested_target,
+        "target_slug": target.safe_slug(requested_target),
         "baud": 115200,
         "commit": COMMIT,
         "github_actions_run": RUN_ID,
@@ -378,9 +446,10 @@ def valid_receipt(root: Path):
         "wall_time_inferred_as_protocol_timestamp": False,
         "supplied_confirmation_logged": False,
         "bound_attestation": attestation,
-        "port_before": snapshot,
-        "port_after": copy.deepcopy(snapshot),
-        "port_identity_sha256": identity,
+        "d1l_target_before": before_target,
+        "d1l_target_after": after_target,
+        "target_identity_sha256": identity,
+        "target_identity_continuity_ok": True,
         "transactions": transactions,
         "started_at": stamp,
         "ended_at": stamp,
@@ -472,6 +541,27 @@ def test_valid_receipt_recomputes_from_raw(tmp_path):
     assert ok, errors
 
 
+def test_valid_posix_receipt_accepts_tty_renumber_with_stable_identity(tmp_path):
+    before = posix_target_snapshot(tty="/dev/ttyUSB2")
+    after = posix_target_snapshot(tty="/dev/ttyUSB7")
+    assert before["stable_identity_sha256"] == after["stable_identity_sha256"]
+    row = valid_receipt(
+        tmp_path,
+        requested_target=target.POSIX_D1L_TARGET,
+        before_target=before,
+        after_target=after,
+    )
+
+    ok, errors = migration.validate_receipt(row, root=tmp_path)
+
+    assert ok, errors
+    assert row["schema"] == 2
+    assert row["port"] == target.POSIX_D1L_TARGET
+    assert row["bound_attestation"]["device"] == target.POSIX_D1L_TARGET
+    assert "/" not in row["target_slug"]
+    assert "\\" not in row["target_slug"]
+
+
 @pytest.mark.parametrize(
     "mutator",
     [
@@ -499,7 +589,7 @@ def test_valid_receipt_recomputes_from_raw(tmp_path):
         lambda row: row["transactions"][4]["result"].__setitem__(
             "protocol_tx_ready", False
         ),
-        lambda row: row["port_after"]["matches"][0].__setitem__("hwid", "different"),
+        lambda row: row["d1l_target_after"].__setitem__("hwid", "different"),
         lambda row: row["git"].__setitem__("dirty", True),
     ],
 )
@@ -576,15 +666,39 @@ def test_receipt_rejects_json_escaped_confirmation_in_raw(tmp_path):
     assert any("reconstructable" in error for error in errors)
 
 
-def test_receipt_requires_exact_com12_snapshot_device(tmp_path):
+def test_receipt_requires_exact_target_snapshot_device(tmp_path):
     row = valid_receipt(tmp_path)
-    for key in ("port_before", "port_after"):
-        row[key]["port"] = "COM11"
-        row[key]["matches"][0]["device"] = "COM11"
-    row["port_identity_sha256"] = migration.port_identity(row["port_before"])
+    for key in ("d1l_target_before", "d1l_target_after"):
+        row[key]["requested_path"] = target.POSIX_D1L_TARGET
     ok, errors = migration.validate_receipt(row, root=tmp_path)
     assert not ok
-    assert "exact COM12 identity continuity failed" in errors
+    assert "exact D1L target identity continuity failed" in errors
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda row: row.__setitem__("target_identity_sha256", "0" * 64),
+        lambda row: row["d1l_target_before"].__setitem__(
+            "stable_identity_sha256",
+            "0" * 64,
+        ),
+        lambda row: row["bound_attestation"].__setitem__(
+            "device",
+            target.POSIX_D1L_TARGET,
+        ),
+        lambda row: row.__setitem__("target_slug", "../unsafe"),
+    ],
+)
+def test_receipt_rejects_target_binding_digest_or_slug_tamper(
+    tmp_path,
+    mutator,
+):
+    row = valid_receipt(tmp_path)
+    mutator(row)
+    ok, errors = migration.validate_receipt(row, root=tmp_path)
+    assert not ok
+    assert errors
 
 
 @pytest.mark.parametrize(
@@ -816,6 +930,8 @@ def test_execute_migration_never_mutates_after_failed_preflight(tmp_path, monkey
             out=tmp_path / "out.json",
             serial_module=module,
             port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
@@ -857,6 +973,8 @@ def test_execute_rejects_mismatched_actions_metadata_before_serial(
             out=tmp_path / "out.json",
             serial_module=module,
             port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
@@ -908,6 +1026,8 @@ def test_execute_migration_writes_one_immutable_valid_receipt(tmp_path, monkeypa
         out=out,
         serial_module=module,
         port_lister=lambda: [port()],
+        requested_target=target.WINDOWS_D1L_TARGET,
+        platform_name="nt",
         commit=COMMIT,
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
@@ -930,6 +1050,8 @@ def test_execute_migration_writes_one_immutable_valid_receipt(tmp_path, monkeypa
             out=out,
             serial_module=module,
             port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
@@ -941,6 +1063,209 @@ def test_execute_migration_writes_one_immutable_valid_receipt(tmp_path, monkeypa
             actions_metadata_path=install_actions_receipt(tmp_path),
             now=lambda: "2026-07-23T21:00:00Z",
         )
+
+
+def test_execute_posix_opens_by_id_and_accepts_tty_renumber(
+    tmp_path,
+    monkeypatch,
+):
+    fake = FakeSerial(
+        [
+            version(False),
+            health(),
+            before_status(),
+            mutation_result(),
+            after_status(),
+            version(True),
+            health(),
+        ]
+    )
+    module = FakeSerialModule(fake)
+    monkeypatch.setattr(
+        migration,
+        "predecessor_source_metadata",
+        lambda _root, _commit: source(),
+    )
+    ttys = ["/dev/ttyUSB2", "/dev/ttyUSB7"]
+    enumeration_count = 0
+
+    def realpath(path):
+        if path == target.POSIX_D1L_TARGET:
+            return ttys[min(enumeration_count, 1)]
+        return path
+
+    def port_lister():
+        nonlocal enumeration_count
+        tty = ttys[min(enumeration_count, 1)]
+        enumeration_count += 1
+        return [posix_port(tty)]
+
+    def exists(path):
+        return path == target.POSIX_D1L_TARGET or path in ttys
+
+    out = tmp_path / "explicit-time-migration.json"
+    row = migration.execute_migration(
+        root=tmp_path,
+        out=out,
+        serial_module=module,
+        port_lister=port_lister,
+        requested_target=target.POSIX_D1L_TARGET,
+        platform_name="posix",
+        target_exists=exists,
+        target_is_symlink=lambda path: path == target.POSIX_D1L_TARGET,
+        target_realpath=realpath,
+        target_access=lambda _path, _mode: True,
+        target_hostname=lambda: "neopi5",
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        expected_legacy_value=LEGACY,
+        confirmed_upper_bound=UPPER,
+        attest_exact_device_upper_bound=True,
+        timeout=1.0,
+        source_git=valid_receipt(tmp_path)["git"],
+        actions_metadata_path=install_actions_receipt(tmp_path),
+        now=lambda: STAMP,
+    )
+
+    assert row["ok"] is True
+    assert row["schema"] == 2
+    assert row["port"] == target.POSIX_D1L_TARGET
+    assert row["bound_attestation"]["device"] == target.POSIX_D1L_TARGET
+    assert fake.port == target.POSIX_D1L_TARGET
+    assert row["d1l_target_before"]["resolved_tty"] == "/dev/ttyUSB2"
+    assert row["d1l_target_after"]["resolved_tty"] == "/dev/ttyUSB7"
+    assert row["target_identity_continuity_ok"] is True
+    assert (
+        row["d1l_target_before"]["stable_identity_sha256"]
+        == row["d1l_target_after"]["stable_identity_sha256"]
+        == row["target_identity_sha256"]
+    )
+    ok, errors = migration.validate_receipt(row, root=tmp_path)
+    assert ok, errors
+
+
+def test_post_mutation_hardware_identity_change_is_uncertain(
+    tmp_path,
+    monkeypatch,
+):
+    fake = FakeSerial(
+        [
+            version(False),
+            health(),
+            before_status(),
+            mutation_result(),
+            after_status(),
+            version(True),
+            health(),
+        ]
+    )
+    module = FakeSerialModule(fake)
+    monkeypatch.setattr(
+        migration,
+        "predecessor_source_metadata",
+        lambda _root, _commit: source(),
+    )
+    samples = [
+        port(),
+        {
+            **port(),
+            "location": "Port_#0009.Hub_#0001",
+            "hwid": "USB VID:PID=1A86:7523 LOCATION=9-1",
+        },
+    ]
+    count = 0
+
+    def port_lister():
+        nonlocal count
+        row = samples[min(count, 1)]
+        count += 1
+        return [row]
+
+    out = tmp_path / "identity-change.json"
+    row = migration.execute_migration(
+        root=tmp_path,
+        out=out,
+        serial_module=module,
+        port_lister=port_lister,
+        requested_target=target.WINDOWS_D1L_TARGET,
+        platform_name="nt",
+        target_hostname=lambda: "WIN-DEV",
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        expected_legacy_value=LEGACY,
+        confirmed_upper_bound=UPPER,
+        attest_exact_device_upper_bound=True,
+        timeout=1.0,
+        source_git=valid_receipt(tmp_path)["git"],
+        actions_metadata_path=install_actions_receipt(tmp_path),
+        now=lambda: STAMP,
+    )
+
+    assert row["ok"] is False
+    assert row["closure_eligible"] is False
+    assert row["mutation_started"] is True
+    assert row["mutation_outcome_uncertain"] is True
+    assert row["target_identity_continuity_ok"] is False
+    assert row["execution_error"]["phase"] == "post_mutation_target_continuity"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["raw-tty", "wrong-vid", "wrong-pid", "dangling", "inaccessible"],
+)
+def test_invalid_posix_target_fails_before_serial_or_mutation(
+    tmp_path,
+    monkeypatch,
+    case,
+):
+    fake = FakeSerial([])
+    module = FakeSerialModule(fake)
+    monkeypatch.setattr(
+        migration,
+        "predecessor_source_metadata",
+        lambda _root, _commit: source(),
+    )
+    hooks = posix_target_hooks()
+    requested = target.POSIX_D1L_TARGET
+    rows = [posix_port()]
+    if case == "raw-tty":
+        requested = POSIX_TTY
+    elif case == "wrong-vid":
+        rows = [{**posix_port(), "vid": 0x10C4}]
+    elif case == "wrong-pid":
+        rows = [{**posix_port(), "pid": 0x0001}]
+    elif case == "dangling":
+        hooks["target_exists"] = lambda _path: False
+    elif case == "inaccessible":
+        hooks["target_access"] = lambda _path, _mode: False
+
+    out = tmp_path / f"{case}.json"
+    with pytest.raises(ValueError):
+        migration.execute_migration(
+            root=tmp_path,
+            out=out,
+            serial_module=module,
+            port_lister=lambda: rows,
+            requested_target=requested,
+            platform_name="posix",
+            **hooks,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            expected_legacy_value=LEGACY,
+            confirmed_upper_bound=UPPER,
+            attest_exact_device_upper_bound=True,
+            timeout=1.0,
+            source_git=valid_receipt(tmp_path)["git"],
+            actions_metadata_path=install_actions_receipt(tmp_path),
+            now=lambda: STAMP,
+        )
+    assert module.calls == []
+    assert fake.writes == []
+    assert not out.exists()
+    assert not out.with_name(f".{out.name}.reservation").exists()
 
 
 def test_post_preflight_serial_error_persists_uncertain_mutation_receipt(
@@ -959,6 +1284,8 @@ def test_post_preflight_serial_error_persists_uncertain_mutation_receipt(
         out=out,
         serial_module=module,
         port_lister=lambda: [port()],
+        requested_target=target.WINDOWS_D1L_TARGET,
+        platform_name="nt",
         commit=COMMIT,
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
@@ -994,6 +1321,8 @@ def execute_fake_migration(tmp_path, monkeypatch, results):
         out=out,
         serial_module=module,
         port_lister=lambda: [port()],
+        requested_target=target.WINDOWS_D1L_TARGET,
+        platform_name="nt",
         commit=COMMIT,
         run_id=RUN_ID,
         run_attempt=RUN_ATTEMPT,
@@ -1170,6 +1499,8 @@ def test_failed_evidence_write_after_mutation_leaves_reservation(tmp_path, monke
             out=out,
             serial_module=module,
             port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
@@ -1212,6 +1543,8 @@ def test_execute_migration_rejects_existing_output_before_serial(tmp_path, monke
             out=out,
             serial_module=module,
             port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
@@ -1258,6 +1591,8 @@ def test_execute_migration_rejects_existing_reservation_before_serial(
             out=out,
             serial_module=module,
             port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
@@ -1333,6 +1668,8 @@ def test_execute_migration_rejects_output_outside_root_before_serial(
             out=tmp_path / "outside.json",
             serial_module=module,
             port_lister=lambda: [port()],
+            requested_target=target.WINDOWS_D1L_TARGET,
+            platform_name="nt",
             commit=COMMIT,
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
@@ -1503,7 +1840,18 @@ def test_cli_rejects_nonfinite_or_nonpositive_timeout(
     assert "finite and positive" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("port_name", ["COM8", "COM11", "COM29", "COM15", "COM16"])
+@pytest.mark.parametrize(
+    "port_name",
+    ["COM8", "COM11", "COM29", "COM15", "COM16", "com12", " COM12 "],
+)
 def test_forbidden_or_non_d1l_ports_are_rejected(port_name):
     with pytest.raises(ValueError):
         migration.enforce_core_port(port_name)
+
+
+@pytest.mark.parametrize(
+    "port_name",
+    [target.WINDOWS_D1L_TARGET, target.POSIX_D1L_TARGET],
+)
+def test_exact_cross_platform_d1l_targets_are_accepted(port_name):
+    assert migration.enforce_core_port(port_name) == port_name

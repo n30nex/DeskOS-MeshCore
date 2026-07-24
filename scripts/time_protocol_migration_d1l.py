@@ -6,7 +6,7 @@ bound.  This runner supplies a conservative exact-device upper bound only
 after:
 
 * the exact clean Core candidate and Actions identity are established;
-* COM12 is uniquely present;
+* the exact cross-platform D1L target is uniquely present;
 * the live device reports the expected legacy value and a TX block; and
 * the requested bound covers a deliberately pessimistic availability-window
   calculation for every predecessor timestamp allocation.
@@ -25,6 +25,7 @@ import json
 import math
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -35,39 +36,47 @@ from typing import Any, Callable, Iterable
 try:
     from core_reboot_persistence_d1l import (
         D1L_BAUD,
-        D1L_CORE_PORT,
-        enforce_core_port,
         exact_commit,
         exact_source_git,
-        port_identity,
-        port_snapshot,
         positive_decimal,
     )
     from capture_core_actions_run_d1l import (
         REPOSITORY as CORE_REPOSITORY,
         validate_capture_receipt,
     )
+    from d1l_serial_target import (
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+        resolve_target,
+        safe_slug,
+        validate_snapshot,
+    )
     from smoke_d1l import open_d1l_serial, parse_jsonl_line
     from verify_checksums import is_link_or_reparse, sha256_file
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.core_reboot_persistence_d1l import (
         D1L_BAUD,
-        D1L_CORE_PORT,
-        enforce_core_port,
         exact_commit,
         exact_source_git,
-        port_identity,
-        port_snapshot,
         positive_decimal,
     )
     from scripts.capture_core_actions_run_d1l import (
         REPOSITORY as CORE_REPOSITORY,
         validate_capture_receipt,
     )
+    from scripts.d1l_serial_target import (
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+        resolve_target,
+        safe_slug,
+        validate_snapshot,
+    )
     from scripts.smoke_d1l import open_d1l_serial, parse_jsonl_line
     from scripts.verify_checksums import is_link_or_reparse, sha256_file
 
 
+D1L_CORE_PORT = WINDOWS_D1L_TARGET
+D1L_CORE_POSIX_TARGET = POSIX_D1L_TARGET
 CORE_RELEASE_PROFILE = "core_1_0"
 CORE_SD_HISTORY_MODE = "disabled"
 EXPECTED_IDF_VERSION = "v5.5.4"
@@ -159,6 +168,29 @@ def _finite_positive_timeout(value: object) -> bool:
         return math.isfinite(value) and value > 0
     except (OverflowError, TypeError, ValueError):
         return False
+
+
+def _authorized_target(value: object) -> str | None:
+    if type(value) is not str:
+        return None
+    if value in {WINDOWS_D1L_TARGET, POSIX_D1L_TARGET}:
+        return value
+    return None
+
+
+def _default_target() -> str:
+    return (
+        WINDOWS_D1L_TARGET
+        if os.name == "nt"
+        else POSIX_D1L_TARGET
+    )
+
+
+def enforce_core_port(value: object) -> str:
+    target = _authorized_target(value)
+    if target is None:
+        raise ValueError("port is not an authorized canonical D1L target")
+    return target
 
 
 def _exact_json_scalar(actual: object, expected: object) -> bool:
@@ -325,6 +357,7 @@ def predecessor_source_metadata(root: Path, candidate_commit: str) -> dict[str, 
 
 def derive_bound_attestation(
     *,
+    device: str = D1L_CORE_PORT,
     expected_legacy_value: int,
     confirmed_upper_bound: int,
     source: dict[str, Any],
@@ -333,6 +366,9 @@ def derive_bound_attestation(
 ) -> dict[str, Any]:
     if attest_exact_device_upper_bound is not True:
         raise ValueError("explicit exact-device upper-bound attestation is required")
+    canonical_device = _authorized_target(device)
+    if canonical_device is None:
+        raise ValueError("device is not an authorized canonical D1L target")
     if (
         type(expected_legacy_value) is not int
         or expected_legacy_value <= 0
@@ -380,7 +416,7 @@ def derive_bound_attestation(
     return {
         "schema": 1,
         "kind": "exact_device_protocol_upper_bound_attestation",
-        "device": D1L_CORE_PORT,
+        "device": canonical_device,
         "operator_attested": True,
         "human_present": False,
         "authority": "delegated_unattended_core_release_execution",
@@ -1094,6 +1130,20 @@ def _actions_binding_errors(
     return errors
 
 
+def _strict_target_identity(
+    snapshot: object,
+    expected_target: str,
+) -> str | None:
+    try:
+        validate_snapshot(snapshot, expected_target)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(snapshot, dict):
+        return None
+    identity = snapshot.get("stable_identity_sha256")
+    return identity if isinstance(identity, str) else None
+
+
 def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
     errors: list[str] = []
     if not isinstance(receipt, dict):
@@ -1113,12 +1163,14 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
     attempt = str(receipt.get("workflow_run_attempt") or "")
     if commit is None or not positive_decimal(run_id) or not positive_decimal(attempt):
         errors.append("exact candidate/Actions identity is invalid")
+    requested_target = _authorized_target(receipt.get("port"))
+    if requested_target is None:
+        errors.append("receipt port is not an authorized canonical D1L target")
     required = {
-        "schema": 1,
+        "schema": 2,
         "kind": "time_protocol_migration",
         "mode": "hardware",
         "scope": "exact-device-legacy-protocol-migration",
-        "port": D1L_CORE_PORT,
         "baud": D1L_BAUD,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": CORE_SD_HISTORY_MODE,
@@ -1142,6 +1194,11 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
     for key, expected in required.items():
         if receipt.get(key) != expected:
             errors.append(f"receipt {key} mismatch")
+    if (
+        requested_target is not None
+        and receipt.get("target_slug") != safe_slug(requested_target)
+    ):
+        errors.append("receipt target_slug mismatch")
     attestation = receipt.get("bound_attestation")
     if not isinstance(attestation, dict):
         errors.append("bound attestation is missing")
@@ -1155,7 +1212,7 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
         or upper > MAX_CONFIRMED_UPPER_BOUND
         or attestation.get("schema") != 1
         or attestation.get("kind") != "exact_device_protocol_upper_bound_attestation"
-        or attestation.get("device") != D1L_CORE_PORT
+        or attestation.get("device") != requested_target
         or attestation.get("expected_legacy_value") != legacy
         or attestation.get("confirmed_upper_bound") != upper
         or attestation.get("operator_attested") is not True
@@ -1293,17 +1350,26 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
             and parsed[6].get("cmd") == "health"
         ):
             errors.append("post-migration health failed")
-    before_port = receipt.get("port_before")
-    after_port = receipt.get("port_after")
-    before_identity = port_identity(before_port)
-    after_identity = port_identity(after_port)
+    before_target = receipt.get("d1l_target_before")
+    after_target = receipt.get("d1l_target_after")
+    before_identity = (
+        _strict_target_identity(before_target, requested_target)
+        if requested_target is not None
+        else None
+    )
+    after_identity = (
+        _strict_target_identity(after_target, requested_target)
+        if requested_target is not None
+        else None
+    )
     if (
         before_identity is None
         or after_identity is None
         or before_identity != after_identity
-        or receipt.get("port_identity_sha256") != before_identity
+        or receipt.get("target_identity_sha256") != before_identity
+        or receipt.get("target_identity_continuity_ok") is not True
     ):
-        errors.append("COM12 identity continuity failed")
+        errors.append("D1L target identity continuity failed")
     source_git = receipt.get("git")
     if not (
         isinstance(source_git, dict)
@@ -1313,22 +1379,6 @@ def _validate_receipt_core(receipt: object) -> tuple[bool, list[str]]:
     ):
         errors.append("exact clean producer source is invalid")
     return not errors, errors
-
-
-def _strict_port_identity(snapshot: object) -> str | None:
-    if not isinstance(snapshot, dict):
-        return None
-    matches = snapshot.get("matches")
-    if not (
-        snapshot.get("port") == D1L_CORE_PORT
-        and snapshot.get("present") is True
-        and isinstance(matches, list)
-        and len(matches) == 1
-        and isinstance(matches[0], dict)
-        and matches[0].get("device") == D1L_CORE_PORT
-    ):
-        return None
-    return port_identity(snapshot)
 
 
 def _strict_receipt_shape_errors(
@@ -1358,12 +1408,14 @@ def _strict_receipt_shape_errors(
         or not _positive_ascii_decimal(run_attempt)
     ):
         errors.append("exact candidate/Actions identity is invalid")
+    requested_target = _authorized_target(receipt.get("port"))
+    if requested_target is None:
+        errors.append("receipt port is not an authorized canonical D1L target")
     required = {
-        "schema": 1,
+        "schema": 2,
         "kind": "time_protocol_migration",
         "mode": "hardware",
         "scope": "exact-device-legacy-protocol-migration",
-        "port": D1L_CORE_PORT,
         "baud": D1L_BAUD,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": CORE_SD_HISTORY_MODE,
@@ -1387,6 +1439,14 @@ def _strict_receipt_shape_errors(
     for key, expected in required.items():
         if not _exact_json_scalar(receipt.get(key), expected):
             errors.append(f"receipt {key} type/value mismatch")
+    if (
+        requested_target is not None
+        and not _exact_json_scalar(
+            receipt.get("target_slug"),
+            safe_slug(requested_target),
+        )
+    ):
+        errors.append("receipt target_slug type/value mismatch")
 
     source_git = receipt.get("git")
     if not (
@@ -1417,7 +1477,7 @@ def _strict_receipt_shape_errors(
     attestation_required = {
         "schema": 1,
         "kind": "exact_device_protocol_upper_bound_attestation",
-        "device": D1L_CORE_PORT,
+        "device": requested_target,
         "operator_attested": True,
         "human_present": False,
         "authority": "delegated_unattended_core_release_execution",
@@ -1541,15 +1601,33 @@ def _strict_receipt_shape_errors(
     ):
         errors.append("confirmation phrase is reconstructable across receipt raw rows")
 
-    before_identity = _strict_port_identity(receipt.get("port_before"))
-    after_identity = _strict_port_identity(receipt.get("port_after"))
+    before_identity = (
+        _strict_target_identity(
+            receipt.get("d1l_target_before"),
+            requested_target,
+        )
+        if requested_target is not None
+        else None
+    )
+    after_identity = (
+        _strict_target_identity(
+            receipt.get("d1l_target_after"),
+            requested_target,
+        )
+        if requested_target is not None
+        else None
+    )
     if (
         before_identity is None
         or after_identity is None
         or before_identity != after_identity
-        or receipt.get("port_identity_sha256") != before_identity
+        or not _exact_json_scalar(
+            receipt.get("target_identity_sha256"),
+            before_identity,
+        )
+        or receipt.get("target_identity_continuity_ok") is not True
     ):
-        errors.append("exact COM12 identity continuity failed")
+        errors.append("exact D1L target identity continuity failed")
 
     if commit is not None and isinstance(run_id, str) and isinstance(run_attempt, str):
         errors.extend(
@@ -1689,7 +1767,7 @@ def _minimal_redacted_failure(
     mutation_started: bool,
 ) -> dict[str, Any]:
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "time_protocol_migration_redacted_failure",
         "mode": "hardware",
         "scope": "exact-device-legacy-protocol-migration",
@@ -1701,7 +1779,7 @@ def _minimal_redacted_failure(
         "redaction_applied": True,
         "redaction_reason": "sensitive_serial_material_omitted",
         "supplied_confirmation_logged": False,
-        "port": D1L_CORE_PORT,
+        "port": report.get("port"),
         "commit": report.get("commit"),
         "github_actions_run": report.get("github_actions_run"),
         "workflow_run_attempt": report.get("workflow_run_attempt"),
@@ -1739,6 +1817,13 @@ def _execute_migration_reserved(
     out: Path,
     serial_module: Any,
     port_lister: Callable[[], Iterable[object]],
+    requested_target: str,
+    platform_name: str | None,
+    target_exists: Callable[[str], bool],
+    target_is_symlink: Callable[[str], bool],
+    target_realpath: Callable[[str], str],
+    target_access: Callable[[str, int], bool],
+    target_hostname: Callable[[], str],
     commit: str,
     run_id: str,
     run_attempt: str,
@@ -1756,21 +1841,31 @@ def _execute_migration_reserved(
         raise ValueError("explicit exact-device upper-bound attestation is required")
     observed_at = now()
     predecessor_source = predecessor_source_metadata(root, commit)
+    canonical_requested_target = enforce_core_port(requested_target)
+    before_target = resolve_target(
+        canonical_requested_target,
+        port_lister=port_lister,
+        platform_name=platform_name,
+        exists=target_exists,
+        is_symlink=target_is_symlink,
+        realpath=target_realpath,
+        access=target_access,
+        hostname=target_hostname,
+    )
+    port = before_target["requested_path"]
+    before_identity = before_target["stable_identity_sha256"]
     attestation = derive_bound_attestation(
+        device=port,
         expected_legacy_value=expected_legacy_value,
         confirmed_upper_bound=confirmed_upper_bound,
         source=predecessor_source,
         observed_at=observed_at,
         attest_exact_device_upper_bound=attest_exact_device_upper_bound,
     )
-    before_port = port_snapshot(port_lister, now=now, clock=clock)
-    before_identity = port_identity(before_port)
-    if before_identity is None:
-        raise ValueError("COM12 must be uniquely present before serial open")
     transactions: list[dict[str, Any]] = []
     ser = open_d1l_serial(
         serial_module,
-        port=D1L_CORE_PORT,
+        port=port,
         baudrate=D1L_BAUD,
         timeout=timeout,
     )
@@ -1871,23 +1966,36 @@ def _execute_migration_reserved(
         except Exception:
             pass
     try:
-        after_port = port_snapshot(port_lister, now=now, clock=clock)
+        after_target = resolve_target(
+            port,
+            port_lister=port_lister,
+            platform_name=platform_name,
+            exists=target_exists,
+            is_symlink=target_is_symlink,
+            realpath=target_realpath,
+            access=target_access,
+            hostname=target_hostname,
+        )
     except Exception as exc:
-        after_port = {
-            "observed_at": now(),
-            "port": D1L_CORE_PORT,
-            "present": False,
-            "matches": [],
-            "capture_error_type": type(exc).__name__,
-        }
+        after_target = None
         if mutation_error is None:
             mutation_error = {
-                "phase": "post_mutation_port_snapshot",
+                "phase": "post_mutation_target_snapshot",
                 "exception_type": type(exc).__name__,
-                "detail_omitted": "port_exception_text_not_persisted",
+                "detail_omitted": "target_exception_text_not_persisted",
             }
+    target_continuity_ok = bool(
+        isinstance(after_target, dict)
+        and after_target.get("stable_identity_sha256") == before_identity
+    )
+    if not target_continuity_ok and mutation_error is None:
+        mutation_error = {
+            "phase": "post_mutation_target_continuity",
+            "exception_type": "TargetIdentityChanged",
+            "detail_omitted": "target_identity_details_retained_in_snapshots",
+        }
     report = {
-        "schema": 1,
+        "schema": 2,
         "kind": "time_protocol_migration",
         "mode": "hardware",
         "scope": "exact-device-legacy-protocol-migration",
@@ -1898,7 +2006,8 @@ def _execute_migration_reserved(
         "mutation_outcome_uncertain": mutation_error is not None,
         "release_closure_sufficient": False,
         "hardware_required": True,
-        "port": D1L_CORE_PORT,
+        "port": port,
+        "target_slug": safe_slug(port),
         "baud": D1L_BAUD,
         "commit": commit,
         "github_actions_run": run_id,
@@ -1909,9 +2018,10 @@ def _execute_migration_reserved(
         "wall_time_inferred_as_protocol_timestamp": False,
         "supplied_confirmation_logged": False,
         "bound_attestation": attestation,
-        "port_before": before_port,
-        "port_after": after_port,
-        "port_identity_sha256": before_identity,
+        "d1l_target_before": before_target,
+        "d1l_target_after": after_target,
+        "target_identity_sha256": before_identity,
+        "target_identity_continuity_ok": target_continuity_ok,
         "transactions": transactions,
         "started_at": transactions[0].get("started_at"),
         "ended_at": now(),
@@ -1947,6 +2057,13 @@ def execute_migration(
     out: Path,
     serial_module: Any,
     port_lister: Callable[[], Iterable[object]],
+    requested_target: str | None = None,
+    platform_name: str | None = None,
+    target_exists: Callable[[str], bool] = os.path.exists,
+    target_is_symlink: Callable[[str], bool] = os.path.islink,
+    target_realpath: Callable[[str], str] = os.path.realpath,
+    target_access: Callable[[str, int], bool] = os.access,
+    target_hostname: Callable[[], str] = socket.gethostname,
     commit: str,
     run_id: str,
     run_attempt: str,
@@ -1982,6 +2099,11 @@ def execute_migration(
         run_id=run_id,
         run_attempt=run_attempt,
     )
+    effective_target = (
+        _default_target()
+        if requested_target is None
+        else requested_target
+    )
     resolved_out, reservation = reserve_new_output_path(root, out)
     mutation_state = {"started": False}
     completed = False
@@ -1991,6 +2113,13 @@ def execute_migration(
             out=resolved_out,
             serial_module=serial_module,
             port_lister=port_lister,
+            requested_target=effective_target,
+            platform_name=platform_name,
+            target_exists=target_exists,
+            target_is_symlink=target_is_symlink,
+            target_realpath=target_realpath,
+            target_access=target_access,
+            target_hostname=target_hostname,
             commit=commit,
             run_id=run_id,
             run_attempt=run_attempt,
@@ -2030,7 +2159,7 @@ def _resolve(root: Path, value: str) -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
-    parser.add_argument("--port", default=D1L_CORE_PORT)
+    parser.add_argument("--port", default=_default_target())
     parser.add_argument("--baud", type=int, default=D1L_BAUD)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--github-run-id", required=True)
@@ -2060,9 +2189,8 @@ def main(argv: list[str] | None = None) -> int:
                 "--attest-exact-device-upper-bound is required; migration is "
                 "never automatic"
             )
-        port = enforce_core_port(args.port)
-        if port != D1L_CORE_PORT or args.baud != D1L_BAUD:
-            raise ValueError(f"only {D1L_CORE_PORT} at {D1L_BAUD} baud is permitted")
+        if args.baud != D1L_BAUD:
+            raise ValueError(f"only {D1L_BAUD} baud is permitted")
         commit = exact_commit(args.commit)
         if commit is None:
             raise ValueError("--commit must be an exact 40-character SHA")
@@ -2082,6 +2210,7 @@ def main(argv: list[str] | None = None) -> int:
             out=_resolve(root, args.out),
             serial_module=serial_module,
             port_lister=port_lister,
+            requested_target=args.port,
             commit=commit,
             run_id=run_id,
             run_attempt=run_attempt,

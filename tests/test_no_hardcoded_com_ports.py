@@ -25,13 +25,11 @@ REVIEWED_CORE_RELEASE_PORT_LITERALS = {
     },
     "scripts/core_release_gate_audit_d1l.py": {"COM12", "COM16"},
     "scripts/core_smoke_d1l.py": {"COM12"},
-    "scripts/manual_ui_review_d1l.py": {"COM12"},
     "scripts/package_release_d1l.py": {
         "COM8", "COM11", "COM12", "COM16", "COM29",
     },
     "scripts/rf_full_acceptance_d1l.py": {"COM12", "COM15", "COM16"},
     "scripts/soak_d1l.py": {"COM12", "COM15"},
-    "scripts/time_protocol_migration_d1l.py": {"COM12"},
 }
 
 
