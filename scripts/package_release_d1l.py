@@ -1802,6 +1802,7 @@ def write_supported_features(
     *,
     source_commit: str,
     actions_run: str,
+    actions_run_attempt: str,
     sd_history_mode: str,
     supported_capabilities: list[str],
     unavailable_capabilities: list[str],
@@ -1837,6 +1838,8 @@ Firmware commit: `{source_commit}`
 
 GitHub Actions run: `{actions_run}`
 
+GitHub Actions run attempt: `{actions_run_attempt}`
+
 SD history mode: `{sd_history_mode}`
 
 {sd_text}
@@ -1862,8 +1865,8 @@ Observer/MQTT, and location are deferred.
 
 ## Support and reporting
 
-Report defects with the firmware commit and GitHub Actions run shown above at
-https://github.com/n30nex/SIGUI/issues/new.
+Report defects with the firmware commit, GitHub Actions run, and run attempt
+shown above at https://github.com/n30nex/SIGUI/issues/new.
 
 Use USB installation and recovery only. Never format an SD card on the device.
 """,
@@ -1881,6 +1884,7 @@ def write_core_install_recovery_guide(
     *,
     source_commit: str,
     actions_run: str,
+    actions_run_attempt: str,
     sd_history_mode: str,
 ) -> dict:
     docs_dir = package_dir / "docs"
@@ -1892,6 +1896,8 @@ def write_core_install_recovery_guide(
 Firmware commit: `{source_commit}`
 
 GitHub Actions run: `{actions_run}`
+
+GitHub Actions run attempt: `{actions_run_attempt}`
 
 Release profile: `{CORE_RELEASE_PROFILE}`
 
@@ -2032,6 +2038,8 @@ Git commit: `{manifest['firmware_commit']}`
 
 GitHub Actions run: `{manifest['actions_run']}`
 
+GitHub Actions run attempt: `{manifest['actions_run_attempt']}`
+
 SD history mode: `{sd_mode}`
 
 {sd_note}
@@ -2104,7 +2112,9 @@ Never format an SD card on the device.
 
 Report defects at https://github.com/n30nex/SIGUI/issues/new. Include firmware
 commit `{manifest['firmware_commit']}`, Actions run
-`{manifest['actions_run']}`, this package name, and the relevant evidence.
+`{manifest['actions_run']}`, run attempt
+`{manifest['actions_run_attempt']}`, this package name, and the relevant
+evidence.
 
 App image: `{app['path']}`
 
@@ -2298,6 +2308,7 @@ def create_release_package(
                 package_dir,
                 source_commit=expected_commit,
                 actions_run=str(workflow["run_id"]),
+                actions_run_attempt=str(workflow["run_attempt"]),
                 sd_history_mode=sd_history_mode,
             )
         ]
@@ -2399,6 +2410,7 @@ def create_release_package(
             package_dir,
             source_commit=expected_commit,
             actions_run=str(workflow["run_id"]),
+            actions_run_attempt=str(workflow["run_attempt"]),
             sd_history_mode=sd_history_mode,
             supported_capabilities=manifest["supported_capabilities"],
             unavailable_capabilities=manifest["unavailable_capabilities"],

@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import re
 import types
 from pathlib import Path
 
@@ -28,6 +29,25 @@ def load_generated_flash_runner(package: Path) -> types.ModuleType:
     module.__file__ = str(path)
     exec(compile(path.read_text(encoding="ascii"), str(path), "exec"), module.__dict__)
     return module
+
+
+def assert_actions_identity(
+    text: str,
+    *,
+    run_id: str,
+    run_attempt: str,
+) -> None:
+    assert re.findall(
+        r"^GitHub Actions run: `([^`]+)`$",
+        text,
+        flags=re.MULTILINE,
+    ) == [run_id]
+    assert re.findall(
+        r"^GitHub Actions run attempt: `([^`]+)`$",
+        text,
+        flags=re.MULTILINE,
+    ) == [run_attempt]
+
 
 def test_core_disabled_package_binds_truth_and_omits_rp2040(
     tmp_path, monkeypatch
@@ -106,6 +126,15 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert "SD history is disabled and deferred" in supported_text
     assert "NVS is authoritative" in supported_text
     assert "Never format an SD card on the device" in supported_text
+    assert_actions_identity(
+        supported_text,
+        run_id="123456789",
+        run_attempt="1",
+    )
+    assert (
+        "GitHub Actions run, and run attempt\nshown above"
+        in supported_text
+    )
     assert manifest["supported_features"]["sha256"] == (
         package_release_d1l.sha256_file(package / "SUPPORTED_FEATURES.md")
     )
@@ -191,6 +220,11 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert os.access(package / "flash_project.sh", os.X_OK)
     assert "/dev/ttyUSB<number>" in guide
     assert "No POSIX recovery wrapper is shipped" in guide
+    assert_actions_identity(
+        guide,
+        run_id="123456789",
+        run_attempt="1",
+    )
     assert "verify_complete_package(root)" in runner_text
     assert "authorized_port = snapshot[\"requested_path\"]" in runner_text
     assert "erase-flash" not in runner_text
@@ -293,6 +327,16 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         )
 
     readme_path = package / "README_RELEASE.md"
+    readme_text = readme_path.read_text(encoding="ascii")
+    assert_actions_identity(
+        readme_text,
+        run_id="123456789",
+        run_attempt="1",
+    )
+    assert (
+        "Actions run\n`123456789`, run attempt\n`1`"
+        in readme_text
+    )
     original_readme = readme_path.read_bytes()
     readme_path.write_bytes(original_readme + b"tampered\n")
     try:
