@@ -572,6 +572,20 @@ def default_posix_flash_runner(
             os.dup2(write_fd, 2)
             if write_fd not in {1, 2}:
                 os.close(write_fd)
+            sys.stdout = open(
+                1,
+                "w",
+                buffering=1,
+                encoding="utf-8",
+                closefd=False,
+            )
+            sys.stderr = open(
+                2,
+                "w",
+                buffering=1,
+                encoding="utf-8",
+                closefd=False,
+            )
             os.chdir(cwd)
             _run_esptool_with_open_serial(command, serial_handle)
             sys.stdout.flush()
