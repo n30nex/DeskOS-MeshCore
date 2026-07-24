@@ -94,14 +94,14 @@ def posix_target_snapshot(resolved_tty: str):
     )
 
 
-def identity_status():
+def identity_status(public_key: str = PUBLIC_KEY):
     return {
         "schema": 1,
         "ok": True,
         "cmd": "identity status",
         "public_key_ready": True,
-        "public_key": PUBLIC_KEY,
-        "fingerprint": PUBLIC_KEY[:16].upper(),
+        "public_key": public_key,
+        "fingerprint": public_key[:16].upper(),
         "role": "desk_companion",
     }
 
@@ -485,6 +485,7 @@ def full_unread():
 def state_capture(nonce: int, uptime: int, reset_reason: str, crash_seq: int):
     rows = [
         ("version", version()),
+        ("identity status", identity_status()),
         ("health", health(nonce, uptime, reset_reason)),
         ("crashlog", crashlog(crash_seq, reset_reason)),
         ("settings get", settings()),
@@ -517,6 +518,7 @@ def full_state_capture(
 ):
     rows = [
         ("version", version()),
+        ("identity status", identity_status()),
         ("health", health(nonce, uptime, reset_reason)),
         ("crashlog", crashlog(crash_seq, reset_reason)),
         ("settings get", settings(node_name)),
@@ -920,6 +922,7 @@ def cycle_receipt(
         flash_sha256=flash_hash,
         previous_sha256=previous_hash,
         d1l_target=target_snapshot(),
+        expected_d1l_public_key=PUBLIC_KEY,
     )
     report["pre"] = full_state_capture(
         1000 + ordinal, 600000, "SW", 100 + ordinal
@@ -927,6 +930,14 @@ def cycle_receipt(
     report["post"] = full_state_capture(
         2000 + ordinal, 10000, reset_reason, 101 + ordinal
     )
+    report["pre_d1l_identity_status"] = copy.deepcopy(
+        report["pre"]["commands"][1]
+    )
+    report["post_d1l_identity_status"] = copy.deepcopy(
+        report["post"]["commands"][1]
+    )
+    report["pre_d1l_identity_ok"] = True
+    report["post_d1l_identity_ok"] = True
     if cycle_type == "software":
         report["action"] = {
             "kind": "software_reboot",
@@ -968,6 +979,44 @@ def cycle_receipt(
     report["reboot_or_power_action_may_have_executed"] = True
     report["ended_at"] = "2026-07-18T12:01:00Z"
     return report
+
+
+def recompute_test_cycle(receipt):
+    baseline, errors, _ = reboot.recompute_state_capture(
+        full_state_capture(1, 10000, "SW", 10),
+        COMMIT,
+        PUBLIC_KEY,
+    )
+    assert errors == []
+    assert baseline is not None
+    return reboot.recompute_cycle(
+        receipt,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        matrix_id="1" * 32,
+        baseline=baseline,
+        expected_target="COM12",
+        expected_target_identity_sha256=target_snapshot()[
+            "stable_identity_sha256"
+        ],
+        expected_d1l_public_key=PUBLIC_KEY,
+    )
+
+
+def replace_cycle_identity(receipt, phase: str, public_key: str):
+    identity_receipt = command_receipt(
+        "identity status", identity_status(public_key)
+    )
+    commands = receipt[phase]["commands"]
+    identity_index = next(
+        index
+        for index, row in enumerate(commands)
+        if row["command"] == "identity status"
+    )
+    commands[identity_index] = identity_receipt
+    receipt[f"{phase}_d1l_identity_status"] = copy.deepcopy(identity_receipt)
+    receipt[f"{phase}_d1l_identity_ok"] = True
 
 
 def valid_matrix_tree(tmp_path: Path):
@@ -1133,6 +1182,7 @@ def test_target_drift_is_rejected_before_next_serial_open(monkeypatch):
         flash_sha256="3" * 64,
         previous_sha256="3" * 64,
         d1l_target=initial,
+        expected_d1l_public_key=PUBLIC_KEY,
     )
 
     with pytest.raises(ValueError, match="identity drifted"):
@@ -1154,10 +1204,157 @@ def test_target_drift_is_rejected_before_next_serial_open(monkeypatch):
             expected_target_identity_sha256=initial[
                 "stable_identity_sha256"
             ],
+            expected_d1l_public_key=PUBLIC_KEY,
             platform_name="nt",
         )
 
     assert opened is False
+
+
+def test_software_identity_mismatch_stops_before_reboot(monkeypatch):
+    class SerialContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def reset_input_buffer(self):
+            return None
+
+    other_d1l_key = PUBLIC_KEY[:16] + "f" * 48
+    pre = full_state_capture(1, 10000, "SW", 10)
+    pre["commands"][1] = command_receipt(
+        "identity status", identity_status(other_d1l_key)
+    )
+    projection, admission_errors, raw = reboot.recompute_state_capture(
+        pre, COMMIT, PUBLIC_KEY
+    )
+    assert admission_errors
+    monkeypatch.setattr(
+        reboot,
+        "_capture_and_recompute",
+        lambda *_args, **_kwargs: (pre, projection, admission_errors, raw),
+    )
+    monkeypatch.setattr(
+        reboot, "_open_serial", lambda *_args, **_kwargs: SerialContext()
+    )
+
+    def unexpected_reboot(*_args, **_kwargs):
+        raise AssertionError("identity mismatch must stop before reboot")
+
+    monkeypatch.setattr(reboot, "read_raw_command", unexpected_reboot)
+    target = target_snapshot()
+    report = reboot._cycle_base(
+        matrix_id="1" * 32,
+        cycle_type="software",
+        ordinal=1,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        seed_sha256="2" * 64,
+        flash_sha256="3" * 64,
+        previous_sha256="3" * 64,
+        d1l_target=target,
+        expected_d1l_public_key=PUBLIC_KEY,
+    )
+
+    with pytest.raises(ValueError, match="pre-cycle admission failed"):
+        reboot.run_software_cycle(
+            serial_module=object(),
+            port_lister=valid_port_lister,
+            timeout=1.0,
+            transition_timeout=1.0,
+            commit=COMMIT,
+            baseline=full_store_projection(),
+            report=report,
+            requested_target="COM12",
+            expected_target_identity_sha256=target[
+                "stable_identity_sha256"
+            ],
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
+        )
+
+    assert report["reboot_or_power_action_may_have_executed"] is False
+    assert report["action"] is None
+    assert report["pre_d1l_identity_ok"] is False
+
+
+def test_cold_identity_mismatch_stops_before_power_prompt(monkeypatch):
+    class SerialContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def reset_input_buffer(self):
+            return None
+
+    other_d1l_key = PUBLIC_KEY[:16] + "f" * 48
+    pre = full_state_capture(1, 10000, "SW", 10)
+    pre["commands"][1] = command_receipt(
+        "identity status", identity_status(other_d1l_key)
+    )
+    projection, admission_errors, raw = reboot.recompute_state_capture(
+        pre, COMMIT, PUBLIC_KEY
+    )
+    assert admission_errors
+    monkeypatch.setattr(
+        reboot,
+        "_capture_and_recompute",
+        lambda *_args, **_kwargs: (pre, projection, admission_errors, raw),
+    )
+    monkeypatch.setattr(
+        reboot, "_open_serial", lambda *_args, **_kwargs: SerialContext()
+    )
+    prompted = False
+
+    def unexpected_prompt(_message):
+        nonlocal prompted
+        prompted = True
+        raise AssertionError("identity mismatch must stop before power prompt")
+
+    target = target_snapshot()
+    report = reboot._cycle_base(
+        matrix_id="1" * 32,
+        cycle_type="cold",
+        ordinal=1,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        seed_sha256="2" * 64,
+        flash_sha256="3" * 64,
+        previous_sha256="3" * 64,
+        d1l_target=target,
+        expected_d1l_public_key=PUBLIC_KEY,
+    )
+
+    with pytest.raises(ValueError, match="pre-cycle admission failed"):
+        reboot.run_cold_cycle(
+            serial_module=object(),
+            port_lister=valid_port_lister,
+            prompt=unexpected_prompt,
+            timeout=1.0,
+            port_timeout=1.0,
+            port_poll_sec=0.1,
+            minimum_power_off_sec=2.0,
+            commit=COMMIT,
+            baseline=full_store_projection(),
+            report=report,
+            requested_target="COM12",
+            expected_target_identity_sha256=target[
+                "stable_identity_sha256"
+            ],
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
+        )
+
+    assert prompted is False
+    assert report["reboot_or_power_action_may_have_executed"] is False
+    assert report["action"] is None
+    assert report["pre_d1l_identity_ok"] is False
 
 
 def test_cold_posix_by_id_allows_tty_renumbering():
@@ -1688,10 +1885,106 @@ def test_software_cycle_is_recomputed_from_raw_not_checks():
         expected_target_identity_sha256=target_snapshot()[
             "stable_identity_sha256"
         ],
+        expected_d1l_public_key=PUBLIC_KEY,
     )
 
     assert ok is True
     assert reasons == []
+
+
+def test_cycle_rejects_same_prefix_mixed_d1l_identity():
+    receipt = cycle_receipt(
+        "software", 1, "1" * 32, "2" * 64, "3" * 64, "3" * 64
+    )
+    other_d1l_key = PUBLIC_KEY[:16] + "f" * 48
+    assert other_d1l_key != PUBLIC_KEY
+    assert other_d1l_key[:16] == PUBLIC_KEY[:16]
+    replace_cycle_identity(receipt, "post", other_d1l_key)
+
+    ok, reasons = recompute_test_cycle(receipt)
+
+    assert ok is False
+    assert any(
+        "post: exact D1L identity schema/readiness/role/key failed" in reason
+        for reason in reasons
+    )
+
+
+def test_cycle_rejects_identity_raw_result_tampering():
+    receipt = cycle_receipt(
+        "software", 1, "1" * 32, "2" * 64, "3" * 64, "3" * 64
+    )
+    embedded = receipt["post"]["commands"][1]
+    embedded["result"]["public_key"] = "f" * 64
+    receipt["post_d1l_identity_status"] = copy.deepcopy(embedded)
+
+    ok, reasons = recompute_test_cycle(receipt)
+
+    assert ok is False
+    assert any("parsed result does not match raw result" in reason for reason in reasons)
+
+
+def test_cycle_rejects_reordered_identity_admission():
+    receipt = cycle_receipt(
+        "software", 1, "1" * 32, "2" * 64, "3" * 64, "3" * 64
+    )
+    commands = receipt["pre"]["commands"]
+    commands[1], commands[2] = commands[2], commands[1]
+
+    ok, reasons = recompute_test_cycle(receipt)
+
+    assert ok is False
+    assert any("admission order must be version -> identity status" in reason for reason in reasons)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "expected_d1l_public_key",
+        "pre_d1l_identity_status",
+        "post_d1l_identity_status",
+        "pre_d1l_identity_ok",
+        "post_d1l_identity_ok",
+    ],
+)
+def test_cycle_rejects_deleted_identity_binding_fields(field):
+    receipt = cycle_receipt(
+        "software", 1, "1" * 32, "2" * 64, "3" * 64, "3" * 64
+    )
+    del receipt[field]
+
+    ok, reasons = recompute_test_cycle(receipt)
+
+    assert ok is False
+    assert reasons
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema", 2),
+        ("public_key_ready", False),
+        ("fingerprint", "0" * 16),
+        ("role", "repeater"),
+    ],
+)
+def test_cycle_rejects_identity_contract_drift(field, value):
+    receipt = cycle_receipt(
+        "software", 1, "1" * 32, "2" * 64, "3" * 64, "3" * 64
+    )
+    result = identity_status()
+    result[field] = value
+    identity_receipt = command_receipt("identity status", result)
+    receipt["post"]["commands"][1] = identity_receipt
+    receipt["post_d1l_identity_status"] = copy.deepcopy(identity_receipt)
+
+    ok, reasons = recompute_test_cycle(receipt)
+
+    assert ok is False
+    assert any(
+        "post: exact D1L identity schema/readiness/role/key failed" in reason
+        for reason in reasons
+    )
 
 
 def test_software_cycle_rejects_raw_poweron_banner():
@@ -1717,6 +2010,7 @@ def test_software_cycle_rejects_raw_poweron_banner():
         expected_target_identity_sha256=target_snapshot()[
             "stable_identity_sha256"
         ],
+        expected_d1l_public_key=PUBLIC_KEY,
     )
 
     assert ok is False
@@ -1744,6 +2038,7 @@ def test_cycle_validator_rejects_unclosed_physical_outcome():
         expected_target_identity_sha256=target_snapshot()[
             "stable_identity_sha256"
         ],
+        expected_d1l_public_key=PUBLIC_KEY,
     )
 
     assert ok is False

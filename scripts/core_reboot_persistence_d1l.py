@@ -84,6 +84,7 @@ MINIMUM_POWER_OFF_SEC = 2.0
 FORBIDDEN_PORTS = frozenset({"COM8", "COM11", "COM16", "COM29"})
 STATE_BASE_COMMANDS = (
     "version",
+    "identity status",
     "health",
     "crashlog",
     "settings get",
@@ -1166,14 +1167,72 @@ def _read_state_projection(
     return {field: result[field] for field in fields}, []
 
 
+def _single_state_command_receipt(
+    capture: object,
+    command: str,
+) -> dict[str, Any] | None:
+    if not isinstance(capture, dict) or not isinstance(capture.get("commands"), list):
+        return None
+    matches = [
+        row
+        for row in capture["commands"]
+        if isinstance(row, dict) and row.get("command") == command
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _state_command_order_errors(capture: dict[str, Any]) -> list[str]:
+    rows = capture["commands"]
+    if not all(
+        isinstance(row, dict) and isinstance(row.get("command"), str)
+        for row in rows
+    ):
+        return ["state: command receipt sequence is invalid"]
+    commands = [row["command"] for row in rows]
+    base = list(STATE_BASE_COMMANDS)
+    tail = list(STATE_TAIL_COMMANDS)
+    if commands[: len(base)] != base:
+        return [
+            "state: admission order must be version -> identity status -> "
+            "health/state"
+        ]
+    if commands[-len(tail) :] != tail:
+        return ["state: tail command order is invalid"]
+    paginated = commands[len(base) : -len(tail)]
+    try:
+        dm_start = paginated.index("messages dm")
+    except ValueError:
+        return ["state: paginated command order is invalid"]
+    public_requests = paginated[:dm_start]
+    dm_requests = paginated[dm_start:]
+    for base_command, requests in (
+        ("messages public", public_requests),
+        ("messages dm", dm_requests),
+    ):
+        if not requests or requests[0] != base_command:
+            return ["state: paginated command order is invalid"]
+        if any(
+            re.fullmatch(
+                rf"{re.escape(base_command)} offset [1-9][0-9]*",
+                request,
+            )
+            is None
+            for request in requests[1:]
+        ):
+            return ["state: paginated command order is invalid"]
+    return []
+
+
 def recompute_state_capture(
     capture: object,
     commit: str,
+    expected_d1l_public_key: str | None = None,
 ) -> tuple[dict[str, Any] | None, list[str], dict[str, Any]]:
     errors: list[str] = []
     raw_results: dict[str, Any] = {}
     if not isinstance(capture, dict) or not isinstance(capture.get("commands"), list):
         return None, ["state capture is missing commands"], raw_results
+    errors.extend(_state_command_order_errors(capture))
     results: list[tuple[str, dict[str, Any]]] = []
     for index, row in enumerate(capture["commands"]):
         result, row_errors = recompute_raw_command(row)
@@ -1182,6 +1241,7 @@ def recompute_state_capture(
             results.append((str(row.get("command")), result))
     by_exact = {request: result for request, result in results}
     version = by_exact.get("version")
+    identity = by_exact.get("identity status")
     health = by_exact.get("health")
     crashlog = by_exact.get("crashlog")
     settings = by_exact.get("settings get")
@@ -1189,6 +1249,21 @@ def recompute_state_capture(
     contacts = by_exact.get("contacts")
     if not exact_version(version, commit):
         errors.append("state: exact candidate version identity failed")
+    expected_public_key = (
+        exact_public_key(expected_d1l_public_key)
+        if expected_d1l_public_key is not None
+        else (
+            exact_public_key(identity.get("public_key"))
+            if isinstance(identity, dict)
+            else None
+        )
+    )
+    if expected_public_key is None or not identity_status_ok(
+        identity, expected_public_key
+    ):
+        errors.append(
+            "state: exact D1L identity schema/readiness/role/key failed"
+        )
     if not exact_health(health):
         errors.append("state: exact candidate health identity/readiness failed")
     if not _command_ok(crashlog, "crashlog"):
@@ -1234,6 +1309,7 @@ def recompute_state_capture(
 
     raw_results = {
         "version": version,
+        "identity_status": identity,
         "health": health,
         "crashlog": crashlog,
     }
@@ -2128,7 +2204,7 @@ def validate_seed_receipt(
     ):
         errors.append("seed: producer I/O and mutation outcome are not closed")
     initial_projection, initial_errors, _ = recompute_state_capture(
-        receipt.get("initial_state_capture"), commit
+        receipt.get("initial_state_capture"), commit, public_key
     )
     errors.extend(f"seed initial: {error}" for error in initial_errors)
     if initial_projection is None:
@@ -2169,7 +2245,7 @@ def validate_seed_receipt(
     ):
         errors.append("seed settings mutation: exact command mismatch")
     projection, capture_errors, _ = recompute_state_capture(
-        receipt.get("state_capture"), commit
+        receipt.get("state_capture"), commit, public_key
     )
     errors.extend(f"seed: {error}" for error in capture_errors)
     witness = receipt.get("retention_witness")
@@ -2432,8 +2508,12 @@ def _cycle_base(
     flash_sha256: str,
     previous_sha256: str,
     d1l_target: dict[str, Any],
+    expected_d1l_public_key: str,
 ) -> dict[str, Any]:
     requested_target = d1l_target["requested_path"]
+    public_key = exact_public_key(expected_d1l_public_key)
+    if public_key is None:
+        raise ValueError("cycle expected D1L public key is invalid")
     return {
         "schema": 2,
         "kind": "core_reboot_persistence_cycle",
@@ -2446,6 +2526,7 @@ def _cycle_base(
         "expected_target_identity_sha256": d1l_target[
             "stable_identity_sha256"
         ],
+        "expected_d1l_public_key": public_key,
         "baud": D1L_BAUD,
         "commit": commit,
         "github_actions_run": run_id,
@@ -2459,6 +2540,10 @@ def _cycle_base(
         "ended_at": None,
         "pre": None,
         "post": None,
+        "pre_d1l_identity_status": None,
+        "post_d1l_identity_status": None,
+        "pre_d1l_identity_ok": False,
+        "post_d1l_identity_ok": False,
         "action": None,
         "checks": {},
         "ok": False,
@@ -2496,6 +2581,7 @@ def _capture_and_recompute(
     *,
     timeout: float,
     commit: str,
+    expected_d1l_public_key: str,
     clock: Callable[[], float],
     now: Callable[[], str],
     command_log: list[dict[str, Any]] | None = None,
@@ -2507,8 +2593,43 @@ def _capture_and_recompute(
         now=now,
         command_log=command_log,
     )
-    projection, errors, raw = recompute_state_capture(capture, commit)
+    projection, errors, raw = recompute_state_capture(
+        capture, commit, expected_d1l_public_key
+    )
     return capture, projection, errors, raw
+
+
+def _bind_cycle_identity(
+    report: dict[str, Any],
+    phase: str,
+    capture: dict[str, Any],
+    raw: dict[str, Any],
+    expected_d1l_public_key: str,
+) -> bool:
+    receipt = _single_state_command_receipt(capture, "identity status")
+    identity_ok = receipt is not None and identity_status_ok(
+        raw.get("identity_status"), expected_d1l_public_key
+    )
+    report[f"{phase}_d1l_identity_status"] = receipt
+    report[f"{phase}_d1l_identity_ok"] = identity_ok
+    return identity_ok
+
+
+def _abort_pre_cycle_admission(
+    report: dict[str, Any],
+    errors: list[str],
+    *,
+    now: Callable[[], str],
+) -> None:
+    report["checks"] = {
+        "pre_d1l_identity_ok": report.get("pre_d1l_identity_ok") is True,
+        "errors": errors,
+    }
+    report["ok"] = False
+    report["closure_eligible"] = False
+    report["stage"] = "pre_cycle_admission_failed"
+    report["ended_at"] = now()
+    raise ValueError("pre-cycle admission failed: " + "; ".join(errors))
 
 
 def run_software_cycle(
@@ -2522,6 +2643,7 @@ def run_software_cycle(
     report: dict[str, Any],
     requested_target: str,
     expected_target_identity_sha256: str,
+    expected_d1l_public_key: str,
     platform_name: str | None = None,
     clock: Callable[[], float] = time.monotonic,
     now: Callable[[], str] = utc_now,
@@ -2553,16 +2675,28 @@ def run_software_cycle(
             ser,
             timeout=timeout,
             commit=commit,
+            expected_d1l_public_key=expected_d1l_public_key,
             clock=clock,
             now=now,
             command_log=command_log,
         )
         report["pre"] = pre
+        _bind_cycle_identity(
+            report,
+            "pre",
+            pre,
+            pre_raw,
+            expected_d1l_public_key,
+        )
         errors.extend(f"pre: {error}" for error in pre_errors)
-        if pre_projection is not None:
+        if pre_projection is None:
+            errors.append("pre: exact candidate state projection is missing")
+        else:
             preserved, state_errors = state_preserved(baseline, pre_projection)
             if not preserved:
                 errors.extend(f"pre: {error}" for error in state_errors)
+        if errors:
+            _abort_pre_cycle_admission(report, errors, now=now)
         report["stage"] = "software_reboot_command"
         report["reboot_or_power_action_may_have_executed"] = True
         reboot = read_raw_command(
@@ -2587,11 +2721,19 @@ def run_software_cycle(
             ser,
             timeout=timeout,
             commit=commit,
+            expected_d1l_public_key=expected_d1l_public_key,
             clock=clock,
             now=now,
             command_log=command_log,
         )
         report["post"] = post
+        _bind_cycle_identity(
+            report,
+            "post",
+            post,
+            post_raw,
+            expected_d1l_public_key,
+        )
         errors.extend(f"post: {error}" for error in post_errors)
     report["stage"] = "resolving_post_reboot_d1l_target"
     after_target = resolve_core_target(
@@ -2652,6 +2794,8 @@ def run_software_cycle(
         "transition": transition,
         "transition_ok": transition_ok,
         "target_identity_stable": target_ok,
+        "pre_d1l_identity_ok": report["pre_d1l_identity_ok"],
+        "post_d1l_identity_ok": report["post_d1l_identity_ok"],
         "retained_state_preserved": not any(
             error.startswith(("pre:", "post:", "baseline:")) for error in errors
         ),
@@ -2678,6 +2822,7 @@ def run_cold_cycle(
     report: dict[str, Any],
     requested_target: str,
     expected_target_identity_sha256: str,
+    expected_d1l_public_key: str,
     platform_name: str | None = None,
     clock: Callable[[], float] = time.monotonic,
     now: Callable[[], str] = utc_now,
@@ -2709,16 +2854,28 @@ def run_cold_cycle(
             ser,
             timeout=timeout,
             commit=commit,
+            expected_d1l_public_key=expected_d1l_public_key,
             clock=clock,
             now=now,
             command_log=command_log,
         )
     report["pre"] = pre
+    _bind_cycle_identity(
+        report,
+        "pre",
+        pre,
+        pre_raw,
+        expected_d1l_public_key,
+    )
     errors.extend(f"pre: {error}" for error in pre_errors)
-    if pre_projection is not None:
+    if pre_projection is None:
+        errors.append("pre: exact candidate state projection is missing")
+    else:
         preserved, state_errors = state_preserved(baseline, pre_projection)
         if not preserved:
             errors.extend(f"pre: {error}" for error in state_errors)
+    if errors:
+        _abort_pre_cycle_admission(report, errors, now=now)
 
     report["stage"] = "operator_cold_power_removal"
     report["reboot_or_power_action_may_have_executed"] = True
@@ -2806,9 +2963,17 @@ def run_cold_cycle(
                 ser,
                 timeout=timeout,
                 commit=commit,
+                expected_d1l_public_key=expected_d1l_public_key,
                 clock=clock,
                 now=now,
                 command_log=command_log,
+            )
+            _bind_cycle_identity(
+                report,
+                "post",
+                post,
+                post_raw,
+                expected_d1l_public_key,
             )
             errors.extend(f"post: {error}" for error in post_errors)
     report["post"] = post
@@ -2860,6 +3025,8 @@ def run_cold_cycle(
         "target_identity_stable": target_ok,
         "transition": transition,
         "transition_ok": transition_ok,
+        "pre_d1l_identity_ok": report["pre_d1l_identity_ok"],
+        "post_d1l_identity_ok": report["post_d1l_identity_ok"],
         "retained_state_preserved": not any(
             error.startswith(("pre:", "post:", "baseline:")) for error in errors
         ),
@@ -3027,6 +3194,32 @@ def _target_action_recomputed(
     return not errors, errors
 
 
+def _cycle_identity_binding_errors(
+    receipt: dict[str, Any],
+    *,
+    phase: str,
+    expected_d1l_public_key: str,
+) -> list[str]:
+    errors: list[str] = []
+    capture = receipt.get(phase)
+    embedded = _single_state_command_receipt(capture, "identity status")
+    declared = receipt.get(f"{phase}_d1l_identity_status")
+    if embedded is None:
+        errors.append(f"{phase}: exactly one embedded identity status is required")
+    if declared != embedded:
+        errors.append(f"{phase}: identity status receipt is not bound to state capture")
+    identity_result, identity_errors = recompute_raw_command(declared)
+    errors.extend(f"{phase} identity: {error}" for error in identity_errors)
+    if (
+        receipt.get(f"{phase}_d1l_identity_ok") is not True
+        or not identity_status_ok(identity_result, expected_d1l_public_key)
+    ):
+        errors.append(
+            f"{phase}: exact D1L identity schema/readiness/role/key failed"
+        )
+    return errors
+
+
 def recompute_cycle(
     receipt: object,
     *,
@@ -3037,6 +3230,7 @@ def recompute_cycle(
     baseline: dict[str, Any],
     expected_target: str,
     expected_target_identity_sha256: str,
+    expected_d1l_public_key: str,
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
     if not isinstance(receipt, dict):
@@ -3044,6 +3238,9 @@ def recompute_cycle(
     cycle_type = receipt.get("cycle_type")
     if cycle_type not in {"software", "cold"}:
         return False, ["cycle type is invalid"]
+    public_key = exact_public_key(expected_d1l_public_key)
+    if public_key is None:
+        return False, ["cycle expected D1L public key is invalid"]
     required = {
         "schema": 2,
         "kind": "core_reboot_persistence_cycle",
@@ -3053,6 +3250,7 @@ def recompute_cycle(
         "expected_target_identity_sha256": (
             expected_target_identity_sha256
         ),
+        "expected_d1l_public_key": public_key,
         "baud": D1L_BAUD,
         "commit": commit,
         "github_actions_run": run_id,
@@ -3072,18 +3270,34 @@ def recompute_cycle(
         "reboot_or_power_action_may_have_executed": True,
         "physical_state_outcome_uncertain": False,
         "mutation_outcome_uncertain": False,
+        "pre_d1l_identity_ok": True,
+        "post_d1l_identity_ok": True,
     }
     for key, expected in required.items():
         if receipt.get(key) != expected:
             errors.append(f"cycle: {key} mismatch")
     pre_projection, pre_errors, pre_raw = recompute_state_capture(
-        receipt.get("pre"), commit
+        receipt.get("pre"), commit, public_key
     )
     post_projection, post_errors, post_raw = recompute_state_capture(
-        receipt.get("post"), commit
+        receipt.get("post"), commit, public_key
     )
     errors.extend(f"pre: {error}" for error in pre_errors)
     errors.extend(f"post: {error}" for error in post_errors)
+    errors.extend(
+        _cycle_identity_binding_errors(
+            receipt,
+            phase="pre",
+            expected_d1l_public_key=public_key,
+        )
+    )
+    errors.extend(
+        _cycle_identity_binding_errors(
+            receipt,
+            phase="post",
+            expected_d1l_public_key=public_key,
+        )
+    )
     if pre_projection is not None:
         preserved, state_errors = state_preserved(baseline, pre_projection)
         if not preserved:
@@ -3249,7 +3463,7 @@ def _validate_core_reboot_persistence_report(
         )
 
     live_projection, live_errors, _ = recompute_state_capture(
-        matrix.get("post_reinstall_live_capture"), commit
+        matrix.get("post_reinstall_live_capture"), commit, public_key
     )
     errors.extend(f"post-reinstall live: {error}" for error in live_errors)
     live_identity_result, live_identity_errors = recompute_raw_command(
@@ -3356,6 +3570,7 @@ def _validate_core_reboot_persistence_report(
             baseline=baseline,
             expected_target=target,
             expected_target_identity_sha256=target_digest,
+            expected_d1l_public_key=public_key,
         )
         if not cycle_ok:
             errors.extend(
@@ -3441,7 +3656,7 @@ def _seed_retained_state_report(
         )
         progress["initial_state_capture"] = initial
         initial_projection, initial_errors, _ = recompute_state_capture(
-            initial, commit
+            initial, commit, expected_d1l_public_key
         )
         if initial_projection is not None and not initial_errors:
             progress["stage"] = "validating_live_d1l_identity"
@@ -3546,7 +3761,9 @@ def _seed_retained_state_report(
             )
             progress["state_capture"] = final
     progress["stage"] = "recomputing_seed_report"
-    projection, capture_errors, _ = recompute_state_capture(final, commit)
+    projection, capture_errors, _ = recompute_state_capture(
+        final, commit, expected_d1l_public_key
+    )
     errors = [
         *(f"initial: {error}" for error in initial_errors),
         *(f"identity: {error}" for error in identity_errors),
@@ -3927,7 +4144,7 @@ def _verify_reboot_matrix_after_reservation(
         )
         execution["post_reinstall_live_capture"] = live_capture
     live_projection, live_errors, _ = recompute_state_capture(
-        live_capture, commit
+        live_capture, commit, expected_d1l_public_key
     )
     if live_projection is None:
         raise ValueError(
@@ -3962,6 +4179,7 @@ def _verify_reboot_matrix_after_reservation(
             flash_sha256=flash_row["sha256"],
             previous_sha256=previous_sha,
             d1l_target=d1l_target,
+            expected_d1l_public_key=expected_d1l_public_key,
         )
         execution["current_cycle_key"] = key
         execution["current_cycle_path"] = str(child)
@@ -3976,6 +4194,7 @@ def _verify_reboot_matrix_after_reservation(
             report=cycle,
             requested_target=requested_target,
             expected_target_identity_sha256=target_digest,
+            expected_d1l_public_key=expected_d1l_public_key,
             platform_name=platform_name,
             clock=clock,
             now=now,
@@ -4011,6 +4230,7 @@ def _verify_reboot_matrix_after_reservation(
                 flash_sha256=flash_row["sha256"],
                 previous_sha256=previous_sha,
                 d1l_target=d1l_target,
+                expected_d1l_public_key=expected_d1l_public_key,
             )
             execution["current_cycle_key"] = key
             execution["current_cycle_path"] = str(child)
@@ -4028,6 +4248,7 @@ def _verify_reboot_matrix_after_reservation(
                 report=cycle,
                 requested_target=requested_target,
                 expected_target_identity_sha256=target_digest,
+                expected_d1l_public_key=expected_d1l_public_key,
                 platform_name=platform_name,
                 clock=clock,
                 now=now,
