@@ -815,6 +815,20 @@ def test_core_scroll_gate_validates_windows_and_posix_targets(tmp_path):
 
 
 def passing_soak(*, active: bool) -> dict:
+    d1l_public_key = audit.rf_acceptance.DEFAULT_D1L_PUBLIC_KEY
+    d1l_identity = (
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "identity status",
+            "public_key_ready": True,
+            "public_key": d1l_public_key,
+            "fingerprint": d1l_public_key[:16].upper(),
+            "role": "desk_companion",
+        }
+        if active
+        else {}
+    )
     duration = 3600 if active else 1800
     interval = 300
     samples = []
@@ -1008,7 +1022,9 @@ def passing_soak(*, active: bool) -> dict:
         ),
         "duration_sec": duration,
         "sample_interval_sec": interval,
-        "preflight_commands": ["version"],
+        "preflight_commands": (
+            ["version", "identity status"] if active else ["version"]
+        ),
         "preflight_failure": None,
         "version_preflight": {
             "schema": 1,
@@ -1032,8 +1048,25 @@ def passing_soak(*, active: bool) -> dict:
                     "release_profile": "core_1_0",
                     "sd_history_mode": "disabled",
                 },
-            }
+            },
+            *(
+                [
+                    {
+                        "elapsed_sec": 0.0,
+                        "cmd": "identity status",
+                        "result": d1l_identity,
+                    }
+                ]
+                if active
+                else []
+            ),
         ],
+        "d1l_identity_required": active,
+        "expected_d1l_public_key": (
+            d1l_public_key if active else None
+        ),
+        "d1l_identity_status": d1l_identity,
+        "d1l_identity_ok": True if active else None,
         "commands": list(soak_runner.SOAK_COMMANDS)
         + [soak_runner.STORAGE_STATUS_COMMAND],
         "sample_storage": True,
@@ -1080,6 +1113,18 @@ def test_core_soak_requires_full_duration_exact_identity_and_nvs():
     )
 
     active["duration_sec"] = 3599
+    assert not audit.soak_artifact_ok(
+        active,
+        commit=COMMIT,
+        sd_history_mode="disabled",
+        active=True,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+    active = passing_soak(active=True)
+    active["d1l_identity_status"]["public_key"] = (
+        active["expected_d1l_public_key"][:16] + "0" * 48
+    )
     assert not audit.soak_artifact_ok(
         active,
         commit=COMMIT,

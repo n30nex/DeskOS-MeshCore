@@ -3671,16 +3671,46 @@ def soak_artifact_ok(
         summary_raw_exact = False
     setup_events = data.get("setup_events")
     setup_events = setup_events if isinstance(setup_events, list) else []
-    setup_ok = (
-        data.get("preflight_commands") == ["version"]
-        and data.get("preflight_failure") is None
-        and len(setup_events) == 1
+    expected_preflight_commands = (
+        ["version", "identity status"] if active else ["version"]
+    )
+    version_setup_ok = (
+        len(setup_events) == len(expected_preflight_commands)
+        and isinstance(setup_events[0], dict)
         and setup_events[0].get("cmd") == "version"
         and setup_events[0].get("elapsed_sec") == 0.0
         and setup_events[0].get("result") == data.get("version_preflight")
         and _profile_version_result(
             data.get("version_preflight"), commit, sd_history_mode
         )
+    )
+    if active:
+        identity_setup_ok = (
+            len(setup_events) == 2
+            and isinstance(setup_events[1], dict)
+            and data.get("d1l_identity_required") is True
+            and data.get("d1l_identity_ok") is True
+            and rf_acceptance.d1l_identity_status_ok(
+                data.get("d1l_identity_status"),
+                data.get("expected_d1l_public_key"),
+            )
+            and setup_events[1].get("cmd") == "identity status"
+            and setup_events[1].get("elapsed_sec") == 0.0
+            and setup_events[1].get("result")
+            == data.get("d1l_identity_status")
+        )
+    else:
+        identity_setup_ok = (
+            data.get("d1l_identity_required") is False
+            and data.get("expected_d1l_public_key") is None
+            and data.get("d1l_identity_status") == {}
+            and data.get("d1l_identity_ok") is None
+        )
+    setup_ok = (
+        data.get("preflight_commands") == expected_preflight_commands
+        and data.get("preflight_failure") is None
+        and version_setup_ok
+        and identity_setup_ok
     )
     invocation_ok = (
         data.get("commands")
@@ -4208,6 +4238,10 @@ def soak_gate(
         and isinstance(rf.get("controlled_peer"), dict)
         and active.get("active_dm_fingerprint")
         == rf["controlled_peer"].get("fingerprint")
+        and rf_acceptance.exact_public_key(
+            active.get("expected_d1l_public_key")
+        )
+        == rf_acceptance.exact_public_key(rf.get("d1l_public_key"))
         and idle.get("controlled_peer_receipt") is None
         and peer_flow_ok
     )
