@@ -13,6 +13,9 @@ COM_PATTERN = re.compile(r"\bCOM\d+\b", re.IGNORECASE)
 # COM12 is the only D1L target, COM16 is not a Core D1L/RF target, and COM15 is
 # the assigned read-only/controlled-peer listener.
 REVIEWED_CORE_RELEASE_PORT_LITERALS = {
+    "scripts/d1l_serial_target.py": {
+        "COM8", "COM11", "COM12", "COM16", "COM29",
+    },
     "scripts/core_flash_only_d1l.py": {
         "COM8", "COM11", "COM12", "COM16", "COM29",
     },
