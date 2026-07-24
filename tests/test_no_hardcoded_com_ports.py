@@ -17,7 +17,7 @@ REVIEWED_CORE_RELEASE_PORT_LITERALS = {
         "COM8", "COM11", "COM12", "COM16", "COM29",
     },
     "scripts/core_flash_only_d1l.py": {
-        "COM8", "COM11", "COM12", "COM16", "COM29",
+        "COM8", "COM11", "COM16", "COM29",
     },
     "scripts/core_install_recovery_review_d1l.py": {"COM12"},
     "scripts/core_reboot_persistence_d1l.py": {

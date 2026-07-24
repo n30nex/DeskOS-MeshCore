@@ -8,6 +8,7 @@ from scripts import core_flash_only_d1l as flash
 COMMIT = "a" * 40
 RUN_ID = "123456789"
 RUN_ATTEMPT = "1"
+PUBLIC_KEY = "f" * 64
 
 
 def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
@@ -56,7 +57,44 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
             "ok": True,
             "entries": [{"fingerprint": "0123456789ABCDEF"}],
         },
+        {
+            "schema": 1,
+            "cmd": "identity status",
+            "ok": True,
+            "public_key_ready": True,
+            "public_key": PUBLIC_KEY,
+            "fingerprint": PUBLIC_KEY[:16].upper(),
+            "role": "desk_companion",
+        },
     ]
+
+
+def target_kwargs():
+    return {
+        "expected_d1l_public_key": PUBLIC_KEY,
+        "platform_name": "nt",
+        "port_lister": lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+                "location": "1-2",
+            }
+        ],
+        "identity_status_reader": (
+            lambda *_args: {
+                "schema": 1,
+                "cmd": "identity status",
+                "ok": True,
+                "public_key_ready": True,
+                "public_key": PUBLIC_KEY,
+                "fingerprint": PUBLIC_KEY[:16].upper(),
+                "role": "desk_companion",
+            }
+        ),
+    }
 
 
 def fixture_paths(tmp_path: Path):
@@ -163,10 +201,15 @@ def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
         settle_sec=0.0,
         raw_log_path=raw_log,
         flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+        **target_kwargs(),
         flash_runner=success_runner,
         retained_state_reader=lambda *_args: retained_state(),
     )
     assert bootstrap["ok"] is True
+    assert bootstrap["schema"] == 2
+    assert bootstrap["d1l_target"]["requested_path"] == "COM12"
+    assert bootstrap["target_identity_continuity_ok"] is True
+    assert bootstrap["d1l_public_key_continuity_ok"] is True
     assert bootstrap["closure_eligible"] is False
     assert bootstrap["scope"] == "core-bootstrap-flash-only"
     assert bootstrap["retained_state_before"] is None
@@ -189,6 +232,7 @@ def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
         settle_sec=0.0,
         raw_log_path=closing_log,
         flash_phase=flash.FLASH_PHASE_RETAINED_REFLASH,
+        **target_kwargs(),
         flash_runner=success_runner,
         retained_state_reader=lambda *_args: retained_state(),
     )
@@ -228,6 +272,7 @@ def test_flash_preflight_fails_before_physical_action(
             settle_sec=0.0,
             raw_log_path=raw_log,
             flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+            **target_kwargs(),
             flash_runner=lambda *_args: calls.append("flash"),
             retained_state_reader=lambda *_args: calls.append("serial"),
         )
@@ -256,6 +301,7 @@ def test_flash_rejects_every_non_com12_port(tmp_path, monkeypatch, port):
             settle_sec=0.0,
             raw_log_path=raw_log,
             flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+            **target_kwargs(),
         )
 
 
@@ -282,6 +328,7 @@ def test_closing_reflash_requires_exact_ready_candidate_baseline(
             settle_sec=0.0,
             raw_log_path=raw_log,
             flash_phase=flash.FLASH_PHASE_RETAINED_REFLASH,
+            **target_kwargs(),
             flash_runner=lambda *_args: calls.append("flash"),
             retained_state_reader=lambda *_args: retained_state("b" * 40),
         )
@@ -313,4 +360,145 @@ def test_flash_rejects_nonpositive_run_identity(
             settle_sec=0.0,
             raw_log_path=raw_log,
             flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+            **target_kwargs(),
         )
+
+
+def test_wrong_usb_identity_fails_before_serial_or_flash(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    calls = []
+    kwargs = target_kwargs()
+    kwargs["port_lister"] = lambda: [
+        {
+            "device": "COM12",
+            "vid": 0x10C4,
+            "pid": 0xEA60,
+            "serial_number": "wrong",
+            "hwid": "wrong",
+            "location": "1-9",
+        }
+    ]
+    kwargs["identity_status_reader"] = (
+        lambda *_args: calls.append("serial")
+    )
+
+    with pytest.raises(ValueError, match="VID"):
+        flash.run_core_flash_only(
+            root=tmp_path,
+            github_run_dir=run_dir,
+            package_dir=package,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            actions_capture_receipt=capture_receipt,
+            port="COM12",
+            serial_baud=115200,
+            flash_baud=460800,
+            serial_timeout=5.0,
+            flash_timeout=60,
+            settle_sec=0.0,
+            raw_log_path=raw_log,
+            flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+            flash_runner=lambda *_args: calls.append("flash"),
+            **kwargs,
+        )
+    assert calls == []
+    assert not raw_log.exists()
+
+
+def test_preflash_public_key_mismatch_fails_before_esptool(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    calls = []
+    kwargs = target_kwargs()
+    kwargs["identity_status_reader"] = lambda *_args: {
+        "schema": 1,
+        "cmd": "identity status",
+        "ok": True,
+        "public_key_ready": True,
+        "public_key": "e" * 64,
+        "fingerprint": "E" * 16,
+        "role": "desk_companion",
+    }
+
+    with pytest.raises(ValueError, match="pinned D1L public key"):
+        flash.run_core_flash_only(
+            root=tmp_path,
+            github_run_dir=run_dir,
+            package_dir=package,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            actions_capture_receipt=capture_receipt,
+            port="COM12",
+            serial_baud=115200,
+            flash_baud=460800,
+            serial_timeout=5.0,
+            flash_timeout=60,
+            settle_sec=0.0,
+            raw_log_path=raw_log,
+            flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+            flash_runner=lambda *_args: calls.append("flash"),
+            **kwargs,
+        )
+    assert calls == []
+    assert not raw_log.exists()
+
+
+def test_postflash_target_drift_blocks_serial_reopen_and_closure(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    locations = iter(("1-2", "1-9"))
+    serial_calls = []
+    kwargs = target_kwargs()
+
+    def lister():
+        location = next(locations)
+        return [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": (
+                    f"USB VID:PID=1A86:7523 LOCATION={location}"
+                ),
+                "location": location,
+            }
+        ]
+
+    kwargs["port_lister"] = lister
+    report = flash.run_core_flash_only(
+        root=tmp_path,
+        github_run_dir=run_dir,
+        package_dir=package,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        actions_capture_receipt=capture_receipt,
+        port="COM12",
+        serial_baud=115200,
+        flash_baud=460800,
+        serial_timeout=5.0,
+        flash_timeout=60,
+        settle_sec=0.0,
+        raw_log_path=raw_log,
+        flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+        flash_runner=success_runner,
+        retained_state_reader=lambda *_args: serial_calls.append("serial"),
+        **kwargs,
+    )
+
+    assert report["ok"] is False
+    assert report["closure_eligible"] is False
+    assert report["target_identity_continuity_ok"] is False
+    assert report["d1l_target_after"]["location"] == "1-9"
+    assert serial_calls == []
+    assert raw_log.is_file()

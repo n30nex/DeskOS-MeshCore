@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Flash one exact Actions-built Core 1.0 candidate to COM12, then stop."""
+"""Flash one exact Actions-built Core candidate to the verified D1L target."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -26,7 +28,9 @@ try:
         enforce_core_port,
         exact_identity,
         exact_version_identity,
+        resolve_core_target,
     )
+    from d1l_serial_target import safe_slug
     from release_gate_audit_d1l import find_release_package
     from smoke_d1l import (
         exact_commit,
@@ -54,7 +58,9 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         enforce_core_port,
         exact_identity,
         exact_version_identity,
+        resolve_core_target,
     )
+    from scripts.d1l_serial_target import safe_slug
     from scripts.release_gate_audit_d1l import find_release_package
     from scripts.smoke_d1l import (
         exact_commit,
@@ -83,7 +89,9 @@ RETAINED_STATE_COMMANDS = (
     "messages public",
     "messages dm",
     "contacts",
+    "identity status",
 )
+EXPECTED_D1L_ROLE = "desk_companion"
 FLASH_PHASE_BOOTSTRAP = "bootstrap"
 FLASH_PHASE_RETAINED_REFLASH = "retained-reflash"
 FLASH_PHASES = (
@@ -130,6 +138,7 @@ def make_context(
     serial_baud: int,
     flash_baud: int,
 ) -> RunContext:
+    target_slug = safe_slug(enforce_core_port(port))
     return RunContext(
         root=root,
         commit=commit,
@@ -138,7 +147,7 @@ def make_context(
         github_run_dir=github_run_dir,
         d1l_port=port,
         rp2040_port="",
-        hardware_dir=root / "artifacts" / "hardware" / "com12",
+        hardware_dir=root / "artifacts" / "hardware" / target_slug,
         rp2040_hardware_dir=root / "artifacts" / "hardware" / "unused",
         baud=serial_baud,
         esp32_flash_baud=flash_baud,
@@ -315,6 +324,70 @@ def default_flash_runner(
     return result, raw
 
 
+def exact_public_key(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return (
+        normalized
+        if re.fullmatch(r"[0-9a-f]{64}", normalized)
+        else None
+    )
+
+
+def identity_status_ok(result: object, expected_public_key: str) -> bool:
+    public_key = exact_public_key(expected_public_key)
+    return (
+        public_key is not None
+        and isinstance(result, dict)
+        and result.get("schema") == 1
+        and result.get("ok") is True
+        and result.get("cmd") == "identity status"
+        and result.get("public_key_ready") is True
+        and exact_public_key(result.get("public_key")) == public_key
+        and result.get("fingerprint") == public_key[:16].upper()
+        and result.get("role") == EXPECTED_D1L_ROLE
+    )
+
+
+def read_identity_status(
+    port: str,
+    baud: int,
+    timeout: float,
+    settle_sec: float,
+) -> dict:
+    try:
+        import serial
+    except ImportError as exc:
+        raise RuntimeError(
+            "pyserial is required for D1L identity preflight"
+        ) from exc
+    if settle_sec > 0:
+        time.sleep(settle_sec)
+    with open_d1l_serial(
+        serial, port=port, baudrate=baud, timeout=timeout
+    ) as handle:
+        time.sleep(1.0)
+        handle.reset_input_buffer()
+        return send_console_command(handle, "identity status", timeout)
+
+
+def command_uses_only_target(command: object, target: str) -> bool:
+    if not isinstance(command, list) or not all(
+        isinstance(token, str) for token in command
+    ):
+        return False
+    selected: list[str] = []
+    for index, token in enumerate(command):
+        if token in {"--port", "-p"}:
+            if index + 1 >= len(command):
+                return False
+            selected.append(command[index + 1])
+        elif token.startswith("--port="):
+            selected.append(token.split("=", 1)[1])
+    return selected == [target]
+
+
 def read_device_identity(
     port: str, baud: int, timeout: float, settle_sec: float
 ) -> tuple[dict, dict]:
@@ -403,13 +476,25 @@ def retained_state_projection(results: object) -> dict | None:
     public = projected_entries("messages public")
     direct = projected_entries("messages dm")
     contacts = projected_entries("contacts")
-    if public is None or direct is None or contacts is None:
+    identity = by_command["identity status"]
+    identity_public_key = exact_public_key(identity.get("public_key"))
+    if (
+        public is None
+        or direct is None
+        or contacts is None
+        or identity_public_key is None
+        or identity.get("public_key_ready") is not True
+        or identity.get("fingerprint")
+        != identity_public_key[:16].upper()
+        or identity.get("role") != EXPECTED_D1L_ROLE
+    ):
         return None
     return {
         "settings": settings_projection,
         "public_messages": public,
         "direct_messages": direct,
         "contacts": contacts,
+        "identity_public_key": identity_public_key,
     }
 
 
@@ -423,7 +508,11 @@ def projection_sha256(projection: dict) -> str:
 
 
 def retained_state_preserved(before: dict, after: dict) -> bool:
-    if before.get("settings") != after.get("settings"):
+    if (
+        before.get("settings") != after.get("settings")
+        or before.get("identity_public_key")
+        != after.get("identity_public_key")
+    ):
         return False
     for field in ("public_messages", "direct_messages", "contacts"):
         before_rows = {
@@ -446,6 +535,7 @@ def write_state_snapshot(
     phase: str,
     commit: str,
     results: list[dict],
+    d1l_target: dict[str, Any],
 ) -> tuple[dict, dict]:
     projection = retained_state_projection(results)
     if projection is None:
@@ -453,12 +543,13 @@ def write_state_snapshot(
     if path.exists():
         raise ValueError(f"refusing to overwrite retained snapshot: {path}")
     payload = {
-        "schema": 1,
+        "schema": 2,
         "kind": "core_retained_state_snapshot",
         "mode": "hardware",
         "phase": phase,
         "captured_at": utc_now(),
-        "port": D1L_CORE_PORT,
+        "port": d1l_target["requested_path"],
+        "d1l_target": d1l_target,
         "expected_firmware_commit": commit,
         "results": results,
         "projection": projection,
@@ -491,6 +582,7 @@ def run_core_flash_only(
     run_attempt: str,
     actions_capture_receipt: Path,
     port: str,
+    expected_d1l_public_key: str,
     serial_baud: int,
     flash_baud: int,
     serial_timeout: float,
@@ -504,6 +596,11 @@ def run_core_flash_only(
     retained_state_reader: Callable[
         [str, int, float, float], list[dict]
     ] = read_retained_state,
+    identity_status_reader: Callable[
+        [str, int, float, float], dict
+    ] = read_identity_status,
+    port_lister: Callable[[], Iterable[object]] | None = None,
+    platform_name: str | None = None,
 ) -> dict:
     root = root.resolve()
     port = enforce_core_port(port)
@@ -512,6 +609,11 @@ def run_core_flash_only(
     normalized_commit = exact_commit(commit)
     if normalized_commit is None:
         raise ValueError("--commit must be an exact 40-character hexadecimal SHA")
+    normalized_public_key = exact_public_key(expected_d1l_public_key)
+    if normalized_public_key is None:
+        raise ValueError(
+            "--expected-d1l-public-key must be an exact 64-hex public key"
+        )
     if (
         not str(run_id).isdigit()
         or int(run_id) < 1
@@ -566,6 +668,23 @@ def run_core_flash_only(
                 f"refusing to overwrite Core flash evidence: {output_path}"
             )
 
+    if port_lister is None:
+        try:
+            from serial.tools import list_ports
+        except ImportError as exc:
+            raise RuntimeError(
+                "pyserial is required for D1L target verification"
+            ) from exc
+        def runtime_port_lister() -> Iterable[object]:
+            return list_ports.comports(include_links=True)
+
+        port_lister = runtime_port_lister
+    d1l_target_before = resolve_core_target(
+        port,
+        port_lister=port_lister,
+        platform_name=platform_name,
+    )
+    port = d1l_target_before["requested_path"]
     context = make_context(
         root=root,
         commit=normalized_commit,
@@ -584,6 +703,16 @@ def run_core_flash_only(
         run_attempt=str(run_attempt),
         actions_verification=actions_verification,
     )
+    pre_flash_identity = identity_status_reader(
+        port, serial_baud, serial_timeout, 0.0
+    )
+    if not identity_status_ok(
+        pre_flash_identity,
+        normalized_public_key,
+    ):
+        raise ValueError(
+            "Pre-flash identity status does not match the pinned D1L public key"
+        )
     before_projection: dict | None = None
     before_snapshot_row: dict | None = None
     if flash_phase == FLASH_PHASE_RETAINED_REFLASH:
@@ -597,6 +726,15 @@ def run_core_flash_only(
         before_health = (
             before_results[1] if len(before_results) > 1 else {}
         )
+        before_identity = next(
+            (
+                row
+                for row in before_results
+                if isinstance(row, dict)
+                and row.get("cmd") == "identity status"
+            ),
+            {},
+        )
         if not (
             before_projection is not None
             and exact_version_identity(
@@ -607,6 +745,10 @@ def run_core_flash_only(
             )
             and before_health.get("board_ready") is True
             and before_health.get("ui_ready") is True
+            and identity_status_ok(
+                before_identity,
+                normalized_public_key,
+            )
         ):
             raise ValueError(
                 "Closing reflash baseline must be the exact ready candidate; "
@@ -618,11 +760,13 @@ def run_core_flash_only(
             phase="pre_flash",
             commit=normalized_commit,
             results=before_results,
+            d1l_target=d1l_target_before,
         )
     build_dir = github_run_dir / "d1l-firmware-artifacts" / "build"
     command = esptool_flash_command(build_dir, port, flash_baud)
     if (
         "write-flash" not in command
+        or not command_uses_only_target(command, port)
         or any("erase" in token.lower() for token in command)
         or any(
             blocked in token.upper()
@@ -641,31 +785,63 @@ def run_core_flash_only(
     after_results: list[dict] = []
     after_projection: dict | None = None
     after_snapshot_row: dict | None = None
+    d1l_target_after: dict[str, Any] | None = None
+    target_continuity_ok = False
+    target_post_error: str | None = None
+    post_flash_identity: dict = {}
     if (
         result.get("name") == "esp32_flash"
         and result.get("ok") is True
         and result.get("returncode") == 0
         and result.get("args") == command
     ):
-        after_results = retained_state_reader(
-            port, serial_baud, serial_timeout, settle_sec
-        )
-        version = after_results[0] if len(after_results) > 0 else {}
-        health = after_results[1] if len(after_results) > 1 else {}
-        after_projection = retained_state_projection(after_results)
-        if after_projection is not None:
-            _, after_snapshot_row = write_state_snapshot(
-                path=after_snapshot_path,
-                root=root,
-                phase=(
-                    "post_flash"
-                    if flash_phase == FLASH_PHASE_RETAINED_REFLASH
-                    else "post_bootstrap"
-                ),
-                commit=normalized_commit,
-                results=after_results,
+        if settle_sec > 0:
+            time.sleep(settle_sec)
+        try:
+            d1l_target_after = resolve_core_target(
+                port,
+                port_lister=port_lister,
+                platform_name=platform_name,
             )
+        except ValueError as exc:
+            target_post_error = str(exc)
+        else:
+            target_continuity_ok = (
+                d1l_target_after["stable_identity_sha256"]
+                == d1l_target_before["stable_identity_sha256"]
+            )
+        if target_continuity_ok:
+            after_results = retained_state_reader(
+                port, serial_baud, serial_timeout, 0.0
+            )
+            version = after_results[0] if len(after_results) > 0 else {}
+            health = after_results[1] if len(after_results) > 1 else {}
+            post_flash_identity = next(
+                (
+                    row
+                    for row in after_results
+                    if isinstance(row, dict)
+                    and row.get("cmd") == "identity status"
+                ),
+                {},
+            )
+            after_projection = retained_state_projection(after_results)
+            if after_projection is not None:
+                _, after_snapshot_row = write_state_snapshot(
+                    path=after_snapshot_path,
+                    root=root,
+                    phase=(
+                        "post_flash"
+                        if flash_phase == FLASH_PHASE_RETAINED_REFLASH
+                        else "post_bootstrap"
+                    ),
+                    commit=normalized_commit,
+                    results=after_results,
+                    d1l_target=d1l_target_after,
+                )
     identity_ok = (
+        target_continuity_ok
+        and
         exact_version_identity(
             version, normalized_commit, EXPECTED_SD_HISTORY_MODE
         )
@@ -674,6 +850,10 @@ def run_core_flash_only(
         )
         and health.get("board_ready") is True
         and health.get("ui_ready") is True
+        and identity_status_ok(
+            post_flash_identity,
+            normalized_public_key,
+        )
     )
     ok = result.get("ok") is True and identity_ok
     retained_preserved = (
@@ -700,7 +880,7 @@ def run_core_flash_only(
         ok and flash_phase == FLASH_PHASE_RETAINED_REFLASH
     )
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "esp32_flash",
         "mode": "hardware",
         "scope": (
@@ -714,6 +894,11 @@ def run_core_flash_only(
         "hardware_required": True,
         "physical_observed": True,
         "port": port,
+        "d1l_target": d1l_target_before,
+        "d1l_target_before": d1l_target_before,
+        "d1l_target_after": d1l_target_after,
+        "target_identity_continuity_ok": target_continuity_ok,
+        "target_post_error": target_post_error,
         "commit": normalized_commit,
         "github_actions_run": str(run_id),
         "workflow_run_attempt": str(run_attempt),
@@ -724,6 +909,13 @@ def run_core_flash_only(
         "device_idf_version": version.get("idf"),
         "firmware_identity_required": True,
         "firmware_identity_ok": identity_ok,
+        "expected_d1l_public_key": normalized_public_key,
+        "pre_flash_identity": pre_flash_identity,
+        "post_flash_identity": post_flash_identity,
+        "d1l_public_key_continuity_ok": identity_status_ok(
+            post_flash_identity,
+            normalized_public_key,
+        ),
         "git": source_git,
         "runner_source_identity_ok": source_identity_ok,
         "artifact_verification": actions_verification,
@@ -735,9 +927,9 @@ def run_core_flash_only(
         "post_flash_version": version,
         "post_flash_health": health,
         "commands_before_flash": (
-            list(RETAINED_STATE_COMMANDS)
+            ["identity status", *RETAINED_STATE_COMMANDS]
             if flash_phase == FLASH_PHASE_RETAINED_REFLASH
-            else []
+            else ["identity status"]
         ),
         "commands_after_flash": list(RETAINED_STATE_COMMANDS),
         "retained_state_before": before_snapshot_row,
@@ -769,6 +961,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--actions-capture-receipt")
     parser.add_argument("--commit", required=True)
     parser.add_argument("--port", default=D1L_CORE_PORT)
+    parser.add_argument("--expected-d1l-public-key", required=True)
     parser.add_argument("--serial-baud", type=int, default=115200)
     parser.add_argument("--flash-baud", type=int, default=460800)
     parser.add_argument("--serial-timeout", type=float, default=5.0)
@@ -812,13 +1005,17 @@ def main(argv: list[str] | None = None) -> int:
             f"core_actions_run_{args.github_run_id}.json"
         ),
     )
+    try:
+        target_slug = safe_slug(enforce_core_port(args.port))
+    except ValueError as exc:
+        parser.error(str(exc))
     out = resolve_path(
         root,
         args.out
         or (
-            "artifacts/hardware/com12/"
+            f"artifacts/hardware/{target_slug}/"
             f"esp32_flash_{args.phase.replace('-', '_')}_{commit[:7]}_actions_"
-            f"{args.github_run_id}_COM12.json"
+            f"{args.github_run_id}_{target_slug}.json"
         ),
     )
     raw_log = out.with_suffix(".log")
@@ -832,6 +1029,7 @@ def main(argv: list[str] | None = None) -> int:
             run_attempt=str(args.github_run_attempt),
             actions_capture_receipt=actions_capture_receipt,
             port=args.port,
+            expected_d1l_public_key=args.expected_d1l_public_key,
             serial_baud=args.serial_baud,
             flash_baud=args.flash_baud,
             serial_timeout=args.serial_timeout,
