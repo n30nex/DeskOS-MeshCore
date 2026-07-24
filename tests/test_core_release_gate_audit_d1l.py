@@ -17,6 +17,27 @@ from scripts import soak_d1l as soak_runner
 COMMIT = "a" * 40
 RUN_ID = "123456789"
 RUN_ATTEMPT = "1"
+D1L_PUBLIC_KEY = audit.rf_acceptance.DEFAULT_D1L_PUBLIC_KEY
+
+
+def d1l_identity_status(public_key: str = D1L_PUBLIC_KEY) -> dict:
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "identity status",
+        "public_key_ready": True,
+        "public_key": public_key,
+        "fingerprint": public_key[:16].upper(),
+        "role": "desk_companion",
+    }
+
+
+def standard_identity_fields(public_key: str = D1L_PUBLIC_KEY) -> dict:
+    return {
+        "expected_d1l_public_key": public_key,
+        "d1l_identity_status": d1l_identity_status(public_key),
+        "d1l_identity_ok": True,
+    }
 
 
 def d1l_target_snapshot(
@@ -200,6 +221,8 @@ def passing_core_smoke() -> dict:
     supported_results = []
     for command in core_smoke_d1l.CORE_SMOKE_COMMANDS:
         cmd = audit.expected_command_name(command)
+        if cmd == "identity status":
+            continue
         if cmd == "storage status":
             supported_results.append(storage)
         elif cmd == "crashlog":
@@ -262,6 +285,7 @@ def passing_core_smoke() -> dict:
         "workflow_run_attempt": RUN_ATTEMPT,
         "firmware_identity_required": True,
         "firmware_identity_ok": True,
+        **standard_identity_fields(),
         "git": {"commit": COMMIT, "dirty": False, "dirty_entries": []},
         "checks": {
             "exact_candidate": True,
@@ -296,7 +320,11 @@ def passing_core_smoke() -> dict:
         },
         "public_rf_tx": False,
         "formats_sd": False,
-        "results": [version, health(9, reset_reason="POWERON")]
+        "results": [
+            version,
+            d1l_identity_status(),
+            health(9, reset_reason="POWERON"),
+        ]
         + supported_results
         + [health(12)],
     }
@@ -331,6 +359,28 @@ def test_core_smoke_gate_passes_exact_fixture_and_rejects_dry_or_wrong_sha(
     failed = passing_core_smoke()
     failed["device_build_commit"] = "b" * 40
     write_json(path, failed)
+    assert not audit.core_smoke_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+
+def test_core_smoke_gate_requires_raw_full_key_identity(tmp_path):
+    path = tmp_path / "smoke.json"
+    for field in (
+        "expected_d1l_public_key",
+        "d1l_identity_status",
+        "d1l_identity_ok",
+    ):
+        receipt = passing_core_smoke()
+        del receipt[field]
+        write_json(path, receipt)
+        assert not audit.core_smoke_gate(
+            path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+        ).ok
+
+    receipt = passing_core_smoke()
+    receipt["d1l_identity_status"] = d1l_identity_status("b" * 64)
+    write_json(path, receipt)
     assert not audit.core_smoke_gate(
         path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
     ).ok
@@ -529,6 +579,7 @@ def passing_core_ui() -> dict:
         "device_build_commit": COMMIT,
         "firmware_identity_required": True,
         "firmware_identity_ok": True,
+        **standard_identity_fields(),
         "github_actions_run": RUN_ID,
         "workflow_run_attempt": RUN_ATTEMPT,
         "git": {"commit": COMMIT, "dirty": False, "dirty_entries": []},
@@ -566,6 +617,10 @@ def passing_core_ui() -> dict:
         "checks": checks,
         "setup_events": [
             {"command": "version", "result": version},
+            {
+                "command": "identity status",
+                "result": d1l_identity_status(),
+            },
             {"command": "health", "result": health()},
             {"command": "ui status", "result": status()},
             {"command": "crashlog", "result": crashlog()},
@@ -640,6 +695,28 @@ def test_core_ui_gate_recomputes_raw_scroll_and_compose_results(tmp_path):
     forged_compose = passing_core_ui()
     forged_compose["compose_events"][2]["result"]["send_enabled"] = True
     write_json(path, forged_compose)
+    assert not audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+
+def test_core_ui_gate_requires_pre_mutation_full_key_identity(tmp_path):
+    path = tmp_path / "core-ui.json"
+    for field in (
+        "expected_d1l_public_key",
+        "d1l_identity_status",
+        "d1l_identity_ok",
+    ):
+        receipt = passing_core_ui()
+        del receipt[field]
+        write_json(path, receipt)
+        assert not audit.core_ui_gate(
+            path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+        ).ok
+
+    receipt = passing_core_ui()
+    receipt["setup_events"][1]["result"] = d1l_identity_status("b" * 64)
+    write_json(path, receipt)
     assert not audit.core_ui_gate(
         path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
     ).ok
@@ -741,6 +818,7 @@ def passing_core_scroll(
         "expected_sd_history_mode": "disabled",
         "device_build_commit": COMMIT,
         "firmware_identity_ok": True,
+        **standard_identity_fields(),
         "scroll_movement_policy": "positive_raw_overflow",
         "clear_crashlog_before_start": True,
         "scroll_movement_optional": [],
@@ -748,6 +826,10 @@ def passing_core_scroll(
         "failures": [],
         "setup_events": [
             {"cmd": "version", "result": version},
+            {
+                "cmd": "identity status",
+                "result": d1l_identity_status(),
+            },
             {"cmd": "health", "result": health()},
             {
                 "cmd": "crashlog clear",
@@ -814,21 +896,31 @@ def test_core_scroll_gate_validates_windows_and_posix_targets(tmp_path):
     ).ok
 
 
+def test_core_scroll_gate_requires_pre_mutation_full_key_identity(tmp_path):
+    path = tmp_path / "core-scroll.json"
+    for field in (
+        "expected_d1l_public_key",
+        "d1l_identity_status",
+        "d1l_identity_ok",
+    ):
+        receipt = passing_core_scroll()
+        del receipt[field]
+        write_json(path, receipt)
+        assert not audit.core_scroll_gate(
+            path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+        ).ok
+
+    receipt = passing_core_scroll()
+    receipt["setup_events"][1]["result"] = d1l_identity_status("b" * 64)
+    write_json(path, receipt)
+    assert not audit.core_scroll_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+
 def passing_soak(*, active: bool) -> dict:
-    d1l_public_key = audit.rf_acceptance.DEFAULT_D1L_PUBLIC_KEY
-    d1l_identity = (
-        {
-            "schema": 1,
-            "ok": True,
-            "cmd": "identity status",
-            "public_key_ready": True,
-            "public_key": d1l_public_key,
-            "fingerprint": d1l_public_key[:16].upper(),
-            "role": "desk_companion",
-        }
-        if active
-        else {}
-    )
+    d1l_public_key = D1L_PUBLIC_KEY
+    d1l_identity = d1l_identity_status(d1l_public_key)
     duration = 3600 if active else 1800
     interval = 300
     samples = []
@@ -1022,9 +1114,7 @@ def passing_soak(*, active: bool) -> dict:
         ),
         "duration_sec": duration,
         "sample_interval_sec": interval,
-        "preflight_commands": (
-            ["version", "identity status"] if active else ["version"]
-        ),
+        "preflight_commands": ["version", "identity status"],
         "preflight_failure": None,
         "version_preflight": {
             "schema": 1,
@@ -1049,24 +1139,16 @@ def passing_soak(*, active: bool) -> dict:
                     "sd_history_mode": "disabled",
                 },
             },
-            *(
-                [
-                    {
-                        "elapsed_sec": 0.0,
-                        "cmd": "identity status",
-                        "result": d1l_identity,
-                    }
-                ]
-                if active
-                else []
-            ),
+            {
+                "elapsed_sec": 0.0,
+                "cmd": "identity status",
+                "result": d1l_identity,
+            },
         ],
-        "d1l_identity_required": active,
-        "expected_d1l_public_key": (
-            d1l_public_key if active else None
-        ),
+        "d1l_identity_required": True,
+        "expected_d1l_public_key": d1l_public_key,
         "d1l_identity_status": d1l_identity,
-        "d1l_identity_ok": True if active else None,
+        "d1l_identity_ok": True,
         "commands": list(soak_runner.SOAK_COMMANDS)
         + [soak_runner.STORAGE_STATUS_COMMAND],
         "sample_storage": True,
@@ -1289,6 +1371,7 @@ def test_reboot_gate_delegates_to_strict_r11_validator(
                 "expected_target_identity_sha256": target[
                     "stable_identity_sha256"
                 ],
+                "expected_d1l_public_key": D1L_PUBLIC_KEY,
                 "software_cycle_count": 5,
                 "cold_cycle_count": 3,
                 "claim": ("same_exact_candidate_non_erasing_reinstall"),
@@ -1346,6 +1429,7 @@ def protocol_migration_receipt() -> dict:
         "d1l_target_after": target,
         "target_identity_sha256": target["stable_identity_sha256"],
         "target_identity_continuity_ok": True,
+        **standard_identity_fields(),
         "commit": COMMIT,
         "github_actions_run": RUN_ID,
         "workflow_run_attempt": RUN_ATTEMPT,
@@ -1384,6 +1468,43 @@ def test_protocol_migration_gate_delegates_to_strict_validator(
     assert gate.details["reasons"] == []
     assert gate.details["validation_errors"] == []
     assert gate.details["receipt_sha256"] == audit.sha256_file(receipt_path)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "expected_d1l_public_key",
+        "d1l_identity_status",
+        "d1l_identity_ok",
+    ),
+)
+def test_protocol_migration_gate_requires_full_key_identity(
+    tmp_path: Path, monkeypatch, field: str
+):
+    receipt = protocol_migration_receipt()
+    del receipt[field]
+    receipt_path = write_json(
+        tmp_path / "time_protocol_migration.json",
+        receipt,
+    )
+    monkeypatch.setattr(
+        audit.time_protocol_migration,
+        "validate_receipt",
+        lambda *_args, **_kwargs: (True, []),
+    )
+
+    gate = audit.protocol_migration_gate(
+        receipt_path,
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert "protocol_migration_d1l_public_key_binding_failed" in gate.details[
+        "reasons"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -2587,7 +2708,48 @@ def test_exact_d1l_target_accepts_only_two_canonical_cli_values():
             audit.exact_d1l_target(rejected)
 
 
-def test_physical_target_identity_gate_requires_one_digest(tmp_path):
+def test_flash_d1l_public_key_binding_recomputes_all_fields():
+    receipt = {
+        "expected_d1l_public_key": D1L_PUBLIC_KEY,
+        "pre_flash_identity": d1l_identity_status(),
+        "post_flash_identity": d1l_identity_status(),
+        "d1l_public_key_continuity_ok": True,
+    }
+    ok, public_key, details = audit.flash_d1l_public_key_binding(receipt)
+    assert ok is True
+    assert public_key == D1L_PUBLIC_KEY
+    assert details["one_public_key"] is True
+
+    for field in (
+        "expected_d1l_public_key",
+        "pre_flash_identity",
+        "post_flash_identity",
+        "d1l_public_key_continuity_ok",
+    ):
+        missing = dict(receipt)
+        del missing[field]
+        assert audit.flash_d1l_public_key_binding(missing)[0] is False
+
+    tampered = dict(receipt)
+    tampered["pre_flash_identity"] = d1l_identity_status("b" * 64)
+    assert audit.flash_d1l_public_key_binding(tampered)[0] is False
+
+    tampered = dict(receipt)
+    tampered["post_flash_identity"] = d1l_identity_status("b" * 64)
+    assert audit.flash_d1l_public_key_binding(tampered)[0] is False
+
+    tampered = dict(receipt)
+    tampered["expected_d1l_public_key"] = "b" * 64
+    assert audit.flash_d1l_public_key_binding(tampered)[0] is False
+
+    tampered = dict(receipt)
+    tampered["d1l_public_key_continuity_ok"] = False
+    assert audit.flash_d1l_public_key_binding(tampered)[0] is False
+
+
+def test_physical_target_identity_gate_requires_one_digest_and_public_key(
+    tmp_path,
+):
     target = d1l_target_snapshot()
     identity = target["stable_identity_sha256"]
     payloads = {
@@ -2598,26 +2760,34 @@ def test_physical_target_identity_gate_requires_one_digest(tmp_path):
             "d1l_target_before": target,
             "d1l_target_after": target,
             "target_identity_continuity_ok": True,
+            "expected_d1l_public_key": D1L_PUBLIC_KEY,
+            "pre_flash_identity": d1l_identity_status(),
+            "post_flash_identity": d1l_identity_status(),
+            "d1l_public_key_continuity_ok": True,
         },
         "core_smoke": {
             "schema": 2,
             "port": "COM12",
             "d1l_target": target,
+            **standard_identity_fields(),
         },
         "core_ui": {
             "schema": 2,
             "port": "COM12",
             "d1l_target": target,
+            **standard_identity_fields(),
         },
         "core_scroll": {
             "schema": 2,
             "port": "COM12",
             "d1l_target": target,
+            **standard_identity_fields(),
         },
         "manual_review": {
             "schema": 4,
             "port": "COM12",
             "d1l_target": target,
+            **standard_identity_fields(),
         },
         "reboot_receipt": {
             "schema": 2,
@@ -2625,6 +2795,7 @@ def test_physical_target_identity_gate_requires_one_digest(tmp_path):
             "d1l_target": target,
             "post_reinstall_d1l_target": target,
             "expected_target_identity_sha256": identity,
+            "expected_d1l_public_key": D1L_PUBLIC_KEY,
         },
         "protocol_migration": {
             "schema": 2,
@@ -2633,6 +2804,7 @@ def test_physical_target_identity_gate_requires_one_digest(tmp_path):
             "d1l_target_after": target,
             "target_identity_sha256": identity,
             "target_identity_continuity_ok": True,
+            **standard_identity_fields(),
         },
         "rf_receipt": {
             "schema": 2,
@@ -2640,6 +2812,7 @@ def test_physical_target_identity_gate_requires_one_digest(tmp_path):
             "d1l_target": target,
             "d1l_target_after": target,
             "target_identity_continuity_ok": True,
+            "d1l_public_key": D1L_PUBLIC_KEY,
         },
         "active_soak": {
             "schema": 2,
@@ -2647,6 +2820,7 @@ def test_physical_target_identity_gate_requires_one_digest(tmp_path):
             "d1l_target": target,
             "d1l_target_after": target,
             "target_identity_continuity_ok": True,
+            **standard_identity_fields(),
         },
         "idle_soak": {
             "schema": 2,
@@ -2654,6 +2828,7 @@ def test_physical_target_identity_gate_requires_one_digest(tmp_path):
             "d1l_target": target,
             "d1l_target_after": target,
             "target_identity_continuity_ok": True,
+            **standard_identity_fields(),
         },
     }
     paths = {
@@ -2667,6 +2842,60 @@ def test_physical_target_identity_gate_requires_one_digest(tmp_path):
     )
     assert gate.ok is True
     assert gate.details["stable_identity_sha256"] == identity
+    assert gate.details["one_d1l_public_key"] is True
+    assert gate.details["d1l_public_key"] == D1L_PUBLIC_KEY
+
+    del payloads["flash_receipt"]["post_flash_identity"]
+    write_json(paths["flash_receipt"], payloads["flash_receipt"])
+    gate = audit.physical_target_identity_gate(
+        root=tmp_path,
+        expected_target="COM12",
+        paths=paths,
+    )
+    assert gate.ok is False
+    assert (
+        gate.details["flash_receipt"]["d1l_public_key_binding"][
+            "post_flash_identity_exact"
+        ]
+        is False
+    )
+
+    payloads["flash_receipt"]["post_flash_identity"] = d1l_identity_status(
+        "b" * 64
+    )
+    write_json(paths["flash_receipt"], payloads["flash_receipt"])
+    gate = audit.physical_target_identity_gate(
+        root=tmp_path,
+        expected_target="COM12",
+        paths=paths,
+    )
+    assert gate.ok is False
+    assert (
+        gate.details["flash_receipt"]["d1l_public_key_binding"][
+            "one_public_key"
+        ]
+        is False
+    )
+
+    payloads["flash_receipt"]["post_flash_identity"] = d1l_identity_status()
+    write_json(paths["flash_receipt"], payloads["flash_receipt"])
+
+    other_public_key = "b" * 64
+    payloads["active_soak"].update(
+        standard_identity_fields(other_public_key)
+    )
+    write_json(paths["active_soak"], payloads["active_soak"])
+    gate = audit.physical_target_identity_gate(
+        root=tmp_path,
+        expected_target="COM12",
+        paths=paths,
+    )
+    assert gate.ok is False
+    assert gate.details["one_stable_identity"] is True
+    assert gate.details["one_d1l_public_key"] is False
+
+    payloads["active_soak"].update(standard_identity_fields())
+    write_json(paths["active_soak"], payloads["active_soak"])
 
     other = d1l_target_snapshot(hostname="other-host")
     payloads["active_soak"]["d1l_target"] = other
@@ -2679,6 +2908,7 @@ def test_physical_target_identity_gate_requires_one_digest(tmp_path):
     )
     assert gate.ok is False
     assert gate.details["one_stable_identity"] is False
+    assert gate.details["one_d1l_public_key"] is True
 
 
 def patch_all_gates(monkeypatch, tmp_path: Path, *, one_failure=False):

@@ -373,6 +373,134 @@ def target_receipt_binding(
     )
 
 
+def exact_canonical_public_key(value: object) -> str | None:
+    """Return one canonical lowercase full D1L public key."""
+
+    normalized = rf_acceptance.exact_public_key(value)
+    return normalized if value == normalized else None
+
+
+def standard_d1l_public_key_binding(
+    data: object,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Validate the standard exact-device identity fields on a receipt."""
+
+    details: dict[str, Any] = {
+        "key_field": "expected_d1l_public_key",
+        "status_field": "d1l_identity_status",
+        "ok_field": "d1l_identity_ok",
+    }
+    if not isinstance(data, dict):
+        details.update(
+            {
+                "public_key_exact": False,
+                "identity_status_exact": False,
+                "identity_flag_ok": False,
+            }
+        )
+        return False, None, details
+    public_key = exact_canonical_public_key(
+        data.get("expected_d1l_public_key")
+    )
+    status = data.get("d1l_identity_status")
+    status_ok = rf_acceptance.d1l_identity_status_ok(status, public_key)
+    flag_ok = data.get("d1l_identity_ok") is True
+    details.update(
+        {
+            "public_key_exact": public_key is not None,
+            "identity_status_exact": status_ok,
+            "identity_flag_ok": flag_ok,
+            "d1l_public_key": public_key,
+        }
+    )
+    return public_key is not None and status_ok and flag_ok, public_key, details
+
+
+def flash_d1l_public_key_binding(
+    data: object,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Recompute the pre/post-flash full-key identity continuity contract."""
+
+    details: dict[str, Any] = {
+        "key_field": "expected_d1l_public_key",
+        "pre_status_field": "pre_flash_identity",
+        "post_status_field": "post_flash_identity",
+        "continuity_field": "d1l_public_key_continuity_ok",
+    }
+    if not isinstance(data, dict):
+        details.update(
+            {
+                "public_key_exact": False,
+                "pre_flash_identity_exact": False,
+                "post_flash_identity_exact": False,
+                "continuity_flag_ok": False,
+                "one_public_key": False,
+            }
+        )
+        return False, None, details
+    public_key = exact_canonical_public_key(
+        data.get("expected_d1l_public_key")
+    )
+    pre = data.get("pre_flash_identity")
+    post = data.get("post_flash_identity")
+    pre_ok = rf_acceptance.d1l_identity_status_ok(pre, public_key)
+    post_ok = rf_acceptance.d1l_identity_status_ok(post, public_key)
+    pre_key = (
+        exact_canonical_public_key(pre.get("public_key"))
+        if isinstance(pre, dict)
+        else None
+    )
+    post_key = (
+        exact_canonical_public_key(post.get("public_key"))
+        if isinstance(post, dict)
+        else None
+    )
+    one_public_key = (
+        public_key is not None
+        and pre_key == public_key
+        and post_key == public_key
+    )
+    continuity_ok = data.get("d1l_public_key_continuity_ok") is True
+    details.update(
+        {
+            "public_key_exact": public_key is not None,
+            "pre_flash_identity_exact": pre_ok,
+            "post_flash_identity_exact": post_ok,
+            "continuity_flag_ok": continuity_ok,
+            "one_public_key": one_public_key,
+            "d1l_public_key": public_key,
+        }
+    )
+    return (
+        public_key is not None
+        and pre_ok
+        and post_ok
+        and continuity_ok
+        and one_public_key,
+        public_key,
+        details,
+    )
+
+
+def public_key_field_binding(
+    data: object,
+    field_name: str,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Extract one independently validated canonical full-key field."""
+
+    public_key = (
+        exact_canonical_public_key(data.get(field_name))
+        if isinstance(data, dict)
+        else None
+    )
+    details = {
+        "key_field": field_name,
+        "public_key_exact": public_key is not None,
+        "d1l_public_key": public_key,
+    }
+    return public_key is not None, public_key, details
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -1244,6 +1372,9 @@ def core_flash_receipt_gate(
         ),
         continuity_flag="target_identity_continuity_ok",
     )
+    public_key_ok, _d1l_public_key, public_key_details = (
+        flash_d1l_public_key_binding(data)
+    )
     before_path, before_projection, before_ok, before_target_identity = (
         _retained_snapshot(
             data.get("retained_state_before"),
@@ -1285,6 +1416,7 @@ def core_flash_receipt_gate(
         and data.get("physical_observed") is True
         and data.get("port") == expected_target
         and target_ok
+        and public_key_ok
         and exact_candidate_fields(data, commit)
         and str(data.get("github_actions_run")) == str(run_id)
         and str(data.get("workflow_run_attempt")) == str(run_attempt)
@@ -1349,6 +1481,7 @@ def core_flash_receipt_gate(
             "non_erasing_retained_state_ok": retained_ok,
             "actions_archive_binding_ok": capture_ok,
             "d1l_target_binding": target_details,
+            "d1l_public_key_binding": public_key_details,
             "legacy_details": legacy.to_dict().get("details", {}),
         },
     )
@@ -1474,6 +1607,9 @@ def core_smoke_gate(
         expected_target=expected_target,
         snapshot_fields=("d1l_target",),
     )
+    public_key_ok, _d1l_public_key, public_key_details = (
+        standard_d1l_public_key_binding(data)
+    )
     probes = data.get("unavailable_mutation_probes")
     expected_plan = mutation_probe_plan(sd_history_mode)
     probes_ok = (
@@ -1520,10 +1656,16 @@ def core_smoke_gate(
     persistence = data.get("persistence")
     results = data.get("results")
     results = results if isinstance(results, list) else []
+    supported_result_commands = [
+        expected_command_name(command)
+        for command in CORE_SMOKE_COMMANDS
+        if expected_command_name(command) != "identity status"
+    ]
     expected_result_commands = [
         "version",
+        "identity status",
         "health",
-        *(expected_command_name(command) for command in CORE_SMOKE_COMMANDS),
+        *supported_result_commands,
         "health",
     ]
     result_commands = [
@@ -1540,7 +1682,11 @@ def core_smoke_gate(
                 for result in results
             )
             and _profile_version_result(results[0], commit, sd_history_mode)
-            and _profile_identity_result(results[1], commit, sd_history_mode)
+            and data.get("d1l_identity_status") == results[1]
+            and rf_acceptance.d1l_identity_status_ok(
+                results[1], data.get("expected_d1l_public_key")
+            )
+            and _profile_identity_result(results[2], commit, sd_history_mode)
             and _profile_identity_result(results[-1], commit, sd_history_mode)
         )
         if results
@@ -1603,6 +1749,7 @@ def core_smoke_gate(
         and data.get("physical_observed") is True
         and data.get("port") == expected_target
         and target_ok
+        and public_key_ok
         and data.get("release_profile") == CORE_RELEASE_PROFILE
         and data.get("sd_history_mode") == sd_history_mode
         and exact_candidate_fields(data, commit)
@@ -1637,6 +1784,7 @@ def core_smoke_gate(
             "device_idf_exact": idf_ok,
             "persistence_ok": (persistence_raw_ok),
             "d1l_target_binding": target_details,
+            "d1l_public_key_binding": public_key_details,
         },
     )
 
@@ -1655,6 +1803,9 @@ def core_ui_gate(
         data,
         expected_target=expected_target,
         snapshot_fields=("d1l_target",),
+    )
+    public_key_ok, _d1l_public_key, public_key_details = (
+        standard_d1l_public_key_binding(data)
     )
     checks = data.get("checks")
     scroll_events = data.get("scroll_events")
@@ -1760,6 +1911,7 @@ def core_ui_gate(
     setup_events = setup_events if isinstance(setup_events, list) else []
     expected_setup_commands = [
         "version",
+        "identity status",
         "health",
         "ui status",
         "crashlog",
@@ -1783,17 +1935,21 @@ def core_ui_gate(
         == expected_setup_commands
         and len(setup_results) == len(expected_setup_commands)
         and _profile_version_result(setup_results[0], commit, sd_history_mode)
-        and _profile_ready_health_result(
-            setup_results[1], commit, sd_history_mode
+        and data.get("d1l_identity_status") == setup_results[1]
+        and rf_acceptance.d1l_identity_status_ok(
+            setup_results[1], data.get("expected_d1l_public_key")
         )
-        and setup_results[2].get("ok") is True
-        and setup_results[2].get("cmd") == "ui status"
-        and crashlog_clean(setup_results[3])
+        and _profile_ready_health_result(
+            setup_results[2], commit, sd_history_mode
+        )
+        and setup_results[3].get("ok") is True
+        and setup_results[3].get("cmd") == "ui status"
+        and crashlog_clean(setup_results[4])
         and (
-            len(setup_results) == 4
+            len(setup_results) == 5
             or (
-                setup_results[4].get("ok") is True
-                and setup_results[4].get("cmd") == "crashlog clear"
+                setup_results[5].get("ok") is True
+                and setup_results[5].get("cmd") == "crashlog clear"
             )
         )
     )
@@ -1807,6 +1963,7 @@ def core_ui_gate(
         and data.get("physical_observed") is True
         and data.get("port") == expected_target
         and target_ok
+        and public_key_ok
         and data.get("release_profile") == CORE_RELEASE_PROFILE
         and data.get("sd_history_mode") == sd_history_mode
         and exact_candidate_fields(data, commit)
@@ -1847,6 +2004,7 @@ def core_ui_gate(
             "raw_event_checks_pass": raw_events_pass,
             "pre_ui_setup_exact": setup_ok,
             "d1l_target_binding": target_details,
+            "d1l_public_key_binding": public_key_details,
         },
     )
 
@@ -1867,6 +2025,9 @@ def core_scroll_gate(
         data,
         expected_target=expected_target,
         snapshot_fields=("d1l_target",),
+    )
+    public_key_ok, _d1l_public_key, public_key_details = (
+        standard_d1l_public_key_binding(data)
     )
     screens = list(CORE_SCROLL_PROBE_SEQUENCE)
     events = data.get("events")
@@ -1908,16 +2069,21 @@ def core_scroll_gate(
         for row in setup_events
     ]
     setup_ok = (
-        setup_commands == ["version", "health", "crashlog clear"]
-        and len(setup_results) == 3
+        setup_commands
+        == ["version", "identity status", "health", "crashlog clear"]
+        and len(setup_results) == 4
         and _profile_version_result(setup_results[0], commit, sd_history_mode)
-        and _profile_ready_health_result(
-            setup_results[1], commit, sd_history_mode
+        and data.get("d1l_identity_status") == setup_results[1]
+        and rf_acceptance.d1l_identity_status_ok(
+            setup_results[1], data.get("expected_d1l_public_key")
         )
-        and isinstance(setup_results[2], dict)
-        and setup_results[2].get("schema") == 1
-        and setup_results[2].get("ok") is True
-        and setup_results[2].get("cmd") == "crashlog clear"
+        and _profile_ready_health_result(
+            setup_results[2], commit, sd_history_mode
+        )
+        and isinstance(setup_results[3], dict)
+        and setup_results[3].get("schema") == 1
+        and setup_results[3].get("ok") is True
+        and setup_results[3].get("cmd") == "crashlog clear"
     )
     expected_safety = scroll_probe_safety(clear_crashlog_before_start=True)
     safety_ok = all(
@@ -1961,6 +2127,7 @@ def core_scroll_gate(
         and data.get("physical_observed") is True
         and data.get("port") == expected_target
         and target_ok
+        and public_key_ok
         and data.get("release_profile") == CORE_RELEASE_PROFILE
         and data.get("expected_sd_history_mode") == sd_history_mode
         and exact_sha(data.get("expected_firmware_commit")) == commit
@@ -2003,6 +2170,7 @@ def core_scroll_gate(
             "source_ok": source_ok,
             "timestamps_ok": timestamps_ok,
             "d1l_target_binding": target_details,
+            "d1l_public_key_binding": public_key_details,
         },
     )
 
@@ -2043,6 +2211,9 @@ def manual_review_gate(
         expected_target=expected_target,
         snapshot_fields=("d1l_target",),
         required_schema=4,
+    )
+    public_key_ok, d1l_public_key, public_key_details = (
+        standard_d1l_public_key_binding(data)
     )
     confirmations = data.get("confirmations")
     photo_receipts = data.get("photo_receipts")
@@ -2104,6 +2275,20 @@ def manual_review_gate(
     expected_ui_path = (
         core_ui_path.resolve() if core_ui_path is not None else None
     )
+    ui_data = read_json(core_ui_path)
+    ui_public_key = exact_canonical_public_key(
+        ui_data.get("expected_d1l_public_key")
+    )
+    ui_identity_binding_ok = (
+        public_key_ok
+        and ui_public_key == d1l_public_key
+        and data.get("expected_d1l_public_key")
+        == ui_data.get("expected_d1l_public_key")
+        and data.get("d1l_identity_status")
+        == ui_data.get("d1l_identity_status")
+        and data.get("d1l_identity_ok") is True
+        and data.get("d1l_identity_ok") == ui_data.get("d1l_identity_ok")
+    )
     ui_binding_ok = (
         ui_receipt_row_ok
         and ui_receipt_path is not None
@@ -2118,6 +2303,7 @@ def manual_review_gate(
             run_attempt,
             expected_target,
         ).ok
+        and ui_identity_binding_ok
     )
     confirmations_ok = (
         isinstance(confirmations, dict)
@@ -2151,6 +2337,7 @@ def manual_review_gate(
         and data.get("physical_observed") is True
         and data.get("port") == expected_target
         and target_ok
+        and public_key_ok
         and data.get("release_profile") == CORE_RELEASE_PROFILE
         and data.get("sd_history_mode") == "disabled"
         and exact_sha(data.get("commit")) == commit
@@ -2177,6 +2364,7 @@ def manual_review_gate(
         {
             "confirmations_ok": confirmations_ok,
             "automated_ui_receipt_ok": ui_binding_ok,
+            "automated_ui_identity_binding_ok": ui_identity_binding_ok,
             "photo_receipts_ok": photos_ok,
             "photos_optional": True,
             "photo_coverage": sorted(observed_photo_coverage),
@@ -2185,6 +2373,7 @@ def manual_review_gate(
             "strict_validator_reasons": strict_reasons,
             "strict_validator_details": strict_details,
             "d1l_target_binding": target_details,
+            "d1l_public_key_binding": public_key_details,
         },
     )
 
@@ -2441,9 +2630,16 @@ def reboot_persistence_gate(
         ),
         identity_field="expected_target_identity_sha256",
     )
-    ok = ok and target_ok
+    public_key_ok, _d1l_public_key, public_key_details = (
+        public_key_field_binding(matrix, "expected_d1l_public_key")
+    )
+    ok = ok and target_ok and public_key_ok
     if not target_ok:
         reasons = list(reasons) + ["reboot_matrix_d1l_target_binding_invalid"]
+    if not public_key_ok:
+        reasons = list(reasons) + [
+            "reboot_matrix_d1l_public_key_binding_invalid"
+        ]
     return CoreGate(
         "reboot_cold_boot_persistence",
         ok,
@@ -2457,6 +2653,7 @@ def reboot_persistence_gate(
             "github_actions_run": matrix.get("github_actions_run"),
             "workflow_run_attempt": matrix.get("workflow_run_attempt"),
             "d1l_target_binding": target_details,
+            "d1l_public_key_binding": public_key_details,
         },
     )
 
@@ -2479,6 +2676,9 @@ def protocol_migration_gate(
         ),
         continuity_flag="target_identity_continuity_ok",
         identity_field="target_identity_sha256",
+    )
+    public_key_ok, _d1l_public_key, public_key_details = (
+        standard_d1l_public_key_binding(data)
     )
     reasons: list[str] = []
     validation_errors: list[str] = []
@@ -2532,8 +2732,17 @@ def protocol_migration_gate(
         reasons.append("protocol_migration_exact_candidate_binding_failed")
     if not target_ok:
         reasons.append("protocol_migration_d1l_target_binding_failed")
+    if not public_key_ok:
+        reasons.append("protocol_migration_d1l_public_key_binding_failed")
 
-    ok = contained and validation_ok and real and binding_ok and target_ok
+    ok = (
+        contained
+        and validation_ok
+        and real
+        and binding_ok
+        and target_ok
+        and public_key_ok
+    )
     return CoreGate(
         "protocol_timestamp_migration",
         ok,
@@ -2547,6 +2756,7 @@ def protocol_migration_gate(
             "github_actions_run": data.get("github_actions_run"),
             "workflow_run_attempt": data.get("workflow_run_attempt"),
             "d1l_target_binding": target_details,
+            "d1l_public_key_binding": public_key_details,
         },
     )
 
@@ -3518,6 +3728,9 @@ def soak_artifact_ok(
         snapshot_fields=("d1l_target", "d1l_target_after"),
         continuity_flag="target_identity_continuity_ok",
     )
+    public_key_ok, _d1l_public_key, _public_key_details = (
+        standard_d1l_public_key_binding(data)
+    )
     summary = data.get("summary")
     samples = data.get("samples")
     health = _health_rows(data)
@@ -3671,9 +3884,7 @@ def soak_artifact_ok(
         summary_raw_exact = False
     setup_events = data.get("setup_events")
     setup_events = setup_events if isinstance(setup_events, list) else []
-    expected_preflight_commands = (
-        ["version", "identity status"] if active else ["version"]
-    )
+    expected_preflight_commands = ["version", "identity status"]
     version_setup_ok = (
         len(setup_events) == len(expected_preflight_commands)
         and isinstance(setup_events[0], dict)
@@ -3684,28 +3895,16 @@ def soak_artifact_ok(
             data.get("version_preflight"), commit, sd_history_mode
         )
     )
-    if active:
-        identity_setup_ok = (
-            len(setup_events) == 2
-            and isinstance(setup_events[1], dict)
-            and data.get("d1l_identity_required") is True
-            and data.get("d1l_identity_ok") is True
-            and rf_acceptance.d1l_identity_status_ok(
-                data.get("d1l_identity_status"),
-                data.get("expected_d1l_public_key"),
-            )
-            and setup_events[1].get("cmd") == "identity status"
-            and setup_events[1].get("elapsed_sec") == 0.0
-            and setup_events[1].get("result")
-            == data.get("d1l_identity_status")
-        )
-    else:
-        identity_setup_ok = (
-            data.get("d1l_identity_required") is False
-            and data.get("expected_d1l_public_key") is None
-            and data.get("d1l_identity_status") == {}
-            and data.get("d1l_identity_ok") is None
-        )
+    identity_setup_ok = (
+        len(setup_events) == 2
+        and isinstance(setup_events[1], dict)
+        and data.get("d1l_identity_required") is True
+        and public_key_ok
+        and setup_events[1].get("cmd") == "identity status"
+        and setup_events[1].get("elapsed_sec") == 0.0
+        and setup_events[1].get("result")
+        == data.get("d1l_identity_status")
+    )
     setup_ok = (
         data.get("preflight_commands") == expected_preflight_commands
         and data.get("preflight_failure") is None
@@ -3831,6 +4030,7 @@ def soak_artifact_ok(
         and data.get("physical_observed") is True
         and data.get("port") == expected_target
         and target_ok
+        and public_key_ok
         and exact_candidate_fields(data, commit)
         and str(data.get("github_actions_run")) == str(run_id)
         and str(data.get("workflow_run_attempt")) == str(run_attempt)
@@ -4210,6 +4410,22 @@ def soak_gate(
             continuity_flag="target_identity_continuity_ok",
         )
     )
+    active_public_key_ok, active_public_key, active_public_key_details = (
+        standard_d1l_public_key_binding(active)
+    )
+    idle_public_key_ok, idle_public_key, idle_public_key_details = (
+        standard_d1l_public_key_binding(idle)
+    )
+    rf_public_key_ok, rf_public_key, rf_public_key_details = (
+        public_key_field_binding(rf, "d1l_public_key")
+    )
+    public_key_binding_ok = (
+        active_public_key_ok
+        and idle_public_key_ok
+        and rf_public_key_ok
+        and rf_public_key is not None
+        and rf_public_key == active_public_key == idle_public_key
+    )
     target_binding_ok = (
         rf_target_ok
         and active_target_ok
@@ -4234,14 +4450,11 @@ def soak_gate(
             expected_target,
         ).ok
         and target_binding_ok
+        and public_key_binding_ok
         and active.get("active_dm_fingerprint") == rf.get("target_fingerprint")
         and isinstance(rf.get("controlled_peer"), dict)
         and active.get("active_dm_fingerprint")
         == rf["controlled_peer"].get("fingerprint")
-        and rf_acceptance.exact_public_key(
-            active.get("expected_d1l_public_key")
-        )
-        == rf_acceptance.exact_public_key(rf.get("d1l_public_key"))
         and idle.get("controlled_peer_receipt") is None
         and peer_flow_ok
     )
@@ -4302,6 +4515,12 @@ def soak_gate(
                 "rf": rf_target_details,
                 "active": active_target_details,
                 "idle": idle_target_details,
+            },
+            "d1l_public_key_binding": {
+                "ok": public_key_binding_ok,
+                "rf": rf_public_key_details,
+                "active": active_public_key_details,
+                "idle": idle_public_key_details,
             },
             "active_final_uptime_ms": active_final_uptime,
             "idle_first_uptime_ms": idle_first_uptime,
@@ -4530,7 +4749,7 @@ def physical_target_identity_gate(
     expected_target: str,
     paths: dict[str, Path | None],
 ) -> CoreGate:
-    """Bind every closing physical receipt to one stable D1L identity."""
+    """Bind every closing receipt to one adapter target and one D1L key."""
 
     specs = {
         "flash_receipt": (
@@ -4538,33 +4757,71 @@ def physical_target_identity_gate(
             2,
             "target_identity_continuity_ok",
             None,
+            "flash",
+            None,
         ),
-        "core_smoke": (("d1l_target",), 2, None, None),
-        "core_ui": (("d1l_target",), 2, None, None),
-        "core_scroll": (("d1l_target",), 2, None, None),
-        "manual_review": (("d1l_target",), 4, None, None),
+        "core_smoke": (
+            ("d1l_target",),
+            2,
+            None,
+            None,
+            "standard",
+            None,
+        ),
+        "core_ui": (
+            ("d1l_target",),
+            2,
+            None,
+            None,
+            "standard",
+            None,
+        ),
+        "core_scroll": (
+            ("d1l_target",),
+            2,
+            None,
+            None,
+            "standard",
+            None,
+        ),
+        "manual_review": (
+            ("d1l_target",),
+            4,
+            None,
+            None,
+            "standard",
+            None,
+        ),
         "reboot_receipt": (
             ("d1l_target", "post_reinstall_d1l_target"),
             2,
             None,
             "expected_target_identity_sha256",
+            "field",
+            "expected_d1l_public_key",
         ),
         "protocol_migration": (
             ("d1l_target_before", "d1l_target_after"),
             2,
             "target_identity_continuity_ok",
             "target_identity_sha256",
+            "standard",
+            None,
         ),
         "rf_receipt": (
             ("d1l_target", "d1l_target_after"),
             2,
             "target_identity_continuity_ok",
             None,
+            "field",
+            "d1l_public_key",
         ),
         "active_soak": (
             ("d1l_target", "d1l_target_after"),
             2,
             "target_identity_continuity_ok",
+            None,
+            "standard",
             None,
         ),
         "idle_soak": (
@@ -4572,10 +4829,13 @@ def physical_target_identity_gate(
             2,
             "target_identity_continuity_ok",
             None,
+            "standard",
+            None,
         ),
     }
     details: dict[str, Any] = {}
     identities: list[str] = []
+    public_keys: list[str] = []
     all_valid = True
     evidence: list[str] = []
     for name, (
@@ -4583,6 +4843,8 @@ def physical_target_identity_gate(
         schema,
         continuity_flag,
         identity_field,
+        public_key_contract,
+        public_key_field,
     ) in specs.items():
         path = paths.get(name)
         data = read_json(path)
@@ -4594,26 +4856,48 @@ def physical_target_identity_gate(
             continuity_flag=continuity_flag,
             identity_field=identity_field,
         )
+        if public_key_contract == "flash":
+            public_key_ok, public_key, public_key_details = (
+                flash_d1l_public_key_binding(data)
+            )
+        elif public_key_contract == "standard":
+            public_key_ok, public_key, public_key_details = (
+                standard_d1l_public_key_binding(data)
+            )
+        else:
+            public_key_ok, public_key, public_key_details = (
+                public_key_field_binding(data, str(public_key_field))
+            )
+        binding_details["d1l_public_key_binding"] = public_key_details
         details[name] = binding_details
-        all_valid = all_valid and binding_ok
+        all_valid = all_valid and binding_ok and public_key_ok
         if identity is not None:
             identities.append(identity)
+        if public_key is not None:
+            public_keys.append(public_key)
         evidence.extend(path_text(path, root))
     one_identity = len(identities) == len(specs) and len(set(identities)) == 1
     stable_identity = identities[0] if one_identity else None
+    one_public_key = (
+        len(public_keys) == len(specs) and len(set(public_keys)) == 1
+    )
+    d1l_public_key = public_keys[0] if one_public_key else None
     details.update(
         {
             "all_receipts_valid": all_valid,
             "one_stable_identity": one_identity,
             "stable_identity_sha256": stable_identity,
+            "one_d1l_public_key": one_public_key,
+            "d1l_public_key": d1l_public_key,
         }
     )
     return CoreGate(
         "physical_d1l_target_identity",
-        all_valid and one_identity,
+        all_valid and one_identity and one_public_key,
         (
             "Every closing physical receipt is bound to the selected D1L "
-            f"target {expected_target} and one stable device identity"
+            f"target {expected_target}, one adapter digest, and one exact "
+            "full D1L public key"
         ),
         evidence,
         details,
