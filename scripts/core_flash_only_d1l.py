@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import json
 import os
 import re
@@ -398,14 +399,32 @@ def open_posix_admitted_serial(
     if os.name != "posix":
         raise RuntimeError("POSIX serial admission requires a POSIX runtime")
     try:
+        import fcntl
         import serial
+        import termios
     except ImportError as exc:
         raise RuntimeError(
-            "pyserial is required for bound POSIX D1L flashing"
+            "Linux tty locking and pyserial are required for bound "
+            "POSIX D1L flashing"
         ) from exc
-    handle = open_d1l_serial(
-        serial, port=port, baudrate=baud, timeout=timeout
+    handle = serial.Serial(
+        port=None,
+        baudrate=baud,
+        timeout=timeout,
+        exclusive=True,
     )
+    try:
+        handle.dtr = False
+        handle.rts = False
+        handle.port = port
+        handle.open()
+        fcntl.ioctl(handle.fileno(), termios.TIOCEXCL)
+    except BaseException:
+        try:
+            handle.close()
+        except Exception:
+            pass
+        raise
     try:
         time.sleep(1.0)
         handle.reset_input_buffer()
@@ -476,6 +495,48 @@ def _run_esptool_with_open_serial(
     esptool.main(argv=command[3:], esp=esp)
 
 
+def _arm_linux_parent_death_signal(expected_parent_pid: int) -> None:
+    """Kill the flash child if its supervising parent disappears."""
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError(
+            "Bound POSIX flashing requires Linux parent-death signaling"
+        )
+    libc = ctypes.CDLL(None, use_errno=True)
+    prctl = libc.prctl
+    prctl.argtypes = [
+        ctypes.c_int,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+    ]
+    prctl.restype = ctypes.c_int
+    if prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(
+            error_number,
+            "Could not arm Linux parent-death signal",
+        )
+    if os.getppid() != expected_parent_pid:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+def _kill_and_reap_child(pid: int) -> int | None:
+    """Stop and reap one fork child, including an already-exited zombie."""
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    while True:
+        try:
+            waited_pid, status = os.waitpid(pid, 0)
+        except InterruptedError:
+            continue
+        except ChildProcessError:
+            return None
+        return status if waited_pid == pid else None
+
+
 def default_posix_flash_runner(
     command: list[str],
     cwd: Path,
@@ -484,14 +545,19 @@ def default_posix_flash_runner(
 ) -> tuple[dict, bytes]:
     """Fork esptool with the exact serial file description admitted above."""
     started_at = utc_now()
-    if os.name != "posix" or not hasattr(os, "fork"):
+    if (
+        os.name != "posix"
+        or not sys.platform.startswith("linux")
+        or not hasattr(os, "fork")
+    ):
         raise RuntimeError(
-            "Bound POSIX flashing requires fork-based descriptor inheritance"
+            "Bound POSIX flashing requires Linux fork descriptor inheritance"
         )
     os.fstat(serial_handle.fileno())
     sys.stdout.flush()
     sys.stderr.flush()
     read_fd, write_fd = os.pipe()
+    parent_pid = os.getpid()
     try:
         pid = os.fork()
     except BaseException:
@@ -500,6 +566,7 @@ def default_posix_flash_runner(
         raise
     if pid == 0:  # pragma: no cover - exercised by Linux hardware
         try:
+            _arm_linux_parent_death_signal(parent_pid)
             os.close(read_fd)
             os.dup2(write_fd, 1)
             os.dup2(write_fd, 2)
@@ -526,8 +593,7 @@ def default_posix_flash_runner(
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 timed_out = True
-                os.kill(pid, signal.SIGKILL)
-                _, status = os.waitpid(pid, 0)
+                status = _kill_and_reap_child(pid)
                 break
             readable, _, _ = select.select(
                 [read_fd], [], [], min(0.1, remaining)
@@ -545,7 +611,11 @@ def default_posix_flash_runner(
                 break
             raw_parts.append(chunk)
     finally:
-        os.close(read_fd)
+        try:
+            if status is None:
+                status = _kill_and_reap_child(pid)
+        finally:
+            os.close(read_fd)
 
     returncode = (
         None

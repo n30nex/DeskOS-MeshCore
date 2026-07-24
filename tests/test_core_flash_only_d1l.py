@@ -934,7 +934,9 @@ def test_bound_esptool_api_receives_connected_handle_without_path_reopen(
 
 
 @pytest.mark.skipif(
-    flash.os.name != "posix" or not hasattr(flash.os, "fork"),
+    flash.os.name != "posix"
+    or not flash.sys.platform.startswith("linux")
+    or not hasattr(flash.os, "fork"),
     reason="descriptor inheritance is a POSIX-only release path",
 )
 def test_default_posix_runner_forks_same_descriptor_and_captures_log(
@@ -982,3 +984,134 @@ def test_default_posix_runner_forks_same_descriptor_and_captures_log(
     assert result["returncode"] == 0
     assert result["serial_handoff"] == "fork_inherited_open_serial"
     assert b"same-descriptor-child" in raw
+
+
+@pytest.mark.skipif(
+    flash.os.name != "posix"
+    or not flash.sys.platform.startswith("linux"),
+    reason="exclusive serial admission is a Linux release path",
+)
+def test_posix_admission_holds_exclusive_serial_lock(monkeypatch):
+    import serial
+
+    master_fd, slave_fd = flash.os.openpty()
+    slave_path = flash.os.ttyname(slave_fd)
+    monkeypatch.setattr(flash.time, "sleep", lambda _seconds: None)
+    try:
+        with flash.open_posix_admitted_serial(
+            slave_path,
+            115200,
+            1.0,
+        ) as admitted:
+            assert admitted.exclusive is True
+            with pytest.raises(
+                serial.SerialException,
+                match="exclusively lock|Device or resource busy",
+            ):
+                serial.Serial(
+                    slave_path,
+                    115200,
+                    timeout=1.0,
+                    exclusive=False,
+                )
+    finally:
+        flash.os.close(master_fd)
+        flash.os.close(slave_fd)
+
+
+@pytest.mark.skipif(
+    flash.os.name != "posix"
+    or not flash.sys.platform.startswith("linux")
+    or not hasattr(flash.os, "fork"),
+    reason="fork cleanup is a Linux release path",
+)
+def test_posix_parent_exception_kills_and_reaps_flash_child(
+    tmp_path, monkeypatch
+):
+    read_fd, write_fd = flash.os.pipe()
+    handle = SimpleNamespace(fileno=lambda: read_fd)
+    real_fork = flash.os.fork
+    child_pids = []
+
+    def tracking_fork():
+        pid = real_fork()
+        if pid > 0:
+            child_pids.append(pid)
+        return pid
+
+    def slow_child(_command, _handle):
+        flash.time.sleep(30)
+
+    def fail_select(*_args, **_kwargs):
+        raise OSError("injected parent read failure")
+
+    monkeypatch.setattr(flash.os, "fork", tracking_fork)
+    monkeypatch.setattr(
+        flash,
+        "_run_esptool_with_open_serial",
+        slow_child,
+    )
+    monkeypatch.setattr(flash.select, "select", fail_select)
+    try:
+        with pytest.raises(OSError, match="injected parent read failure"):
+            flash.default_posix_flash_runner(
+                ["python", "-m", "esptool", "write-flash"],
+                tmp_path,
+                5,
+                handle,
+            )
+    finally:
+        flash.os.close(read_fd)
+        flash.os.close(write_fd)
+
+    assert len(child_pids) == 1
+    with pytest.raises(ChildProcessError):
+        flash.os.waitpid(child_pids[0], flash.os.WNOHANG)
+
+
+@pytest.mark.skipif(
+    flash.os.name != "posix"
+    or not flash.sys.platform.startswith("linux")
+    or not hasattr(flash.os, "fork"),
+    reason="fork timeout cleanup is a Linux release path",
+)
+def test_posix_timeout_kills_and_reaps_flash_child(
+    tmp_path, monkeypatch
+):
+    read_fd, write_fd = flash.os.pipe()
+    handle = SimpleNamespace(fileno=lambda: read_fd)
+    real_fork = flash.os.fork
+    child_pids = []
+
+    def tracking_fork():
+        pid = real_fork()
+        if pid > 0:
+            child_pids.append(pid)
+        return pid
+
+    def slow_child(_command, _handle):
+        flash.time.sleep(30)
+
+    monkeypatch.setattr(flash.os, "fork", tracking_fork)
+    monkeypatch.setattr(
+        flash,
+        "_run_esptool_with_open_serial",
+        slow_child,
+    )
+    try:
+        result, _raw = flash.default_posix_flash_runner(
+            ["python", "-m", "esptool", "write-flash"],
+            tmp_path,
+            0,
+            handle,
+        )
+    finally:
+        flash.os.close(read_fd)
+        flash.os.close(write_fd)
+
+    assert result["ok"] is False
+    assert result["returncode"] is None
+    assert result["error"] == "timeout"
+    assert len(child_pids) == 1
+    with pytest.raises(ChildProcessError):
+        flash.os.waitpid(child_pids[0], flash.os.WNOHANG)
