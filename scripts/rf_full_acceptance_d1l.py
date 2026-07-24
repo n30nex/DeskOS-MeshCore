@@ -3436,6 +3436,7 @@ def build_report(
         }
     if listener_mode and not remote_mode:
         controlled_peer["public_key"] = peer_public_key
+    report_ok = all(checks.values())
     return {
         "schema": RF_FULL_ACCEPTANCE_SCHEMA,
         "mode": "rf-full-acceptance",
@@ -3446,7 +3447,7 @@ def build_report(
         "simulation": False,
         "source_inspection": False,
         "execution_complete": True,
-        "closure_eligible": True,
+        "closure_eligible": report_ok,
         "dm_rf_tx": bool(
             send_outbound
             and outbound_step
@@ -3537,7 +3538,7 @@ def build_report(
         },
         "checks": checks,
         "steps": steps,
-        "ok": all(checks.values()),
+        "ok": report_ok,
     }
 
 

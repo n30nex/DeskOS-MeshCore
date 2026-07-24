@@ -287,6 +287,7 @@ def test_rf_full_acceptance_rejects_missing_inbound_token():
     )
 
     assert report["ok"] is False
+    assert report["closure_eligible"] is False
     assert report["checks"]["inbound_dm"] is False
     assert report["checks"]["ack_path"] is False
     assert report["checks"]["direct_route"] is False
