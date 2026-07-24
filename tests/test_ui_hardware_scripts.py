@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts import (
     scroll_probe_d1l,
     smoke_d1l,
@@ -445,6 +447,17 @@ def test_scroll_probe_core_identity_preflight_precedes_mutation(
         github_actions_run="123",
         workflow_run_attempt="1",
         expected_sd_history_mode="disabled",
+        platform_name="nt",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+                "location": "1-2",
+            }
+        ],
     )
     assert commands == ["version", "health"]
     assert report["ok"] is False
@@ -453,6 +466,58 @@ def test_scroll_probe_core_identity_preflight_precedes_mutation(
     assert report["clear_crashlog_requested"] is True
     assert report["firmware_identity_ok"] is False
     assert report["events"] == []
+    assert report["schema"] == 2
+    assert report["d1l_target"]["requested_path"] == "COM12"
+
+
+def test_scroll_probe_invalid_core_target_fails_before_serial_open(
+    monkeypatch,
+):
+    clean = {
+        "commit": "a" * 40,
+        "short_commit": "a" * 7,
+        "branch": "release/24h-core",
+        "dirty": False,
+        "dirty_entries": [],
+    }
+    monkeypatch.setattr(
+        scroll_probe_d1l, "git_metadata", lambda _root: clean
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("invalid target must fail before serial open")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="VID"):
+        scroll_probe_d1l.run_scroll_probe(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            screens=list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+            dwell_sec=0.0,
+            manual_touch=False,
+            clear_crashlog_before_start=False,
+            poll_sec=0.01,
+            release_profile="core_1_0",
+            expected_firmware_commit="a" * 40,
+            github_actions_run="123",
+            workflow_run_attempt="1",
+            expected_sd_history_mode="disabled",
+            platform_name="nt",
+            port_lister=lambda: [
+                {
+                    "device": "COM12",
+                    "vid": 0x10C4,
+                    "pid": 0xEA60,
+                    "serial_number": "wrong",
+                    "hwid": "wrong",
+                    "location": "1-9",
+                }
+            ],
+        )
 
 
 def test_scroll_probe_ignores_normal_power_on_history_but_rejects_crash_like_resets():

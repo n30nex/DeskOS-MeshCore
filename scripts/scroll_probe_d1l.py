@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import time
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +19,7 @@ try:
         enforce_core_port,
         exact_identity,
         exact_version_identity,
+        resolve_core_target,
     )
     from smoke_d1l import exact_commit
 except ModuleNotFoundError:
@@ -27,6 +29,7 @@ except ModuleNotFoundError:
         enforce_core_port,
         exact_identity,
         exact_version_identity,
+        resolve_core_target,
     )
     from scripts.smoke_d1l import (
         exact_commit,
@@ -426,6 +429,8 @@ def run_scroll_probe(
     github_actions_run: str | None = None,
     workflow_run_attempt: str | None = None,
     expected_sd_history_mode: str | None = None,
+    port_lister: Callable[[], Iterable[object]] | None = None,
+    platform_name: str | None = None,
 ) -> dict:
     validate_setup_actions(screens, clear_crashlog_before_start)
     validate_release_profile_screens(screens, release_profile)
@@ -451,8 +456,18 @@ def run_scroll_probe(
         ]
     try:
         import serial
+        from serial.tools import list_ports
     except ImportError as exc:
         raise SystemExit("pyserial is required for hardware scroll probe: python -m pip install pyserial") from exc
+    d1l_target = None
+    if release_profile == CORE_RELEASE_PROFILE:
+        d1l_target = resolve_core_target(
+            port,
+            port_lister=port_lister
+            or (lambda: list_ports.comports(include_links=True)),
+            platform_name=platform_name,
+        )
+        port = d1l_target["requested_path"]
 
     setup_events: list[dict] = []
     events: list[dict] = []
@@ -495,13 +510,14 @@ def run_scroll_probe(
             if not preflight_ok:
                 ended_at = datetime.now(timezone.utc)
                 return {
-                    "schema": 1,
+                    "schema": 2,
                     "mode": "hardware",
                     "ok": False,
                     "closure_eligible": False,
                     "hardware_required": True,
                     "physical_observed": True,
                     "port": port,
+                    "d1l_target": d1l_target,
                     "baud": baud,
                     "started_at": started_at.isoformat().replace(
                         "+00:00", "Z"
@@ -669,9 +685,12 @@ def run_scroll_probe(
             ),
             "firmware_identity_ok": firmware_identity_ok,
             "scroll_movement_policy": "positive_raw_overflow",
+            "d1l_target": d1l_target,
         }
     return {
-        "schema": 1,
+        "schema": (
+            2 if release_profile == CORE_RELEASE_PROFILE else 1
+        ),
         "mode": "hardware",
         "port": port,
         "baud": baud,
