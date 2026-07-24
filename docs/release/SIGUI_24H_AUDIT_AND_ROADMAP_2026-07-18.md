@@ -882,6 +882,7 @@ grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
 export D1L_COMMIT='<40-hex-sha>'
 export D1L_ACTIONS_RUN='<numeric-run-id>'
 export D1L_RUN_ATTEMPT='<numeric-attempt>'
+export D1L_PUBLIC_KEY='<64-hex-D1L-public-key>'
 export D1L_PEER_FINGERPRINT='<16-hex-controlled-peer>'
 ```
 
@@ -909,6 +910,10 @@ After adding the profile-aware runner, execute on `neopi5`:
 python ./scripts/core_smoke_d1l.py \
   --port "$D1L_PORT" \
   --expected-firmware-commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --expected-sd-history-mode disabled \
   --persistence-test \
   --manual-touch \
   --out artifacts/hardware/neopi5/core_smoke_${D1L_COMMIT}_by-id.json
@@ -920,6 +925,10 @@ python ./scripts/core_smoke_d1l.py \
 python ./scripts/core_ui_corruption_probe_d1l.py \
   --port "$D1L_PORT" \
   --expected-firmware-commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --expected-sd-history-mode disabled \
   --rounds 20 \
   --clear-crashlog-before-start \
   --out artifacts/hardware/neopi5/core_ui_corruption_probe_${D1L_COMMIT}_by-id.json
@@ -928,6 +937,7 @@ python ./scripts/scroll_probe_d1l.py \
   --port "$D1L_PORT" \
   --release-profile core_1_0 \
   --expected-firmware-commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
   --github-actions-run "$D1L_ACTIONS_RUN" \
   --workflow-run-attempt "$D1L_RUN_ATTEMPT" \
   --expected-sd-history-mode disabled \
