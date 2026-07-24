@@ -244,6 +244,70 @@ def posix_run_kwargs(
     }
 
 
+@pytest.mark.parametrize("absolute_run_dir", [False, True])
+def test_main_default_capture_receipt_follows_custom_run_dir(
+    tmp_path,
+    monkeypatch,
+    absolute_run_dir,
+):
+    custom_run_dir = (
+        tmp_path
+        / "artifacts"
+        / "github"
+        / f"{RUN_ID}-{COMMIT}"
+    )
+    package = (
+        custom_run_dir
+        / "d1l-release-package"
+        / f"d1l-release-{COMMIT}"
+    )
+    package.mkdir(parents=True)
+    captured = {}
+
+    def fake_flash(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(flash, "run_core_flash_only", fake_flash)
+    run_dir_arg = (
+        str(custom_run_dir)
+        if absolute_run_dir
+        else str(custom_run_dir.relative_to(tmp_path))
+    )
+
+    result = flash.main(
+        [
+            "--root",
+            str(tmp_path),
+            "--github-run-id",
+            RUN_ID,
+            "--github-run-attempt",
+            RUN_ATTEMPT,
+            "--github-run-dir",
+            run_dir_arg,
+            "--commit",
+            COMMIT,
+            "--port",
+            "COM12",
+            "--expected-d1l-public-key",
+            PUBLIC_KEY,
+            "--phase",
+            flash.FLASH_PHASE_BOOTSTRAP,
+            "--out",
+            "flash.json",
+        ]
+    )
+
+    assert result == 0
+    assert captured["github_run_dir"] == custom_run_dir.resolve()
+    assert captured["package_dir"] == package.resolve()
+    assert captured["actions_capture_receipt"] == (
+        custom_run_dir
+        / "core-actions-run-metadata"
+        / f"core_actions_run_{RUN_ID}.json"
+    ).resolve()
+
+
 def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
     tmp_path, monkeypatch
 ):

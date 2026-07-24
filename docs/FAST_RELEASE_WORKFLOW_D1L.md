@@ -38,7 +38,7 @@ gh workflow run d1l-ci.yml --ref <branch> -f include_sd_bridge=false
 gh run watch <run-id> --exit-status
 gh run download <run-id> --dir artifacts\github\<run-id>-<sha>
 python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-firmware-artifacts
-python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-release-package
+python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-release-package\d1l-release-<sha>
 ```
 
 Then run one issue proof:

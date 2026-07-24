@@ -882,6 +882,7 @@ grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
 export D1L_COMMIT='<40-hex-sha>'
 export D1L_ACTIONS_RUN='<numeric-run-id>'
 export D1L_RUN_ATTEMPT='<numeric-attempt>'
+export D1L_ACTIONS_RUN_DIR="artifacts/github/${D1L_ACTIONS_RUN}-${D1L_COMMIT}"
 export D1L_PUBLIC_KEY='<64-hex-D1L-public-key>'
 export D1L_PEER_FINGERPRINT='<16-hex-controlled-peer>'
 export D1L_CONTROLLED_PEER_RECEIPT='<qualified-controlled-peer-receipt.json>'
@@ -895,15 +896,17 @@ substitute `/dev/ttyUSB2` or another raw `/dev/ttyUSB*` name.
 
 ### Actions
 
-```powershell
+```bash
 gh workflow run d1l-ci.yml --ref release/24h-core -f include_sd_bridge=false
-gh run watch <run-id> --exit-status
-python .\scripts\capture_core_actions_run_d1l.py `
-  --github-run-id <run-id> `
-  --commit <sha> `
-  --github-run-dir artifacts\github\<run-id>-<sha>
-python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-firmware-artifacts
-python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-release-package
+gh run watch "$D1L_ACTIONS_RUN" --exit-status
+python ./scripts/capture_core_actions_run_d1l.py \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --commit "$D1L_COMMIT" \
+  --github-run-dir "$D1L_ACTIONS_RUN_DIR"
+python ./scripts/verify_checksums.py \
+  "$D1L_ACTIONS_RUN_DIR/d1l-firmware-artifacts"
+python ./scripts/verify_checksums.py \
+  "$D1L_ACTIONS_RUN_DIR/d1l-release-package/d1l-release-$D1L_COMMIT"
 ```
 
 Only a successful `workflow_dispatch` run whose `head_sha` is the exact
@@ -912,6 +915,28 @@ its synthetic merge SHA is not flashable candidate evidence. The capture tool
 requires exactly the five Core archives, verifies their GitHub API digests and
 extracted trees, and records the run attempt. Use `include_sd_bridge=true` only
 for a candidate that will advertise supported SD history.
+
+### Exact non-erasing bootstrap flash
+
+From a clean checkout at `$D1L_COMMIT`, install the exact captured candidate.
+This bootstrap receipt is not release-closing evidence; the closing receipt is
+created only after the retained-state baseline exists.
+
+```bash
+python ./scripts/core_flash_only_d1l.py \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --github-run-dir "$D1L_ACTIONS_RUN_DIR" \
+  --commit "$D1L_COMMIT" \
+  --port "$D1L_PORT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --phase bootstrap \
+  --out "$D1L_HARDWARE_DIR/esp32_flash_bootstrap_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_by-id.json"
+```
+
+The flash runner accepts only `write-flash`, rejects erase operations, validates
+the `1a86:7523` by-id target before and after flashing, and derives its Actions
+capture receipt from `$D1L_ACTIONS_RUN_DIR`.
 
 ### Core smoke
 
@@ -1029,6 +1054,40 @@ python ./scripts/soak_d1l.py \
 ```
 
 For supported SD, replace `--allow-sd-unavailable` with `--sd-file-canary`.
+
+### Exact non-erasing closing reflash
+
+After the retained settings, messages, contacts, and identity baseline exists
+and all other physical gates above pass, perform the closing reflash. The
+runner snapshots retained state before and after flashing and emits the only
+flash receipt eligible to close the release gate.
+
+```bash
+python ./scripts/core_flash_only_d1l.py \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --github-run-dir "$D1L_ACTIONS_RUN_DIR" \
+  --commit "$D1L_COMMIT" \
+  --port "$D1L_PORT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --phase retained-reflash \
+  --out "$D1L_HARDWARE_DIR/esp32_flash_retained_reflash_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_by-id.json"
+```
+
+Then run the closing audit against the same Actions and evidence directories:
+
+```bash
+python ./scripts/core_release_gate_audit_d1l.py \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_RUN_ATTEMPT" \
+  --github-run-dir "$D1L_ACTIONS_RUN_DIR" \
+  --commit "$D1L_COMMIT" \
+  --d1l-port "$D1L_PORT" \
+  --sd-history-mode disabled \
+  --hardware-dir "$D1L_HARDWARE_DIR" \
+  --soak-dir artifacts/soak \
+  --out "artifacts/release-gate/core_release_gate_${D1L_COMMIT}_actions_${D1L_ACTIONS_RUN}_neopi5_by-id.json"
+```
 
 ---
 

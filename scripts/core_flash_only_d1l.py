@@ -1277,6 +1277,17 @@ def resolve_path(root: Path, value: str) -> Path:
     return path.resolve() if path.is_absolute() else (root / path).resolve()
 
 
+def default_actions_capture_receipt(
+    github_run_dir: Path,
+    run_id: str,
+) -> Path:
+    return (
+        github_run_dir
+        / "core-actions-run-metadata"
+        / f"core_actions_run_{run_id}.json"
+    ).resolve()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -1322,14 +1333,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     if package is None:
         parser.error("No downloaded d1l-release-package was found")
-    actions_capture_receipt = resolve_path(
-        root,
-        args.actions_capture_receipt
-        or (
-            f"artifacts/github/{args.github_run_id}/"
-            "core-actions-run-metadata/"
-            f"core_actions_run_{args.github_run_id}.json"
-        ),
+    actions_capture_receipt = (
+        resolve_path(root, args.actions_capture_receipt)
+        if args.actions_capture_receipt
+        else default_actions_capture_receipt(run_dir, args.github_run_id)
     )
     try:
         target_slug = safe_slug(enforce_core_port(args.port))
