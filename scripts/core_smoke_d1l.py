@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
@@ -64,7 +65,6 @@ CORE_SMOKE_COMMANDS = (
     "board",
     "settings get",
     "settings onboarding status",
-    "identity status",
     "i2c",
     "display test",
     "touch test",
@@ -175,6 +175,38 @@ def exact_identity(
         and exact_commit(result.get("build_commit")) == expected_commit
         and result.get("release_profile") == CORE_RELEASE_PROFILE
         and result.get("sd_history_mode") == expected_sd_history_mode
+    )
+
+
+def exact_public_key(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return (
+        normalized
+        if re.fullmatch(r"[0-9a-f]{64}", normalized) is not None
+        else None
+    )
+
+
+def d1l_identity_status_ok(
+    result: object,
+    expected_public_key: object,
+) -> bool:
+    """Require the complete live D1L identity before later smoke commands."""
+
+    public_key = exact_public_key(expected_public_key)
+    return bool(
+        public_key is not None
+        and isinstance(result, dict)
+        and type(result.get("schema")) is int
+        and result.get("schema") == 1
+        and result.get("ok") is True
+        and result.get("cmd") == "identity status"
+        and result.get("public_key_ready") is True
+        and exact_public_key(result.get("public_key")) == public_key
+        and result.get("fingerprint") == public_key[:16].upper()
+        and result.get("role") == "desk_companion"
     )
 
 
@@ -337,6 +369,8 @@ def command_plan(sd_history_mode: str) -> dict:
         "mode": "plan",
         "ok": False,
         "closure_eligible": False,
+        "dry_run": True,
+        "planning_only": True,
         "hardware_required": True,
         "physical_observed": False,
         "port": D1L_CORE_PORT,
@@ -346,7 +380,7 @@ def command_plan(sd_history_mode: str) -> dict:
         ],
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": sd_history_mode,
-        "preflight_commands": ["version", "health"],
+        "preflight_commands": ["version", "identity status", "health"],
         "supported_commands": list(CORE_SMOKE_COMMANDS),
         "unavailable_mutation_probes": mutation_probe_plan(sd_history_mode),
         "unavailable_status_probes": unavailable_status_probe_plan(
@@ -354,6 +388,9 @@ def command_plan(sd_history_mode: str) -> dict:
         ),
         "public_rf_tx": False,
         "formats_sd": False,
+        "expected_d1l_public_key": None,
+        "d1l_identity_status": {},
+        "d1l_identity_ok": None,
     }
 
 
@@ -498,12 +535,25 @@ def identity_failure_report(
     baud: int,
     expected_commit: str,
     expected_sd_history_mode: str,
+    expected_d1l_public_key: str,
     version: dict,
     github_run_id: str,
     workflow_run_attempt: str,
     d1l_target: dict[str, Any],
+    d1l_identity_status: dict | None = None,
     health: dict | None = None,
 ) -> dict:
+    public_key = exact_public_key(expected_d1l_public_key)
+    if public_key is None:
+        raise ValueError(
+            "expected_d1l_public_key must be an exact 64-hex public key"
+        )
+    identity_status = (
+        d1l_identity_status
+        if isinstance(d1l_identity_status, dict)
+        else {}
+    )
+    identity_ok = d1l_identity_status_ok(identity_status, public_key)
     health = health or {}
     return {
         "schema": 2,
@@ -521,6 +571,9 @@ def identity_failure_report(
         "expected_firmware_commit": expected_commit,
         "github_actions_run": github_run_id,
         "workflow_run_attempt": workflow_run_attempt,
+        "expected_d1l_public_key": public_key,
+        "d1l_identity_status": identity_status,
+        "d1l_identity_ok": identity_ok,
         "device_build_commit": version.get("build_commit"),
         "firmware_identity_required": True,
         "firmware_identity_ok": False,
@@ -530,7 +583,11 @@ def identity_failure_report(
         "unavailable_status_probes": [],
         "public_rf_tx": False,
         "formats_sd": False,
-        "results": [version] + ([health] if health else []),
+        "results": (
+            [version]
+            + ([identity_status] if identity_status else [])
+            + ([health] if health else [])
+        ),
     }
 
 
@@ -541,6 +598,7 @@ def run_core_smoke(
     timeout: float,
     expected_commit: str,
     expected_sd_history_mode: str,
+    expected_d1l_public_key: str,
     persistence_test: bool,
     manual_touch: bool,
     github_run_id: str,
@@ -548,6 +606,11 @@ def run_core_smoke(
     port_lister: Callable[[], Iterable[object]] | None = None,
     platform_name: str | None = None,
 ) -> dict:
+    normalized_public_key = exact_public_key(expected_d1l_public_key)
+    if normalized_public_key is None:
+        raise ValueError(
+            "expected_d1l_public_key must be an exact 64-hex public key"
+        )
     try:
         import serial
         from serial.tools import list_ports
@@ -611,7 +674,30 @@ def run_core_smoke(
                 baud=baud,
                 expected_commit=normalized_commit,
                 expected_sd_history_mode=expected_sd_history_mode,
+                expected_d1l_public_key=normalized_public_key,
                 version=version,
+                github_run_id=str(github_run_id),
+                workflow_run_attempt=str(workflow_run_attempt),
+                d1l_target=d1l_target,
+            )
+        d1l_identity_status = send_console_command(
+            ser,
+            "identity status",
+            timeout,
+        )
+        d1l_identity_ok = d1l_identity_status_ok(
+            d1l_identity_status,
+            normalized_public_key,
+        )
+        if not d1l_identity_ok:
+            return identity_failure_report(
+                port=port,
+                baud=baud,
+                expected_commit=normalized_commit,
+                expected_sd_history_mode=expected_sd_history_mode,
+                expected_d1l_public_key=normalized_public_key,
+                version=version,
+                d1l_identity_status=d1l_identity_status,
                 github_run_id=str(github_run_id),
                 workflow_run_attempt=str(workflow_run_attempt),
                 d1l_target=d1l_target,
@@ -625,13 +711,15 @@ def run_core_smoke(
                 baud=baud,
                 expected_commit=normalized_commit,
                 expected_sd_history_mode=expected_sd_history_mode,
+                expected_d1l_public_key=normalized_public_key,
                 version=version,
+                d1l_identity_status=d1l_identity_status,
                 health=health_preflight,
                 github_run_id=str(github_run_id),
                 workflow_run_attempt=str(workflow_run_attempt),
                 d1l_target=d1l_target,
             )
-        results.extend([version, health_preflight])
+        results.extend([version, d1l_identity_status, health_preflight])
 
         for command in CORE_SMOKE_COMMANDS:
             results.append(send_console_command(ser, command, timeout))
@@ -725,6 +813,9 @@ def run_core_smoke(
         "expected_firmware_commit": normalized_commit,
         "github_actions_run": str(github_run_id),
         "workflow_run_attempt": str(workflow_run_attempt),
+        "expected_d1l_public_key": normalized_public_key,
+        "d1l_identity_status": d1l_identity_status,
+        "d1l_identity_ok": True,
         "device_build_commit": version.get("build_commit"),
         "firmware_identity_required": True,
         "firmware_identity_ok": True,
@@ -786,6 +877,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-firmware-commit", required=True)
     parser.add_argument("--github-run-id", required=True)
     parser.add_argument("--github-run-attempt", required=True)
+    parser.add_argument("--expected-d1l-public-key")
     parser.add_argument(
         "--expected-sd-history-mode",
         required=True,
@@ -793,11 +885,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--persistence-test", action="store_true")
     parser.add_argument("--manual-touch", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out")
     args = parser.parse_args(argv)
 
     try:
-        port = enforce_core_port(args.port)
+        port = enforce_core_port(
+            D1L_CORE_PORT
+            if args.dry_run and args.port is None
+            else args.port
+        )
     except ValueError as exc:
         parser.error(str(exc))
     commit = exact_commit(args.expected_firmware_commit)
@@ -814,6 +911,52 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             "--github-run-id and --github-run-attempt must be positive integers"
         )
+    public_key = (
+        exact_public_key(args.expected_d1l_public_key)
+        if args.expected_d1l_public_key is not None
+        else None
+    )
+    if args.expected_d1l_public_key is not None and public_key is None:
+        parser.error(
+            "--expected-d1l-public-key must be an exact 64-hex public key"
+        )
+    if not args.dry_run and public_key is None:
+        parser.error(
+            "--expected-d1l-public-key is required for hardware execution"
+        )
+
+    if args.dry_run:
+        report = command_plan(args.expected_sd_history_mode)
+        report.update(
+            {
+                "port": port,
+                "expected_firmware_commit": commit,
+                "github_actions_run": str(args.github_run_id),
+                "workflow_run_attempt": str(args.github_run_attempt),
+                "expected_d1l_public_key": public_key,
+            }
+        )
+        if args.out:
+            root = Path(__file__).resolve().parents[1]
+            out_path = resolve_out_path(args.out, port)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(
+                json.dumps(report, indent=2) + "\n",
+                encoding="ascii",
+            )
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "dry_run": True,
+                        "out": str(out_path),
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(json.dumps(report, indent=2))
+        return 0
 
     report = run_core_smoke(
         port=port,
@@ -821,6 +964,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.timeout,
         expected_commit=commit,
         expected_sd_history_mode=args.expected_sd_history_mode,
+        expected_d1l_public_key=public_key,
         persistence_test=args.persistence_test,
         manual_touch=args.manual_touch,
         github_run_id=str(args.github_run_id),

@@ -1,26 +1,87 @@
+import json
+
 import pytest
 
 from scripts import core_smoke_d1l as core_smoke
 
 
 COMMIT = "a" * 40
+PUBLIC_KEY = "0123456789abcdef" * 4
+
+
+def identity_status(public_key=PUBLIC_KEY):
+    normalized = core_smoke.exact_public_key(public_key)
+    assert normalized is not None
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "identity status",
+        "public_key_ready": True,
+        "public_key": normalized,
+        "fingerprint": normalized[:16].upper(),
+        "role": "desk_companion",
+    }
+
+
+def windows_port():
+    return {
+        "device": "COM12",
+        "vid": 0x1A86,
+        "pid": 0x7523,
+        "serial_number": None,
+        "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+        "location": "1-2",
+    }
 
 
 def windows_target():
     return core_smoke.resolve_core_target(
         "COM12",
         platform_name="nt",
-        port_lister=lambda: [
-            {
-                "device": "COM12",
-                "vid": 0x1A86,
-                "pid": 0x7523,
-                "serial_number": None,
-                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
-                "location": "1-2",
-            }
-        ],
+        port_lister=lambda: [windows_port()],
     )
+
+
+class FakeSerial:
+    def __init__(self):
+        self.reset_count = 0
+        self.writes = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def reset_input_buffer(self):
+        self.reset_count += 1
+
+    def write(self, value):
+        self.writes.append(bytes(value))
+
+    def flush(self):
+        return None
+
+
+def install_hardware_fakes(monkeypatch, command_runner):
+    fake = FakeSerial()
+    monkeypatch.setattr(
+        core_smoke,
+        "git_metadata",
+        lambda _root: {
+            "commit": COMMIT,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(core_smoke.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        core_smoke,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: fake,
+    )
+    monkeypatch.setattr(core_smoke, "send_console_command", command_runner)
+    return fake
 
 
 def test_core_smoke_requires_exact_com12():
@@ -48,6 +109,12 @@ def test_core_smoke_plan_never_closes_or_transmits_public_rf():
     assert plan["release_profile"] == "core_1_0"
     assert plan["public_rf_tx"] is False
     assert plan["formats_sd"] is False
+    assert plan["preflight_commands"] == [
+        "version",
+        "identity status",
+        "health",
+    ]
+    assert "identity status" not in plan["supported_commands"]
     assert not any(
         command.startswith("mesh send public ")
         for command in plan["supported_commands"]
@@ -163,12 +230,236 @@ def test_core_smoke_exact_identity_and_unsupported_contract():
     )
 
 
+def test_hardware_smoke_binds_full_identity_before_health_and_supported_commands(
+    monkeypatch,
+):
+    commands = []
+
+    def command_runner(_ser, command, _timeout):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": COMMIT,
+                "idf": core_smoke.EXPECTED_IDF_VERSION,
+                "release_profile": core_smoke.CORE_RELEASE_PROFILE,
+                "sd_history_mode": "conditional",
+            }
+        if command == "identity status":
+            return identity_status()
+        if command == "health":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "health",
+                "build_commit": COMMIT,
+                "release_profile": core_smoke.CORE_RELEASE_PROFILE,
+                "sd_history_mode": "conditional",
+                "board_ready": True,
+                "ui_ready": True,
+            }
+        if command == "crashlog":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "crashlog",
+                "entries": [],
+            }
+        return {"schema": 1, "ok": True, "cmd": command}
+
+    fake = install_hardware_fakes(monkeypatch, command_runner)
+    mutation_features = {
+        row["command"]: row["feature"]
+        for row in core_smoke.mutation_probe_plan("conditional")
+    }
+
+    def exact_probe(_ser, command, _timeout):
+        return {
+            "schema": 1,
+            "ok": False,
+            "cmd": command,
+            "code": "ESP_ERR_NOT_SUPPORTED",
+            "release_profile": core_smoke.CORE_RELEASE_PROFILE,
+            "feature": mutation_features[command],
+        }
+
+    monkeypatch.setattr(core_smoke, "send_exact_console_command", exact_probe)
+
+    report = core_smoke.run_core_smoke(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        expected_commit=COMMIT,
+        expected_sd_history_mode="conditional",
+        expected_d1l_public_key=PUBLIC_KEY,
+        persistence_test=False,
+        manual_touch=False,
+        github_run_id="123",
+        workflow_run_attempt="1",
+        platform_name="nt",
+        port_lister=lambda: [windows_port()],
+    )
+
+    assert report["ok"] is True
+    assert fake.reset_count == 1
+    assert commands == [
+        "version",
+        "identity status",
+        "health",
+        *core_smoke.CORE_SMOKE_COMMANDS,
+        "health",
+    ]
+    assert report["expected_d1l_public_key"] == PUBLIC_KEY
+    assert report["d1l_identity_status"] == identity_status()
+    assert report["d1l_identity_ok"] is True
+    assert report["supported_commands_executed"] == list(
+        core_smoke.CORE_SMOKE_COMMANDS
+    )
+    assert "identity status" not in report["supported_commands_executed"]
+    assert [row["cmd"] for row in report["results"][:3]] == [
+        "version",
+        "identity status",
+        "health",
+    ]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "wrong-key",
+        "missing-key",
+        "same-prefix-key",
+        "wrong-role",
+        "bool-schema",
+        "wrong-fingerprint",
+        "not-ready",
+    ],
+)
+def test_live_key_failure_stops_before_health_display_touch_or_persistence(
+    monkeypatch,
+    case,
+):
+    observed_identity = identity_status()
+    if case == "wrong-key":
+        observed_identity = identity_status("f" * 64)
+    elif case == "missing-key":
+        observed_identity.pop("public_key")
+    elif case == "same-prefix-key":
+        observed_identity = identity_status(PUBLIC_KEY[:16] + "f" * 48)
+    elif case == "wrong-role":
+        observed_identity["role"] = "repeater"
+    elif case == "bool-schema":
+        observed_identity["schema"] = True
+    elif case == "wrong-fingerprint":
+        observed_identity["fingerprint"] = "0" * 16
+    else:
+        observed_identity["public_key_ready"] = False
+    commands = []
+
+    def command_runner(_ser, command, _timeout):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": COMMIT,
+                "idf": core_smoke.EXPECTED_IDF_VERSION,
+                "release_profile": core_smoke.CORE_RELEASE_PROFILE,
+                "sd_history_mode": "disabled",
+            }
+        if command == "identity status":
+            return observed_identity
+        raise AssertionError(f"unexpected command after identity failure: {command}")
+
+    install_hardware_fakes(monkeypatch, command_runner)
+    monkeypatch.setattr(
+        core_smoke,
+        "send_exact_console_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("mutation/status probes must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        core_smoke,
+        "run_core_persistence_check",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("persistence must not run")
+        ),
+    )
+
+    report = core_smoke.run_core_smoke(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        expected_commit=COMMIT,
+        expected_sd_history_mode="disabled",
+        expected_d1l_public_key=PUBLIC_KEY,
+        persistence_test=True,
+        manual_touch=True,
+        github_run_id="123",
+        workflow_run_attempt="1",
+        platform_name="nt",
+        port_lister=lambda: [windows_port()],
+    )
+
+    assert commands == ["version", "identity status"]
+    assert report["ok"] is False
+    assert report["closure_eligible"] is False
+    assert report["expected_d1l_public_key"] == PUBLIC_KEY
+    assert report["d1l_identity_status"] == observed_identity
+    assert report["d1l_identity_ok"] is False
+    assert report["supported_commands_executed"] == []
+    assert [row["cmd"] for row in report["results"]] == [
+        "version",
+        "identity status",
+    ]
+
+
+@pytest.mark.parametrize("value", [None, "", "0" * 63, "g" * 64, True])
+def test_hardware_smoke_requires_full_expected_key_before_serial(
+    monkeypatch,
+    value,
+):
+    monkeypatch.setattr(
+        core_smoke,
+        "git_metadata",
+        lambda _root: (_ for _ in ()).throw(
+            AssertionError("source and serial preflight must not start")
+        ),
+    )
+    monkeypatch.setattr(
+        core_smoke,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("serial must not open")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="exact 64-hex"):
+        core_smoke.run_core_smoke(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            expected_commit=COMMIT,
+            expected_sd_history_mode="disabled",
+            expected_d1l_public_key=value,
+            persistence_test=False,
+            manual_touch=False,
+            github_run_id="123",
+            workflow_run_attempt="1",
+        )
+
+
 def test_identity_failure_report_cannot_claim_closure():
     report = core_smoke.identity_failure_report(
         port="COM12",
         baud=115200,
         expected_commit=COMMIT,
         expected_sd_history_mode="disabled",
+        expected_d1l_public_key=PUBLIC_KEY,
         version={"ok": True, "build_commit": "b" * 40},
         github_run_id="123456789",
         workflow_run_attempt="1",
@@ -180,6 +471,9 @@ def test_identity_failure_report_cannot_claim_closure():
     assert report["ok"] is False
     assert report["closure_eligible"] is False
     assert report["identity_preflight_only"] is True
+    assert report["expected_d1l_public_key"] == PUBLIC_KEY
+    assert report["d1l_identity_status"] == {}
+    assert report["d1l_identity_ok"] is False
     assert report["supported_commands_executed"] == []
     assert report["unavailable_mutation_probes"] == []
     assert report["unavailable_status_probes"] == []
@@ -194,6 +488,7 @@ def test_hardware_smoke_rejects_zero_run_before_serial_open():
             timeout=1.0,
             expected_commit=COMMIT,
             expected_sd_history_mode="disabled",
+            expected_d1l_public_key=PUBLIC_KEY,
             persistence_test=False,
             manual_touch=False,
             github_run_id="0",
@@ -226,6 +521,7 @@ def test_invalid_hardware_target_fails_before_serial_open(monkeypatch):
             timeout=1.0,
             expected_commit=COMMIT,
             expected_sd_history_mode="disabled",
+            expected_d1l_public_key=PUBLIC_KEY,
             persistence_test=False,
             manual_touch=False,
             github_run_id="123",
@@ -251,3 +547,71 @@ def test_pi_target_output_path_never_embeds_absolute_path():
     )
     assert "dev-serial-by-id-usb-1a86-usb-serial-if00-port0" in str(path)
     assert core_smoke.D1L_CORE_POSIX_TARGET not in str(path)
+
+
+def test_cli_dry_run_allows_omitted_key_and_never_enters_hardware(
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(
+        core_smoke,
+        "run_core_smoke",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("dry-run must not enter hardware")
+        ),
+    )
+
+    rc = core_smoke.main(
+        [
+            "--dry-run",
+            "--expected-firmware-commit",
+            COMMIT,
+            "--github-run-id",
+            "123",
+            "--github-run-attempt",
+            "1",
+            "--expected-sd-history-mode",
+            "disabled",
+        ]
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert report["dry_run"] is True
+    assert report["planning_only"] is True
+    assert report["ok"] is False
+    assert report["closure_eligible"] is False
+    assert report["expected_d1l_public_key"] is None
+    assert report["d1l_identity_status"] == {}
+    assert report["d1l_identity_ok"] is None
+    assert report["preflight_commands"] == [
+        "version",
+        "identity status",
+        "health",
+    ]
+
+
+def test_cli_hardware_requires_expected_key_before_runner(monkeypatch):
+    monkeypatch.setattr(
+        core_smoke,
+        "run_core_smoke",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("hardware runner must not start")
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        core_smoke.main(
+            [
+                "--port",
+                "COM12",
+                "--expected-firmware-commit",
+                COMMIT,
+                "--github-run-id",
+                "123",
+                "--github-run-attempt",
+                "1",
+                "--expected-sd-history-mode",
+                "disabled",
+            ]
+        )
