@@ -1283,7 +1283,8 @@ def _retained_snapshot(
     phase: str,
     expected_target: str,
     expected_target_identity: str | None,
-) -> tuple[Path | None, dict | None, bool, str | None]:
+    expected_d1l_public_key: object,
+) -> tuple[Path | None, dict | None, dict | None, bool, str | None]:
     path, file_ok = _verified_file_row(row, root)
     data = read_json(path)
     target_identity = target_snapshot_identity(
@@ -1291,6 +1292,15 @@ def _retained_snapshot(
     )
     results = data.get("results")
     projection = retained_state_projection(results)
+    identity_status = next(
+        (
+            result
+            for result in results
+            if isinstance(result, dict)
+            and result.get("cmd") == "identity status"
+        ),
+        None,
+    ) if isinstance(results, list) else None
     version = (
         results[0] if isinstance(results, list) and len(results) > 0 else {}
     )
@@ -1314,10 +1324,16 @@ def _retained_snapshot(
         and projection is not None
         and data.get("projection") == projection
         and data.get("projection_sha256") == projection_sha256(projection)
+        and projection.get("identity_public_key")
+        == expected_d1l_public_key
+        and rf_acceptance.d1l_identity_status_ok(
+            identity_status,
+            expected_d1l_public_key,
+        )
         and _profile_version_result(version, commit, "disabled")
         and _profile_ready_health_result(health, commit, "disabled")
     )
-    return path, projection, ok, target_identity
+    return path, projection, identity_status, ok, target_identity
 
 
 def core_flash_receipt_gate(
@@ -1375,32 +1391,47 @@ def core_flash_receipt_gate(
         snapshot_fields=tuple(flash_snapshot_fields),
         continuity_flag="target_identity_continuity_ok",
     )
-    public_key_ok, _d1l_public_key, public_key_details = (
+    public_key_ok, d1l_public_key, public_key_details = (
         flash_d1l_public_key_binding(data)
     )
-    before_path, before_projection, before_ok, before_target_identity = (
-        _retained_snapshot(
-            data.get("retained_state_before"),
-            root,
-            commit,
-            "pre_flash",
-            expected_target,
-            target_identity,
-        )
+    (
+        before_path,
+        before_projection,
+        before_identity_status,
+        before_ok,
+        before_target_identity,
+    ) = _retained_snapshot(
+        data.get("retained_state_before"),
+        root,
+        commit,
+        "pre_flash",
+        expected_target,
+        target_identity,
+        d1l_public_key,
     )
-    after_path, after_projection, after_ok, after_target_identity = (
-        _retained_snapshot(
-            data.get("retained_state_after"),
-            root,
-            commit,
-            "post_flash",
-            expected_target,
-            target_identity,
-        )
+    (
+        after_path,
+        after_projection,
+        after_identity_status,
+        after_ok,
+        after_target_identity,
+    ) = _retained_snapshot(
+        data.get("retained_state_after"),
+        root,
+        commit,
+        "post_flash",
+        expected_target,
+        target_identity,
+        d1l_public_key,
+    )
+    retained_identity_binding_ok = (
+        before_identity_status == data.get("pre_flash_identity")
+        and after_identity_status == data.get("post_flash_identity")
     )
     retained_ok = (
         before_ok
         and after_ok
+        and retained_identity_binding_ok
         and before_target_identity == target_identity
         and after_target_identity == target_identity
         and before_projection is not None
@@ -1489,6 +1520,7 @@ def core_flash_receipt_gate(
             "raw_flash_log_ok": raw_log_ok,
             "retained_before_ok": before_ok,
             "retained_after_ok": after_ok,
+            "retained_identity_binding_ok": retained_identity_binding_ok,
             "non_erasing_retained_state_ok": retained_ok,
             "actions_archive_binding_ok": capture_ok,
             "flash_serial_binding_ok": serial_binding_ok,

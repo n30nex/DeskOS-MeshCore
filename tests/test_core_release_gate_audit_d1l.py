@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts import core_release_gate_audit_d1l as audit
+from scripts import core_flash_only_d1l as core_flash
 from scripts import core_smoke_d1l
 from scripts import core_ui_corruption_probe_d1l
 from scripts import d1l_serial_target
@@ -86,6 +87,317 @@ def d1l_target_snapshot(
 def write_json(path: Path, value: dict) -> Path:
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
+
+
+def core_flash_retained_results(
+    public_key: str,
+    *,
+    identity_extra: dict | None = None,
+) -> list[dict]:
+    identity = d1l_identity_status(public_key)
+    identity.update(identity_extra or {})
+    return [
+        {
+            "schema": 1,
+            "cmd": "version",
+            "ok": True,
+            "build_commit": COMMIT,
+            "idf": "v5.5.4",
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+        },
+        {
+            "schema": 1,
+            "cmd": "health",
+            "ok": True,
+            "build_commit": COMMIT,
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "board_ready": True,
+            "ui_ready": True,
+        },
+        {
+            "schema": 1,
+            "cmd": "settings get",
+            "ok": True,
+            "node_name": "DeskOS",
+            "path_hash_bytes": 2,
+        },
+        {
+            "schema": 1,
+            "cmd": "messages public",
+            "ok": True,
+            "entries": [{"seq": 1, "text": "retained"}],
+        },
+        {
+            "schema": 1,
+            "cmd": "messages dm",
+            "ok": True,
+            "entries": [{"seq": 2, "text": "retained-dm"}],
+        },
+        {
+            "schema": 1,
+            "cmd": "contacts",
+            "ok": True,
+            "entries": [{"fingerprint": "0123456789ABCDEF"}],
+        },
+        identity,
+    ]
+
+
+def core_flash_gate_fixture(
+    root: Path,
+    *,
+    before_key: str = D1L_PUBLIC_KEY,
+    after_key: str = D1L_PUBLIC_KEY,
+    before_identity_extra: dict | None = None,
+    after_identity_extra: dict | None = None,
+) -> tuple[Path, Path, dict]:
+    target_path = d1l_serial_target.POSIX_D1L_TARGET
+    target = d1l_target_snapshot(target_path)
+    hardware_dir = root / "artifacts" / "hardware" / "pi5-d1l"
+    hardware_dir.mkdir(parents=True)
+    before_path = hardware_dir / "retained-before.json"
+    after_path = hardware_dir / "retained-after.json"
+    _, before_row = core_flash.write_state_snapshot(
+        path=before_path,
+        root=root,
+        phase="pre_flash",
+        commit=COMMIT,
+        results=core_flash_retained_results(
+            before_key,
+            identity_extra=before_identity_extra,
+        ),
+        d1l_target=target,
+    )
+    _, after_row = core_flash.write_state_snapshot(
+        path=after_path,
+        root=root,
+        phase="post_flash",
+        commit=COMMIT,
+        results=core_flash_retained_results(
+            after_key,
+            identity_extra=after_identity_extra,
+        ),
+        d1l_target=target,
+    )
+    raw_log = hardware_dir / "flash.log"
+    raw_log.write_bytes(b"exact bound flash log\n")
+    capture_path = root / "actions-capture.json"
+    capture_path.write_text("{}\n", encoding="ascii")
+    capture = {
+        "ok": True,
+        "receipt": core_flash._relative_file_row(capture_path, root),
+    }
+    identity = d1l_identity_status()
+    version = core_flash_retained_results(D1L_PUBLIC_KEY)[0]
+    health = core_flash_retained_results(D1L_PUBLIC_KEY)[1]
+    receipt = {
+        "schema": 2,
+        "kind": "esp32_flash",
+        "mode": "hardware",
+        "scope": "core-retained-reflash-only",
+        "flash_phase": core_flash.FLASH_PHASE_RETAINED_REFLASH,
+        "ok": True,
+        "closure_eligible": True,
+        "hardware_required": True,
+        "physical_observed": True,
+        "port": target_path,
+        "d1l_target": target,
+        "d1l_target_before": target,
+        "pre_flash_target_after_open": target,
+        "d1l_target_after": target,
+        "target_identity_continuity_ok": True,
+        "flash_serial_binding": "posix_fork_inherited_open_serial",
+        "flash_serial_binding_ok": True,
+        "expected_firmware_commit": COMMIT,
+        "device_build_commit": COMMIT,
+        "firmware_identity_required": True,
+        "firmware_identity_ok": True,
+        "git": {"commit": COMMIT, "dirty": False, "dirty_entries": []},
+        "runner_source_identity_ok": True,
+        "github_actions_run": RUN_ID,
+        "workflow_run_attempt": RUN_ATTEMPT,
+        "release_profile": "core_1_0",
+        "sd_history_mode": "disabled",
+        "expected_d1l_public_key": D1L_PUBLIC_KEY,
+        "pre_flash_identity": identity,
+        "post_flash_identity": identity,
+        "d1l_public_key_continuity_ok": True,
+        "post_flash_version": version,
+        "post_flash_health": health,
+        "package_verification": {
+            "ok": True,
+            "checksum_tree_verified": True,
+            "firmware_commit": COMMIT,
+            "github_actions_run": RUN_ID,
+            "workflow_run_attempt": RUN_ATTEMPT,
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "storage_authority": "nvs",
+            "repository": "n30nex/SIGUI",
+            "flash_files_match_actions": True,
+        },
+        "actions_capture_verification": capture,
+        "commands_before_flash": [
+            "identity status",
+            *core_flash.RETAINED_STATE_COMMANDS,
+        ],
+        "commands_after_flash": list(core_flash.RETAINED_STATE_COMMANDS),
+        "retained_state_before": before_row,
+        "retained_state_after": after_row,
+        "retained_state_preserved": True,
+        "raw_flash_log": core_flash._relative_file_row(raw_log, root),
+        "erase_flash": False,
+        "public_rf_tx": False,
+        "dm_rf_tx": False,
+        "sd_access": False,
+        "rp2040_access": False,
+        "formats_sd": False,
+        "legacy_suite_ran": False,
+    }
+    receipt_path = write_json(
+        hardware_dir / f"esp32_flash_{COMMIT}.json",
+        receipt,
+    )
+    return hardware_dir, receipt_path, capture
+
+
+def core_flash_gate_from_fixture(
+    monkeypatch,
+    root: Path,
+    hardware_dir: Path,
+    receipt_path: Path,
+    capture: dict,
+) -> audit.CoreGate:
+    monkeypatch.setattr(
+        audit,
+        "esp32_flash_receipt_gate",
+        lambda *_args, **_kwargs: audit.CoreGate(
+            "legacy_flash",
+            True,
+            "legacy flash contract",
+        ),
+    )
+    monkeypatch.setattr(
+        audit,
+        "newest_commit_json",
+        lambda *_args, **_kwargs: receipt_path,
+    )
+    monkeypatch.setattr(
+        audit,
+        "validate_capture_receipt",
+        lambda **_kwargs: capture,
+    )
+    return audit.core_flash_receipt_gate(
+        hardware_dir,
+        root / "artifacts" / "github" / RUN_ID,
+        root,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+        d1l_serial_target.POSIX_D1L_TARGET,
+    )
+
+
+def test_core_flash_gate_accepts_one_key_bound_retained_snapshot_pair(
+    tmp_path,
+    monkeypatch,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(tmp_path)
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is True
+    assert gate.details["retained_before_ok"] is True
+    assert gate.details["retained_after_ok"] is True
+    assert gate.details["retained_identity_binding_ok"] is True
+
+
+def test_core_flash_gate_rejects_two_foreign_key_retained_snapshots(
+    tmp_path,
+    monkeypatch,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(
+        tmp_path,
+        before_key="b" * 64,
+        after_key="b" * 64,
+    )
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is False
+    assert gate.details["retained_before_ok"] is False
+    assert gate.details["retained_after_ok"] is False
+    assert gate.details["non_erasing_retained_state_ok"] is False
+
+
+@pytest.mark.parametrize(
+    ("before_key", "after_key", "failed_detail"),
+    [
+        ("b" * 64, D1L_PUBLIC_KEY, "retained_before_ok"),
+        (D1L_PUBLIC_KEY, "b" * 64, "retained_after_ok"),
+    ],
+)
+def test_core_flash_gate_rejects_one_sided_retained_snapshot_key_drift(
+    tmp_path,
+    monkeypatch,
+    before_key,
+    after_key,
+    failed_detail,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(
+        tmp_path,
+        before_key=before_key,
+        after_key=after_key,
+    )
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is False
+    assert gate.details[failed_detail] is False
+    assert gate.details["non_erasing_retained_state_ok"] is False
+
+
+def test_core_flash_gate_requires_raw_snapshot_identity_to_match_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(
+        tmp_path,
+        before_identity_extra={"capture_slot": "different-raw-row"},
+    )
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is False
+    assert gate.details["retained_before_ok"] is True
+    assert gate.details["retained_identity_binding_ok"] is False
+    assert gate.details["non_erasing_retained_state_ok"] is False
 
 
 def passing_core_smoke() -> dict:
