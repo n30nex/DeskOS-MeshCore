@@ -85,6 +85,7 @@ def write_fake_build(build: Path) -> None:
     (build / "partition_table").mkdir(parents=True)
     (build / "bootloader" / "bootloader.bin").write_bytes(b"BOOT")
     (build / "partition_table" / "partition-table.bin").write_bytes(b"PART")
+    (build / "ota_data_initial.bin").write_bytes(b"OTA-DATA")
     (build / "meshcore_deskos_d1l.bin").write_bytes(b"APP")
     (build / "meshcore_deskos_d1l.elf").write_bytes(b"ELF")
     (build / "meshcore_deskos_d1l.map").write_text("MAP", encoding="ascii")
@@ -98,6 +99,7 @@ def write_fake_build(build: Path) -> None:
                 },
                 "flash_files": {
                     "0x0": "bootloader/bootloader.bin",
+                    "0xf000": "ota_data_initial.bin",
                     "0x10000": "meshcore_deskos_d1l.bin",
                     "0x8000": "partition_table/partition-table.bin",
                 },
@@ -414,8 +416,14 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert "workflow" in manifest
     assert (package_dir / "firmware" / "bootloader.bin").read_bytes() == b"BOOT"
     assert (package_dir / "firmware" / "partition-table.bin").read_bytes() == b"PART"
+    assert (package_dir / "firmware" / "ota_data_initial.bin").read_bytes() == b"OTA-DATA"
     assert (package_dir / "firmware" / "meshcore_deskos_d1l.bin").read_bytes() == b"APP"
     assert (package_dir / "update" / "d1l-update.bin").read_bytes() == b"APP"
+    assert next(
+        entry
+        for entry in manifest["flash_files"]
+        if entry["source"] == "ota_data_initial.bin"
+    )["role"] == "ota-data"
     assert (package_dir / "notices" / "LICENSE").read_text(encoding="ascii") == "project license\n"
     assert (package_dir / "notices" / "THIRD_PARTY_NOTICES.md").read_text(encoding="ascii") == "third party notices\n"
     assert (package_dir / "notices" / "ATTRIBUTIONS.md").read_text(encoding="ascii") == "attributions\n"

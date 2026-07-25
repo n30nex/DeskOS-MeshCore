@@ -1170,6 +1170,8 @@ def flash_role_for_path(path: str) -> str:
         return "bootloader"
     if name == "partition-table.bin":
         return "partition-table"
+    if name == "ota_data_initial.bin":
+        return "ota-data"
     if name.endswith(".bin"):
         return "app"
     return "artifact"
@@ -1360,10 +1362,17 @@ def workflow_info() -> dict:
 
 
 def app_entry(entries: list[dict]) -> dict:
-    for entry in entries:
-        if entry["role"] == "app":
-            return entry
-    raise ValueError("No app binary found in flash files")
+    matches = [
+        entry
+        for entry in entries
+        if entry["role"] == "app"
+        and Path(entry["source"]).name == "meshcore_deskos_d1l.bin"
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "Expected exactly one meshcore_deskos_d1l.bin app image in flash files"
+        )
+    return matches[0]
 
 
 def copy_update_image(package_dir: Path, firmware_dir: Path, app: dict) -> dict:
