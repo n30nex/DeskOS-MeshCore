@@ -521,7 +521,7 @@ static void build_self_info(void)
     s_pending_payload[offset++] = settings.coding_rate;
     const size_t name_len = strnlen(
         settings.node_name,
-        sizeof(s_pending_payload) - offset);
+        sizeof(settings.node_name));
     memcpy(&s_pending_payload[offset], settings.node_name, name_len);
     offset += name_len;
     s_pending_len = offset;
