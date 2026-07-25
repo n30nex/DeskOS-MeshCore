@@ -5266,8 +5266,7 @@ static void print_public_message_entry_json(const d1l_message_entry_t *e,
 
 static void cmd_messages_public(const char *line)
 {
-    static d1l_message_entry_t
-        entries[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+    static d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     char search[D1L_MESSAGE_TEXT_LEN] = {0};
     bool filtered = false;
     size_t offset = 0;
@@ -6804,8 +6803,7 @@ static void cmd_routes_trace(const char *line)
 
     d1l_contact_entry_t contact = {0};
     const bool known_contact = d1l_contact_store_find_by_fingerprint(fingerprint, &contact);
-    static d1l_route_entry_t
-        entries[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+    static d1l_route_entry_t entries[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_app_model_copy_route_trace(fingerprint, entries, D1L_ROUTE_STORE_CAPACITY);
     const size_t best = copied ? route_trace_best_index(entries, copied) : 0;
 

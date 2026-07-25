@@ -39,7 +39,7 @@
     "scripts/meshcore_semantic_packet_fuzz_d1l.py": "5765cddb1560f8355d26fd4e7dc1679858ae99aa5d3836b237e72fd523f04bd5",
     "tests/fuzz/meshcore_packet_semantics_fuzz.c": "49563874ea8b87f150153da28c0e9c86416a0908f744ff616d2921f8a1c4c9a8",
     "tests/native/meshcore_packet_semantics_test.c": "d3247c6df9d51aa9b8f7c3964e3241953aa62f1422d77c0f4bed4336e70fe622",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "19f74d005c3b6b79bad9ec95747d37b11a4c2fba6a3b11855e3ea3f82b3035ae",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "bdcf4be579405207007c1491012aa923e13ac8af657b3463a52e2601a150bf54",
     "tests/test_meshcore_packet_semantics.py": "925ac7ab080c916c154e44d5962b6186af52379669df3ee8b0a8cafc91686243"
   },
   "accepted_families": [

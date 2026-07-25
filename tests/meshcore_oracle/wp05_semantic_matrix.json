@@ -494,7 +494,7 @@
     "main/mesh/dm_delivery_state.h": "d27b3666f03d27e74cb30efb2e77c47bd50f0273d7991e29315e55d5a2fd4185",
     "main/mesh/meshcore_admin_dispatch.c": "d129f74a297d5c40f78ab4696eb3987eeb9f11cda73bb3527e0fdffb73243288",
     "main/mesh/meshcore_admin_dispatch.h": "cce74df8570d048fbfa4eb7bf5eec89d1a1847aacdde4a30dd7c45999c0971c6",
-    "main/mesh/contact_store.c": "3f895213e9cb8fdf5da67a01fac26df35aa542c6f2ffcf179d1e0d276a1d9e14",
+    "main/mesh/contact_store.c": "32b2a8e3e09c6573e01ca4bd5782128dee8ce61f3a67fe192141452f55f66430",
     "main/mesh/contact_store.h": "2252ef58b703c6721a1fd77f2a1306d6ea4d9f419af5c996666a212a29752750",
     "main/mesh/contact_uri.c": "a65175e4a07023adc2777a0504a2c83f5d409fdc4bd497cbddd4a4868f51fc8b",
     "main/mesh/contact_uri.h": "1a06f9d47c284f1c9990f71357434e3b5446a516331e37447ef1e3d7676662ef",

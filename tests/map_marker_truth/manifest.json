@@ -107,7 +107,7 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "6b1f4310efd29c1a540661b9d0474a3156867f624db895d225a70803cced5b02",
+    "main/app/app_model.c": "7b04d81683f59944b14e56f314be833debbc4a0461a23e586dc86d85dceed6df",
     "main/app/app_model.h": "8ad54aa8180d342b74bac7b2bc1fd27c8f86945fc38471d7e66147c5c6cfc02d",
     "main/app/settings_model.c": "c61099b8475719e21e51dee3c2216014f7687a03fc8ddf4faf83fa5cf1509a38",
     "main/app/settings_model.h": "1d56b09a11cb0ccfec0a0a60018955915512248e8b41189e1b8a05804c28f63c",
@@ -134,7 +134,7 @@
     "main/ui/ui_map.h": "35833cc85e96764c126cb311697f43c238bc742130b42c87d603d51ce8695176",
     "main/ui/ui_node_detail.c": "9cfd5f1c4a63341416df3463caa260b8ed5dfbc3b2479d5b40c9b7a6ec56a139",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "93d2d572b25e77c8aa6073012b33b7bd4297e50b15e9a3af624ac00e76492887",
+    "main/ui/ui_phase1.c": "ddc72725b80bf6f9b65e8aa723622f931bc23325f32f571c1f68e12f79bf96d7",
     "tools/ui_simulator.py": "9b80a6ccde4ec55a6d199a546fc2380d2a7b55ba8c1faa96da2ea922052558f0"
   }
 }

@@ -64,7 +64,7 @@
     "tests/fuzz/settings_envelope_fuzz.c": "ddcb8ce9b14005c1a746bcd215666cd01280115f01d7efce186dcf68c418c5cd",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "19f74d005c3b6b79bad9ec95747d37b11a4c2fba6a3b11855e3ea3f82b3035ae",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "bdcf4be579405207007c1491012aa923e13ac8af657b3463a52e2601a150bf54",
     "tests/meshcore_remaining_fuzz/crypto_host_adapter.cpp": "1fa19502918fa07f1e30610ec04cf7d394d14caa16e0c5f779ce148a790842f6",
     "tests/meshcore_remaining_fuzz/stubs/esp_err.h": "a32529585b01ed39217555a23159f8434fcbf8601947728a66156715c0c6d2e2",
     "tests/meshcore_remaining_fuzz/stubs/mbedtls/aes.h": "ea331364a1c181f34a09a38e825d5ddb781261738785b47e814a54e18d3fe53f",
