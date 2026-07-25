@@ -189,15 +189,23 @@ static bool backend_uses_sd(const char *backend)
            text_equals(backend, "sd_diagnostic_exports_ready");
 }
 
+static bool backend_is_live_only(const char *backend)
+{
+    return text_equals(backend, "volatile") ||
+           text_equals(backend, "unavailable");
+}
+
 static const char *retained_backend(
     const d1l_ui_storage_view_input_t *input, const char *backend)
 {
     if (text_equals(backend, "sd") || text_equals(backend, "mixed")) {
-        return input->retained_backup_degraded ?
-            "SD; backup degraded" : "SD + internal backup";
+        return input->retained_sd_degraded ? "SD issue" : "SD card";
     }
     if (text_equals(backend, "nvs")) {
-        return input->retained_backup_degraded ? "Internal issue" : "Internal";
+        return "Legacy internal";
+    }
+    if (backend_is_live_only(backend)) {
+        return "Live only - not saved";
     }
     return "Unavailable";
 }
@@ -207,7 +215,8 @@ static const char *node_backend(const char *backend)
     if (text_equals(backend, "sd")) {
         return "SD card";
     }
-    return "Unavailable - live only";
+    return backend_is_live_only(backend) ?
+        "Live only - not saved" : "Unavailable";
 }
 
 static const char *map_backend(const char *backend)
@@ -247,13 +256,17 @@ static const char *data_summary(const d1l_ui_storage_view_input_t *input)
         backend_uses_sd(input->node_store_backend) ||
         backend_uses_sd(input->map_tile_backend) ||
         backend_uses_sd(input->export_backend);
-    if (text_equals(input->node_store_backend, "unavailable")) {
-        return "Live only; node history off";
+    if (backend_is_live_only(input->message_store_backend) ||
+        backend_is_live_only(input->dm_store_backend) ||
+        backend_is_live_only(input->packet_log_backend) ||
+        backend_is_live_only(input->route_store_backend) ||
+        backend_is_live_only(input->node_store_backend)) {
+        return "Live only; history not saved";
     }
     if (input->retained_backup_degraded) {
         return uses_sd ? "SD; backup issue" : "Storage issue";
     }
-    return uses_sd ? "SD + internal" : "Internal";
+    return uses_sd ? "SD card" : "Live only";
 }
 
 static void set_hero(const d1l_ui_storage_view_input_t *input,
@@ -264,54 +277,54 @@ static void set_hero(const d1l_ui_storage_view_input_t *input,
     const char *guidance = "Status updates automatically.";
     uint32_t accent = COLOR_AMBER;
 
-    if (text_equals(input->node_store_backend, "unavailable")) {
+    if (backend_is_live_only(input->node_store_backend)) {
         state = "Live mesh only";
-        detail = "SD unavailable; node history is not saved.";
+        detail = "SD unavailable; history is not saved.";
         guidance = "RF transmit, receive, and chat remain available.";
         accent = COLOR_RED;
     } else if (input->retained_backup_degraded) {
         if (input->retained_sd_degraded) {
             state = "Saved storage needs attention";
-            detail = "SD and internal backup reported errors.";
+            detail = "SD saved-data access reported an error.";
             guidance = "See USB diagnostics before relying on saved history.";
             accent = COLOR_RED;
         } else if (input->data_enabled) {
             state = "SD card ready";
             detail = "Saved data is using SD.";
-            guidance = "Internal backup needs attention.";
+            guidance = "See USB diagnostics before relying on saved history.";
         } else {
             state = "Storage needs attention";
-            detail = "Internal saved-data storage is unavailable.";
+            detail = "Saved-data storage is unavailable.";
             guidance = "See USB diagnostics before relying on saved history.";
             accent = COLOR_RED;
         }
     } else if (input->retained_sd_degraded) {
         state = "SD needs attention";
-        detail = "Internal storage is active.";
-        guidance = "Saved data remains available.";
+        detail = "History is live only until SD recovers.";
+        guidance = "RF transmit, receive, and chat remain available.";
         accent = COLOR_RED;
     } else if (storage_needs_attention(input)) {
         state = "Card needs attention";
-        detail = "Internal storage is active.";
+        detail = "History is live only.";
         guidance = "Technical details are available over USB.";
         accent = COLOR_RED;
     } else if (text_equals(input->setup_action, "wait_for_storage_reconnect")) {
         state = "Card reader reconnecting";
         detail = input->data_enabled ?
             "Last confirmed SD remains active briefly." :
-            "Internal storage is active.";
+            "History is live only.";
         guidance = input->data_enabled ?
-            "Internal fallback takes over if status retries fail." :
+            "History becomes live-only if status retries fail." :
             "SD access resumes after a valid status reply.";
     } else if (text_equals(input->setup_action, "bridge_unavailable")) {
         detail = "SD support is unavailable.";
-        guidance = "Internal storage remains active.";
+        guidance = "Live chat remains available; history is not saved.";
     } else if (text_equals(input->setup_action, "bridge_protocol_pending")) {
         detail = "SD support is starting.";
     } else if (text_equals(input->setup_action, "run_storage_mount") ||
                text_equals(input->setup_action, "wait_for_storage_mount")) {
         state = "Checking SD card";
-        detail = "Using internal storage for now.";
+        detail = "History is live only for now.";
         guidance = "The card check finishes automatically.";
     } else if (text_equals(input->setup_action, "insert_card")) {
         state = "No SD card";
@@ -324,23 +337,25 @@ static void set_hero(const d1l_ui_storage_view_input_t *input,
         detail = "Prepare it on a computer.";
         guidance = "Prepare as FAT32, then reinsert the card.";
     } else if (text_equals(input->setup_action, "retry_storage_mount") ||
-               text_equals(input->setup_action, "use_nvs_fallback")) {
+               text_equals(input->setup_action, "use_nvs_fallback") ||
+               text_equals(input->setup_action, "live_only_until_ready")) {
         state = "Card setup incomplete";
-        detail = "Internal storage is active.";
+        detail = "History is live only.";
         guidance = "Reinsert the card to finish DeskOS folders.";
-    } else if (text_equals(input->setup_action, "forced_nvs")) {
-        state = "Internal storage only";
+    } else if (text_equals(input->setup_action, "forced_nvs") ||
+               text_equals(input->setup_action, "forced_volatile")) {
+        state = "SD storage paused";
         detail = "SD storage is paused.";
-        guidance = "Internal storage remains active.";
+        guidance = "History is live only and is not saved.";
     } else if (input->data_enabled) {
         state = "SD card ready";
-        detail = "SD is used with internal backup.";
-        guidance = "Saved data stays mirrored internally.";
+        detail = "Saved data uses the SD card.";
+        guidance = "Live history is written to SD.";
         accent = COLOR_GREEN;
     } else if (input->sd_data_root_ready) {
         state = "SD card ready";
-        detail = "Using internal storage.";
-        guidance = "SD is ready; saved data stays internal.";
+        detail = "DeskOS storage is ready.";
+        guidance = "Saved history will use SD.";
         accent = COLOR_GREEN;
     }
 
@@ -422,7 +437,7 @@ bool d1l_ui_storage_view(const d1l_ui_storage_view_input_t *input,
     }
     memset(out_view, 0, sizeof(*out_view));
     out_view->needs_attention =
-        text_equals(input->node_store_backend, "unavailable") ||
+        backend_is_live_only(input->node_store_backend) ||
         storage_needs_attention(input) ||
         input->retained_backup_degraded;
     set_hero(input, &out_view->hero);

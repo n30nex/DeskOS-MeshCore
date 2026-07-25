@@ -40,6 +40,7 @@ typedef struct {
     const char *name;
     const char *nvs_namespace;
     const char *sd_directory;
+    const char *legacy_retired_key;
     bool nvs_fallback_allowed;
 } d1l_retained_blob_store_config_t;
 
@@ -65,34 +66,39 @@ static const d1l_retained_blob_store_config_t s_store_configs[] = {
         .name = "public_messages",
         .nvs_namespace = D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE,
         .sd_directory = D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR,
-        .nvs_fallback_allowed = true,
+        .legacy_retired_key = "sd_pub_v1",
+        .nvs_fallback_allowed = false,
     },
     {
         .id = D1L_RETAINED_BLOB_STORE_DM_MESSAGES,
         .name = "dm_messages",
         .nvs_namespace = D1L_RETAINED_DM_MESSAGE_NAMESPACE,
         .sd_directory = D1L_RETAINED_DM_MESSAGE_SD_DIR,
-        .nvs_fallback_allowed = true,
+        .legacy_retired_key = "sd_dm_v1",
+        .nvs_fallback_allowed = false,
     },
     {
         .id = D1L_RETAINED_BLOB_STORE_ROUTES,
         .name = "routes",
         .nvs_namespace = D1L_RETAINED_ROUTE_NAMESPACE,
         .sd_directory = D1L_RETAINED_ROUTE_SD_DIR,
-        .nvs_fallback_allowed = true,
+        .legacy_retired_key = "sd_route_v1",
+        .nvs_fallback_allowed = false,
     },
     {
         .id = D1L_RETAINED_BLOB_STORE_PACKET_LOG,
         .name = "packet_log",
         .nvs_namespace = D1L_RETAINED_PACKET_LOG_NAMESPACE,
         .sd_directory = D1L_RETAINED_PACKET_LOG_SD_DIR,
-        .nvs_fallback_allowed = true,
+        .legacy_retired_key = "sd_pkt_v1",
+        .nvs_fallback_allowed = false,
     },
     {
         .id = D1L_RETAINED_BLOB_STORE_NODES,
         .name = "nodes",
         .nvs_namespace = NULL,
         .sd_directory = D1L_RETAINED_NODE_SD_DIR,
+        .legacy_retired_key = NULL,
         .nvs_fallback_allowed = false,
     },
 };
@@ -108,6 +114,8 @@ _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_NODES ==
                "retained and reset node-store identifiers must match");
 
 static bool s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT];
+static bool s_store_sd_committed[D1L_RETAINED_BLOB_STORE_COUNT];
+static bool s_store_legacy_retired[D1L_RETAINED_BLOB_STORE_COUNT];
 static uint32_t s_store_backend_generation[D1L_RETAINED_BLOB_STORE_COUNT];
 static d1l_retained_blob_store_sd_stats_t s_store_sd_stats[D1L_RETAINED_BLOB_STORE_COUNT];
 static portMUX_TYPE s_store_state_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -443,8 +451,7 @@ static esp_err_t nvs_open_store(const d1l_retained_blob_store_config_t *config,
                                 bool dedicated, nvs_open_mode_t open_mode,
                                 nvs_handle_t *out_handle)
 {
-    if (!config || !out_handle || !config->nvs_fallback_allowed ||
-        !config->nvs_namespace) {
+    if (!config || !out_handle || !config->nvs_namespace) {
         return ESP_ERR_INVALID_ARG;
     }
     return dedicated ?
@@ -452,6 +459,81 @@ static esp_err_t nvs_open_store(const d1l_retained_blob_store_config_t *config,
                                 config->nvs_namespace, open_mode,
                                 out_handle) :
         nvs_open(config->nvs_namespace, open_mode, out_handle);
+}
+
+static bool legacy_blob_is_retired(
+    const d1l_retained_blob_store_config_t *config)
+{
+    if (!config || !config->legacy_retired_key ||
+        config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return false;
+    }
+    bool retired;
+    portENTER_CRITICAL(&s_store_state_mux);
+    retired = s_store_legacy_retired[config->id];
+    portEXIT_CRITICAL(&s_store_state_mux);
+    return retired;
+}
+
+static esp_err_t load_legacy_retired_state(
+    const d1l_retained_blob_store_config_t *config)
+{
+    if (!config || !config->legacy_retired_key ||
+        config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return ESP_OK;
+    }
+
+    uint8_t retired = 0U;
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(D1L_RETAINED_NVS_SENTINEL_NAMESPACE,
+                             NVS_READONLY, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ret = ESP_OK;
+    } else if (ret == ESP_OK) {
+        ret = nvs_get_u8(handle, config->legacy_retired_key, &retired);
+        nvs_close(handle);
+        if (ret == ESP_ERR_NVS_NOT_FOUND) {
+            ret = ESP_OK;
+        }
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    portENTER_CRITICAL(&s_store_state_mux);
+    s_store_legacy_retired[config->id] = retired == 1U;
+    portEXIT_CRITICAL(&s_store_state_mux);
+    return ESP_OK;
+}
+
+static esp_err_t mark_legacy_blob_retired(
+    const d1l_retained_blob_store_config_t *config)
+{
+    if (!config || !config->legacy_retired_key ||
+        config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return ESP_OK;
+    }
+    if (legacy_blob_is_retired(config)) {
+        return ESP_OK;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(D1L_RETAINED_NVS_SENTINEL_NAMESPACE,
+                             NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = nvs_set_u8(handle, config->legacy_retired_key, 1U);
+    if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    if (ret == ESP_OK) {
+        portENTER_CRITICAL(&s_store_state_mux);
+        s_store_legacy_retired[config->id] = true;
+        portEXIT_CRITICAL(&s_store_state_mux);
+    }
+    return ret;
 }
 
 static esp_err_t nvs_read_blob_from(const d1l_retained_blob_store_config_t *config,
@@ -596,6 +678,34 @@ static esp_err_t nvs_read_blob(const d1l_retained_blob_store_config_t *config,
     return ESP_OK;
 }
 
+/* SD-only stores may import one historical NVS snapshot, but they never
+ * mirror new history back to flash. Read the old locations without invoking
+ * the legacy copy-forward path above. Once a successful SD commit retires the
+ * legacy snapshot, the small recovery marker prevents stale data from
+ * reappearing when the card is later absent. */
+static esp_err_t nvs_read_legacy_blob(
+    const d1l_retained_blob_store_config_t *config, const char *key,
+    void *dst, size_t *len_inout)
+{
+    if (!config || !key || !dst || !len_inout) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_retained_nvs_ready) {
+        return retained_nvs_unavailable_error();
+    }
+    if (legacy_blob_is_retired(config)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    const size_t requested_len = *len_inout;
+    esp_err_t ret = nvs_read_blob_from(config, key, dst, len_inout, true);
+    if (ret != ESP_ERR_NOT_FOUND) {
+        return ret;
+    }
+    *len_inout = requested_len;
+    return nvs_read_blob_from(config, key, dst, len_inout, false);
+}
+
 static esp_err_t nvs_write_blob(const d1l_retained_blob_store_config_t *config,
                                 const char *key, const void *src, size_t len)
 {
@@ -623,6 +733,57 @@ static esp_err_t nvs_erase_blob(const d1l_retained_blob_store_config_t *config,
         return legacy_ret;
     }
     return nvs_erase_blob_from(config, key, true);
+}
+
+static void note_sd_primary_commit(
+    const d1l_retained_blob_store_config_t *config)
+{
+    if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return;
+    }
+    portENTER_CRITICAL(&s_store_state_mux);
+    s_store_sd_committed[config->id] = true;
+    portEXIT_CRITICAL(&s_store_state_mux);
+}
+
+static bool sd_primary_committed_this_boot(
+    const d1l_retained_blob_store_config_t *config)
+{
+    if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return false;
+    }
+    bool committed;
+    portENTER_CRITICAL(&s_store_state_mux);
+    committed = s_store_sd_committed[config->id];
+    portEXIT_CRITICAL(&s_store_state_mux);
+    return committed;
+}
+
+static esp_err_t retire_legacy_blob_after_sd_commit(
+    const d1l_retained_blob_store_config_t *config, const char *key)
+{
+    if (!config || !key) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (config->nvs_fallback_allowed) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!config->legacy_retired_key ||
+        !sd_primary_committed_this_boot(config)) {
+        return ESP_OK;
+    }
+
+    const esp_err_t marker_ret = mark_legacy_blob_retired(config);
+    if (marker_ret != ESP_OK) {
+        return marker_ret;
+    }
+
+    /* The marker is authoritative. Cleanup is best effort so an old corrupt
+     * NVS page cannot turn a completed SD commit into a false persistence
+     * failure or resurrect the ignored snapshot. */
+    (void)nvs_erase_blob_from(config, key, false);
+    (void)nvs_erase_blob_from(config, key, true);
+    return ESP_OK;
 }
 
 static bool retained_nvs_marker_structurally_valid(
@@ -1196,6 +1357,9 @@ static esp_err_t migrate_known_legacy_nvs_keys(void)
     for (size_t i = 0U; i < sizeof(keys) / sizeof(keys[0]); ++i) {
         const d1l_retained_blob_store_config_t *config =
             find_store(keys[i].store_id);
+        if (!config || !config->nvs_fallback_allowed) {
+            continue;
+        }
         const esp_err_t ret = migrate_legacy_nvs_key(config, keys[i].key);
         if (ret != ESP_OK) {
             s_retained_nvs_migration_error = ret;
@@ -1623,7 +1787,7 @@ const char *d1l_retained_blob_store_backend_name(d1l_retained_blob_store_id_t st
         return "sd";
     }
     return config->nvs_fallback_allowed && s_retained_nvs_ready ?
-        "nvs" : "unavailable";
+        "nvs" : "volatile";
 }
 
 bool d1l_retained_blob_store_is_available(d1l_retained_blob_store_id_t store_id)
@@ -1709,6 +1873,8 @@ esp_err_t d1l_retained_blob_store_init(void)
 {
     portENTER_CRITICAL(&s_store_state_mux);
     memset(&s_retained_nvs_telemetry, 0, sizeof(s_retained_nvs_telemetry));
+    memset(s_store_sd_committed, 0, sizeof(s_store_sd_committed));
+    memset(s_store_legacy_retired, 0, sizeof(s_store_legacy_retired));
     portEXIT_CRITICAL(&s_store_state_mux);
     s_retained_nvs_ready = false;
     s_retained_nvs_marker_ready = false;
@@ -1733,6 +1899,16 @@ esp_err_t d1l_retained_blob_store_init(void)
         migration_ret = ensure_default_retained_nvs_sentinel();
         if (migration_ret != ESP_OK) {
             s_retained_nvs_migration_error = migration_ret;
+        }
+    }
+    if (migration_ret == ESP_OK) {
+        for (size_t i = 0U;
+             i < sizeof(s_store_configs) / sizeof(s_store_configs[0]); ++i) {
+            migration_ret = load_legacy_retired_state(&s_store_configs[i]);
+            if (migration_ret != ESP_OK) {
+                s_retained_nvs_migration_error = migration_ret;
+                break;
+            }
         }
     }
     if (migration_ret == ESP_OK && s_retained_nvs_marker_finalize_pending) {
@@ -1852,7 +2028,9 @@ esp_err_t d1l_retained_blob_store_read_nvs_fallback(
     if (!config || !key || !dst || !len_inout) {
         return ESP_ERR_INVALID_ARG;
     }
-    return nvs_read_blob(config, key, dst, len_inout);
+    return config->nvs_fallback_allowed ?
+        nvs_read_blob(config, key, dst, len_inout) :
+        nvs_read_legacy_blob(config, key, dst, len_inout);
 }
 
 esp_err_t d1l_retained_blob_store_write_sd_primary(
@@ -1868,7 +2046,11 @@ esp_err_t d1l_retained_blob_store_write_sd_primary(
     if (!store_sd_enabled(config)) {
         return ESP_ERR_INVALID_STATE;
     }
-    return sd_write_blob(config, key, src, len);
+    const esp_err_t ret = sd_write_blob(config, key, src, len);
+    if (ret == ESP_OK) {
+        note_sd_primary_commit(config);
+    }
+    return ret;
 }
 
 esp_err_t d1l_retained_blob_store_write_sd_primary_guarded(
@@ -1882,8 +2064,12 @@ esp_err_t d1l_retained_blob_store_write_sd_primary_guarded(
     if (!config || !key || !src || len == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
-    return sd_write_blob_with_lineage(config, key, src, len,
-                                      expected_generation);
+    const esp_err_t ret = sd_write_blob_with_lineage(
+        config, key, src, len, expected_generation);
+    if (ret == ESP_OK) {
+        note_sd_primary_commit(config);
+    }
+    return ret;
 }
 
 esp_err_t d1l_retained_blob_store_write_nvs_fallback(
@@ -1895,6 +2081,9 @@ esp_err_t d1l_retained_blob_store_write_nvs_fallback(
     const d1l_retained_blob_store_config_t *config = find_store(store_id);
     if (!config || !key || !src || len == 0) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!config->nvs_fallback_allowed) {
+        return retire_legacy_blob_after_sd_commit(config, key);
     }
     esp_err_t ret = nvs_write_blob(config, key, src, len);
     note_nvs_mirror_failure(config, ret);
@@ -1981,6 +2170,15 @@ esp_err_t d1l_retained_blob_store_erase_nvs_fallback(
     if (!config || !key) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!config->nvs_fallback_allowed) {
+        const esp_err_t marker_ret = mark_legacy_blob_retired(config);
+        if (marker_ret != ESP_OK) {
+            return marker_ret;
+        }
+        (void)nvs_erase_blob_from(config, key, false);
+        (void)nvs_erase_blob_from(config, key, true);
+        return ESP_OK;
+    }
     return nvs_erase_blob(config, key);
 }
 
@@ -2005,14 +2203,18 @@ esp_err_t d1l_retained_blob_store_read(d1l_retained_blob_store_id_t store_id,
         }
         note_sd_failure(config, D1L_RETAINED_SD_OP_READ, sd_ret);
         *len_inout = requested_len;
-        esp_err_t nvs_ret = nvs_read_blob(config, key, dst, len_inout);
+        esp_err_t nvs_ret = config->nvs_fallback_allowed ?
+            nvs_read_blob(config, key, dst, len_inout) :
+            nvs_read_legacy_blob(config, key, dst, len_inout);
         if (nvs_ret == ESP_OK) {
             return ESP_OK;
         }
         return sd_ret == ESP_ERR_NOT_FOUND ? nvs_ret : sd_ret;
     }
 
-    return nvs_read_blob(config, key, dst, len_inout);
+    return config->nvs_fallback_allowed ?
+        nvs_read_blob(config, key, dst, len_inout) :
+        nvs_read_legacy_blob(config, key, dst, len_inout);
 }
 
 esp_err_t d1l_retained_blob_store_read_fallback(d1l_retained_blob_store_id_t store_id,
@@ -2024,7 +2226,9 @@ esp_err_t d1l_retained_blob_store_read_fallback(d1l_retained_blob_store_id_t sto
     if (!config || !key || !dst || !len_inout) {
         return ESP_ERR_INVALID_ARG;
     }
-    return nvs_read_blob(config, key, dst, len_inout);
+    return config->nvs_fallback_allowed ?
+        nvs_read_blob(config, key, dst, len_inout) :
+        nvs_read_legacy_blob(config, key, dst, len_inout);
 }
 
 esp_err_t d1l_retained_blob_store_write(d1l_retained_blob_store_id_t store_id,
@@ -2040,12 +2244,26 @@ esp_err_t d1l_retained_blob_store_write(d1l_retained_blob_store_id_t store_id,
     if (store_sd_enabled(config)) {
         esp_err_t sd_ret = sd_write_blob(config, key, src, len);
         if (sd_ret == ESP_OK) {
-            note_nvs_mirror_failure(config, nvs_write_blob(config, key, src, len));
+            note_sd_primary_commit(config);
+            if (config->nvs_fallback_allowed) {
+                note_nvs_mirror_failure(
+                    config, nvs_write_blob(config, key, src, len));
+            } else {
+                const esp_err_t retire_ret =
+                    retire_legacy_blob_after_sd_commit(config, key);
+                if (retire_ret != ESP_OK) {
+                    return retire_ret;
+                }
+            }
             return ESP_OK;
+        }
+        if (!config->nvs_fallback_allowed) {
+            return sd_ret;
         }
     }
 
-    return nvs_write_blob(config, key, src, len);
+    return config->nvs_fallback_allowed ?
+        nvs_write_blob(config, key, src, len) : ESP_OK;
 }
 
 esp_err_t d1l_retained_blob_store_write_split(d1l_retained_blob_store_id_t store_id,
@@ -2065,16 +2283,26 @@ esp_err_t d1l_retained_blob_store_write_split(d1l_retained_blob_store_id_t store
     const void *nvs_src = has_fallback ? fallback_src : primary_src;
     const size_t nvs_len = has_fallback ? fallback_len : primary_len;
     if (!store_sd_enabled(config) || !has_primary) {
-        return nvs_write_blob(config, key, nvs_src, nvs_len);
+        return config->nvs_fallback_allowed ?
+            nvs_write_blob(config, key, nvs_src, nvs_len) : ESP_OK;
     }
 
     esp_err_t sd_ret = sd_write_blob(config, key, primary_src, primary_len);
-    esp_err_t nvs_ret = nvs_write_blob(config, key, nvs_src, nvs_len);
+    if (sd_ret == ESP_OK) {
+        note_sd_primary_commit(config);
+    }
+    esp_err_t nvs_ret = ESP_OK;
+    if (config->nvs_fallback_allowed) {
+        nvs_ret = nvs_write_blob(config, key, nvs_src, nvs_len);
+    } else if (sd_ret == ESP_OK) {
+        nvs_ret = retire_legacy_blob_after_sd_commit(config, key);
+    }
     if (sd_ret == ESP_OK) {
         note_nvs_mirror_failure(config, nvs_ret);
-        return ESP_OK;
+        return nvs_ret;
     }
-    return nvs_ret == ESP_OK ? ESP_OK : sd_ret;
+    return config->nvs_fallback_allowed && nvs_ret == ESP_OK ?
+        ESP_OK : sd_ret;
 }
 
 esp_err_t d1l_retained_blob_store_erase(d1l_retained_blob_store_id_t store_id,
@@ -2092,6 +2320,15 @@ esp_err_t d1l_retained_blob_store_erase(d1l_retained_blob_store_id_t store_id,
             ret = ESP_OK;
         }
     }
-    esp_err_t nvs_ret = nvs_erase_blob(config, key);
+    esp_err_t nvs_ret;
+    if (config->nvs_fallback_allowed) {
+        nvs_ret = nvs_erase_blob(config, key);
+    } else {
+        nvs_ret = mark_legacy_blob_retired(config);
+        if (nvs_ret == ESP_OK) {
+            (void)nvs_erase_blob_from(config, key, false);
+            (void)nvs_erase_blob_from(config, key, true);
+        }
+    }
     return ret == ESP_OK ? nvs_ret : ret;
 }

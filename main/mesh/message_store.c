@@ -1488,6 +1488,12 @@ esp_err_t d1l_message_store_clear(void)
     s_nvs_fallback_dirty = true;
     s_persistence_dirty = true;
     d1l_store_lock_give(&s_store_lock);
+    const esp_err_t retire_ret =
+        d1l_retained_blob_store_erase_nvs_fallback(
+            D1L_MESSAGE_STORE_ID, D1L_MESSAGE_STORE_KEY);
+    if (retire_ret != ESP_OK) {
+        return retire_ret;
+    }
     return d1l_message_store_flush();
 }
 
@@ -1544,6 +1550,12 @@ esp_err_t d1l_message_store_clear_channel(uint64_t channel_id)
     s_nvs_fallback_dirty = true;
     s_persistence_dirty = true;
     d1l_store_lock_give(&s_store_lock);
+    const esp_err_t retire_ret =
+        d1l_retained_blob_store_erase_nvs_fallback(
+            D1L_MESSAGE_STORE_ID, D1L_MESSAGE_STORE_KEY);
+    if (retire_ret != ESP_OK) {
+        return retire_ret;
+    }
     return d1l_message_store_flush();
 }
 

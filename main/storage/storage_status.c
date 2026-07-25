@@ -36,7 +36,7 @@ typedef enum {
     D1L_STORAGE_MANAGER_STATUS,
     D1L_STORAGE_MANAGER_MOUNT,
     D1L_STORAGE_MANAGER_READY_SD,
-    D1L_STORAGE_MANAGER_READY_NVS,
+    D1L_STORAGE_MANAGER_READY_VOLATILE,
     D1L_STORAGE_MANAGER_NEEDS_FAT32,
     D1L_STORAGE_MANAGER_NO_CARD,
     D1L_STORAGE_MANAGER_ERROR_BACKOFF,
@@ -85,18 +85,10 @@ static void refresh_retained_sd_health(d1l_storage_status_t *status)
                                            &status->retained_sd_stats[
                                                D1L_RETAINED_BLOB_STORE_NODES]);
     status->retained_sd_degraded = d1l_retained_blob_store_any_sd_degraded();
-    bool nvs_mirror_failed = false;
-    for (size_t i = 0U; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
-        if (status->retained_sd_stats[i].nvs_mirror_last_error != ESP_OK) {
-            nvs_mirror_failed = true;
-            break;
-        }
-    }
-    status->retained_backup_degraded =
-        !d1l_retained_blob_store_nvs_ready() ||
-        d1l_retained_blob_store_nvs_error() != ESP_OK ||
-        d1l_retained_blob_store_nvs_migration_error() != ESP_OK ||
-        nvs_mirror_failed;
+    /* RC1 retained history is SD-only. Internal NVS is not a history mirror,
+     * so its ownership/legacy-import state must not be presented as a failed
+     * backup. */
+    status->retained_backup_degraded = false;
     if (status->retained_sd_degraded) {
         status->note = D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE;
     }
@@ -115,8 +107,8 @@ static const char *storage_manager_state_name(d1l_storage_manager_state_t state)
         return "MOUNT";
     case D1L_STORAGE_MANAGER_READY_SD:
         return "READY_SD";
-    case D1L_STORAGE_MANAGER_READY_NVS:
-        return "READY_NVS";
+    case D1L_STORAGE_MANAGER_READY_VOLATILE:
+        return "READY_VOLATILE";
     case D1L_STORAGE_MANAGER_NEEDS_FAT32:
         return "NEEDS_FAT32";
     case D1L_STORAGE_MANAGER_NO_CARD:
@@ -331,8 +323,7 @@ static void set_store_backends(d1l_storage_status_t *status)
                                  routes_on_sd ||
                                  packet_log_on_sd ||
                                  nodes_on_sd;
-    status->data_backend = any_retained_sd ? "mixed" :
-        (d1l_retained_blob_store_nvs_ready() ? "nvs" : "unavailable");
+    status->data_backend = any_retained_sd ? "sd" : "volatile";
     status->message_store_backend =
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES);
     status->dm_store_backend =
@@ -387,9 +378,9 @@ static void apply_force_nvs_status(void)
     set_store_backends(&s_status);
     s_status.force_nvs = true;
     s_status.data_enabled = false;
-    s_status.setup_action = "forced_nvs";
-    s_status.note = "SD data storage is forced to onboard NVS until storage force-nvs off or storage remount is requested";
-    set_manager_state(D1L_STORAGE_MANAGER_READY_NVS);
+    s_status.setup_action = "forced_volatile";
+    s_status.note = "SD history writes are paused; live RF and chat continue without saved history until storage force-nvs off or storage remount is requested";
+    set_manager_state(D1L_STORAGE_MANAGER_READY_VOLATILE);
 }
 
 static void clear_sd_runtime_fields(d1l_storage_status_t *status)
@@ -557,7 +548,7 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
 
     if (!sd->bridge_ready) {
         s_status.setup_action = "bridge_unavailable";
-        s_status.note = "RP2040 UART bridge is unavailable; onboard NVS remains the default data store";
+        s_status.note = "RP2040 UART bridge is unavailable; live RF and chat continue but history is not saved";
     } else if (!sd->protocol_supported) {
         s_status.setup_action = "bridge_protocol_pending";
         s_status.note = "RP2040 UART is ready, but the DeskOS SD status protocol is not implemented on the bridge yet";
@@ -566,22 +557,22 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.note = "RP2040 SD bridge is ready; run storage mount to check the inserted card before enabling SD data storage";
     } else if (strcmp(s_status.sd_state, "mount_pending") == 0) {
         s_status.setup_action = "wait_for_storage_mount";
-        s_status.note = "RP2040 SD bridge is checking the inserted card; onboard NVS remains the default data store until the mount completes";
+        s_status.note = "RP2040 SD bridge is checking the inserted card; history is live-only until the mount completes";
     } else if (probe_rejected_card) {
         s_status.setup_action = "inspect_rp2040_sd_cmd0_firmware_path";
         s_status.note =
             "RP2040 SD probe rejected the card init response; inspect firmware CMD0/CMD8 diagnostics before changing the card";
     } else if (explicit_no_card) {
         s_status.setup_action = "insert_card";
-        s_status.note = "No SD card reported by the RP2040 bridge; onboard NVS remains the default data store";
+        s_status.note = "No SD card reported by the RP2040 bridge; live RF and chat continue but history is not saved";
     } else if (mount_failed_with_diag) {
         s_status.setup_action = "inspect_rp2040_sd_mount_error_firmware_path";
         s_status.note =
-            "The last confirmed card is not mounted; inspect RP2040 mount diagnostics while onboard fallback remains active";
+            "The last confirmed card is not mounted; inspect RP2040 mount diagnostics while history remains live-only";
     } else if (presence_stale) {
         s_status.setup_action = "wait_for_storage_reconnect";
         s_status.note =
-            "The card was previously confirmed, but the latest bridge reply could not confirm its presence; onboard fallback remains active";
+            "The card was previously confirmed, but the latest bridge reply could not confirm its presence; history is live-only";
     } else if (s_status.sd_needs_fat32) {
         s_status.setup_action = "prepare_fat32_on_computer";
         s_status.note =
@@ -595,14 +586,14 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
             "DeskOS files are invalid; back up the card and prepare FAT32 on a computer" :
             "DeskOS files are not ready; retry storage mount to create the required folders";
     } else if (s_status.setup_required) {
-        s_status.setup_action = "use_nvs_fallback";
-        s_status.note = "SD card is present but not ready; onboard NVS remains active";
+        s_status.setup_action = "live_only_until_ready";
+        s_status.note = "SD card is present but not ready; history is live-only until storage is ready";
     } else {
         s_status.setup_action = s_status.data_enabled ? "retained_history_sd_enabled" :
                                 "store_migration_pending";
         s_status.note = s_status.data_enabled ?
-            "SD card is valid; retained Public/DM message, route, packet history, diagnostic exports, and map tile cache can use SD with onboard NVS mirrors" :
-            "SD card is valid, but retained stores remain on onboard NVS until SD-backed store migration is enabled";
+            "SD card is valid; Public/DM message, route, packet, node history, diagnostic exports, and map tiles use SD" :
+            "SD card is valid, but saved-history stores are still starting";
         s_status.map_tile_backend = d1l_map_tile_store_sd_ready(&s_status) ?
             "sd_map_tiles_ready" : "sd_pending_store_migration";
     }
@@ -651,7 +642,7 @@ static void note_rp2040_exchange_failure(esp_err_t ret, bool response_truncated)
     s_status.setup_action = "wait_for_storage_reconnect";
     s_status.note = allows_cached_io ?
         "Storage status is reconnecting; the last confirmed SD state remains active during a bounded grace period" :
-        "Storage status did not recover; SD file access is paused and onboard fallback remains active until a valid status reply";
+        "Storage status did not recover; SD file access is paused and history is live-only until a valid status reply";
 }
 
 static void apply_rp2040_sd_exchange_result(const d1l_rp2040_sd_status_t *sd,
@@ -664,7 +655,7 @@ static void apply_rp2040_sd_exchange_result(const d1l_rp2040_sd_status_t *sd,
 
     /* A timeout or malformed reply is not evidence that an inserted card
      * disappeared. Keep the last parsed card/filesystem diagnostics, allow a
-     * short I/O grace, then fail closed to onboard fallback. A real removal is
+     * short I/O grace, then fail closed to live-only history. A real removal is
      * still applied immediately because it arrives as a valid no_card reply. */
     note_rp2040_exchange_failure(ret, sd->response_truncated);
 }
@@ -699,7 +690,7 @@ esp_err_t d1l_storage_status_init(void)
     s_status.sd_interface = "rp2040";
     s_status.sd_state = "pending_bridge";
     s_status.note =
-        "D1L microSD is not exposed through ESP32 SDMMC/SDSPI; using onboard fallback until RP2040 SD bridge is implemented";
+        "D1L microSD uses the RP2040 bridge; history remains live-only until that bridge is ready";
 #else
     s_status.direct_supported = false;
     s_status.rp2040_bridge_required = false;
@@ -731,7 +722,7 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result)
         s_status.sd_state = "rp2040_unavailable";
         s_status.last_error = rp2040_init_result;
         s_status.setup_action = "bridge_unavailable";
-        s_status.note = "RP2040 bridge is not ready; SD data storage remains on onboard fallback";
+        s_status.note = "RP2040 bridge is not ready; live RF and chat continue but history is not saved";
     } else if (s_status.rp2040_bridge_required) {
         clear_sd_runtime_fields(&s_status);
         d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
@@ -954,7 +945,7 @@ static void classify_storage_manager_state(
         set_manager_state(D1L_STORAGE_MANAGER_NEEDS_FAT32);
         s_status.manager_backoff_ms = 0;
     } else {
-        set_manager_state(D1L_STORAGE_MANAGER_READY_NVS);
+        set_manager_state(D1L_STORAGE_MANAGER_READY_VOLATILE);
         s_status.manager_backoff_ms = 0;
     }
 }

@@ -10,6 +10,12 @@ static bool text_equals(const char *value, const char *expected)
     return value && expected && strcmp(value, expected) == 0;
 }
 
+static bool history_is_live_only(const char *backend)
+{
+    return text_equals(backend, "volatile") ||
+           text_equals(backend, "unavailable");
+}
+
 void d1l_ui_home_view_apply_release_profile(
     d1l_ui_home_view_input_t *input)
 {
@@ -36,9 +42,9 @@ void d1l_ui_home_view_apply_release_profile(
         input->storage_sd_data_root_ready = false;
         input->storage_setup_required = false;
         input->storage_sd_needs_fat32 = false;
-        input->storage_sd_state = "internal";
-        input->storage_setup_action = "forced_nvs";
-        input->node_store_backend = "nvs";
+        input->storage_sd_state = "volatile";
+        input->storage_setup_action = "forced_volatile";
+        input->node_store_backend = "volatile";
     }
 }
 
@@ -52,7 +58,7 @@ static bool storage_needs_attention(const d1l_ui_home_view_input_t *input)
     if (!input) {
         return false;
     }
-    return text_equals(input->node_store_backend, "unavailable") ||
+    return history_is_live_only(input->node_store_backend) ||
            input->storage_retained_sd_degraded ||
            text_equals(input->storage_sd_state, "error") ||
            text_equals(input->storage_sd_state, "bridge_reported") ||
@@ -74,7 +80,7 @@ const char *d1l_ui_home_sd_state(const d1l_ui_home_view_input_t *input)
     if (input->storage_retained_backup_degraded) {
         return "backup issue";
     }
-    if (text_equals(input->node_store_backend, "unavailable")) {
+    if (history_is_live_only(input->node_store_backend)) {
         return "live only";
     }
     if (storage_needs_attention(input)) {
@@ -106,11 +112,13 @@ const char *d1l_ui_home_sd_state(const d1l_ui_home_view_input_t *input)
         return "mounting";
     }
     if (text_equals(input->storage_setup_action, "retry_storage_mount") ||
-        text_equals(input->storage_setup_action, "use_nvs_fallback")) {
+        text_equals(input->storage_setup_action, "use_nvs_fallback") ||
+        text_equals(input->storage_setup_action, "live_only_until_ready")) {
         return "setup";
     }
-    if (text_equals(input->storage_setup_action, "forced_nvs")) {
-        return "internal";
+    if (text_equals(input->storage_setup_action, "forced_nvs") ||
+        text_equals(input->storage_setup_action, "forced_volatile")) {
+        return "live only";
     }
     const char *state = input->storage_sd_state;
     if (!state || state[0] == '\0') {
@@ -195,7 +203,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
         (input->muted_dm_unread_count ? 0x8EA0AEU : 0x5EEAD4U);
 
     const bool node_history_unavailable =
-        text_equals(input->node_store_backend, "unavailable");
+        history_is_live_only(input->node_store_backend);
     if (node_history_unavailable) {
         snprintf(out_view->network_status, sizeof(out_view->network_status),
                  "%llu nearby | history not saved",

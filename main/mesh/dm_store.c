@@ -2370,6 +2370,11 @@ esp_err_t d1l_dm_store_clear(void)
     s_sd_primary_dirty = true;
     s_nvs_fallback_dirty = true;
     d1l_store_lock_give(&s_store_lock);
+    ret = d1l_retained_blob_store_erase_nvs_fallback(
+        D1L_DM_STORE_ID, D1L_DM_STORE_KEY);
+    if (ret != ESP_OK) {
+        return ret;
+    }
     return d1l_dm_store_flush();
 }
 

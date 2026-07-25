@@ -2909,18 +2909,18 @@ static void cmd_storage_status(void)
            (unsigned long)status.sd_mount_error,
            (unsigned long)status.sd_mount_data,
            esp_err_to_name(status.last_error), bool_json(status.data_enabled));
-    print_json_string(status.data_backend ? status.data_backend : "nvs");
+    print_json_string(status.data_backend ? status.data_backend : "volatile");
     printf(",\"message_store_backend\":");
-    print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
+    print_json_string(status.message_store_backend ? status.message_store_backend : "volatile");
     printf(",\"dm_store_backend\":");
-    print_json_string(status.dm_store_backend ? status.dm_store_backend : "nvs");
+    print_json_string(status.dm_store_backend ? status.dm_store_backend : "volatile");
     printf(",\"packet_log_backend\":");
-    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "volatile");
     printf(",\"route_store_backend\":");
-    print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
+    print_json_string(status.route_store_backend ? status.route_store_backend : "volatile");
     printf(",\"node_store_backend\":");
     print_json_string(status.node_store_backend ?
-                          status.node_store_backend : "unavailable");
+                          status.node_store_backend : "volatile");
     printf(",\"map_tile_backend\":");
     print_json_string(
         map_available && status.map_tile_backend ?
@@ -2992,16 +2992,16 @@ static void cmd_storage_status(void)
         &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_NODES]);
     printf("}}");
     printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
-    print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
+    print_json_string(status.message_store_backend ? status.message_store_backend : "volatile");
     printf(",\"dm\":");
-    print_json_string(status.dm_store_backend ? status.dm_store_backend : "nvs");
+    print_json_string(status.dm_store_backend ? status.dm_store_backend : "volatile");
     printf(",\"packets\":");
-    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "volatile");
     printf(",\"routes\":");
-    print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
+    print_json_string(status.route_store_backend ? status.route_store_backend : "volatile");
     printf(",\"nodes\":");
     print_json_string(status.node_store_backend ?
-                          status.node_store_backend : "unavailable");
+                          status.node_store_backend : "volatile");
     printf(",\"contacts\":\"nvs\",\"read_state\":\"nvs\",\"crashlog\":\"nvs\",\"map_tiles\":");
     print_json_string(
         map_available && status.map_tile_backend ?
@@ -3334,8 +3334,8 @@ static void print_storage_setup_payload(const d1l_storage_status_t *status)
     print_json_string(status->setup_action ? status->setup_action : "not_available");
     printf(",\"needs_fat32\":%s,\"will_format\":false,\"format_requested\":false,\"format_performed\":false,\"policy\":\"no_device_format\",\"data_backend\":",
            bool_json(status->sd_needs_fat32));
-    print_json_string(status->data_backend ? status->data_backend : "nvs");
-    printf(",\"fallback\":\"nvs\",\"note\":");
+    print_json_string(status->data_backend ? status->data_backend : "volatile");
+    printf(",\"fallback\":\"volatile\",\"note\":");
     print_json_string(status->note ? status->note : "");
     printf("}\n");
 }
@@ -3352,9 +3352,9 @@ static void print_storage_filecanary_error(const char *step,
     printf(",\"sd_state\":");
     print_json_string(status && status->sd_state ? status->sd_state : "unknown");
     printf(",\"data_backend\":");
-    print_json_string(status && status->data_backend ? status->data_backend : "nvs");
+    print_json_string(status && status->data_backend ? status->data_backend : "volatile");
     printf(",\"packet_log_backend\":");
-    print_json_string(status && status->packet_log_backend ? status->packet_log_backend : "nvs");
+    print_json_string(status && status->packet_log_backend ? status->packet_log_backend : "volatile");
     printf(",\"file_op\":");
     print_json_string(file && file->op[0] ? file->op : "");
     printf(",\"file_error\":");
@@ -3499,12 +3499,12 @@ static void cmd_storage_filecanary(void)
     print_json_string(tmp_path);
     printf(",\"bytes\":%u,\"write_tmp\":true,\"read_tmp\":true,\"rename_replace\":true,\"stat_final\":true,\"read_final\":true,\"delete_final\":true,\"stat_deleted\":true,\"data_backend\":",
            (unsigned)payload_len);
-    print_json_string(status.data_backend ? status.data_backend : "nvs");
+    print_json_string(status.data_backend ? status.data_backend : "volatile");
     printf(",\"packet_log_backend\":");
-    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "volatile");
     printf(",\"node_store_backend\":");
     print_json_string(status.node_store_backend ?
-                          status.node_store_backend : "unavailable");
+                          status.node_store_backend : "volatile");
     printf(",\"note\":\"Serial-only RP2040 SD file-operation canary passed; no Public RF or format command was used\"}\n");
 }
 
@@ -3517,7 +3517,7 @@ static bool storage_retained_history_sd_ready(const d1l_storage_status_t *status
 {
     return status &&
            status->data_enabled &&
-           text_equals(status->data_backend, "mixed") &&
+           text_equals(status->data_backend, "sd") &&
            text_equals(status->message_store_backend, "sd") &&
            text_equals(status->dm_store_backend, "sd") &&
            text_equals(status->route_store_backend, "sd") &&
@@ -3534,7 +3534,7 @@ static bool storage_retained_history_sd_ready(const d1l_storage_status_t *status
            status->path_max >= D1L_RP2040_FILE_PATH_MAX;
 }
 
-static bool storage_retained_history_nvs_no_card_ready(
+static bool storage_retained_history_volatile_no_card_ready(
     const d1l_storage_status_t *status)
 {
     return status &&
@@ -3548,16 +3548,12 @@ static bool storage_retained_history_nvs_no_card_ready(
            !status->sd_mounted &&
            !status->sd_data_root_ready &&
            !status->bridge_status_stale &&
-           text_equals(status->message_store_backend, "nvs") &&
-           text_equals(status->dm_store_backend, "nvs") &&
-           text_equals(status->route_store_backend, "nvs") &&
-           text_equals(status->packet_log_backend, "nvs") &&
-           text_equals(status->node_store_backend, "unavailable") &&
-           d1l_retained_blob_store_nvs_ready() &&
-           d1l_retained_blob_store_nvs_marker_ready() &&
-           d1l_retained_blob_store_nvs_markers_complete() &&
-           d1l_retained_blob_store_nvs_anchor_ready() &&
-           d1l_retained_blob_store_nvs_sentinel_ready();
+           text_equals(status->data_backend, "volatile") &&
+           text_equals(status->message_store_backend, "volatile") &&
+           text_equals(status->dm_store_backend, "volatile") &&
+           text_equals(status->route_store_backend, "volatile") &&
+           text_equals(status->packet_log_backend, "volatile") &&
+           text_equals(status->node_store_backend, "volatile");
 }
 
 static bool retained_canary_backend_generations(
@@ -4050,14 +4046,14 @@ static bool build_diagnostic_export_payload(const char *token,
                             "\"file_ops\":%s,\"atomic_rename\":%s},",
                             token,
                             status->sd_state ? status->sd_state : "unknown",
-                            status->data_backend ? status->data_backend : "nvs",
+                            status->data_backend ? status->data_backend : "volatile",
                             status->export_backend ? status->export_backend : "serial",
-                            status->message_store_backend ? status->message_store_backend : "nvs",
-                            status->dm_store_backend ? status->dm_store_backend : "nvs",
-                            status->route_store_backend ? status->route_store_backend : "nvs",
-                            status->packet_log_backend ? status->packet_log_backend : "nvs",
+                            status->message_store_backend ? status->message_store_backend : "volatile",
+                            status->dm_store_backend ? status->dm_store_backend : "volatile",
+                            status->route_store_backend ? status->route_store_backend : "volatile",
+                            status->packet_log_backend ? status->packet_log_backend : "volatile",
                             status->node_store_backend ?
-                                status->node_store_backend : "unavailable",
+                                status->node_store_backend : "volatile",
                             status->map_tile_backend ? status->map_tile_backend : "unavailable",
                             bool_json(status->file_ops_supported),
                             bool_json(status->atomic_rename_supported))) {
@@ -4457,14 +4453,14 @@ static bool build_data_export_payload(const char *token,
                             "\"limits\":{\"payload_max\":%u,\"sample_max\":%u},",
                             token,
                             status->sd_state ? status->sd_state : "unknown",
-                            status->data_backend ? status->data_backend : "nvs",
+                            status->data_backend ? status->data_backend : "volatile",
                             status->export_backend ? status->export_backend : "serial",
-                            status->message_store_backend ? status->message_store_backend : "nvs",
-                            status->dm_store_backend ? status->dm_store_backend : "nvs",
-                            status->route_store_backend ? status->route_store_backend : "nvs",
-                            status->packet_log_backend ? status->packet_log_backend : "nvs",
+                            status->message_store_backend ? status->message_store_backend : "volatile",
+                            status->dm_store_backend ? status->dm_store_backend : "volatile",
+                            status->route_store_backend ? status->route_store_backend : "volatile",
+                            status->packet_log_backend ? status->packet_log_backend : "volatile",
                             status->node_store_backend ?
-                                status->node_store_backend : "unavailable",
+                                status->node_store_backend : "volatile",
                             status->map_tile_backend ? status->map_tile_backend : "unavailable",
                             bool_json(status->file_ops_supported),
                             bool_json(status->atomic_rename_supported),
@@ -4874,16 +4870,16 @@ static void cmd_storage_retained_canary(const char *line)
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     const bool sd_backend_mode = storage_retained_history_sd_ready(&status);
-    const bool nvs_no_card_backend_mode =
-        storage_retained_history_nvs_no_card_ready(&status);
+    const bool volatile_no_card_backend_mode =
+        storage_retained_history_volatile_no_card_ready(&status);
     uint32_t backend_generations[D1L_RETAINED_BLOB_STORE_COUNT] = {0};
-    if ((!sd_backend_mode && !nvs_no_card_backend_mode) ||
+    if ((!sd_backend_mode && !volatile_no_card_backend_mode) ||
         !retained_canary_backend_generations(
             sd_backend_mode, backend_generations)) {
         d1l_route_store_worker_quiesce_end();
         d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", "SD_RETAINED_HISTORY_NOT_READY",
-                   "requires either ready RP2040 SD backends or an explicit fresh NO_CARD state with ready retained NVS");
+                   "requires either ready RP2040 SD backends or an explicit fresh NO_CARD live-only state");
         return;
     }
 
@@ -4961,8 +4957,9 @@ static void cmd_storage_retained_canary(const char *line)
            (unsigned long)dm_seq,
            (unsigned long)route_seq,
            (unsigned long)packet_seq);
-    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"backend_mode\":\"%s\",\"public_rf_tx\":false,\"dm_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\",\"nodes\":\"%s\"}",
-           sd_backend_mode ? "sd" : "nvs_no_card",
+    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"backend_mode\":\"%s\",\"history_persisted\":%s,\"public_rf_tx\":false,\"dm_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\",\"nodes\":\"%s\"}",
+           sd_backend_mode ? "sd" : "volatile_no_card",
+           bool_json(sd_backend_mode),
            status.message_store_backend,
            status.dm_store_backend,
            status.route_store_backend,
