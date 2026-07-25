@@ -885,8 +885,8 @@ def test_posix_postflash_path_drift_cannot_redirect_admitted_flash(
 def test_bound_esptool_api_receives_connected_handle_without_path_reopen(
     monkeypatch,
 ):
-    import esptool
-    from esptool import cmds
+    esptool = pytest.importorskip("esptool")
+    cmds = pytest.importorskip("esptool.cmds")
 
     handle = object()
     connected = SimpleNamespace(CHIP_NAME="ESP32-S3")
