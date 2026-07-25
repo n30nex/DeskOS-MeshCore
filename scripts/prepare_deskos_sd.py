@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -120,6 +121,87 @@ def load_provider_manifest(tile_source: Path) -> dict:
         raise PreparationError(
             "tile provider manifest tile_template must be z{z}/x{x}/y{y}.png"
         )
+    source_id = manifest["source_id"]
+    if len(source_id) > 24 or any(
+        not (
+            character.isascii()
+            and (character.isalnum() or character in "-_")
+        )
+        for character in source_id
+    ):
+        raise PreparationError(
+            "tile provider source_id must be 1-24 letters, numbers, '-' or '_'"
+        )
+    if source_id == "openstreetmap-standard":
+        raise PreparationError("tile provider source_id is reserved")
+    for key, maximum in (("attribution", 64), ("license_url", 128)):
+        value = manifest[key]
+        if len(value) > maximum or any(
+            not character.isascii()
+            or ord(character) < 32
+            or ord(character) > 126
+            or character in {'"', "\\"}
+            for character in value
+        ):
+            raise PreparationError(
+                f"tile provider {key} must be 1-{maximum} safe ASCII characters"
+            )
+    license_url = urlsplit(manifest["license_url"])
+    if license_url.scheme != "https" or not license_url.netloc:
+        raise PreparationError("tile provider license_url must be HTTPS")
+    if not isinstance(manifest.get("background_prefetch_permitted"), bool):
+        raise PreparationError(
+            "tile provider manifest requires background_prefetch_permitted"
+        )
+    max_zoom = manifest.get("max_zoom")
+    average_tile_bytes = manifest.get("average_tile_bytes")
+    if not isinstance(max_zoom, int) or not 14 <= max_zoom <= 18:
+        raise PreparationError("tile provider max_zoom must be 14 through 18")
+    if (
+        not isinstance(average_tile_bytes, int)
+        or not 4096 <= average_tile_bytes <= 196 * 1024
+    ):
+        raise PreparationError(
+            "tile provider average_tile_bytes must be 4096 through 200704"
+        )
+    network_template = manifest.get("network_url_template")
+    if network_template is not None:
+        if (
+            not isinstance(network_template, str)
+            or len(network_template) > 192
+            or not network_template.isascii()
+            or '"' in network_template
+            or "\\" in network_template
+            or urlsplit(network_template).scheme != "https"
+            or not urlsplit(network_template).netloc
+            or any(network_template.count(token) != 1 for token in ("{z}", "{x}", "{y}"))
+            or "#" in network_template
+        ):
+            raise PreparationError(
+                "network_url_template must be HTTPS with one {z}, {x}, and {y}"
+            )
+    if manifest["background_prefetch_permitted"] and not network_template:
+        raise PreparationError(
+            "background prefetch permission requires network_url_template"
+        )
+    request_interval_ms = manifest.get(
+        "minimum_request_interval_ms", 250
+    )
+    if (
+        not isinstance(request_interval_ms, int)
+        or not 100 <= request_interval_ms <= 5000
+    ):
+        raise PreparationError(
+            "minimum_request_interval_ms must be 100 through 5000"
+        )
+    manifest["minimum_request_interval_ms"] = request_interval_ms
+    encoded = (
+        json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+    ).encode("utf-8")
+    if len(encoded) > 1024:
+        raise PreparationError(
+            "tile provider manifest exceeds the 1024-byte firmware limit"
+        )
     return manifest
 
 
@@ -143,11 +225,13 @@ def tile_items(tile_source: Path) -> tuple[dict, list[CopyItem]]:
         items.append(
             CopyItem(
                 source=path,
-                relative=Path(DESKOS_ROOT_NAME, "map", "tiles", "offline") /
+                relative=Path(
+                    DESKOS_ROOT_NAME, "map", "tiles", manifest["source_id"]
+                ) /
                 relative,
             )
         )
-    if not items:
+    if not items and not manifest.get("network_url_template"):
         raise PreparationError("tile source contains no PNG tiles")
     return manifest, items
 
@@ -309,7 +393,21 @@ def main(argv: list[str] | None = None) -> int:
             "deletes_files": False,
             "overwrites_files": False,
             **target_info,
-            "provider": provider,
+            "provider": (
+                {
+                    "source_id": provider["source_id"],
+                    "attribution": provider["attribution"],
+                    "license_url": provider["license_url"],
+                    "offline_storage_permitted": True,
+                    "background_prefetch_permitted":
+                        provider["background_prefetch_permitted"],
+                    "network_fetch_configured":
+                        bool(provider.get("network_url_template")),
+                    "max_zoom": provider["max_zoom"],
+                    "average_tile_bytes": provider["average_tile_bytes"],
+                }
+                if provider else None
+            ),
             "files": [
                 {
                     key: entry[key]

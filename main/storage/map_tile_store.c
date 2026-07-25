@@ -8,6 +8,7 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "map/map_tile_provider.h"
 #include "platform/time_service.h"
 #include "storage/storage_status_policy.h"
 
@@ -16,8 +17,6 @@
 #define D1L_MAP_TILE_CANARY_Y 2U
 #define D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000
 #define D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U
-#define D1L_MAP_TILE_ATTRIBUTION_PATH "map/tiles/attribution.json"
-#define D1L_MAP_TILE_ATTRIBUTION_TMP_PATH "map/tiles/attribution.tmp"
 
 bool d1l_map_tile_store_coord_valid(uint8_t z, uint32_t x, uint32_t y)
 {
@@ -40,28 +39,31 @@ bool d1l_map_tile_store_path(uint8_t z, uint32_t x, uint32_t y,
     return len > 0 && (size_t)len < dest_size;
 }
 
-static bool tile_result_paths(d1l_map_tile_download_result_t *result)
+static bool tile_result_paths(
+    const d1l_map_tile_provider_t *provider,
+    d1l_map_tile_download_result_t *result)
 {
-    if (!result || !d1l_map_tile_store_coord_valid(result->z, result->x, result->y)) {
+    if (!provider || !result ||
+        !d1l_map_tile_store_coord_valid(result->z, result->x, result->y) ||
+        !d1l_map_tile_provider_path(
+            provider, result->z, result->x, result->y,
+            result->path, sizeof(result->path))) {
         return false;
     }
-    const int final_len = snprintf(result->path, sizeof(result->path),
-                                   "map/tiles/openstreetmap/z%u/x%lu/y%lu.png",
-                                   (unsigned)result->z,
-                                   (unsigned long)result->x,
-                                   (unsigned long)result->y);
-    const int tmp_len = snprintf(result->tmp_path, sizeof(result->tmp_path),
-                                 "map/tiles/openstreetmap/z%u/x%lu/y%lu.tmp",
-                                 (unsigned)result->z,
-                                 (unsigned long)result->x,
-                                 (unsigned long)result->y);
-    snprintf(result->attribution_path, sizeof(result->attribution_path), "%s",
-             D1L_MAP_TILE_ATTRIBUTION_PATH);
-    snprintf(result->attribution_tmp_path, sizeof(result->attribution_tmp_path), "%s",
-             D1L_MAP_TILE_ATTRIBUTION_TMP_PATH);
-    return final_len > 0 && tmp_len > 0 &&
-           (size_t)final_len < sizeof(result->path) &&
-           (size_t)tmp_len < sizeof(result->tmp_path);
+    const size_t path_length = strlen(result->path);
+    if (path_length < 4U ||
+        strcmp(&result->path[path_length - 4U], ".png") != 0 ||
+        path_length + 1U >= sizeof(result->tmp_path)) {
+        return false;
+    }
+    memcpy(result->tmp_path, result->path, path_length - 4U);
+    memcpy(&result->tmp_path[path_length - 4U], ".tmp", 5U);
+    return d1l_map_tile_provider_attribution_path(
+               provider, false, result->attribution_path,
+               sizeof(result->attribution_path)) &&
+           d1l_map_tile_provider_attribution_path(
+               provider, true, result->attribution_tmp_path,
+               sizeof(result->attribution_tmp_path));
 }
 
 static bool append_text(char *dest, size_t dest_size, size_t *offset, const char *text)
@@ -238,20 +240,31 @@ bool d1l_map_tile_store_sd_ready(const d1l_storage_status_t *status)
            status->path_max >= D1L_RP2040_FILE_PATH_MAX;
 }
 
-static esp_err_t write_attribution_metadata(d1l_map_tile_download_result_t *result)
+static esp_err_t write_attribution_metadata(
+    const d1l_map_tile_provider_t *provider,
+    d1l_map_tile_download_result_t *result)
 {
-    char payload[384];
+    if (!provider || !result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char payload[512];
     const int len = snprintf(payload, sizeof(payload),
                              "{\"schema\":1,\"kind\":\"map_tile_attribution\","
                              "\"source\":\"%s\",\"attribution\":\"%s\","
                              "\"license_url\":\"%s\",\"policy\":\"%s\","
-                             "\"min_cache_days\":%u,\"current_view_only\":true,"
+                             "\"min_cache_days\":%u,\"current_view_only\":%s,"
+                             "\"background_prefetch_permitted\":%s,"
                              "\"public_rf_tx\":false,\"formats_sd\":false}\n",
-                             D1L_MAP_TILE_SOURCE_ID,
-                             result->attribution,
-                             D1L_MAP_TILE_LICENSE_URL,
-                             D1L_MAP_TILE_PROVIDER_POLICY,
-                             (unsigned)D1L_MAP_TILE_MIN_CACHE_DAYS);
+                             provider->source_id,
+                             provider->attribution,
+                             provider->license_url,
+                             provider->configured ?
+                                 "configured_offline_provider" :
+                                 D1L_MAP_TILE_PROVIDER_POLICY,
+                             (unsigned)D1L_MAP_TILE_MIN_CACHE_DAYS,
+                             provider->configured ? "false" : "true",
+                             provider->background_prefetch_permitted ?
+                                 "true" : "false");
     if (len <= 0 || (size_t)len >= sizeof(payload)) {
         return ESP_ERR_INVALID_SIZE;
     }
@@ -312,24 +325,36 @@ static bool continue_allowed(d1l_map_tile_continue_cb_t should_continue, void *c
 }
 
 static void init_download_result(d1l_map_tile_download_result_t *result,
+                                 const d1l_map_tile_provider_t *provider,
                                  uint8_t z,
                                  uint32_t x,
                                  uint32_t y,
                                  const d1l_storage_status_t *status,
                                  bool wifi_connected)
 {
+    if (!result || !provider) {
+        return;
+    }
     memset(result, 0, sizeof(*result));
     result->z = z;
     result->x = x;
     result->y = y;
     result->wifi_connected = wifi_connected;
     result->sd_ready = d1l_map_tile_store_sd_ready(status);
-    result->provider_allowed = true;
+    result->provider_allowed = provider->network_fetch_allowed;
+    result->provider_configured = provider->configured;
+    result->background_prefetch_permitted =
+        provider->background_prefetch_permitted;
     result->public_rf_tx = false;
     result->formats_sd = false;
     result->last_error = ESP_OK;
-    snprintf(result->attribution, sizeof(result->attribution), "%s", D1L_MAP_TILE_ATTRIBUTION);
-    (void)tile_result_paths(result);
+    snprintf(result->source_id, sizeof(result->source_id), "%s",
+             provider->source_id);
+    snprintf(result->attribution, sizeof(result->attribution), "%s",
+             provider->attribution);
+    snprintf(result->license_url, sizeof(result->license_url), "%s",
+             provider->license_url);
+    (void)tile_result_paths(provider, result);
 }
 
 static void cleanup_partial(const d1l_map_tile_download_result_t *result)
@@ -342,12 +367,54 @@ static void cleanup_partial(const d1l_map_tile_download_result_t *result)
                                         D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
 }
 
-static bool attribution_metadata_present(void)
+static bool attribution_metadata_present(
+    const d1l_map_tile_download_result_t *result)
 {
+    if (!result || !result->attribution_path[0]) {
+        return false;
+    }
     d1l_rp2040_file_result_t file = {0};
     const esp_err_t ret = d1l_rp2040_bridge_file_stat(
-        D1L_MAP_TILE_ATTRIBUTION_PATH, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        result->attribution_path, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     return ret == ESP_OK && file.ok && file.exists && !file.is_directory && file.size > 0U;
+}
+
+esp_err_t d1l_map_tile_store_cached(
+    uint8_t z,
+    uint32_t x,
+    uint32_t y,
+    const d1l_storage_status_t *status,
+    bool *out_cached)
+{
+    if (!status || !out_cached) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_cached = false;
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
+    d1l_map_tile_download_result_t result = {0};
+    init_download_result(&result, &provider, z, x, y, status, false);
+    if (!result.sd_ready) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!result.path[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    const esp_err_t ret = d1l_rp2040_bridge_file_stat(
+        result.path, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (!file.ok || !file.exists || file.is_directory || file.size == 0U ||
+        file.size > D1L_MAP_TILE_DOWNLOAD_MAX_BYTES) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (!provider.configured && !attribution_metadata_present(&result)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    *out_cached = true;
+    return ESP_OK;
 }
 
 esp_err_t d1l_map_tile_store_read(uint8_t z,
@@ -365,8 +432,10 @@ esp_err_t d1l_map_tile_store_read(uint8_t z,
         return ESP_ERR_INVALID_ARG;
     }
     *out_len = 0U;
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
     d1l_map_tile_download_result_t result;
-    init_download_result(&result, z, x, y, status, false);
+    init_download_result(&result, &provider, z, x, y, status, false);
     if (!result.sd_ready || !d1l_map_tile_store_coord_valid(z, x, y) ||
         !result.path[0]) {
         download_step(&result, "preflight", ESP_ERR_NOT_SUPPORTED, NULL);
@@ -379,7 +448,7 @@ esp_err_t d1l_map_tile_store_read(uint8_t z,
         *out_result = result;
         return result.last_error;
     }
-    if (!attribution_metadata_present()) {
+    if (!provider.configured && !attribution_metadata_present(&result)) {
         download_step(&result, "metadata_missing", ESP_ERR_NOT_FOUND, NULL);
         *out_result = result;
         return result.last_error;
@@ -494,12 +563,26 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
         return ESP_ERR_INVALID_ARG;
     }
     *out_len = 0U;
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
     d1l_map_tile_download_result_t result;
-    init_download_result(&result, z, x, y, status, wifi_connected);
-    if (!d1l_map_tile_store_coord_valid(z, x, y) || !result.path[0] ||
-        !build_tile_url(D1L_MAP_TILE_SOURCE_URL_TEMPLATE, z, x, y,
-                        result.url, sizeof(result.url))) {
+    init_download_result(
+        &result, &provider, z, x, y, status, wifi_connected);
+    if (!d1l_map_tile_store_coord_valid(z, x, y) || !result.path[0]) {
         download_step(&result, "coordinate", ESP_ERR_INVALID_ARG, NULL);
+        *out_result = result;
+        return result.last_error;
+    }
+    if (!provider.network_fetch_allowed) {
+        download_step(&result, "provider_preloaded_only",
+                      ESP_ERR_NOT_SUPPORTED, NULL);
+        *out_result = result;
+        return result.last_error;
+    }
+    if (!build_tile_url(provider.url_template, z, x, y,
+                        result.url, sizeof(result.url))) {
+        download_step(&result, "provider_config",
+                      ESP_ERR_INVALID_RESPONSE, NULL);
         *out_result = result;
         return result.last_error;
     }
@@ -661,7 +744,7 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
         goto fetch_done;
     }
     result.rename_replace = true;
-    ret = write_attribution_metadata(&result);
+    ret = write_attribution_metadata(&provider, &result);
     if (ret != ESP_OK) {
         /* A cache entry is only valid when its required attribution metadata
          * commits too.  Do not leave a newly-renamed tile paired with stale or

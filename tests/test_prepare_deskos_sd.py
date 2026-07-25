@@ -95,3 +95,83 @@ def test_prepare_refuses_overwrite_and_unlicensed_tile_import(tmp_path):
     )
     assert unlicensed.returncode == 2
     assert "offline_storage_permitted=true" in unlicensed.stderr
+
+
+def test_prepare_installs_authorized_network_provider_without_leaking_url(tmp_path):
+    target = tmp_path / "card"
+    target.mkdir()
+    tiles = tmp_path / "provider"
+    tiles.mkdir()
+    provider = {
+        "schema": 1,
+        "source_id": "licensed-local",
+        "attribution": "(c) Licensed Local Maps",
+        "license_url": "https://example.invalid/license",
+        "offline_storage_permitted": True,
+        "background_prefetch_permitted": True,
+        "network_url_template":
+            "https://tiles.example.invalid/{z}/{x}/{y}.png?key=topsecret",
+        "tile_template": "z{z}/x{x}/y{y}.png",
+        "max_zoom": 18,
+        "average_tile_bytes": 65536,
+        "minimum_request_interval_ms": 500,
+    }
+    (tiles / "offline-tile-provider.json").write_text(
+        json.dumps(provider), encoding="utf-8"
+    )
+
+    applied = run_prepare(
+        "--target", str(target),
+        "--skip-filesystem-check",
+        "--tiles-from", str(tiles),
+        "--apply",
+    )
+    assert applied.returncode == 0, applied.stderr
+    assert "topsecret" not in applied.stdout
+    result = json.loads(applied.stdout)
+    assert result["provider"]["network_fetch_configured"] is True
+    assert "network_url_template" not in result["provider"]
+    installed = json.loads(
+        (target / "deskos" / "map" / "offline-provider.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert installed["network_url_template"] == provider["network_url_template"]
+    receipt = json.loads(
+        (target / "deskos" / "card-preparation-receipt.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "network_url_template" not in receipt["provider"]
+
+
+def test_prepare_rejects_provider_text_firmware_cannot_parse(tmp_path):
+    target = tmp_path / "card"
+    target.mkdir()
+    tiles = tmp_path / "provider"
+    tiles.mkdir()
+    (tiles / "offline-tile-provider.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "source_id": "licensed-local",
+                "attribution": "Copyright \u00a9 Local Maps",
+                "license_url": "https://example.invalid/license",
+                "offline_storage_permitted": True,
+                "background_prefetch_permitted": True,
+                "network_url_template":
+                    "https://tiles.example.invalid/{z}/{x}/{y}.png",
+                "tile_template": "z{z}/x{x}/y{y}.png",
+                "max_zoom": 18,
+                "average_tile_bytes": 65536,
+            }
+        ),
+        encoding="utf-8",
+    )
+    refused = run_prepare(
+        "--target", str(target),
+        "--skip-filesystem-check",
+        "--tiles-from", str(tiles),
+    )
+    assert refused.returncode == 2
+    assert "safe ASCII" in refused.stderr

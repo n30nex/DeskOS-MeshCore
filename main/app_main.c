@@ -25,6 +25,7 @@
 #include "mesh/route_store.h"
 #include "mesh/route_store_worker.h"
 #include "mesh/meshcore_service.h"
+#include "map/map_prefetch_service.h"
 #include "platform/time_service.h"
 #include "platform/secure_random.h"
 #include "storage/retained_blob_store.h"
@@ -260,6 +261,11 @@ void app_main(void)
     esp_err_t connectivity_ret = d1l_connectivity_init();
     if (connectivity_ret != ESP_OK) {
         ESP_LOGW(TAG, "connectivity policy init failed: %s", esp_err_to_name(connectivity_ret));
+    }
+    esp_err_t map_prefetch_ret = d1l_map_prefetch_service_init();
+    if (map_prefetch_ret != ESP_OK) {
+        ESP_LOGW(TAG, "background map service init failed: %s",
+                 esp_err_to_name(map_prefetch_ret));
     }
     esp_err_t observer_ret = d1l_observer_manager_init();
     if (observer_ret != ESP_OK && observer_ret != ESP_ERR_NOT_SUPPORTED) {

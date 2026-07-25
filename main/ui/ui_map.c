@@ -9,6 +9,8 @@
 #include "freertos/FreeRTOS.h"
 #include "map/map_marker_truth.h"
 #include "map/map_point_projection.h"
+#include "map/map_prefetch_service.h"
+#include "map/map_tile_provider.h"
 #include "map/map_view_service.h"
 #include "map/map_viewport_truth_transition.h"
 #include "mesh/node_store.h"
@@ -319,11 +321,18 @@ static const char *map_sd_status(const d1l_app_snapshot_t *snapshot)
 
 static uint8_t map_zoom_clamp(uint8_t zoom)
 {
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
+    uint8_t maximum = D1L_MAP_VIEW_MAX_ZOOM;
+    if (provider.max_zoom >= D1L_MAP_VIEW_MIN_ZOOM &&
+        provider.max_zoom < maximum) {
+        maximum = provider.max_zoom;
+    }
     if (zoom < D1L_MAP_VIEW_MIN_ZOOM) {
         return D1L_MAP_VIEW_MIN_ZOOM;
     }
-    if (zoom > D1L_MAP_VIEW_MAX_ZOOM) {
-        return D1L_MAP_VIEW_MAX_ZOOM;
+    if (zoom > maximum) {
+        return maximum;
     }
     return zoom;
 }
@@ -929,6 +938,16 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
         detail = "Keep Wi-Fi connected, then reopen Map.";
         color = MAP_COLOR_WARN;
         show_overlay = true;
+    } else if (strcmp(status->phase, "provider_config") == 0) {
+        title = "Map source needs attention";
+        detail = "Check the offline provider file on the SD card.";
+        color = MAP_COLOR_WARN;
+        show_overlay = true;
+    } else if (strcmp(status->phase, "provider_preloaded_only") == 0) {
+        title = "Tile is not preloaded";
+        detail = "Add this area to the SD card or configure an authorized download source.";
+        color = MAP_COLOR_WARN;
+        show_overlay = true;
     } else if (status->failed_tiles > 0U && !status->frame_ready) {
         title = "Map unavailable";
         detail = "Tiles could not be loaded. Check Wi-Fi and the SD card.";
@@ -1039,19 +1058,29 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
         }
     }
     if (s_viewport_attribution_label) {
+        lv_label_set_text(
+            s_viewport_attribution_label,
+            status->provider_configured && status->attribution[0] != '\0' ?
+                status->attribution : "(c) OpenStreetMap contributors");
         lv_obj_move_foreground(s_viewport_attribution_label);
     }
 }
 
 static void map_viewport_update_controls(void)
 {
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
+    const uint8_t maximum =
+        provider.max_zoom >= D1L_MAP_VIEW_MIN_ZOOM &&
+                provider.max_zoom < D1L_MAP_VIEW_MAX_ZOOM ?
+            provider.max_zoom : D1L_MAP_VIEW_MAX_ZOOM;
     if (s_viewport_zoom_label) {
         char zoom[8];
         snprintf(zoom, sizeof(zoom), "z%u", (unsigned)s_viewport_zoom);
         lv_label_set_text(s_viewport_zoom_label, zoom);
     }
     if (s_viewport_zoom_in_button) {
-        if (s_viewport_zoom >= D1L_MAP_VIEW_MAX_ZOOM) {
+        if (s_viewport_zoom >= maximum) {
             lv_obj_add_state(s_viewport_zoom_in_button, LV_STATE_DISABLED);
         } else {
             lv_obj_clear_state(s_viewport_zoom_in_button, LV_STATE_DISABLED);
@@ -1216,11 +1245,13 @@ static void map_viewport_drag_event_cb(lv_event_t *event)
 static void map_viewport_zoom_in_event_cb(lv_event_t *event)
 {
     (void)event;
-    if (s_viewport_zoom >= D1L_MAP_VIEW_MAX_ZOOM) {
+    const uint8_t next_zoom = map_zoom_clamp(
+        (uint8_t)(s_viewport_zoom + 1U));
+    if (next_zoom <= s_viewport_zoom) {
         return;
     }
     const uint8_t old_zoom = s_viewport_zoom;
-    ++s_viewport_zoom;
+    s_viewport_zoom = next_zoom;
     if (!map_viewport_request_interactive_view()) {
         s_viewport_zoom = old_zoom;
     }
@@ -1715,6 +1746,8 @@ static void map_render_options_root(lv_obj_t *parent,
                                     const d1l_app_snapshot_t *snapshot,
                                     const d1l_ui_map_callbacks_t *callbacks)
 {
+    d1l_map_prefetch_status_t prefetch = {0};
+    d1l_map_prefetch_service_status(&prefetch);
     map_render_header(parent, "Map options", "Location and cache", "Back to Map",
                       callbacks->close_options);
     map_menu_row(parent, 68, "Set location", map_location_status(snapshot),
@@ -1738,7 +1771,10 @@ static void map_render_options_root(lv_obj_t *parent,
     lv_obj_t *policy = map_panel(parent, 16, 280, 448, 80);
     if (policy) {
         lv_obj_t *text = map_label(policy,
-            "Tiles download only while Map is open. Reopening the same area uses the saved copy.",
+            prefetch.provider_configured &&
+                    prefetch.background_prefetch_permitted ?
+                "The local node area downloads in the background. Opening Map always has priority." :
+                "Built-in tiles download only while Map is open. Offline prefetch needs an authorized SD source.",
             MAP_COLOR_MUTED);
         map_label_wrap(text, 418);
         if (text) {
@@ -1755,10 +1791,33 @@ static void map_render_cache_status(lv_obj_t *parent,
                       callbacks->back_to_options);
     d1l_map_view_status_t view_status = {0};
     d1l_map_view_service_status(&view_status);
+    d1l_map_prefetch_status_t prefetch = {0};
+    d1l_map_prefetch_service_status(&prefetch);
     char map_view_value[32];
     uint32_t map_view_color = MAP_COLOR_MUTED;
-    map_saved_area_status(&view_status, map_view_value, sizeof(map_view_value),
-                          &map_view_color);
+    map_saved_area_status(&view_status, map_view_value,
+                          sizeof(map_view_value), &map_view_color);
+    char prefetch_value[40];
+    uint32_t prefetch_color = MAP_COLOR_MUTED;
+    if (prefetch.complete) {
+        snprintf(prefetch_value, sizeof(prefetch_value), "Ready through z%u",
+                 (unsigned)prefetch.selected_max_zoom);
+        prefetch_color = MAP_COLOR_GOOD;
+    } else if (prefetch.running) {
+        snprintf(prefetch_value, sizeof(prefetch_value), "%llu / %llu tiles",
+                 (unsigned long long)prefetch.visited_tiles,
+                 (unsigned long long)prefetch.total_tiles);
+        prefetch_color = MAP_COLOR_INFO;
+    } else if (prefetch.paused_for_visible_map) {
+        snprintf(prefetch_value, sizeof(prefetch_value), "%s", "Paused for Map");
+        prefetch_color = MAP_COLOR_INFO;
+    } else if (prefetch.phase[0] != '\0') {
+        snprintf(prefetch_value, sizeof(prefetch_value), "%s", prefetch.phase);
+        prefetch_color =
+            prefetch.eligible ? MAP_COLOR_INFO : MAP_COLOR_WARN;
+    } else {
+        snprintf(prefetch_value, sizeof(prefetch_value), "%s", "Starting");
+    }
 
     lv_obj_t *panel = map_panel(parent, 16, 64, 448, 324);
     if (!panel) {
@@ -1770,16 +1829,32 @@ static void map_render_cache_status(lv_obj_t *parent,
                           snapshot->map_tile_cache_ready ? MAP_COLOR_GOOD : MAP_COLOR_WARN);
     map_render_status_row(panel, 144, "Location", map_location_status(snapshot),
                           snapshot->map_location_set ? MAP_COLOR_GOOD : MAP_COLOR_WARN);
-    map_render_status_row(panel, 208, "Map view", map_view_value, map_view_color);
+    map_render_status_row(panel, 208, "Map view", map_view_value,
+                          map_view_color);
 
-    lv_obj_t *built_in = map_label(panel, "OpenStreetMap is built in.", MAP_COLOR_MUTED);
+    char source_status[96];
+    if (view_status.provider_configured) {
+        snprintf(source_status, sizeof(source_status), "%s - %s",
+                 view_status.source_id[0] != '\0' ?
+                    view_status.source_id : "SD provider",
+                 prefetch_value);
+    } else {
+        snprintf(source_status, sizeof(source_status), "%s",
+                 "Built-in OpenStreetMap - interactive cache only");
+    }
+    lv_obj_t *built_in = map_label(
+        panel, source_status,
+        view_status.provider_configured ? prefetch_color : MAP_COLOR_MUTED);
     if (built_in) {
         map_label_dot(built_in, 420);
         lv_obj_set_style_text_align(built_in, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(built_in, 12, 274);
     }
-    lv_obj_t *attribution = map_label(panel, "(c) OpenStreetMap contributors",
-                                      MAP_COLOR_DETAIL);
+    lv_obj_t *attribution = map_label(
+        panel,
+        view_status.provider_configured && view_status.attribution[0] != '\0' ?
+            view_status.attribution : "(c) OpenStreetMap contributors",
+        MAP_COLOR_DETAIL);
     if (attribution) {
         map_label_dot(attribution, 420);
         lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_CENTER, 0);
