@@ -213,8 +213,8 @@ def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():
 
     assert '#include "map/map_point_projection.h"' in source
     assert '#include "mesh/node_store.h"' in source
-    assert "MAP_MARKER_QUERY_LIMIT 32U" in source
-    assert "MAP_MARKER_DISPLAY_LIMIT 8U" in source
+    assert "MAP_MARKER_QUERY_LIMIT D1L_NODE_SD_HISTORY_CAPACITY" in source
+    assert "MAP_MARKER_LABEL_LIMIT 8U" in source
     assert "MAP_MARKER_HIT_RADIUS 22" in source
     assert "d1l_node_store_marker_generation()" in marker_refresh
     assert "d1l_node_store_copy_markers(" in marker_refresh
@@ -224,7 +224,13 @@ def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():
     assert "map_copy_bounded_text(" in marker_refresh
     assert "LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE" in marker_refresh
     assert "label_y = point.screen_y + dot_radius + MAP_MARKER_LABEL_GAP" in marker_refresh
-    assert "s_viewport_marker_count < MAP_MARKER_DISPLAY_LIMIT" in marker_refresh
+    assert "for (size_t i = 0; i < candidate_count; ++i)" in marker_refresh
+    assert "s_viewport_marker_count++" in marker_refresh
+    assert (
+        "s_viewport_marker_label_count < MAP_MARKER_LABEL_LIMIT"
+        in marker_refresh
+    )
+    assert "if (!label_allowed)" in marker_refresh
     assert "d1l_map_view_service_acquire_visible" not in marker_refresh
     assert "d1l_map_view_service_acquire_frame" not in marker_refresh
     assert "memcpy(s_viewport_pixels" not in marker_refresh
@@ -444,6 +450,9 @@ def test_storage_and_wifi_transitions_refresh_non_map_ui_without_tearing_down_ma
 
     assert "content_generation_text_equal(left->storage_sd_state" in generation_equal
     assert "content_generation_text_equal(left->storage_setup_action" in generation_equal
+    assert "node_store_backend" in generation_struct
+    assert ".node_store_backend = snapshot->node_store_backend" in generation_builder
+    assert "content_generation_text_equal(left->node_store_backend" in generation_equal
     assert "snapshot->map_tile_cache_ready" not in map_input
     assert "snapshot->wifi_connected" not in map_input
     map_branch = changed.split("} else {", 1)[0]

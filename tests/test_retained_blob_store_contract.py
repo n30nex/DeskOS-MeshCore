@@ -8,7 +8,7 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
+def test_retained_blob_store_has_sd_history_stores_and_nodes_forbid_nvs_fallback():
     header = read("main/storage/retained_blob_store.h")
     source = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
@@ -17,6 +17,7 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in header
     assert "D1L_RETAINED_BLOB_STORE_ROUTES" in header
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in header
+    assert "D1L_RETAINED_BLOB_STORE_NODES" in header
     assert "d1l_retained_blob_store_backend_name" in header
     assert "d1l_retained_blob_store_init" in header
     assert "d1l_retained_blob_store_nvs_ready" in header
@@ -77,11 +78,21 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert 'D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"' in source
     assert 'D1L_RETAINED_ROUTE_SD_DIR "stores/routes"' in source
     assert 'D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"' in source
+    assert 'D1L_RETAINED_NODE_SD_DIR "stores/nodes"' in source
     assert '.name = "public_messages"' in source
     assert '.name = "dm_messages"' in source
     assert '.name = "routes"' in source
     assert '.name = "packet_log"' in source
-    assert 'return s_retained_nvs_ready ? "nvs" : "unavailable";' in source
+    assert '.name = "nodes"' in source
+    node_config = source.split(
+        ".id = D1L_RETAINED_BLOB_STORE_NODES", 1
+    )[1].split("},", 1)[0]
+    assert ".nvs_namespace = NULL" in node_config
+    assert ".nvs_fallback_allowed = false" in node_config
+    assert (
+        "config->nvs_fallback_allowed && s_retained_nvs_ready"
+        in source
+    )
     assert "s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "s_store_backend_generation[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "s_store_state_mux" in source
@@ -206,18 +217,21 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert "D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in storage_status
     assert "D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in storage_status
     assert "D1L_RETAINED_BLOB_STORE_ROUTES" in storage_status
+    assert "D1L_RETAINED_BLOB_STORE_NODES" in storage_status
     assert "sd->file_ops_supported" in storage_status
     assert "sd->atomic_rename_supported" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_DM_MESSAGES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in storage_status
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_NODES)" in storage_status
     assert 'status->data_backend = any_retained_sd ? "mixed" :' in storage_status
     assert '"retained_history_sd_enabled"' in storage_status
     assert 'status->message_store_backend = "nvs"' not in storage_status
     assert 'status->dm_store_backend = "nvs"' not in storage_status
     assert 'status->route_store_backend = "nvs"' not in storage_status
     assert 'status->packet_log_backend = "nvs"' not in storage_status
+    assert 'status->node_store_backend = "nvs"' not in storage_status
     assert "d1l_retained_blob_store_backend_state(" in packet_log
     assert "d1l_retained_blob_store_read_sd_primary(" in packet_log
     assert "d1l_retained_blob_store_read_nvs_fallback(" in packet_log

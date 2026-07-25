@@ -479,6 +479,7 @@ int main(void)
     assert(store_flush_calls(3U) == 0U);
     assert(store_flush_calls(4U) == 0U);
     assert(store_flush_calls(5U) == 0U);
+    assert(store_flush_calls(6U) == 0U);
 
     assert(d1l_route_store_worker_force_flush(1000U) == ESP_OK);
     assert(store_flush_calls(0U) == 2U);
@@ -487,6 +488,7 @@ int main(void)
     assert(store_flush_calls(3U) == 1U);
     assert(store_flush_calls(4U) == 1U);
     assert(store_flush_calls(5U) == 1U);
+    assert(store_flush_calls(6U) == 1U);
 
     /* A quiesce owner holds both request and flush locks. A competing forced
      * caller times out, then quiesce_end releases both for the next request. */
@@ -506,6 +508,7 @@ int main(void)
     assert(store_flush_calls(3U) == 2U);
     assert(store_flush_calls(4U) == 2U);
     assert(store_flush_calls(5U) == 2U);
+    assert(store_flush_calls(6U) == 2U);
 
     puts("native retained-store worker lifecycle: ok");
     return 0;

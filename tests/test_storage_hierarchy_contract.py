@@ -97,6 +97,8 @@ def test_storage_retained_sd_degradation_is_copied_into_touch_snapshot():
         "snapshot->storage_retained_backup_degraded = storage.retained_backup_degraded;"
         in snapshot_copy
     )
+    assert "const char *node_store_backend;" in snapshot_struct
+    assert "snapshot->node_store_backend = storage.node_store_backend;" in snapshot_copy
 
 
 def test_storage_touch_ui_prioritizes_all_attention_states():
@@ -224,11 +226,12 @@ def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():
         "dm_store_backend",
         "packet_log_backend",
         "route_store_backend",
+        "node_store_backend",
         "map_tile_backend",
         "export_backend",
     ):
         assert f"input->{backend}" in summary
-    assert summary.count("backend_uses_sd(") == 6
+    assert summary.count("backend_uses_sd(") == 7
     assert 'uses_sd ? "SD + internal" : "Internal"' in summary
     assert "sd_pending_store_migration" not in uses_sd
 

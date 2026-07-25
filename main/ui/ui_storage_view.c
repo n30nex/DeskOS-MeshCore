@@ -202,6 +202,14 @@ static const char *retained_backend(
     return "Unavailable";
 }
 
+static const char *node_backend(const char *backend)
+{
+    if (text_equals(backend, "sd")) {
+        return "SD card";
+    }
+    return "Unavailable - live only";
+}
+
 static const char *map_backend(const char *backend)
 {
     if (text_equals(backend, "sd_map_tiles_ready")) {
@@ -236,8 +244,12 @@ static const char *data_summary(const d1l_ui_storage_view_input_t *input)
         backend_uses_sd(input->dm_store_backend) ||
         backend_uses_sd(input->packet_log_backend) ||
         backend_uses_sd(input->route_store_backend) ||
+        backend_uses_sd(input->node_store_backend) ||
         backend_uses_sd(input->map_tile_backend) ||
         backend_uses_sd(input->export_backend);
+    if (text_equals(input->node_store_backend, "unavailable")) {
+        return "Live only; node history off";
+    }
     if (input->retained_backup_degraded) {
         return uses_sd ? "SD; backup issue" : "Storage issue";
     }
@@ -252,7 +264,12 @@ static void set_hero(const d1l_ui_storage_view_input_t *input,
     const char *guidance = "Status updates automatically.";
     uint32_t accent = COLOR_AMBER;
 
-    if (input->retained_backup_degraded) {
+    if (text_equals(input->node_store_backend, "unavailable")) {
+        state = "Live mesh only";
+        detail = "SD unavailable; node history is not saved.";
+        guidance = "RF transmit, receive, and chat remain available.";
+        accent = COLOR_RED;
+    } else if (input->retained_backup_degraded) {
         if (input->retained_sd_degraded) {
             state = "Saved storage needs attention";
             detail = "SD and internal backup reported errors.";
@@ -298,8 +315,8 @@ static void set_hero(const d1l_ui_storage_view_input_t *input,
         guidance = "The card check finishes automatically.";
     } else if (text_equals(input->setup_action, "insert_card")) {
         state = "No SD card";
-        detail = "Internal storage is active.";
-        guidance = "Insert a FAT32 card for more space.";
+        detail = "Saved history is unavailable.";
+        guidance = "Insert a prepared FAT32 card; live chat stays available.";
     } else if (text_equals(input->setup_action, "prepare_fat32_on_computer") ||
                text_equals(input->setup_action,
                            "backup_reformat_fat32_on_computer")) {
@@ -404,7 +421,9 @@ bool d1l_ui_storage_view(const d1l_ui_storage_view_input_t *input,
         return false;
     }
     memset(out_view, 0, sizeof(*out_view));
-    out_view->needs_attention = storage_needs_attention(input) ||
+    out_view->needs_attention =
+        text_equals(input->node_store_backend, "unavailable") ||
+        storage_needs_attention(input) ||
         input->retained_backup_degraded;
     set_hero(input, &out_view->hero);
 
@@ -442,6 +461,10 @@ bool d1l_ui_storage_view(const d1l_ui_storage_view_input_t *input,
                  D1L_UI_STORAGE_LOCATION_ROUTES, "Routes",
                  retained_backend(input, input->route_store_backend),
                  backend_accent(input->route_store_backend));
+    set_location(&out_view->locations[D1L_UI_STORAGE_LOCATION_NODES],
+                 D1L_UI_STORAGE_LOCATION_NODES, "Node map history",
+                 node_backend(input->node_store_backend),
+                 backend_accent(input->node_store_backend));
     set_location(&out_view->locations[D1L_UI_STORAGE_LOCATION_MAP_TILES],
                  D1L_UI_STORAGE_LOCATION_MAP_TILES, "Map tiles",
                  map_backend(input->map_tile_backend),

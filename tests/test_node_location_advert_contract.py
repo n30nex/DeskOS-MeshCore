@@ -172,7 +172,8 @@ def test_schema_v4_migrates_v3_without_fabricating_location():
     migration = function_slice(source, "static void migrate_v3_entries", "static void migrate_v2_blob")
     init = function_slice(source, "esp_err_t d1l_node_store_init", "esp_err_t d1l_node_store_clear")
 
-    assert "D1L_NODE_STORE_SCHEMA 4U" in source
+    assert "D1L_NODE_STORE_SCHEMA_V4 4U" in source
+    assert "D1L_NODE_STORE_SD_SCHEMA 5U" in source
     assert "D1L_NODE_STORE_SCHEMA_V3 3U" in source
     assert "D1L_NODE_STORE_LEGACY_TYPE_LEN 8U" in source
     assert "D1L_NODE_TYPE_LEN 9U" in header
@@ -210,7 +211,9 @@ def test_stale_guard_location_preservation_and_material_marker_generation():
         "esp_err_t d1l_node_store_upsert_advert",
         "d1l_node_store_stats_t d1l_node_store_stats",
     )
-    material = function_slice(source, "static bool marker_material_changed", "static void fill_blob")
+    material = function_slice(
+        source, "static bool marker_material_changed", "static uint32_t monotonic_ms"
+    )
 
     assert upsert.index("d1l_meshcore_lifetime_advert_is_strictly_newer(") < upsert.index(
         "entry->seq = s_next_seq++"
@@ -249,17 +252,19 @@ def test_stale_guard_location_preservation_and_material_marker_generation():
     assert "before->advert_timestamp" not in material
     assert "before->location_advert_timestamp" not in material
     assert upsert.count("bump_marker_generation();") == 1
-    for rollback_field in (
-        "entry_before",
+    assert "entry_before" in upsert
+    for removed_sync_persistence in (
         "count_before",
         "next_seq_before",
         "total_written_before",
         "dropped_oldest_before",
         "marker_generation_before",
+        "persist_store()",
+        "nvs_set_blob",
     ):
-        assert rollback_field in upsert
-    assert "if (ret != ESP_OK)" in upsert
-    assert upsert.index("persist_store()") < upsert.index("*entry = entry_before")
+        assert removed_sync_persistence not in upsert
+    assert "note_persistence_dirty_locked(false, now_ms)" in upsert
+    assert "return ESP_OK;" in upsert
 
 
 def test_marker_query_is_bounded_passive_and_location_only():

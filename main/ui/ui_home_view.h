@@ -36,6 +36,7 @@ typedef struct {
     bool storage_sd_needs_fat32;
     const char *storage_sd_state;
     const char *storage_setup_action;
+    const char *node_store_backend;
 } d1l_ui_home_view_input_t;
 
 typedef struct {

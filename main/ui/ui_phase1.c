@@ -375,6 +375,7 @@ typedef struct {
     const char *storage_setup_action;
     const char *message_store_backend;
     const char *dm_store_backend;
+    const char *node_store_backend;
 } d1l_ui_content_generation_t;
 
 typedef struct {
@@ -471,6 +472,7 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .storage_setup_action = snapshot->storage_setup_action,
         .message_store_backend = snapshot->message_store_backend,
         .dm_store_backend = snapshot->dm_store_backend,
+        .node_store_backend = snapshot->node_store_backend,
     };
 }
 
@@ -547,7 +549,9 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         content_generation_text_equal(left->message_store_backend,
                                       right->message_store_backend) &&
         content_generation_text_equal(left->dm_store_backend,
-                                      right->dm_store_backend);
+                                      right->dm_store_backend) &&
+        content_generation_text_equal(left->node_store_backend,
+                                      right->node_store_backend);
 }
 
 static void remember_rendered_content_generation(const d1l_app_snapshot_t *snapshot)
@@ -1780,6 +1784,7 @@ static void home_view_input_from_snapshot(
         .storage_sd_needs_fat32 = snapshot->storage_sd_needs_fat32,
         .storage_sd_state = snapshot->storage_sd_state,
         .storage_setup_action = snapshot->storage_setup_action,
+        .node_store_backend = snapshot->node_store_backend,
     };
     d1l_ui_home_view_apply_release_profile(out_input);
 }
@@ -1879,6 +1884,7 @@ static void storage_view_input_from_snapshot(
         .dm_store_backend = snapshot->dm_store_backend,
         .packet_log_backend = snapshot->packet_log_backend,
         .route_store_backend = snapshot->route_store_backend,
+        .node_store_backend = snapshot->node_store_backend,
         .map_tile_backend = snapshot->map_tile_backend,
         .export_backend = snapshot->export_backend,
     };

@@ -141,10 +141,13 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
     assert "D1L_RETAINED_BLOB_STORE_ROUTES" in source
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in source
+    assert "D1L_RETAINED_BLOB_STORE_NODES" in source
+    assert "node_store_backend" in header
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_DM_MESSAGES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in source
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_NODES)" in source
     assert "refresh_retained_sd_health" in source
     assert "d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
     assert "d1l_retained_blob_store_any_sd_degraded()" in source
@@ -154,6 +157,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert 'status->message_store_backend = "nvs"' not in source
     assert 'status->dm_store_backend = "nvs"' not in source
     assert 'status->route_store_backend = "nvs"' not in source
+    assert 'status->node_store_backend = "nvs"' not in source
     assert "d1l_retained_blob_store_note_sd_backend(sd->data_ready" in source
     assert "sd->file_ops_supported" in source
     assert "sd->atomic_rename_supported" in source
@@ -700,7 +704,9 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "no_device_format" in console
     assert "false" in console
     assert "ESP_ERR_NOT_SUPPORTED" in console
-    assert '\\"fallback\\":\\"nvs\\"' in console
+    assert '\\"fallback\\":\\"per_store\\"' in console
+    assert '\\"node_history_requires_sd\\":true' in console
+    assert '\\"live_mesh_without_sd\\":[\\"rf_tx\\",\\"rf_rx\\",\\"chat\\"]' in console
     assert "storage status" in SMOKE_COMMANDS
     assert "storage map-policy" in SMOKE_COMMANDS
     assert "storage setup" in SMOKE_COMMANDS

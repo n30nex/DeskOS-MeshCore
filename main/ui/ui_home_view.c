@@ -38,6 +38,7 @@ void d1l_ui_home_view_apply_release_profile(
         input->storage_sd_needs_fat32 = false;
         input->storage_sd_state = "internal";
         input->storage_setup_action = "forced_nvs";
+        input->node_store_backend = "nvs";
     }
 }
 
@@ -51,7 +52,8 @@ static bool storage_needs_attention(const d1l_ui_home_view_input_t *input)
     if (!input) {
         return false;
     }
-    return input->storage_retained_sd_degraded ||
+    return text_equals(input->node_store_backend, "unavailable") ||
+           input->storage_retained_sd_degraded ||
            text_equals(input->storage_sd_state, "error") ||
            text_equals(input->storage_sd_state, "bridge_reported") ||
            text_equals(input->storage_setup_action,
@@ -71,6 +73,9 @@ const char *d1l_ui_home_sd_state(const d1l_ui_home_view_input_t *input)
     }
     if (input->storage_retained_backup_degraded) {
         return "backup issue";
+    }
+    if (text_equals(input->node_store_backend, "unavailable")) {
+        return "live only";
     }
     if (storage_needs_attention(input)) {
         return "Needs attention";
@@ -189,11 +194,20 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
     out_view->messages_status_color = unread_count ? 0xFBBF24U :
         (input->muted_dm_unread_count ? 0x8EA0AEU : 0x5EEAD4U);
 
-    snprintf(out_view->network_status, sizeof(out_view->network_status),
-             "%llu contacts | %llu nearby",
-             (unsigned long long)input->contact_count,
-             (unsigned long long)input->node_count);
-    out_view->network_status_color = input->contact_count ? 0x5EEAD4U : 0x8EA0AEU;
+    const bool node_history_unavailable =
+        text_equals(input->node_store_backend, "unavailable");
+    if (node_history_unavailable) {
+        snprintf(out_view->network_status, sizeof(out_view->network_status),
+                 "%llu nearby | history not saved",
+                 (unsigned long long)input->node_count);
+    } else {
+        snprintf(out_view->network_status, sizeof(out_view->network_status),
+                 "%llu contacts | %llu nearby",
+                 (unsigned long long)input->contact_count,
+                 (unsigned long long)input->node_count);
+    }
+    out_view->network_status_color = node_history_unavailable ? 0xFBBF24U :
+        (input->contact_count ? 0x5EEAD4U : 0x8EA0AEU);
 
     const char *map_status = "Ready to open";
     out_view->map_status_color = 0x5EEAD4U;
@@ -276,7 +290,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
 
     const char *sd_compact = out_view->sd_value;
     if (out_view->storage_needs_attention) {
-        sd_compact = "Check";
+        sd_compact = node_history_unavailable ? "Live only" : "Check";
     } else if (text_equals(out_view->sd_value, "needs FAT32")) {
         sd_compact = "FAT32";
     } else if (text_equals(out_view->sd_value, "storage issue") ||
@@ -312,8 +326,9 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
         input->radio_apply_pending || input->wifi_connecting ||
         sd_notice;
     snprintf(out_view->attention_value, sizeof(out_view->attention_value), "%s",
-             out_view->attention_required ? "Check" :
-             (attention_notice ? "Notice" : "OK"));
+             node_history_unavailable ? "Limited" :
+             (out_view->attention_required ? "Check" :
+             (attention_notice ? "Notice" : "OK")));
     out_view->attention_value_color = out_view->attention_required ? 0xF87171U :
         (attention_notice ? 0xFBBF24U : 0x5EEAD4U);
 }

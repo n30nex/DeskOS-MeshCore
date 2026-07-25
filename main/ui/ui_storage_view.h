@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #define D1L_UI_STORAGE_TEXT_LEN 80U
-#define D1L_UI_STORAGE_LOCATION_COUNT 6U
+#define D1L_UI_STORAGE_LOCATION_COUNT 7U
 #define D1L_UI_STORAGE_VIEW_MODEL_MAX_BYTES 2048U
 
 typedef enum {
@@ -13,6 +13,7 @@ typedef enum {
     D1L_UI_STORAGE_LOCATION_DIRECT_MESSAGES,
     D1L_UI_STORAGE_LOCATION_PACKETS,
     D1L_UI_STORAGE_LOCATION_ROUTES,
+    D1L_UI_STORAGE_LOCATION_NODES,
     D1L_UI_STORAGE_LOCATION_MAP_TILES,
     D1L_UI_STORAGE_LOCATION_EXPORTS,
 } d1l_ui_storage_location_t;
@@ -37,6 +38,7 @@ typedef struct {
     const char *dm_store_backend;
     const char *packet_log_backend;
     const char *route_store_backend;
+    const char *node_store_backend;
     const char *map_tile_backend;
     const char *export_backend;
 } d1l_ui_storage_view_input_t;

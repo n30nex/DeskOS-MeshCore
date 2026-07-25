@@ -457,6 +457,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->dm_store_backend = storage.dm_store_backend;
     snapshot->packet_log_backend = storage.packet_log_backend;
     snapshot->route_store_backend = storage.route_store_backend;
+    snapshot->node_store_backend = storage.node_store_backend;
     snapshot->map_tile_backend = storage.map_tile_backend;
     snapshot->export_backend = storage.export_backend;
     snapshot->map_tile_cache_policy = D1L_MAP_TILE_CACHE_POLICY;

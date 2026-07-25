@@ -164,6 +164,7 @@ typedef struct {
     const char *dm_store_backend;
     const char *packet_log_backend;
     const char *route_store_backend;
+    const char *node_store_backend;
     const char *map_tile_backend;
     const char *export_backend;
     const char *map_tile_cache_policy;

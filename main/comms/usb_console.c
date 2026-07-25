@@ -979,6 +979,9 @@ static void print_retained_nvs_telemetry_json(
     printf(",\"packets\":");
     print_retained_nvs_store_telemetry_json(
         &telemetry->stores[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    printf(",\"nodes\":");
+    print_retained_nvs_store_telemetry_json(
+        &telemetry->stores[D1L_RETAINED_BLOB_STORE_NODES]);
     printf("}}");
 }
 
@@ -2915,6 +2918,9 @@ static void cmd_storage_status(void)
     print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
     printf(",\"route_store_backend\":");
     print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
+    printf(",\"node_store_backend\":");
+    print_json_string(status.node_store_backend ?
+                          status.node_store_backend : "unavailable");
     printf(",\"map_tile_backend\":");
     print_json_string(
         map_available && status.map_tile_backend ?
@@ -2981,6 +2987,9 @@ static void cmd_storage_status(void)
     printf(",\"packets\":");
     print_retained_sd_store_json(
         &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    printf(",\"nodes\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_NODES]);
     printf("}}");
     printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
     print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
@@ -2990,16 +2999,21 @@ static void cmd_storage_status(void)
     print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
     printf(",\"routes\":");
     print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
+    printf(",\"nodes\":");
+    print_json_string(status.node_store_backend ?
+                          status.node_store_backend : "unavailable");
     printf(",\"contacts\":\"nvs\",\"read_state\":\"nvs\",\"crashlog\":\"nvs\",\"map_tiles\":");
     print_json_string(
         map_available && status.map_tile_backend ?
             status.map_tile_backend : "unavailable");
     printf(",\"exports\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
-    printf("},\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
+    printf("},\"node_history_requires_sd\":true,"
+           "\"live_mesh_without_sd\":[\"rf_tx\",\"rf_rx\",\"chat\"],"
+           "\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
            bool_json(status.setup_required), bool_json(status.setup_supported));
     print_json_string(status.setup_action ? status.setup_action : "not_available");
-    printf(",\"fallback\":\"nvs\",\"note\":");
+    printf(",\"fallback\":\"per_store\",\"note\":");
     print_json_string(status.note ? status.note : "");
     printf("}\n");
 }
@@ -3488,6 +3502,9 @@ static void cmd_storage_filecanary(void)
     print_json_string(status.data_backend ? status.data_backend : "nvs");
     printf(",\"packet_log_backend\":");
     print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    printf(",\"node_store_backend\":");
+    print_json_string(status.node_store_backend ?
+                          status.node_store_backend : "unavailable");
     printf(",\"note\":\"Serial-only RP2040 SD file-operation canary passed; no Public RF or format command was used\"}\n");
 }
 
@@ -3505,6 +3522,7 @@ static bool storage_retained_history_sd_ready(const d1l_storage_status_t *status
            text_equals(status->dm_store_backend, "sd") &&
            text_equals(status->route_store_backend, "sd") &&
            text_equals(status->packet_log_backend, "sd") &&
+           text_equals(status->node_store_backend, "sd") &&
            status->sd_present &&
            status->sd_mounted &&
            status->sd_data_root_ready &&
@@ -3534,6 +3552,7 @@ static bool storage_retained_history_nvs_no_card_ready(
            text_equals(status->dm_store_backend, "nvs") &&
            text_equals(status->route_store_backend, "nvs") &&
            text_equals(status->packet_log_backend, "nvs") &&
+           text_equals(status->node_store_backend, "unavailable") &&
            d1l_retained_blob_store_nvs_ready() &&
            d1l_retained_blob_store_nvs_marker_ready() &&
            d1l_retained_blob_store_nvs_markers_complete() &&
@@ -4026,7 +4045,8 @@ static bool build_diagnostic_export_payload(const char *token,
                             "\"storage\":{\"sd_state\":\"%s\",\"data_backend\":\"%s\","
                             "\"export_backend\":\"%s\",\"message_store_backend\":\"%s\","
                             "\"dm_store_backend\":\"%s\",\"route_store_backend\":\"%s\","
-                            "\"packet_log_backend\":\"%s\",\"map_tile_backend\":\"%s\","
+                            "\"packet_log_backend\":\"%s\",\"node_store_backend\":\"%s\","
+                            "\"map_tile_backend\":\"%s\","
                             "\"file_ops\":%s,\"atomic_rename\":%s},",
                             token,
                             status->sd_state ? status->sd_state : "unknown",
@@ -4036,6 +4056,8 @@ static bool build_diagnostic_export_payload(const char *token,
                             status->dm_store_backend ? status->dm_store_backend : "nvs",
                             status->route_store_backend ? status->route_store_backend : "nvs",
                             status->packet_log_backend ? status->packet_log_backend : "nvs",
+                            status->node_store_backend ?
+                                status->node_store_backend : "unavailable",
                             status->map_tile_backend ? status->map_tile_backend : "unavailable",
                             bool_json(status->file_ops_supported),
                             bool_json(status->atomic_rename_supported))) {
@@ -4429,7 +4451,7 @@ static bool build_data_export_payload(const char *token,
                             "\"storage\":{\"sd_state\":\"%s\",\"data_backend\":\"%s\","
                             "\"export_backend\":\"%s\",\"stores\":{\"messages\":\"%s\","
                             "\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\","
-                            "\"contacts\":\"onboard\",\"nodes\":\"onboard\","
+                            "\"contacts\":\"onboard\",\"nodes\":\"%s\","
                             "\"read_state\":\"onboard\",\"map_tiles\":\"%s\"},"
                             "\"file_ops\":%s,\"atomic_rename\":%s},"
                             "\"limits\":{\"payload_max\":%u,\"sample_max\":%u},",
@@ -4441,6 +4463,8 @@ static bool build_data_export_payload(const char *token,
                             status->dm_store_backend ? status->dm_store_backend : "nvs",
                             status->route_store_backend ? status->route_store_backend : "nvs",
                             status->packet_log_backend ? status->packet_log_backend : "nvs",
+                            status->node_store_backend ?
+                                status->node_store_backend : "unavailable",
                             status->map_tile_backend ? status->map_tile_backend : "unavailable",
                             bool_json(status->file_ops_supported),
                             bool_json(status->atomic_rename_supported),
@@ -4937,17 +4961,19 @@ static void cmd_storage_retained_canary(const char *line)
            (unsigned long)dm_seq,
            (unsigned long)route_seq,
            (unsigned long)packet_seq);
-    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"backend_mode\":\"%s\",\"public_rf_tx\":false,\"dm_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\"}",
+    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"backend_mode\":\"%s\",\"public_rf_tx\":false,\"dm_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\",\"nodes\":\"%s\"}",
            sd_backend_mode ? "sd" : "nvs_no_card",
            status.message_store_backend,
            status.dm_store_backend,
            status.route_store_backend,
-           status.packet_log_backend);
-    printf(",\"backend_generations\":{\"messages\":%lu,\"dm\":%lu,\"routes\":%lu,\"packets\":%lu}",
+           status.packet_log_backend,
+           status.node_store_backend);
+    printf(",\"backend_generations\":{\"messages\":%lu,\"dm\":%lu,\"routes\":%lu,\"packets\":%lu,\"nodes\":%lu}",
            (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES],
            (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_DM_MESSAGES],
            (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_ROUTES],
-           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PACKET_LOG],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_NODES]);
     printf(",\"note\":\"Synthetic retained-history canary rows appended without Public or DM RF or a format command\"}\n");
 }
 

@@ -36,6 +36,14 @@ def test_bulk_store_and_inspector_buffers_use_external_bss():
         "EXT_RAM_BSS_ATTR;"
     ) in node_store
     assert (
+        "static d1l_node_store_sd_blob_t s_sd_blob_scratch "
+        "EXT_RAM_BSS_ATTR;"
+    ) in node_store
+    assert (
+        "static d1l_node_store_sd_blob_t s_persist_snapshot "
+        "EXT_RAM_BSS_ATTR;"
+    ) in node_store
+    assert (
         "static d1l_node_entry_t s_node_scratch[D1L_NODE_STORE_CAPACITY] "
         "EXT_RAM_BSS_ATTR;"
     ) in mesh_inspector

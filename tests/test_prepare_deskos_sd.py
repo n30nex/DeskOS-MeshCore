@@ -44,7 +44,21 @@ def test_prepare_is_plan_only_by_default_and_apply_is_verified(tmp_path):
     receipt = target / "deskos" / "card-preparation-receipt.json"
     assert manifest.is_file()
     assert json.loads(map_manifest.read_text(encoding="utf-8"))["schema"] == 2
-    assert json.loads(receipt.read_text(encoding="utf-8"))["formats_sd"] is False
+    receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert receipt_payload["formats_sd"] is False
+    expected_directories = {
+        "deskos/stores/messages/public",
+        "deskos/stores/messages/dm",
+        "deskos/stores/nodes",
+        "deskos/stores/routes",
+        "deskos/stores/packet_log",
+        "deskos/exports",
+        "deskos/map/tiles",
+    }
+    assert set(result["directories"]) == expected_directories
+    assert set(receipt_payload["directories"]) == expected_directories
+    for relative in expected_directories:
+        assert (target / relative).is_dir()
     repeated = run_prepare(
         "--target", str(target), "--skip-filesystem-check", "--apply"
     )

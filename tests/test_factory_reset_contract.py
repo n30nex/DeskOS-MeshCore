@@ -71,6 +71,7 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         ("nvs", "d1l_channels", "channels", clear),
         ("nvs", "d1l_contacts", "contacts", clear),
         ("nvs", "d1l_nodes", "heard", clear),
+        ("nvs", "d1l_nodes", "marker_epoch", clear),
         ("nvs", "d1l_read", "state", clear),
         ("d1l_retained", "d1l_messages", "public", clear),
         ("nvs", "d1l_messages", "public", clear),
@@ -94,6 +95,7 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         ("nvs", "d1l_reset", "sd_dm_v1", journal),
         ("nvs", "d1l_reset", "sd_routes_v1", journal),
         ("nvs", "d1l_reset", "sd_packets_v1", journal),
+        ("nvs", "d1l_reset", "sd_nodes_v1", journal),
     }
     assert nvs_tuples == expected_nvs_tuples
     for entry in entries:
@@ -142,8 +144,8 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         ),
     }
     header = read("main/storage/factory_reset.h")
-    assert "D1L_FACTORY_RESET_INVENTORY_COUNT 30U" in header
-    assert "D1L_FACTORY_RESET_SD_STORE_COUNT 4U" in header
+    assert "D1L_FACTORY_RESET_INVENTORY_COUNT 32U" in header
+    assert "D1L_FACTORY_RESET_SD_STORE_COUNT 5U" in header
     assert "D1L_FACTORY_RESET_RAW_MARKER_COUNT 2U" in header
     assert "D1L_FACTORY_RESET_RAW_MARKER_BYTES 16U" in header
 
