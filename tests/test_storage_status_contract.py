@@ -151,8 +151,8 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert "refresh_retained_sd_health" in source
     assert "d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
     assert "d1l_retained_blob_store_any_sd_degraded()" in source
-    assert "d1l_retained_blob_store_nvs_ready()" in source
-    assert "nvs_mirror_last_error != ESP_OK" in source
+    assert "status->retained_backup_degraded = false;" in source
+    assert "Internal NVS is not a history mirror" in source
     assert "D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE" in source
     assert 'status->message_store_backend = "nvs"' not in source
     assert 'status->dm_store_backend = "nvs"' not in source
