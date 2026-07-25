@@ -149,7 +149,8 @@ bool d1l_meshcore_admin_begin_login(
     if (!session || !peer_public_key || !local_public_key || !session_secret ||
         request_deadline_us == 0U || idle_timeout_us == 0U ||
         absolute_timeout_us == 0U || idle_timeout_us > absolute_timeout_us ||
-        role != D1L_MESHCORE_ADMIN_ROLE_REPEATER ||
+        (role != D1L_MESHCORE_ADMIN_ROLE_REPEATER &&
+         role != D1L_MESHCORE_ADMIN_ROLE_ROOM) ||
         (session->state != D1L_MESHCORE_ADMIN_IDLE &&
          session->state != D1L_MESHCORE_ADMIN_TIMED_OUT)) {
         return false;
@@ -188,7 +189,8 @@ bool d1l_meshcore_admin_binding_matches(
     const uint8_t session_secret[D1L_MESHCORE_ADMIN_SECRET_BYTES])
 {
     return session && role == session->role &&
-           role == D1L_MESHCORE_ADMIN_ROLE_REPEATER &&
+           (role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ||
+            role == D1L_MESHCORE_ADMIN_ROLE_ROOM) &&
            bytes_equal(session->peer_public_key, peer_public_key,
                        D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES) &&
            bytes_equal(session->local_public_key, local_public_key,
@@ -390,6 +392,158 @@ bool d1l_meshcore_admin_cancel_status_request(
     return true;
 }
 
+const char *d1l_meshcore_admin_mutation_name(
+    d1l_meshcore_admin_mutation_t mutation)
+{
+    switch (mutation) {
+    case D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS:
+        return "clear_stats";
+    case D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP:
+        return "advertise_zero_hop";
+    case D1L_MESHCORE_ADMIN_MUTATION_NONE:
+    default:
+        return "none";
+    }
+}
+
+const char *d1l_meshcore_admin_mutation_command(
+    d1l_meshcore_admin_mutation_t mutation)
+{
+    switch (mutation) {
+    case D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS:
+        return "clear stats";
+    case D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP:
+        return "advert.zerohop";
+    case D1L_MESHCORE_ADMIN_MUTATION_NONE:
+    default:
+        return NULL;
+    }
+}
+
+static const char *mutation_success_reply(
+    d1l_meshcore_admin_mutation_t mutation)
+{
+    switch (mutation) {
+    case D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS:
+        return "(OK - stats reset)";
+    case D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP:
+        return "OK - zerohop advert sent";
+    case D1L_MESHCORE_ADMIN_MUTATION_NONE:
+    default:
+        return NULL;
+    }
+}
+
+bool d1l_meshcore_admin_begin_mutation(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_mutation_t mutation, uint32_t tag,
+    uint64_t now_us, uint64_t request_deadline_us)
+{
+    const uint8_t expected_firmware =
+        session && session->role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ? 2U :
+        session && session->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ? 1U : 0U;
+    if (!session || session->state != D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+        !d1l_meshcore_admin_mutation_command(mutation) ||
+        tag == 0U || request_deadline_us == 0U ||
+        tag == session->last_completed_tag ||
+        (session->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ADMIN) !=
+            D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ||
+        expected_firmware == 0U ||
+        session->firmware_level != expected_firmware) {
+        return false;
+    }
+    if (authenticated_deadline_due(session, now_us)) {
+        d1l_meshcore_admin_timeout(session);
+        return false;
+    }
+    session->pending_tag = tag;
+    session->pending_mutation = mutation;
+    session->request_deadline_us = request_deadline_us;
+    session->state = D1L_MESHCORE_ADMIN_MUTATION_PENDING;
+    session->generation = next_generation(session->generation);
+    return true;
+}
+
+bool d1l_meshcore_admin_cancel_mutation(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_mutation_t mutation, uint32_t tag)
+{
+    if (!session ||
+        session->state != D1L_MESHCORE_ADMIN_MUTATION_PENDING ||
+        session->pending_mutation != mutation ||
+        session->pending_tag != tag) {
+        return false;
+    }
+    session->pending_tag = 0U;
+    session->pending_mutation = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+    session->request_deadline_us = 0U;
+    session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
+    session->generation = next_generation(session->generation);
+    return true;
+}
+
+static bool mutation_error_reply(const uint8_t *text, size_t text_len)
+{
+    return text && text_len >= 3U &&
+           ((memcmp(text, "ERR", 3U) == 0) ||
+            (text_len >= 5U && memcmp(text, "Error", 5U) == 0) ||
+            (text_len >= 4U && memcmp(text, "(ERR", 4U) == 0));
+}
+
+d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_accept_mutation_response(
+    d1l_meshcore_admin_session_t *session,
+    const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
+    uint32_t response_timestamp, const uint8_t *text, size_t text_len,
+    uint64_t now_us)
+{
+    if (!session ||
+        session->state != D1L_MESHCORE_ADMIN_MUTATION_PENDING ||
+        !d1l_meshcore_admin_peer_matches(session, peer_public_key)) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+    }
+    if (authenticated_deadline_due(session, now_us) ||
+        deadline_due(session->request_deadline_us, now_us)) {
+        d1l_meshcore_admin_timeout(session);
+        return D1L_MESHCORE_ADMIN_RESPONSE_EXPIRED;
+    }
+    if (!text || text_len == 0U ||
+        text_len > D1L_MESHCORE_ADMIN_MUTATION_REPLY_MAX_BYTES ||
+        response_timestamp == 0U ||
+        response_timestamp <= session->server_timestamp) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+    }
+    for (size_t i = 0U; i < text_len; ++i) {
+        if (text[i] < 0x20U || text[i] > 0x7EU) {
+            return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+        }
+    }
+
+    const d1l_meshcore_admin_mutation_t mutation =
+        session->pending_mutation;
+    const char *expected = mutation_success_reply(mutation);
+    const size_t expected_len = expected ? strlen(expected) : 0U;
+    const bool success = expected && text_len == expected_len &&
+                         memcmp(text, expected, expected_len) == 0;
+    const bool rejected = !success && mutation_error_reply(text, text_len);
+    if (!success && !rejected) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+    }
+
+    session->server_timestamp = response_timestamp;
+    session->last_completed_tag = session->pending_tag;
+    session->pending_tag = 0U;
+    session->last_mutation = mutation;
+    session->last_mutation_success = success;
+    session->pending_mutation = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+    session->request_deadline_us = 0U;
+    refresh_idle_deadline(session, now_us);
+    session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
+    session->generation = next_generation(session->generation);
+    return success ? D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED :
+                     D1L_MESHCORE_ADMIN_RESPONSE_REJECTED;
+}
+
 size_t d1l_meshcore_admin_status_logical_size(
     d1l_meshcore_admin_role_t role)
 {
@@ -498,7 +652,8 @@ bool d1l_meshcore_admin_expire_if_due(
         due = deadline_due(session->request_deadline_us, now_us);
     } else if (session->state == D1L_MESHCORE_ADMIN_AUTHENTICATED) {
         due = authenticated_deadline_due(session, now_us);
-    } else if (session->state == D1L_MESHCORE_ADMIN_STATUS_PENDING) {
+    } else if (session->state == D1L_MESHCORE_ADMIN_STATUS_PENDING ||
+               session->state == D1L_MESHCORE_ADMIN_MUTATION_PENDING) {
         due = authenticated_deadline_due(session, now_us) ||
               deadline_due(session->request_deadline_us, now_us);
     }

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "lvgl.h"
+#include "ui_font_symbols_14.h"
 
 static const char *d1l_compose_kb_map_lc[] = {
     "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
@@ -50,17 +51,18 @@ static const char *d1l_compose_kb_map_spec[] = {
     "abc", "1", "2", "3", "4", "5", "6", "7", "8", "9", "\n",
     "0", "+", "-", "/", "*", "=", "%", "!", "?", "#", "\n",
     "@", "&", "(", ")", ":", ";", "\"", "'", ".", ",", "\n",
-    "ABC", "_", " ", "/", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+    "☺", "☹", "♥", "★", "✓", "☕", "⚠", "✈", "\n",
+    "ABC", "_", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
 };
 
 static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_spec[] = {
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
     1,
-    6,
-    1,
+    7,
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2
 };
@@ -80,7 +82,8 @@ void d1l_ui_keyboard_configure_compose(lv_obj_t *keyboard)
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_2,
                         d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
     lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
-    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(
+        keyboard, &d1l_ui_font_symbols_14, LV_PART_ITEMS);
     lv_obj_set_style_pad_all(keyboard, 4, 0);
     lv_obj_set_style_pad_row(keyboard, 6, 0);
     lv_obj_set_style_pad_column(keyboard, 4, 0);

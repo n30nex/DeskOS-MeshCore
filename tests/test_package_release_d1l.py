@@ -361,6 +361,25 @@ def write_meshcore_signed_advert_runtime(
     return path
 
 
+def test_full_feature_package_requires_signing_key_at_callable_boundary(
+    tmp_path,
+) -> None:
+    with pytest.raises(ValueError, match="requires an update signing key"):
+        package_release_d1l.create_release_package(
+            root=tmp_path,
+            build_dir=tmp_path / "build",
+            out_dir=tmp_path / "release",
+            package_name="unsigned-full-feature",
+            full_size=0x20000,
+            release_profile=package_release_d1l.FULL_FEATURE_RELEASE_PROFILE,
+        )
+
+
+def test_update_security_sequence_is_exact_source_commit_epoch() -> None:
+    identity = fake_source_identity("a" * 40)
+    assert package_release_d1l.source_security_sequence(identity) == 1783965716
+
+
 def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monkeypatch):
     root = tmp_path
     build = root / "build"
@@ -382,6 +401,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         out_dir=out,
         package_name="d1l-test",
         full_size=0x20000,
+        release_profile="development",
         rp2040_artifact_root=rp2040_artifacts,
         meshcore_conformance_json=conformance,
         meshcore_signed_advert_runtime_json=signed_advert,
@@ -395,7 +415,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert (package_dir / "firmware" / "bootloader.bin").read_bytes() == b"BOOT"
     assert (package_dir / "firmware" / "partition-table.bin").read_bytes() == b"PART"
     assert (package_dir / "firmware" / "meshcore_deskos_d1l.bin").read_bytes() == b"APP"
-    assert (package_dir / "update" / "meshcore_deskos_d1l-app.bin").read_bytes() == b"APP"
+    assert (package_dir / "update" / "d1l-update.bin").read_bytes() == b"APP"
     assert (package_dir / "notices" / "LICENSE").read_text(encoding="ascii") == "project license\n"
     assert (package_dir / "notices" / "THIRD_PARTY_NOTICES.md").read_text(encoding="ascii") == "third party notices\n"
     assert (package_dir / "notices" / "ATTRIBUTIONS.md").read_text(encoding="ascii") == "attributions\n"
@@ -627,6 +647,7 @@ def test_release_package_rejects_signed_advert_receipt_from_other_commit(
             out_dir=tmp_path / "artifacts" / "release",
             package_name="signed-advert-wrong-commit",
             full_size=0x20000,
+            release_profile="development",
             meshcore_signed_advert_runtime_json=signed_advert,
         )
 
@@ -653,6 +674,7 @@ def test_release_package_rejects_substituted_signed_runtime_binding_hash(
             out_dir=tmp_path / "artifacts" / "release",
             package_name="substituted-signed-runtime-binding",
             full_size=0x20000,
+            release_profile="development",
             meshcore_conformance_json=conformance,
             meshcore_signed_advert_runtime_json=signed_advert,
         )
@@ -681,6 +703,7 @@ def test_release_package_rejects_signed_advert_receipt_without_sanitizer_command
             out_dir=tmp_path / "artifacts" / "release",
             package_name="signed-advert-without-sanitizers",
             full_size=0x20000,
+            release_profile="development",
             meshcore_signed_advert_runtime_json=signed_advert,
         )
 
@@ -746,6 +769,7 @@ def test_release_package_accepts_signed_advert_commands_from_other_checkout_root
         out_dir=tmp_path / "artifacts" / "release",
         package_name="signed-advert-relocated-checkout",
         full_size=0x20000,
+        release_profile="development",
         meshcore_signed_advert_runtime_json=signed_advert,
     )
 
@@ -777,6 +801,7 @@ def test_release_package_rejects_mismatched_runtime_link_and_execution_paths(
             out_dir=tmp_path / "artifacts" / "release",
             package_name="signed-advert-mismatched-runtime-output",
             full_size=0x20000,
+            release_profile="development",
             meshcore_signed_advert_runtime_json=signed_advert,
         )
 
@@ -867,6 +892,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
             out_dir=out,
             package_name="mismatch",
             full_size=0x20000,
+            release_profile="development",
             meshcore_conformance_json=mismatched,
             meshcore_signed_advert_runtime_json=signed_advert,
         )
@@ -888,6 +914,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
             out_dir=out,
             package_name="expired",
             full_size=0x20000,
+            release_profile="development",
             meshcore_conformance_json=expired,
             meshcore_signed_advert_runtime_json=signed_advert,
         )
@@ -908,6 +935,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
             out_dir=out,
             package_name="future-overflow",
             full_size=0x20000,
+            release_profile="development",
             meshcore_conformance_json=far_future,
             meshcore_signed_advert_runtime_json=signed_advert,
         )
@@ -938,6 +966,7 @@ def test_release_package_rejects_top_level_green_but_incomplete_conformance(
             out_dir=tmp_path / "artifacts" / "release",
             package_name="incomplete-conformance",
             full_size=0x20000,
+            release_profile="development",
             meshcore_conformance_json=conformance_path,
         )
 
@@ -960,6 +989,7 @@ def test_release_package_requires_each_rp2040_checksum_manifest(tmp_path, monkey
             out_dir=out,
             package_name="missing-rp2040-manifests",
             full_size=0x20000,
+            release_profile="development",
             rp2040_artifact_root=rp2040_artifacts,
         )
 
@@ -979,6 +1009,7 @@ def test_release_package_requires_each_rp2040_checksum_manifest(tmp_path, monkey
             out_dir=out,
             package_name="invalid-rp2040-manifest",
             full_size=0x20000,
+            release_profile="development",
             rp2040_artifact_root=invalid_artifacts,
         )
 
@@ -1060,6 +1091,7 @@ def test_generated_flash_scripts_require_explicit_port(tmp_path, monkeypatch):
         out_dir=out,
         package_name="d1l-test",
         full_size=0x20000,
+        release_profile="development",
     )
 
     ps1 = (out / "d1l-test" / "flash_project.ps1").read_text(encoding="ascii")
@@ -1091,6 +1123,7 @@ def test_esp32_only_release_package_omits_rp2040_artifacts(tmp_path, monkeypatch
         out_dir=out,
         package_name="d1l-esp32-only",
         full_size=0x20000,
+        release_profile="development",
     )
 
     package_dir = out / "d1l-esp32-only"
@@ -1127,6 +1160,7 @@ def test_release_package_rejects_dirty_source_worktree(tmp_path, monkeypatch):
             out_dir=tmp_path / "release",
             package_name="dirty",
             full_size=0x20000,
+            release_profile="development",
         )
 
 

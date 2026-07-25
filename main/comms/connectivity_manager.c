@@ -969,6 +969,12 @@ static void fill_status(d1l_connectivity_status_t *out_status)
         wifi_available && boot_decision.crash_loop_detected;
     out_status->ble_stack_active =
         ble_available && ble_status.stack_initialized;
+    out_status->ble_peer_known =
+        ble_available && ble_status.peer_known;
+    out_status->ble_protocol_running =
+        ble_available && ble_status.protocol_running;
+    out_status->ble_protocol_ready =
+        ble_available && ble_status.protocol_ready;
     out_status->wifi_profile_saved =
         wifi_available && settings.wifi_profile_saved;
     out_status->wifi_password_saved =
@@ -990,6 +996,16 @@ static void fill_status(d1l_connectivity_status_t *out_status)
         boot_guard.consecutive_crash_boots;
     out_status->wifi_last_disconnect_reason = s_wifi_last_disconnect_reason;
     out_status->wifi_retry_delay_ms = policy.retry_delay_ms;
+    out_status->ble_pairing_passkey =
+        ble_available ? ble_status.pairing_passkey : 0U;
+    out_status->ble_protocol_command_count =
+        ble_available ? ble_status.protocol_command_count : 0U;
+    out_status->ble_protocol_response_count =
+        ble_available ? ble_status.protocol_response_count : 0U;
+    out_status->ble_protocol_unsupported_count =
+        ble_available ? ble_status.protocol_unsupported_count : 0U;
+    out_status->ble_protocol_malformed_count =
+        ble_available ? ble_status.protocol_malformed_count : 0U;
     out_status->wifi_last_error = wifi_available ?
         s_wifi_last_error : "unsupported_in_release_profile";
     out_status->wifi_last_failure_class =
@@ -1631,6 +1647,27 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
         return rollback_ret == ESP_OK ? start_ret : rollback_ret;
     }
     return ESP_OK;
+}
+
+esp_err_t d1l_connectivity_ble_begin_pairing(void)
+{
+    if (!release_ble_available() || !build_ble_enabled()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    if (!settings.ble_companion_enabled) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return d1l_ble_companion_begin_pairing();
+}
+
+esp_err_t d1l_connectivity_ble_forget_peer(void)
+{
+    if (!release_ble_available() || !build_ble_enabled()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return d1l_ble_companion_forget_peer();
 }
 
 esp_err_t d1l_connectivity_save_wifi_profile(const char *ssid, const char *password)

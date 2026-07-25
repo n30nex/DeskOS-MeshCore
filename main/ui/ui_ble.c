@@ -9,6 +9,8 @@
 enum {
     BINDING_CLOSE = 0,
     BINDING_TOGGLE,
+    BINDING_PAIR,
+    BINDING_FORGET,
 };
 
 _Static_assert(sizeof(d1l_ui_ble_controller_t) <=
@@ -87,7 +89,7 @@ static void action_event_cb(lv_event_t *event)
     if (!binding_is_current(binding) ||
         !binding->controller->action_handler ||
         binding->action <= D1L_UI_BLE_ACTION_NONE ||
-        binding->action > D1L_UI_BLE_ACTION_TOGGLE) {
+        binding->action > D1L_UI_BLE_ACTION_FORGET) {
         return;
     }
     binding->controller->action_handler(
@@ -265,13 +267,19 @@ bool d1l_ui_ble_render(d1l_ui_ble_controller_t *controller,
             controller, controller->rendered.toggle_label, 8, 206, 98, 40,
             BINDING_TOGGLE, D1L_UI_BLE_ACTION_TOGGLE);
         lv_obj_t *pair = create_button(controller, "Pair", 116, 206, 98, 40,
-                                       0U, D1L_UI_BLE_ACTION_NONE);
+                                       BINDING_PAIR,
+                                       controller->rendered.pairing_available ?
+                                           D1L_UI_BLE_ACTION_PAIR :
+                                           D1L_UI_BLE_ACTION_NONE);
         lv_obj_t *forget = create_button(controller, "Forget", 224, 206, 98,
-                                         40, 0U, D1L_UI_BLE_ACTION_NONE);
-        if (pair) {
+                                         40, BINDING_FORGET,
+                                         controller->rendered.forget_available ?
+                                             D1L_UI_BLE_ACTION_FORGET :
+                                             D1L_UI_BLE_ACTION_NONE);
+        if (pair && !controller->rendered.pairing_available) {
             lv_obj_add_state(pair, LV_STATE_DISABLED);
         }
-        if (forget) {
+        if (forget && !controller->rendered.forget_available) {
             lv_obj_add_state(forget, LV_STATE_DISABLED);
         }
         complete = toggle && pair && forget && complete;

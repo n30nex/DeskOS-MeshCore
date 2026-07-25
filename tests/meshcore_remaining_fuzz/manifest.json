@@ -41,8 +41,8 @@
     }
   },
   "source_pins": {
-    ".github/workflows/d1l-ci.yml": "5052c9ac62ca1174e3c4176e069891bc04257944102a5e8142ecdddb720e9091",
-    "main/CMakeLists.txt": "7d63bc76172947e15a2972090ce6fcc20eb85a216f8bcbc373f9e5e8252cd55f",
+    ".github/workflows/d1l-ci.yml": "ae26bb5fb48e87be5a356db171e7475cd06cdab8e30dad0db9ba5c67dc20711e",
+    "main/CMakeLists.txt": "76eb2596db59165b73bbdf52132f5e0b1a34462042e24331a880c188215de393",
     "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
     "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",
     "main/mesh/dm_delivery_state.c": "a3ff6903299b70ed68727284de8c2b6e81b2f9db69a80902db75983ee91aee94",
@@ -53,7 +53,7 @@
     "main/mesh/meshcore_path_state.c": "a6a5f42bc95f511115f1b9da12e4853fb868646ebc34ffaaeae85eb15cb72a58",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
-    "main/mesh/meshcore_service.c": "4cdee25e5adbd4c85f895ddb9f040d07a2c8c1a8ccb6328cd62fe9fbd0d821ea",
+    "main/mesh/meshcore_service.c": "e840e3fce130499def3fdc4e09f92885505056ca03161684e43f6384ab48997b",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
     "scripts/meshcore_conformance_d1l.py": "df0bf83fb823f70498eb46cfe5e86cd91d837f393ba4128f2bf6a0a43ce29646",
@@ -64,7 +64,7 @@
     "tests/fuzz/settings_envelope_fuzz.c": "ddcb8ce9b14005c1a746bcd215666cd01280115f01d7efce186dcf68c418c5cd",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "602f05d2e36e62df74f9b6cabddb4b7c19c4b1e3eb78d542148a3866470117dd",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "19f74d005c3b6b79bad9ec95747d37b11a4c2fba6a3b11855e3ea3f82b3035ae",
     "tests/meshcore_remaining_fuzz/crypto_host_adapter.cpp": "1fa19502918fa07f1e30610ec04cf7d394d14caa16e0c5f779ce148a790842f6",
     "tests/meshcore_remaining_fuzz/stubs/esp_err.h": "a32529585b01ed39217555a23159f8434fcbf8601947728a66156715c0c6d2e2",
     "tests/meshcore_remaining_fuzz/stubs/mbedtls/aes.h": "ea331364a1c181f34a09a38e825d5ddb781261738785b47e814a54e18d3fe53f",
@@ -73,7 +73,7 @@
     "tests/native/meshcore_crypto_test.c": "a397b7a7d28053984993cc146fea05849544af5f315c9644eca2214c16db769e",
     "tests/native/meshcore_route_selection_test.c": "6c318ccab70eed048687ecf6fb728cc2d3a01fbacb358ce0eac7b9dc55c7f988",
     "tests/native/settings_envelope_test.c": "158353ab42c51142e05bb3b0f180aafdc12167ece20372a4a50cc2ae6924cd7a",
-    "tests/test_meshcore_conformance_contract.py": "e051e2eb247449782020b031769d1251a5034bd48b3f467106c4c60ef9f92966",
+    "tests/test_meshcore_conformance_contract.py": "9c03984db5fa869480691b9dcaeb28de7637f4992160aa4dcafe3d6dd77ac2c7",
     "tests/test_meshcore_public_rf_contract.py": "0bf9c2ec5402a5151de5c1414239779ed2323e327af7b364d8bcd3e89c650726",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"

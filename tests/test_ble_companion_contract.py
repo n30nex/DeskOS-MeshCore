@@ -55,17 +55,18 @@ def test_ble_transport_fails_closed_on_security_and_preserves_wire_contract():
     assert "mesh/" not in source
 
 
-def test_ble_pin_is_never_logged_and_touch_capability_remains_truthful():
+def test_ble_pin_is_generated_never_logged_and_touch_capability_is_truthful():
     source = read("main/comms/ble_companion.c")
     app_header = read("main/app/app_model.h")
     settings = read("main/app/settings_model.c")
 
-    assert "D1L_BLE_COMPANION_STATIC_PASSKEY" in source
+    assert "100000U + (esp_random() % 900000U)" in source
+    assert "ble_sm_inject_io" in source
     for line in source.splitlines():
         if "LOG" in line or "printf" in line:
             assert "PASSKEY" not in line.upper()
-            assert "123456" not in line
-    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false" in app_header
+            assert "pairing_passkey" not in line
+    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED true" in app_header
     assert "settings->ble_companion_enabled = false" in settings
 
 
@@ -84,7 +85,7 @@ def test_ble_build_configuration_is_nimble_only_and_memory_bounded():
         "# CONFIG_BT_NIMBLE_GATT_CLIENT is not set",
         "CONFIG_BT_NIMBLE_SECURITY_ENABLE=y",
         "CONFIG_BT_NIMBLE_SM_SC=y",
-        "CONFIG_BT_NIMBLE_SM_SC_ONLY=y",
+        "CONFIG_BT_NIMBLE_SM_SC_ONLY=1",
         "CONFIG_BT_NIMBLE_NVS_PERSIST=y",
         "CONFIG_BT_NIMBLE_MAX_BONDS=2",
         "CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1",
@@ -95,6 +96,7 @@ def test_ble_build_configuration_is_nimble_only_and_memory_bounded():
     ):
         assert setting in defaults
     assert '"comms/ble_companion.c"' in cmake
+    assert '"comms/ble_companion_protocol.c"' in cmake
     assert '"comms/ble_companion_queue.c"' in cmake
     assert "bt" in cmake
     assert "d1l_ble_companion_start()" in manager

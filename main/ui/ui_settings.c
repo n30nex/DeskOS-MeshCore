@@ -14,6 +14,20 @@ bool d1l_ui_settings_action_available(d1l_ui_settings_action_t action)
     switch (action) {
     case D1L_UI_SETTINGS_ACTION_PACKETS:
         return d1l_release_feature_available(D1L_RELEASE_FEATURE_PACKETS);
+    case D1L_UI_SETTINGS_ACTION_TERMINAL:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MUTABLE_TERMINAL);
+    case D1L_UI_SETTINGS_ACTION_OBSERVER:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_OBSERVER_MQTT);
+    case D1L_UI_SETTINGS_ACTION_UPDATE:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_SIGNED_UPDATE);
+    case D1L_UI_SETTINGS_ACTION_NOTIFICATIONS:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
+    case D1L_UI_SETTINGS_ACTION_ADMIN:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN);
     case D1L_UI_SETTINGS_ACTION_STORAGE:
         return d1l_release_feature_available(
             D1L_RELEASE_FEATURE_RETAINED_NVS);

@@ -1,112 +1,120 @@
-# MeshCore DeskOS D1L Core 1.0
+# MeshCore DeskOS for SenseCAP Indicator D1L
 
-MeshCore DeskOS D1L Core 1.0 is a touch-first, non-forwarding MeshCore desk
-client for the Seeed SenseCAP Indicator D1L. It focuses on reliable Public and
-direct messaging, local mesh visibility, diagnostics, and safe USB recovery.
-
-The shipping profile is immutable:
+MeshCore DeskOS is a touch-first, non-forwarding MeshCore desk client for the
+Seeed SenseCAP Indicator D1L. The production candidate now builds the
+`full_feature` profile with conditional SD history:
 
 ```text
-D1L_RELEASE_PROFILE=core_1_0
-D1L_SD_HISTORY_MODE=disabled
+D1L_RELEASE_PROFILE=full_feature
+D1L_SD_HISTORY_MODE=conditional
 ```
 
-Release status is fail-closed. An untagged checkout, green source test,
-simulator image, predecessor binary, dry run, or newly discovered serial
-device is not a release. Tag `v1.0.0` is authorized only when the exact GitHub
-Actions package, qualified-target hardware gates, controlled-peer RF/DM
-acceptance, and Core audit all pass. The current release-closing target is the
-D1L on Raspberry Pi 5 host `neopi5`, selected through
-`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with USB VID:PID
-`1A86:7523`. `COM12` remains the valid Windows alternative. Full Feature
-readiness remains false.
+The firmware feature implementation is complete for this profile. Public
+release remains fail-closed until the exact commit built by GitHub Actions is
+checksum-verified, flashed to the qualified D1L, and its automated device,
+reboot, storage, and controlled-peer acceptance receipts pass. Source tests,
+simulator images, predecessor binaries, and dry runs are not release evidence.
 
-## Core capability matrix
+The current D1L is attached to Raspberry Pi 5 host `neopi5`
+(`192.168.0.24`). Its only authorized release identity is:
 
-| Capability | Core 1.0 |
+```text
+/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+VID:PID 1a86:7523
+```
+
+Do not substitute a raw `/dev/ttyUSB*` name or a stale Windows COM assignment.
+
+## Production feature set
+
+| Area | Full Feature production surface |
 |---|---|
-| D1L board, 480×480 display, touch, backlight | Supported |
-| Home | Supported |
-| Fixed default Public channel | Supported |
-| Direct messages and truthful delivery state | Supported |
-| Basic verified contacts | Supported |
-| Nodes and bounded detail | Supported |
-| Packet log/search/filter | Supported, read-only |
-| DM route plus signal/route diagnostics | Supported, read-only |
-| Canada/USA radio settings | Supported |
-| Identity and adverts | Supported |
-| Retained settings and Core state | Internal NVS |
-| Diagnostics, crashlog, and health | Supported |
-| Fixed UTC offset and truthful time state | Supported |
-| Checksum-verified USB install/recovery | Supported |
-| SD history | Disabled; RP2040 payload omitted |
+| Hardware | 480×480 display, touch, button, SX1262 radio, backlight and power/status truth |
+| Messaging | Public and multi-channel messaging, DMs, unread state, delivery/retry truth and retained history |
+| Contacts and nodes | Verified contacts, QR import/export, rename/favorite/mute/delete, heard nodes, role detail and signed location markers |
+| Network tools | Packet terminal, filters/search/raw detail, signal/routes and explicit user TRACE/PATH tools |
+| Map | Built-in attributed OpenStreetMap source, manual or authenticated-companion center, visible-current-view tile cache and signed peer markers |
+| Connectivity | User-controlled Wi-Fi and bonded encrypted BLE companion transport |
+| Companion protocol | Official core initial-sync, contact/channel, messaging, time, advert, radio and battery/storage commands |
+| Server administration | Authenticated repeater and room login/status; room login starts with a no-history cursor; two exact allowlisted mutations require local confirmation |
+| Observer | Opt-in `mqtts://` TLS observer, QoS 1/PUBACK accounting, bounded queue and optional center location |
+| Storage | Internal NVS fallback plus optional FAT32 SD/RP2040 retained history, exports and map cache |
+| Updates | Ed25519-signed local SD/OTA bundle, exact signer identity, image hash, anti-rollback sequence, dual-slot boot and rollback |
+| Device UX | Brightness, timeout, night/high-contrast modes, notification pulse/quiet modes, curated glyph palette and service sheets |
+| Support | Structured event terminal, diagnostics, crashlog, health, safe reboot, guarded factory reset and USB recovery |
 
-## Intentionally unavailable
+The D1L has no onboard GPS. A map center comes only from an explicit local
+entry or an authenticated bonded companion. Peer pins require signed advert
+coordinates and truthful time/age validation.
 
-Core 1.0 does not expose or start:
+The BLE companion surface intentionally rejects remote reboot, factory reset,
+and private-key import/export. Optional channel-datagram extensions are not
+advertised. Those exclusions protect device ownership and secrets; normal
+companion setup, synchronization, channel/contact management, messaging,
+location, advert and radio operations are available.
 
-- Map or tile networking;
-- user-controlled Wi-Fi;
-- BLE;
-- multi-channel management;
-- repeater or room-server administration;
-- Observer/MQTT;
-- signed SD update or OTA;
-- GPS/location;
-- mutable terminal/log UI;
-- advanced QR/emoji tools;
-- user-facing active TRACE/PATH tools;
-- a notification-system claim beyond unread counters.
+## Navigation
 
-Unavailable mutations are rejected before side effects with
-`ESP_ERR_NOT_SUPPORTED`, `release_profile="core_1_0"`, and the unavailable
-feature ID.
-
-## Core navigation
-
-The on-device dock contains exactly:
+The full-feature dock contains:
 
 1. Home
 2. Messages
 3. Nodes
-4. Packets
-5. Settings
+4. Map
+5. Tools
 
-Messages contains Public and Direct messages. Read-only navigation, searches,
-scrolling, and probes are RF-silent. Sending requires an explicit user action.
-Release automation never transmits on the default Public channel.
+Tools groups Packets, Diagnostics, Terminal, Wi-Fi, Bluetooth, Observer, SD
+Card, Map options, Signed update, Display, Notifications, Identity, About,
+Radio, Server admin, and Mesh advertise. Lists and detail sheets scroll on the
+device; the automated UI probe covers required scrollable surfaces.
 
-## Build and test policy
+## Safety and privacy
 
-Firmware binaries are built only by the repository's `d1l-ci` GitHub Actions
-workflow. Local workstations may run host tests and inspect source, but may not
-compile release firmware.
+- DeskOS is a client and does not forward MeshCore packets.
+- Read, navigation, search, refresh and automated UI acceptance are RF-silent.
+- Release automation never transmits on the default Public channel.
+- Observer is off until configured and enabled; it never publishes message
+  text, contacts, keys, or forwarding traffic.
+- Server mutations are limited to `clear stats` and `advert.zerohop`, require
+  an authenticated session, and require a second local confirmation within
+  five seconds.
+- Users prepare FAT32 SD cards on a computer. There is no device-side SD
+  formatting path. Missing or unusable media falls back to NVS where defined.
+- Normal project flashing is non-erasing. The full recovery image is
+  destructive and requires typed confirmation.
 
-The final source gate is:
+The compatibility `core_1_0` profile remains in source for narrow recovery
+builds. In that profile SD history is disabled, NVS is authoritative, and the
+RP2040 payload is omitted; it is not the current production candidate.
+
+## Build and release policy
+
+Release firmware is built only by `.github/workflows/d1l-ci.yml` with the
+pinned ESP-IDF 5.5.4 toolchain. Local workstations may run source/host tests
+but do not produce release firmware.
+
+The required source gate is:
 
 ```powershell
 python -m pytest tests -q
 python .\scripts\completion_ledger.py validate --check-generated
 python .\scripts\completion_pack_manifest.py check
-python .\scripts\core_release_gate_audit_d1l.py --dry-run
 git diff --check
 ```
 
-The frozen candidate workflow must produce the host evidence, MeshCore
-conformance/fuzz evidence, ESP-IDF v5.5.4 firmware, release package, checksums,
-provenance, and SBOM for one exact commit. The Core candidate uses
-`include_sd_bridge=false`.
+The exact Actions run must produce a source-bound full-feature package,
+checksums, provenance, SBOM, MeshCore conformance evidence, RP2040 bridge
+payload, and Ed25519-signed update bundle. Package metadata records the exact
+repository, commit, workflow run, run attempt, release profile, SD mode and
+security sequence.
 
-## Install the exact release package
+## Flash the current device
 
-Download the package attached to the GitHub release, verify all checksums, and
-use the package's explicit-target helper. For the current Pi 5 route, connect
-with the key-only, unprivileged development account and use only the stable
-by-id link:
+Extract the exact Actions package on `neopi5`, verify it, then use only the
+stable by-id link:
 
 ```bash
-ssh siguidev@neopi5
-cd /path/to/extracted-package-directory
+cd /path/to/extracted-package
 sha256sum --check SHA256SUMS.txt
 export D1L_PORT='/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0'
 test -L "$D1L_PORT" && test -r "$D1L_PORT" && test -w "$D1L_PORT"
@@ -116,56 +124,21 @@ grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
 ./flash_project.sh
 ```
 
-The link currently resolves to `/dev/ttyUSB2`; that raw kernel name is
-observational only and must not be substituted. If the D1L is intentionally
-moved back to Windows, the valid alternative remains:
-
-```powershell
-python .\scripts\verify_checksums.py <extracted-package-directory>
-$env:D1L_PORT = "COM12"
-.\flash_project.ps1 -Port $env:D1L_PORT
-```
-
-Normal project flashing is non-erasing. The full 8 MB recovery image can
-overwrite retained settings, contacts, messages, and logs, and requires typed
-confirmation. The Pi move and serial preflight do not close release: exact-SHA
-flash, UI/manual review, reboot/persistence, protocol migration, controlled
-RF/DM, active/idle soak, install review, and final audit remain fail-closed.
-Controlled-peer evidence also remains blocked until narrowly scoped peer
-status/control access for `siguidev` is provisioned and verified.
-
-Hardware safety rules:
-
-- use the exact `neopi5` stable by-id link and require `1A86:7523` for the
-  current D1L;
-- use COM12 only as the valid Windows alternative;
-- never use a raw `/dev/ttyUSB*` as release identity;
-- use COM16 only for separately authorized SD/RP2040 work, never as the Core
-  D1L target;
-- never use COM8, COM11, or COM29;
-- never format SD;
-- never automate default Public RF;
-- flash only the exact checksum-verified Actions candidate.
-
-SD is not required for Core 1.0. The Core package omits RP2040 firmware and
-uses internal NVS for retained state.
+Follow the package README for its exact file names and acceptance command.
+Never flash another Pi serial device. Never format SD.
 
 ## Documentation
 
-- [Core user guide](docs/USER_GUIDE_D1L.md)
+- [Full Feature user guide](docs/USER_GUIDE_D1L.md)
 - [Flash and recovery](docs/FLASH_RECOVERY_D1L.md)
-- [Core product contract](docs/release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md)
-- [24-hour execution ledger](docs/release/24H_STATUS.md)
-- [Core audit and roadmap](docs/release/SIGUI_24H_AUDIT_AND_ROADMAP_2026-07-18.md)
-- [Core execution backlog](docs/release/SIGUI_24H_EXECUTION_BACKLOG_2026-07-18.yaml)
+- [Current release status](docs/release/24H_STATUS.md)
+- [Known limitations and security boundaries](docs/KNOWN_LIMITATIONS.md)
+- [Acceptance plan](docs/TEST_PLAN_D1L.md)
+- [MeshCore conformance](docs/MESHCORE_CONFORMANCE.md)
 - [Attribution](docs/ATTRIBUTIONS.md)
-
-The historical Full Feature development guide is retained at
-`docs/FULL_FEATURE_DEVELOPMENT_GUIDE_D1L_2026-07-18.md`; it describes
-unavailable future surfaces and is not part of the Core package.
 
 ## Licensing
 
 MeshCore DeskOS D1L is GPL-3.0-or-later. Release packages include third-party
-notices and source attribution for the pinned dependencies and permitted
+notices and source attribution for pinned dependencies and permitted
 references.

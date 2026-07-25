@@ -113,9 +113,12 @@ static void test_truthful_render_actions_generation_and_cleanup(void)
     assert(lv_test_has_label(
         controller.sheet,
         "DM unavailable [heard_only]: Heard node only; add or import a verified chat Contact."));
-    assert(lv_test_has_label(controller.sheet, "Manage locked"));
+    assert(lv_test_has_label(controller.sheet, "Admin"));
     assert(lv_test_has_label(controller.sheet,
-                             "Authenticated admin session required."));
+                             "Verified server; local authenticated login required."));
+    lv_test_click(lv_test_find_button(controller.sheet, "Admin"));
+    assert(s_action_count == 1U);
+    assert(s_last_action == D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN);
 
     lv_obj_t *why = lv_test_find_button(controller.sheet, "Why no DM?");
     assert(why);
@@ -124,10 +127,10 @@ static void test_truthful_render_actions_generation_and_cleanup(void)
     const uint32_t current_generation = binding->generation;
     binding->generation = current_generation - 1U;
     lv_test_click(why);
-    assert(s_action_count == 0U);
+    assert(s_action_count == 1U);
     binding->generation = current_generation;
     lv_test_click(why);
-    assert(s_action_count == 1U);
+    assert(s_action_count == 2U);
     assert(s_last_action == D1L_UI_NODE_DETAIL_ACTION_EXPLAIN_DM);
     assert(strcmp(s_last_fingerprint, "0123456789abcdef") == 0);
     assert(s_last_return_to_map);
@@ -142,7 +145,7 @@ static void test_truthful_render_actions_generation_and_cleanup(void)
     lv_event_t stale_event = {.user_data = stale_user_data,
                               .code = LV_EVENT_CLICKED};
     stale_callback(&stale_event);
-    assert(s_action_count == 1U);
+    assert(s_action_count == 2U);
 }
 
 static void test_ready_dm_close_and_invalid_models_fail_closed(void)
@@ -164,7 +167,7 @@ static void test_ready_dm_close_and_invalid_models_fail_closed(void)
     assert(lv_test_has_label(
         controller.sheet,
         "DM ready [ready]: Verified canonical chat Contact."));
-    assert(!lv_test_has_label(controller.sheet, "Manage locked"));
+    assert(!lv_test_has_label(controller.sheet, "Admin"));
 
     const size_t before = s_action_count;
     lv_test_click(lv_test_find_button(controller.sheet, "DM"));

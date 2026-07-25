@@ -63,7 +63,8 @@ static int all_zero(const void *value, size_t size)
     return 1;
 }
 
-static void login_response(uint8_t response[16], uint8_t uniqueness)
+static void login_response_for_role(uint8_t response[16], uint8_t uniqueness,
+                                    uint8_t firmware_level)
 {
     memset(response, 0, 16U);
     write_le32(response, 0x55667788U);
@@ -73,7 +74,12 @@ static void login_response(uint8_t response[16], uint8_t uniqueness)
     response[9] = 0x20U;
     response[10] = 0x30U;
     response[11] = 0x40U;
-    response[12] = 2U;
+    response[12] = firmware_level;
+}
+
+static void login_response(uint8_t response[16], uint8_t uniqueness)
+{
+    login_response_for_role(response, uniqueness, 2U);
 }
 
 static size_t status_response(uint8_t response[64], uint32_t tag)
@@ -198,7 +204,7 @@ static int test_exact_deadlines_and_zeroization(void)
     return 0;
 }
 
-static int test_login_replay_and_room_rejection(void)
+static int test_login_replay_and_room_no_history(void)
 {
     d1l_meshcore_admin_session_t session = {0};
     d1l_meshcore_admin_replay_cache_t replay = {0};
@@ -222,9 +228,119 @@ static int test_login_replay_and_room_rejection(void)
           D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED);
     CHECK(session.state == D1L_MESHCORE_ADMIN_TIMED_OUT);
     CHECK(all_zero(session.session_secret, sizeof(session.session_secret)));
-    CHECK(!d1l_meshcore_admin_begin_login(
+
+    uint8_t room_request[D1L_MESHCORE_ADMIN_MAX_LOGIN_REQUEST_BYTES] = {0};
+    size_t room_request_len = 0U;
+    static const uint8_t password[] = {'r', 'o', 'o', 'm'};
+    CHECK(d1l_meshcore_admin_encode_login_request(
+        D1L_MESHCORE_ADMIN_ROLE_ROOM, 0x01020304U,
+        D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR, password,
+        sizeof(password), room_request, sizeof(room_request),
+        &room_request_len));
+    static const uint8_t expected_room_request[] = {
+        0x04U, 0x03U, 0x02U, 0x01U,
+        0xFFU, 0xFFU, 0xFFU, 0xFFU,
+        'r', 'o', 'o', 'm'};
+    CHECK(room_request_len == sizeof(expected_room_request));
+    CHECK(memcmp(room_request, expected_room_request,
+                 sizeof(expected_room_request)) == 0);
+
+    CHECK(d1l_meshcore_admin_begin_login(
         &session, D1L_MESHCORE_ADMIN_ROLE_ROOM, PEER, LOCAL, SECRET,
         700U, 100U, 300U));
+    login_response_for_role(login, 0x23U, 1U);
+    CHECK(d1l_meshcore_admin_accept_login_response(
+              &session, &replay, PEER, login, sizeof(login), 650U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.role == D1L_MESHCORE_ADMIN_ROLE_ROOM);
+    CHECK(session.firmware_level == 1U);
+    return 0;
+}
+
+static int authenticate_repeater(d1l_meshcore_admin_session_t *session,
+                                 d1l_meshcore_admin_replay_cache_t *replay,
+                                 uint8_t uniqueness, uint64_t now_us)
+{
+    uint8_t login[16];
+    login_response(login, uniqueness);
+    return begin(session, now_us + 100U, 200U, 500U) &&
+           d1l_meshcore_admin_accept_login_response(
+               session, replay, PEER, login, sizeof(login), now_us) ==
+               D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED;
+}
+
+static int test_allowlisted_mutations(void)
+{
+    CHECK(strcmp(d1l_meshcore_admin_mutation_name(
+                     D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS),
+                 "clear_stats") == 0);
+    CHECK(strcmp(d1l_meshcore_admin_mutation_command(
+                     D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS),
+                 "clear stats") == 0);
+    CHECK(strcmp(d1l_meshcore_admin_mutation_name(
+                     D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP),
+                 "advertise_zero_hop") == 0);
+    CHECK(strcmp(d1l_meshcore_admin_mutation_command(
+                     D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP),
+                 "advert.zerohop") == 0);
+    CHECK(d1l_meshcore_admin_mutation_command(
+              D1L_MESHCORE_ADMIN_MUTATION_NONE) == NULL);
+
+    d1l_meshcore_admin_session_t session = {0};
+    d1l_meshcore_admin_replay_cache_t replay = {0};
+    CHECK(authenticate_repeater(&session, &replay, 0x41U, 100U));
+
+    const uint32_t first_tag = 0x10203040U;
+    CHECK(d1l_meshcore_admin_begin_mutation(
+        &session, D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS, first_tag,
+        120U, 200U));
+    static const uint8_t unrelated[] = "OK";
+    CHECK(d1l_meshcore_admin_accept_mutation_response(
+              &session, OTHER_PEER, 0x55667789U, unrelated,
+              sizeof(unrelated) - 1U, 130U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED);
+    CHECK(d1l_meshcore_admin_accept_mutation_response(
+              &session, PEER, 0x55667789U, unrelated,
+              sizeof(unrelated) - 1U, 130U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED);
+    static const uint8_t clear_ok[] = "(OK - stats reset)";
+    CHECK(d1l_meshcore_admin_accept_mutation_response(
+              &session, PEER, 0x55667789U, clear_ok,
+              sizeof(clear_ok) - 1U, 140U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.last_mutation == D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS);
+    CHECK(session.last_mutation_success);
+    CHECK(session.last_completed_tag == first_tag);
+
+    CHECK(d1l_meshcore_admin_begin_mutation(
+        &session, D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP,
+        first_tag + 1U, 150U, 230U));
+    static const uint8_t rejected[] = "ERR denied";
+    CHECK(d1l_meshcore_admin_accept_mutation_response(
+              &session, PEER, 0x5566778AU, rejected,
+              sizeof(rejected) - 1U, 160U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
+    CHECK(session.last_mutation ==
+          D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP);
+    CHECK(!session.last_mutation_success);
+
+    CHECK(d1l_meshcore_admin_begin_mutation(
+        &session, D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP,
+        first_tag + 2U, 170U, 240U));
+    CHECK(d1l_meshcore_admin_cancel_mutation(
+        &session, D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP,
+        first_tag + 2U));
+    CHECK(session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED);
+
+    session.permissions = 0U;
+    CHECK(!d1l_meshcore_admin_begin_mutation(
+        &session, D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS,
+        first_tag + 3U, 180U, 250U));
+    session.permissions = D1L_MESHCORE_ADMIN_PERMISSION_ADMIN;
+    session.firmware_level = 1U;
+    CHECK(!d1l_meshcore_admin_begin_mutation(
+        &session, D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS,
+        first_tag + 3U, 180U, 250U));
     return 0;
 }
 
@@ -270,7 +386,8 @@ int main(void)
 {
     CHECK(test_codec_and_repeater_status() == 0);
     CHECK(test_exact_deadlines_and_zeroization() == 0);
-    CHECK(test_login_replay_and_room_rejection() == 0);
+    CHECK(test_login_replay_and_room_no_history() == 0);
+    CHECK(test_allowlisted_mutations() == 0);
     CHECK(test_replay_capacity_and_deterministic_eviction() == 0);
     puts("meshcore_admin_dispatch_test: ok");
     return 0;

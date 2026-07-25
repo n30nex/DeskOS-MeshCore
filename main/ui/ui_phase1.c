@@ -21,6 +21,9 @@
 #include "bsp_lcd.h"
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
+#include "diagnostics/event_log.h"
+#include "hal/backlight.h"
+#include "hal/display_preferences.h"
 #include "hal/indicator_board.h"
 #include "mesh/user_text.h"
 #include "ui_ble.h"
@@ -32,6 +35,7 @@
 #include "ui_device_sheets.h"
 #include "ui_dm_identity.h"
 #include "ui_home.h"
+#include "ui_font_symbols_14.h"
 #include "ui_keyboard.h"
 #include "ui_map.h"
 #include "ui_messages.h"
@@ -43,6 +47,7 @@
 #include "ui_packets.h"
 #include "ui_radio_settings.h"
 #include "ui_screen.h"
+#include "ui_service_sheets.h"
 #include "ui_settings.h"
 #include "ui_storage_view.h"
 #include "ui_wifi.h"
@@ -133,11 +138,25 @@ static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_map_sheets_controller_t s_map_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_device_sheets_controller_t s_device_sheets_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_service_sheets_controller_t s_service_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_radio_settings_controller_t s_radio_settings_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_contact_sheets_controller_t s_contact_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_channel_sheets_controller_t s_channel_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_node_detail_controller_t s_node_detail_controller EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
+static bool s_terminal_clear_armed;
+static bool s_update_install_armed;
+static bool s_update_reboot_armed;
+static d1l_meshcore_admin_mutation_t s_admin_mutation_armed =
+    D1L_MESHCORE_ADMIN_MUTATION_NONE;
+static uint32_t s_terminal_clear_deadline;
+static uint32_t s_update_install_deadline;
+static uint32_t s_update_reboot_deadline;
+static uint32_t s_admin_mutation_deadline;
+static bool s_backlight_dimmed;
+static bool s_backlight_pulse_active;
+static uint32_t s_backlight_pulse_until;
+static uint32_t s_last_notification_unread;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
 static esp_err_t s_compose_last_send_error;
@@ -148,6 +167,7 @@ static d1l_route_entry_t s_route_detail_route;
 static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
+static char s_admin_target_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static d1l_node_view_t s_map_node_rows[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
@@ -161,6 +181,7 @@ static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
  * before a nested page opens. Keep the serial proof bounded without turning a
  * populated device into a false timeout. */
 static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 5000U;
+static const uint32_t D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS = 5000U;
 static const uint32_t D1L_UI_COMPOSE_PROBE_TIMEOUT_MS = 1500U;
 static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
 typedef struct {
@@ -218,6 +239,11 @@ static void open_wifi_sheet_event_cb(lv_event_t *event);
 static void open_ble_sheet_event_cb(lv_event_t *event);
 static void open_display_sheet_event_cb(lv_event_t *event);
 static void open_diagnostics_sheet_event_cb(lv_event_t *event);
+static void open_terminal_sheet_event_cb(lv_event_t *event);
+static void open_observer_sheet_event_cb(lv_event_t *event);
+static void open_update_sheet_event_cb(lv_event_t *event);
+static void open_notifications_sheet_event_cb(lv_event_t *event);
+static void open_admin_sheet_event_cb(lv_event_t *event);
 static void open_sheet_event_cb(lv_event_t *event);
 
 typedef d1l_ui_screen_t d1l_ui_tab_t;
@@ -747,6 +773,8 @@ static bool render_wifi_sheet(void);
 static bool render_ble_sheet(void);
 static bool render_display_sheet(void);
 static bool render_diagnostics_sheet(void);
+static void service_sheets_action_handler(
+    d1l_ui_service_action_t action, void *context);
 static bool render_map_location_sheet(void);
 static bool render_map_options_sheet(d1l_ui_map_options_page_t page);
 static void hide_node_detail_sheet(void);
@@ -1225,6 +1253,7 @@ static lv_obj_t *create_label(lv_obj_t *parent, const char *text, uint32_t color
     }
     lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    lv_obj_set_style_text_font(label, &d1l_ui_font_symbols_14, 0);
     return label;
 }
 
@@ -1542,6 +1571,16 @@ static void hide_diagnostics_sheet(void)
     restore_dock_for_active_tab();
 }
 
+static void hide_service_sheets(void)
+{
+    d1l_ui_service_sheets_hide_all(&s_service_sheets_controller);
+    s_terminal_clear_armed = false;
+    s_update_install_armed = false;
+    s_update_reboot_armed = false;
+    s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+    restore_dock_for_active_tab();
+}
+
 static void hide_map_location_sheet(void)
 {
     d1l_ui_map_sheets_hide_location(&s_map_sheets_controller);
@@ -1720,6 +1759,22 @@ static void more_view_input_from_snapshot(
     if (!snapshot || !out_input) {
         return;
     }
+    d1l_observer_status_t observer = {0};
+    d1l_observer_status(&observer);
+    d1l_update_status_t update = {0};
+    d1l_update_status(&update);
+    d1l_meshcore_admin_snapshot_t admin = {0};
+    d1l_meshcore_service_admin_snapshot(&admin);
+    const d1l_event_log_status_t terminal = d1l_event_log_status();
+    const uint64_t unread_total =
+        (uint64_t)snapshot->public_unread_count +
+        (uint64_t)snapshot->dm_unread_count;
+    const char *admin_state =
+        admin.state == D1L_MESHCORE_ADMIN_AUTHENTICATED ? "authenticated" :
+        admin.state == D1L_MESHCORE_ADMIN_LOGIN_PENDING ? "login pending" :
+        admin.state == D1L_MESHCORE_ADMIN_STATUS_PENDING ? "refreshing" :
+        admin.state == D1L_MESHCORE_ADMIN_MUTATION_PENDING ? "applying" :
+        admin.state == D1L_MESHCORE_ADMIN_TIMED_OUT ? "timed out" : "idle";
     *out_input = (d1l_ui_more_view_input_t) {
         .packet_count = snapshot->packet_count,
         .wifi_build_enabled = snapshot->wifi_build_enabled,
@@ -1744,6 +1799,12 @@ static void more_view_input_from_snapshot(
         .map_tile_cache_ready = snapshot->map_tile_cache_ready,
         .map_tile_render_supported = snapshot->map_tile_render_supported,
         .identity_ready = snapshot->identity_ready,
+        .terminal_event_count = (uint32_t)terminal.count,
+        .notification_unread_count =
+            unread_total > UINT32_MAX ? UINT32_MAX : (uint32_t)unread_total,
+        .observer_state = d1l_observer_state_name(observer.state),
+        .update_state = d1l_update_state_name(update.state),
+        .admin_state = admin_state,
         .time_available = snapshot->time_available,
         .time_approximate = snapshot->time_approximate,
         .timezone_settings_ready = snapshot->timezone_settings_ready,
@@ -2096,6 +2157,22 @@ static void handle_settings_action(d1l_ui_settings_action_t action, void *contex
         break;
     case D1L_UI_SETTINGS_ACTION_DIAGNOSTICS:
         open_diagnostics_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_SETTINGS_ACTION_TERMINAL:
+        open_terminal_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_SETTINGS_ACTION_OBSERVER:
+        open_observer_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_SETTINGS_ACTION_UPDATE:
+        open_update_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_SETTINGS_ACTION_NOTIFICATIONS:
+        open_notifications_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_SETTINGS_ACTION_ADMIN:
+        s_admin_target_fingerprint[0] = '\0';
+        open_admin_sheet_event_cb(NULL);
         break;
     case D1L_UI_SETTINGS_ACTION_ADVANCED:
         open_sheet_event_cb(NULL);
@@ -3032,6 +3109,15 @@ static void handle_node_detail_action(
         break;
     case D1L_UI_NODE_DETAIL_ACTION_EXPLAIN_DM:
         show_dm_identity_reason(dm_identity_for_node(event->node, NULL));
+        break;
+    case D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN:
+        if (event->node && event->node->node.fingerprint[0] != '\0') {
+            snprintf(s_admin_target_fingerprint,
+                     sizeof(s_admin_target_fingerprint), "%s",
+                     event->node->node.fingerprint);
+            hide_node_detail_sheet();
+            open_admin_sheet_event_cb(NULL);
+        }
         break;
     case D1L_UI_NODE_DETAIL_ACTION_NONE:
     default:
@@ -6026,6 +6112,26 @@ static void ble_action_handler(d1l_ui_ble_action_t action, void *context)
         request_content_refresh();
         return;
     }
+    case D1L_UI_BLE_ACTION_PAIR: {
+        const esp_err_t ret = d1l_app_model_ble_begin_pairing();
+        show_toast("BLE Pair", ret);
+        d1l_app_model_snapshot(&s_snapshot);
+        if (!render_ble_sheet()) {
+            hide_ble_sheet();
+        }
+        request_content_refresh();
+        return;
+    }
+    case D1L_UI_BLE_ACTION_FORGET: {
+        const esp_err_t ret = d1l_app_model_ble_forget_peer();
+        show_toast("BLE Forget", ret);
+        d1l_app_model_snapshot(&s_snapshot);
+        if (!render_ble_sheet()) {
+            hide_ble_sheet();
+        }
+        request_content_refresh();
+        return;
+    }
     case D1L_UI_BLE_ACTION_NONE:
     default:
         return;
@@ -6082,6 +6188,10 @@ static bool render_ble_sheet(void)
         .build_enabled = s_snapshot.ble_build_enabled,
         .transport_supported = s_snapshot.ble_transport_supported,
         .companion_enabled = s_snapshot.ble_companion_enabled,
+        .peer_known = s_snapshot.ble_peer_known,
+        .protocol_running = s_snapshot.ble_protocol_running,
+        .protocol_ready = s_snapshot.ble_protocol_ready,
+        .pairing_passkey = s_snapshot.ble_pairing_passkey,
         .state = s_snapshot.ble_state,
     };
     d1l_ui_ble_view_model_t view = {0};
@@ -6099,12 +6209,87 @@ static void device_sheets_action_handler(
     void *context)
 {
     (void)context;
+    d1l_settings_t settings = {0};
+    d1l_display_preferences_t preferences = {0};
     switch (action) {
     case D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DISPLAY:
         hide_display_sheet();
         return;
+    case D1L_UI_DEVICE_SHEETS_ACTION_BRIGHTNESS: {
+        d1l_display_preferences_get(&preferences);
+        static const uint8_t levels[] = {25U, 50U, 70U, 85U, 100U};
+        uint8_t next = levels[0];
+        for (size_t i = 0U; i < sizeof(levels) / sizeof(levels[0]); ++i) {
+            if (preferences.brightness_percent < levels[i]) {
+                next = levels[i];
+                break;
+            }
+            next = levels[(i + 1U) %
+                          (sizeof(levels) / sizeof(levels[0]))];
+        }
+        esp_err_t ret = d1l_display_preferences_set_brightness(next);
+        if (ret == ESP_OK) {
+            (void)d1l_settings_public_snapshot(&settings);
+            ret = d1l_backlight_set_percent(
+                settings.night_mode ? 25 : next);
+        }
+        show_toast("Brightness", ret);
+        d1l_app_model_snapshot(&s_snapshot);
+        (void)render_display_sheet();
+        return;
+    }
+    case D1L_UI_DEVICE_SHEETS_ACTION_NIGHT_MODE: {
+        (void)d1l_settings_public_snapshot(&settings);
+        settings.night_mode = !settings.night_mode;
+        esp_err_t ret = d1l_settings_update_fields(
+            &settings, D1L_SETTINGS_UPDATE_NIGHT_MODE);
+        if (ret == ESP_OK) {
+            d1l_display_preferences_get(&preferences);
+            ret = d1l_backlight_set_percent(
+                settings.night_mode ? 25 : preferences.brightness_percent);
+        }
+        show_toast("Night mode", ret);
+        d1l_app_model_snapshot(&s_snapshot);
+        (void)render_display_sheet();
+        request_full_screen_repaint();
+        return;
+    }
+    case D1L_UI_DEVICE_SHEETS_ACTION_HIGH_CONTRAST: {
+        (void)d1l_settings_public_snapshot(&settings);
+        settings.high_contrast = !settings.high_contrast;
+        const esp_err_t ret = d1l_settings_update_fields(
+            &settings, D1L_SETTINGS_UPDATE_HIGH_CONTRAST);
+        show_toast("High contrast", ret);
+        d1l_app_model_snapshot(&s_snapshot);
+        if (ret == ESP_OK && s_screen) {
+            lv_obj_set_style_bg_color(
+                s_screen,
+                lv_color_hex(settings.high_contrast ? 0x000000 : 0x071018),
+                0);
+        }
+        (void)render_display_sheet();
+        request_full_screen_repaint();
+        return;
+    }
+    case D1L_UI_DEVICE_SHEETS_ACTION_TIMEOUT: {
+        d1l_display_preferences_get(&preferences);
+        const uint16_t next =
+            preferences.timeout_seconds == 0U ? 30U :
+            preferences.timeout_seconds == 30U ? 60U :
+            preferences.timeout_seconds == 60U ? 120U :
+            preferences.timeout_seconds == 120U ? 300U : 0U;
+        const esp_err_t ret = d1l_display_preferences_set_timeout(next);
+        show_toast("Display timeout", ret);
+        d1l_app_model_snapshot(&s_snapshot);
+        (void)render_display_sheet();
+        return;
+    }
     case D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DIAGNOSTICS:
         hide_diagnostics_sheet();
+        return;
+    case D1L_UI_DEVICE_SHEETS_ACTION_OPEN_TERMINAL:
+        hide_diagnostics_sheet();
+        open_terminal_sheet_event_cb(NULL);
         return;
     case D1L_UI_DEVICE_SHEETS_ACTION_NONE:
     default:
@@ -6128,6 +6313,301 @@ static bool render_diagnostics_sheet(void)
     return d1l_ui_device_sheets_render_diagnostics(
         &s_device_sheets_controller, &s_snapshot,
         device_sheets_action_handler, NULL);
+}
+
+static bool confirmation_active(bool armed, uint32_t deadline)
+{
+    return armed && (int32_t)(deadline - lv_tick_get()) > 0;
+}
+
+static bool render_terminal_service_sheet(void)
+{
+    d1l_ui_terminal_sheet_input_t input = {
+        .status = d1l_event_log_status(),
+        .clear_armed = confirmation_active(
+            s_terminal_clear_armed, s_terminal_clear_deadline),
+    };
+    if (!input.clear_armed) {
+        s_terminal_clear_armed = false;
+    }
+    input.entry_count = d1l_event_log_copy_recent(
+        input.entries, D1L_UI_TERMINAL_PREVIEW_COUNT);
+    return d1l_ui_service_sheets_render_terminal(
+        &s_service_sheets_controller, &input,
+        service_sheets_action_handler, NULL);
+}
+
+static bool render_observer_service_sheet(void)
+{
+    d1l_observer_status_t status = {0};
+    d1l_observer_status(&status);
+    return d1l_ui_service_sheets_render_observer(
+        &s_service_sheets_controller, &status,
+        service_sheets_action_handler, NULL);
+}
+
+static bool render_update_service_sheet(void)
+{
+    d1l_update_status_t status = {0};
+    d1l_update_status(&status);
+    const bool install_armed = confirmation_active(
+        s_update_install_armed, s_update_install_deadline);
+    const bool reboot_armed = confirmation_active(
+        s_update_reboot_armed, s_update_reboot_deadline);
+    if (!install_armed) {
+        s_update_install_armed = false;
+    }
+    if (!reboot_armed) {
+        s_update_reboot_armed = false;
+    }
+    return d1l_ui_service_sheets_render_update(
+        &s_service_sheets_controller, &status,
+        install_armed, reboot_armed,
+        service_sheets_action_handler, NULL);
+}
+
+static bool render_notifications_service_sheet(void)
+{
+    d1l_display_preferences_t preferences = {0};
+    d1l_display_preferences_get(&preferences);
+    d1l_ui_notifications_sheet_input_t input = {
+        .public_unread = s_snapshot.public_unread_count,
+        .dm_unread = s_snapshot.dm_unread_count,
+        .muted_unread = s_snapshot.muted_dm_unread_count,
+        .mode = preferences.notification_mode,
+    };
+    return d1l_ui_service_sheets_render_notifications(
+        &s_service_sheets_controller, &input,
+        service_sheets_action_handler, NULL);
+}
+
+static bool render_admin_service_sheet(void)
+{
+    d1l_meshcore_admin_snapshot_t status = {0};
+    d1l_meshcore_service_admin_snapshot(&status);
+    if (status.state != D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+        !confirmation_active(
+            s_admin_mutation_armed != D1L_MESHCORE_ADMIN_MUTATION_NONE,
+            s_admin_mutation_deadline)) {
+        s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+    }
+    return d1l_ui_service_sheets_render_admin(
+        &s_service_sheets_controller, &status,
+        s_admin_target_fingerprint,
+        s_admin_mutation_armed,
+        service_sheets_action_handler, NULL);
+}
+
+static void service_sheets_action_handler(
+    d1l_ui_service_action_t action,
+    void *context)
+{
+    (void)context;
+    switch (action) {
+    case D1L_UI_SERVICE_ACTION_CLOSE_TERMINAL:
+    case D1L_UI_SERVICE_ACTION_CLOSE_OBSERVER:
+    case D1L_UI_SERVICE_ACTION_CLOSE_UPDATE:
+    case D1L_UI_SERVICE_ACTION_CLOSE_NOTIFICATIONS:
+    case D1L_UI_SERVICE_ACTION_CLOSE_ADMIN:
+        hide_service_sheets();
+        return;
+    case D1L_UI_SERVICE_ACTION_TERMINAL_LEVEL: {
+        const d1l_event_log_status_t status = d1l_event_log_status();
+        const d1l_event_log_level_t next =
+            (d1l_event_log_level_t)(
+                ((unsigned)status.runtime_level + 1U) %
+                ((unsigned)D1L_EVENT_LOG_LEVEL_DEBUG + 1U));
+        show_toast("Terminal level",
+                   d1l_event_log_set_runtime_level(next));
+        (void)render_terminal_service_sheet();
+        return;
+    }
+    case D1L_UI_SERVICE_ACTION_TERMINAL_CLEAR:
+        if (!confirmation_active(
+                s_terminal_clear_armed, s_terminal_clear_deadline)) {
+            s_terminal_clear_armed = true;
+            s_terminal_clear_deadline = lv_tick_get() + 5000U;
+            show_toast_text("Tap Confirm Clear within 5 seconds", true);
+        } else {
+            s_terminal_clear_armed = false;
+            show_toast("Clear logs", d1l_event_log_clear());
+        }
+        (void)render_terminal_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_OBSERVER_TOGGLE: {
+        d1l_observer_status_t status = {0};
+        d1l_observer_status(&status);
+        show_toast(status.enabled ? "Observer off" : "Observer on",
+                   d1l_observer_set_enabled(!status.enabled));
+        (void)render_observer_service_sheet();
+        request_content_refresh();
+        return;
+    }
+    case D1L_UI_SERVICE_ACTION_UPDATE_INSTALL:
+        if (!confirmation_active(
+                s_update_install_armed, s_update_install_deadline)) {
+            s_update_install_armed = true;
+            s_update_install_deadline = lv_tick_get() + 5000U;
+            show_toast_text("Tap Confirm Install within 5 seconds", true);
+        } else {
+            s_update_install_armed = false;
+            show_toast("Signed update",
+                       d1l_update_request_install());
+        }
+        (void)render_update_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_UPDATE_CANCEL:
+        show_toast("Update cancel", d1l_update_cancel());
+        (void)render_update_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_UPDATE_REBOOT:
+        if (!confirmation_active(
+                s_update_reboot_armed, s_update_reboot_deadline)) {
+            s_update_reboot_armed = true;
+            s_update_reboot_deadline = lv_tick_get() + 5000U;
+            show_toast_text("Tap Confirm Reboot within 5 seconds", true);
+            (void)render_update_service_sheet();
+            return;
+        }
+        s_update_reboot_armed = false;
+        show_toast("Update reboot",
+                   d1l_update_reboot_to_installed());
+        (void)render_update_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_NOTIFICATIONS_MODE: {
+        d1l_display_preferences_t preferences = {0};
+        d1l_display_preferences_get(&preferences);
+        const d1l_notification_mode_t next =
+            (d1l_notification_mode_t)(
+                ((unsigned)preferences.notification_mode + 1U) %
+                ((unsigned)D1L_NOTIFICATION_MODE_QUIET_HOURS + 1U));
+        show_toast("Notification mode",
+                   d1l_display_preferences_set_notification_mode(next));
+        d1l_app_model_snapshot(&s_snapshot);
+        (void)render_notifications_service_sheet();
+        request_content_refresh();
+        return;
+    }
+    case D1L_UI_SERVICE_ACTION_OPEN_MESSAGES:
+        hide_service_sheets();
+        s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
+        request_tab_switch(D1L_UI_TAB_MESSAGES);
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_REFRESH:
+        s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+        show_toast("Admin status",
+                   d1l_meshcore_service_admin_request_status());
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_CLEAR_STATS:
+    case D1L_UI_SERVICE_ACTION_ADMIN_ADVERTISE_ZERO_HOP: {
+        const d1l_meshcore_admin_mutation_t mutation =
+            action == D1L_UI_SERVICE_ACTION_ADMIN_CLEAR_STATS ?
+                D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS :
+                D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP;
+        if (s_admin_mutation_armed != mutation ||
+            !confirmation_active(true, s_admin_mutation_deadline)) {
+            s_admin_mutation_armed = mutation;
+            s_admin_mutation_deadline =
+                lv_tick_get() + D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS;
+            show_toast_text(
+                mutation == D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS ?
+                    "Tap Confirm Clear Stats within 5 seconds" :
+                    "Tap Confirm Zero-Hop within 5 seconds",
+                true);
+        } else {
+            s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+            show_toast(
+                mutation == D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS ?
+                    "Clear remote stats" : "Send zero-hop advert",
+                d1l_meshcore_service_admin_request_mutation(
+                    mutation, true));
+        }
+        (void)render_admin_service_sheet();
+        return;
+    }
+    case D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT:
+        s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+        show_toast("Admin logout",
+                   d1l_meshcore_service_admin_logout());
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_NONE:
+    default:
+        return;
+    }
+}
+
+static void open_terminal_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_TERMINAL)) {
+        return;
+    }
+    hide_sheet();
+    d1l_app_model_snapshot(&s_snapshot);
+    if (render_terminal_service_sheet()) {
+        show_modal(d1l_ui_service_sheets_terminal(
+            &s_service_sheets_controller));
+    }
+}
+
+static void open_observer_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_OBSERVER)) {
+        return;
+    }
+    hide_sheet();
+    if (render_observer_service_sheet()) {
+        show_modal(d1l_ui_service_sheets_observer(
+            &s_service_sheets_controller));
+    }
+}
+
+static void open_update_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_UPDATE)) {
+        return;
+    }
+    hide_sheet();
+    if (render_update_service_sheet()) {
+        show_modal(d1l_ui_service_sheets_update(
+            &s_service_sheets_controller));
+    }
+}
+
+static void open_notifications_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_NOTIFICATIONS)) {
+        return;
+    }
+    hide_sheet();
+    d1l_app_model_snapshot(&s_snapshot);
+    if (render_notifications_service_sheet()) {
+        show_modal(d1l_ui_service_sheets_notifications(
+            &s_service_sheets_controller));
+    }
+}
+
+static void open_admin_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_ADMIN)) {
+        return;
+    }
+    hide_sheet();
+    if (render_admin_service_sheet()) {
+        show_modal(d1l_ui_service_sheets_admin(
+            &s_service_sheets_controller));
+    }
 }
 
 static void open_wifi_sheet_event_cb(lv_event_t *event)
@@ -7549,16 +8029,95 @@ static void lock_event_cb(lv_event_t *event)
     }
 }
 
+static uint8_t desired_backlight_percent(void)
+{
+    d1l_settings_t settings = {0};
+    d1l_display_preferences_t preferences = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    d1l_display_preferences_get(&preferences);
+    return settings.night_mode ? 25U : preferences.brightness_percent;
+}
+
 static void unlock_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_lock_overlay) {
+        (void)d1l_backlight_set_percent(desired_backlight_percent());
+        s_backlight_dimmed = false;
+        s_backlight_pulse_active = false;
         s_lock_visible = false;
         lv_obj_add_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
         if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
             !d1l_ui_modal_has_active() && !s_onboarding_visible) {
             request_content_refresh();
         }
+    }
+}
+
+static bool notification_quiet_now(void)
+{
+    const char *time = s_snapshot.time_label;
+    if (!s_snapshot.time_available || !time) {
+        return true;
+    }
+    while (*time && (*time < '0' || *time > '9')) {
+        time++;
+    }
+    if (time[0] < '0' || time[0] > '9' ||
+        time[1] < '0' || time[1] > '9') {
+        return true;
+    }
+    const unsigned hour =
+        (unsigned)(time[0] - '0') * 10U + (unsigned)(time[1] - '0');
+    return hour >= 22U || hour < 7U;
+}
+
+static void display_runtime_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    d1l_display_preferences_t preferences = {0};
+    d1l_display_preferences_get(&preferences);
+    const uint32_t now = lv_tick_get();
+    const uint64_t unread_wide =
+        (uint64_t)s_snapshot.public_unread_count +
+        (uint64_t)s_snapshot.dm_unread_count;
+    const uint32_t unread = unread_wide > UINT32_MAX ?
+        UINT32_MAX : (uint32_t)unread_wide;
+
+    if (unread > s_last_notification_unread &&
+        preferences.notification_mode != D1L_NOTIFICATION_MODE_OFF &&
+        (preferences.notification_mode !=
+             D1L_NOTIFICATION_MODE_QUIET_HOURS ||
+         !notification_quiet_now()) &&
+        !s_backlight_dimmed && !s_lock_visible) {
+        if (d1l_backlight_set_percent(100) == ESP_OK) {
+            s_backlight_pulse_active = true;
+            s_backlight_pulse_until = now + 450U;
+        }
+    }
+    s_last_notification_unread = unread;
+
+    if (s_backlight_pulse_active &&
+        (int32_t)(now - s_backlight_pulse_until) >= 0) {
+        (void)d1l_backlight_set_percent(desired_backlight_percent());
+        s_backlight_pulse_active = false;
+    }
+
+    const uint32_t inactive_ms = lv_disp_get_inactive_time(NULL);
+    if (s_backlight_dimmed) {
+        if (inactive_ms < 500U) {
+            (void)d1l_backlight_set_percent(desired_backlight_percent());
+            s_backlight_dimmed = false;
+        }
+        return;
+    }
+    if (preferences.timeout_seconds > 0U &&
+        inactive_ms >= (uint32_t)preferences.timeout_seconds * 1000U &&
+        !s_lock_visible && !s_onboarding_visible) {
+        lock_event_cb(NULL);
+        (void)d1l_backlight_set_percent(0);
+        s_backlight_dimmed = true;
+        s_backlight_pulse_active = false;
     }
 }
 
@@ -7583,6 +8142,19 @@ static void refresh_timer_cb(lv_timer_t *timer)
     update_onboarding_visibility(&s_snapshot);
     if (d1l_ui_modal_visible(s_compose_sheet)) {
         update_compose_counter();
+    }
+    if (d1l_ui_modal_visible(d1l_ui_service_sheets_update(
+            &s_service_sheets_controller))) {
+        (void)render_update_service_sheet();
+    } else if (d1l_ui_modal_visible(d1l_ui_service_sheets_observer(
+                   &s_service_sheets_controller))) {
+        (void)render_observer_service_sheet();
+    } else if (d1l_ui_modal_visible(d1l_ui_service_sheets_admin(
+                   &s_service_sheets_controller))) {
+        (void)render_admin_service_sheet();
+    } else if (d1l_ui_modal_visible(d1l_ui_service_sheets_notifications(
+                   &s_service_sheets_controller))) {
+        (void)render_notifications_service_sheet();
     }
     const bool map_active = d1l_ui_navigation_active() == D1L_UI_TAB_MAP;
     const bool map_uncovered = map_active &&
@@ -7745,6 +8317,8 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_color(s_compose_textarea, lv_color_hex(0x263241), 0);
     lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0xF4F7FB), 0);
     lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0x8EA0AE), LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_text_font(
+        s_compose_textarea, &d1l_ui_font_symbols_14, 0);
     lv_obj_add_event_cb(s_compose_textarea, compose_textarea_event_cb,
                         LV_EVENT_VALUE_CHANGED, NULL);
 
@@ -8256,6 +8830,10 @@ esp_err_t d1l_ui_phase1_show_home(void)
     if (!d1l_ui_device_sheets_create(&s_device_sheets_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
     }
+    if (!d1l_ui_service_sheets_create(
+            &s_service_sheets_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
     if (d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
         if (!d1l_ui_map_sheets_create(&s_map_sheets_controller, s_screen)) {
             return ESP_ERR_NO_MEM;
@@ -8289,11 +8867,17 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_onboarding_sheet(s_screen);
 
     render_active_tab();
+    const uint64_t initial_unread =
+        (uint64_t)s_snapshot.public_unread_count +
+        (uint64_t)s_snapshot.dm_unread_count;
+    s_last_notification_unread = initial_unread > UINT32_MAX ?
+        UINT32_MAX : (uint32_t)initial_unread;
     if (d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
         lv_timer_create(map_viewport_timer_cb,
                         D1L_UI_MAP_VIEWPORT_REFRESH_MS, NULL);
     }
     lv_timer_create(refresh_timer_cb, 2000, NULL);
+    lv_timer_create(display_runtime_timer_cb, 100, NULL);
     lv_scr_load(s_screen);
     return ESP_OK;
 }

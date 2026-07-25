@@ -442,7 +442,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_keyboard_set_textarea(keyboard, NULL)" in keyboard
     assert "d1l_compose_kb_map_lc" in keyboard
     assert "lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER" in keyboard
-    assert "lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14" in keyboard
+    assert "lv_obj_set_style_text_font(" in keyboard
+    assert "keyboard, &d1l_ui_font_symbols_14, LV_PART_ITEMS" in keyboard
     assert "lv_obj_set_size(keyboard, (lv_coord_t)width, (lv_coord_t)height)" in keyboard
     assert "lv_obj_set_align(keyboard, LV_ALIGN_TOP_LEFT)" in keyboard
     assert "lv_keyboard_set_textarea(keyboard, textarea)" in keyboard
@@ -1200,7 +1201,8 @@ def test_node_detail_sheet_opens_from_heard_node_rows():
     assert '"Path hops %u  hash %u byte  advert %lums"' in detail
     assert '"Last heard %lums  first %lums  count %lu"' in detail
     assert 'create_button(controller, "DM"' in detail
-    assert '"Manage locked"' in detail
+    assert '"Admin"' in detail
+    assert '"Verified server; local authenticated login required."' in detail
     assert 'create_button(controller, "Close"' in detail
     assert "d1l_ui_node_detail_create(&s_node_detail_controller, s_screen)" in source
 
@@ -1741,7 +1743,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "d1l_app_model_wifi_connect()" in source
     assert "d1l_app_model_clear_wifi_profile()" in source
     assert "d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled)" in source
-    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false" in header
+    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED true" in header
     app_model = read("main/app/app_model.c")
     assert "D1L_RELEASE_FEATURE_BLE" in app_model
     assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED" in app_model
@@ -1756,13 +1758,14 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "D1L_UI_WIFI_ACTION_SCAN" in source
     assert "D1L_UI_WIFI_ACTION_CONNECT" in source
     assert '"BLE companion transport is unavailable in this release."' in connectivity
-    assert '"No BLE pairing or transport artifact is present for public release."' in connectivity
+    assert '"Secure MeshCore companion transport is available."' in connectivity
+    assert '"No BLE pairing or transport runtime is present."' in connectivity
     assert '"Enable unavailable"' in ble_module
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
     assert '"Fixed UTC offset only; daylight saving is not automatic.' in device_sheets
-    assert '"Advanced details stay here so normal screens remain simple."' in device_sheets
+    assert '"Open Terminal for the bounded redacted event ring and runtime log level."' in device_sheets
     assert '"reset %s  heap %luK/%luK  ui stk %lu"' in device_sheets
 
 

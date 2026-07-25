@@ -73,17 +73,37 @@ void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
     out_view->controls_available = runtime_available;
     snprintf(out_view->purpose, sizeof(out_view->purpose), "%s",
              runtime_available ?
-                 "Companion BLE is available for measured local setup." :
+                 "Secure MeshCore companion transport is available." :
                  "BLE companion transport is unavailable in this release.");
-    snprintf(out_view->runtime_note, sizeof(out_view->runtime_note), "%s",
-             runtime_available ?
-                 "Pairing controls require a measured BLE runtime artifact." :
-                 "No BLE pairing or transport artifact is present for public release.");
+    if (runtime_available && input->pairing_passkey >= 100000U &&
+        input->pairing_passkey <= 999999U &&
+        strcmp(safe_text(input->state, "off"), "pairing") == 0) {
+        snprintf(out_view->runtime_note, sizeof(out_view->runtime_note),
+                 "Enter PIN %06lu on the companion device.",
+                 (unsigned long)input->pairing_passkey);
+    } else if (runtime_available && input->protocol_ready) {
+        snprintf(out_view->runtime_note, sizeof(out_view->runtime_note),
+                 "Encrypted, bonded, and ready for companion sync.");
+    } else if (runtime_available && input->companion_enabled) {
+        snprintf(out_view->runtime_note, sizeof(out_view->runtime_note),
+                 "Advertising securely; tap Pair to renew discovery.");
+    } else {
+        snprintf(out_view->runtime_note, sizeof(out_view->runtime_note), "%s",
+                 runtime_available ?
+                     "Enable Bluetooth, then tap Pair from this screen." :
+                     "No BLE pairing or transport runtime is present.");
+    }
     snprintf(out_view->toggle_label, sizeof(out_view->toggle_label), "%s",
              runtime_available && input->companion_enabled ?
                  "Disable" : "Enable");
     snprintf(out_view->production_note, sizeof(out_view->production_note), "%s",
-             "USB remains the reliable companion path for production validation.");
+             runtime_available && input->protocol_running ?
+                 "Official MeshCore framing; Wi-Fi switches off while BLE is active." :
+                 "USB remains available for recovery and diagnostics.");
+    out_view->pairing_available =
+        runtime_available && input->companion_enabled;
+    out_view->forget_available =
+        runtime_available && input->peer_known;
     out_view->state_color = runtime_available && input->companion_enabled ?
         0xA7F3D0U : 0xFBBF24U;
 }

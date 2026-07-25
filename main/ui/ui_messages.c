@@ -5,6 +5,7 @@
 
 #include "app/release_profile.h"
 #include "lvgl.h"
+#include "ui_font_symbols_14.h"
 #include "ui_modal.h"
 
 _Static_assert(sizeof(d1l_ui_messages_controller_t) <=
@@ -177,6 +178,7 @@ static lv_obj_t *messages_create_label(lv_obj_t *parent, const char *text, uint3
     }
     lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    lv_obj_set_style_text_font(label, &d1l_ui_font_symbols_14, 0);
     return label;
 }
 

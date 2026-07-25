@@ -1,179 +1,238 @@
-# MeshCore DeskOS D1L Core 1.0 User Guide
+# MeshCore DeskOS D1L Full Feature User Guide
 
-MeshCore DeskOS D1L Core 1.0 is a touch-first, non-forwarding MeshCore desk
-client for the Seeed SenseCAP Indicator D1L. The immutable release profile is
-`core_1_0`.
+This guide covers the production `full_feature` firmware for the Seeed
+SenseCAP Indicator D1L. DeskOS is a non-forwarding MeshCore desk client: it
+receives and sends user-requested traffic but does not act as a repeater.
 
-Release readiness is determined only by the exact GitHub Actions package and
-its Core release audit. A source checkout, simulator image, dry run, or older
-device image is not release evidence.
+## First start
 
-## Supported surface
+1. Power on the D1L and complete onboarding.
+2. Set a device name and confirm the Canada/USA radio profile unless your
+   authorized region requires another supported setting.
+3. Open **Tools → Identity** and confirm the local identity is ready.
+4. Open **Tools → Diagnostics** and confirm board, radio, settings and retained
+   storage are healthy.
+5. Leave Wi-Fi, Bluetooth and Observer off until you need them.
 
-Core 1.0 supports:
+The bottom dock is **Home**, **Messages**, **Nodes**, **Map**, and **Tools**.
+Swipe vertically in lists and long sheets. Home itself is a summary rather
+than a long scrolling page.
 
-- Home with device, radio, message, storage, and health truth;
-- Public messages on the fixed default Public channel;
-- direct-message conversations with verified contacts;
-- basic contact and heard-node inspection;
-- Nodes and bounded node detail;
-- read-only Packets and route/signal diagnostics;
-- Canada/USA radio settings;
-- local identity and adverts;
-- retained settings and Core message state in internal NVS;
-- diagnostics, health, crashlog, display, touch, and backlight;
-- fixed UTC-offset display and truthful approximate/unavailable time;
-- checksum-verified USB installation and recovery.
+## Messages and channels
 
-SD history is disabled in this Core candidate because the paired SD/RP2040
-path was not available for exact-candidate qualification. The package omits
-the RP2040 payload and internal NVS remains authoritative.
+**Messages** opens the channel and direct-message views. Reading, scrolling,
+searching and refreshing are RF-silent. A transmission occurs only after an
+explicit Send, Advert, Trace or administration action.
 
-## Unavailable surface
+The fixed Public channel is always present. Full Feature also supports
+creating/importing channels, selecting an active channel, renaming compatible
+entries, exporting share URIs, and removing non-protected channels. The Public
+channel cannot be deleted.
 
-The following are intentionally unavailable and should not appear as usable
-destinations or controls:
+A Public packet's display name has the `sender_name_unverified` boundary. It
+never alias-matches into a DM destination. Direct-message compose requires the
+complete public key of the same retained, verified chat contact; heard-only,
+incomplete, mismatched and non-chat identities remain read-only.
 
-- Map and map tiles;
-- user-controlled Wi-Fi;
-- BLE;
-- channel creation, import, export, selection, or removal;
-- repeater or room-server administration;
-- Observer/MQTT;
-- signed SD update or OTA;
-- GPS/location (the D1L has no onboard GPS);
-- mutable terminal or log UI;
-- advanced QR/emoji tools;
-- user-facing active TRACE/PATH tools;
-- a notification system beyond unread counters.
+DM rows report queued, transmitted, acknowledged, retrying or failed state.
+Opening a thread or refreshing it never silently retries a failed draft.
 
-An unavailable mutation returns `ESP_ERR_NOT_SUPPORTED` with
-`release_profile="core_1_0"` before any side effect.
+## Contacts, nodes, routes and packets
 
-## Navigation
+Contact detail supports verified MeshCore QR import/export, rename,
+favorite/mute state and confirmed deletion. Unknown or malformed roles remain
+read-only.
 
-The Core dock contains exactly:
+**Nodes** shows heard peers and role-specific detail. Signed advert locations
+can appear as map markers only when their provenance and non-future age can be
+validated. Route and signal views expose retained evidence without inventing
+hop identity.
 
-1. Home
-2. Messages
-3. Nodes
-4. Packets
-5. Settings
+**Tools → Packets** is a bounded terminal-style packet view with pause/resume,
+filters, search, packet detail and raw preview. **Trace** and path probes are
+explicit RF actions; ordinary inspection is silent.
 
-Messages contains Public and Direct messages. Opening, reading, searching,
-scrolling, or refreshing a message view does not transmit. Radio transmission
-requires an explicit Send action.
+## Map
 
-## First use
+The D1L has no onboard GPS. The GPS/location boundary is explicit: Map center is supplied by an explicit user-set
+center or an authenticated bonded companion. The source is stored and shown
+as `manual` or `authenticated_companion`; it is never inferred from the
+coordinates.
 
-1. Power on the D1L and wait for Home.
-2. Confirm the device identifies itself as a non-forwarding desk client.
-3. Open Settings and review About/Version, Radio, Identity, Storage, Time, and
-   Diagnostics.
-4. Confirm Storage reports internal/NVS operation and SD history disabled.
-5. Use the Canada/USA radio preset unless your authorized region requires a
-   different supported configuration.
-6. Let a compatible peer advert be received before attempting a direct
-   message. Use the complete verified contact identity; ambiguous fingerprint
-   prefixes are rejected.
+Use **Map → Map options → Set location or Cache status**. The map uses the
+built-in OpenStreetMap tile source and always displays
+`(c) OpenStreetMap contributors`. The bounded interactive policy is:
 
-## Messaging
+- zoom 8 through 14, starting at 10;
+- one-finger pan and direct `-`, `+`, and **Center** controls;
+- a visible current-view 3x3 tile maximum;
+- at most one zoom request per visible generation;
+- cache/reuse of completed tiles;
+- no background prefetch and no area download.
 
-Public is the one fixed default channel in Core 1.0. A user may manually read,
-compose, and send Public messages. Release automation never transmits on the
-default Public channel.
+Map probes never request map tiles. Tile networking requires enabled,
+connected Wi-Fi, a trusted center, and ready SD-backed tile storage.
 
-A Public packet's sender display name is unverified. The
-`sender_name_unverified` boundary never alias-matches that name into a direct
-message target. Direct-message compose requires the complete public key of the
-same retained, verified chat contact. Heard-only, incomplete, mismatched, or
-non-chat identities remain read-only.
+## Wi-Fi
 
-Direct messages require a verified compatible peer. The conversation reports
-queued, transmitted, acknowledged, retrying, or failed state truthfully. A
-failed draft is not silently retransmitted by navigation or refresh.
+Open **Tools → Connections → Wi-Fi**. Scan, save a station profile, connect or
+disconnect explicitly. Saved passwords are not printed by status, logs or
+exports. Wi-Fi and BLE share the device radio under an offline-first
+coexistence policy, so enabling one may stop the other.
 
-## Storage and persistence
+## Bluetooth companion
 
-Core retained state uses internal NVS. It includes bounded settings, identity,
-Public and direct-message state, read markers, required contacts/routes, and
-crashlog state.
+Open **Tools → Connections → Bluetooth**, turn BLE on, tap **Pair**, and enter
+the six-digit PIN shown on the D1L in the companion app. A session is accepted
+only after encryption, authentication and bonding. **Forget** removes the
+bonded peer locally.
 
-- DeskOS never formats an SD card.
-- This Core package does not contain an RP2040 SD bridge image.
-- SD media is not required for Core 1.0.
-- Normal project flashing is non-erasing and should preserve retained state.
-- The full 8 MB recovery image is destructive and requires typed
-  confirmation.
+The production companion core protocol supports:
 
-## Install from the exact release package
+- app start and device query;
+- contact list and exact-contact lookup/removal;
+- channel read/write and non-protected channel deletion;
+- DM and channel messaging plus message synchronization;
+- device time read/write;
+- device name, advert and authenticated-companion location;
+- radio parameters, TX power and path-hash mode;
+- battery and storage status.
 
-Use only the package attached to the GitHub release for the exact tagged
-commit. Verify every checksum before flashing.
+Remote reboot, remote factory reset, and private-key import/export return a
+disabled response. Optional channel-datagram extensions are not advertised.
+These are deliberate ownership/security boundaries, not missing everyday
+companion functions.
 
-```powershell
-python .\scripts\verify_checksums.py <extracted-package-directory>
-$env:D1L_PORT = "COM12"
-.\flash_project.ps1 -Port $env:D1L_PORT
+## Observer / MQTT
+
+Observer is opt-in. Configure it over the USB terminal with an `mqtts://`
+broker and a topic, then enable it from **Tools → Connections → Observer** or
+USB. TLS is mandatory. Publishing uses QoS 1 with PUBACK accounting and a
+bounded drop-oldest queue during outages.
+
+The payload contains device health/counters and, only when explicitly
+selected, the current manual/companion map center. It never publishes message
+text, keys, contacts or RF-forwarding data.
+
+## Repeater and room administration
+
+Open a repeater or room node, then **Admin**, or use **Tools → Advanced →
+Server admin**. Login requires the exact retained server fingerprint and its
+password. A room login starts at the no-history cursor, so old room traffic is
+not replayed into the session.
+
+Status refresh is read-only. Production mutations are exactly:
+
+- clear server statistics;
+- request a zero-hop advert.
+
+Each requires an authenticated matching session and a second local tap within
+five seconds. Logout clears the session. DeskOS does not expose arbitrary raw
+server commands.
+
+## Display, notifications and terminal
+
+**Tools → Device → Display** controls brightness, screen timeout, night mode,
+high contrast and fixed UTC display offset. Touch wakes the backlight without
+also activating the control beneath it.
+
+**Notifications** cycles off, pulse and quiet-hours behavior. Repeated updates
+are deduplicated and the backlight pulse does not override an active local
+interaction.
+
+**Terminal** shows the 64-entry structured event ring with level, source, kind
+and bounded message. It never retains secrets or raw remote commands. Log
+clearing is locally confirmed.
+
+## SD storage
+
+Full Feature uses conditional SD history through the D1L RP2040 bridge.
+Internal NVS remains the bounded fallback when the card or bridge is absent.
+
+- Users prepare FAT32 SD cards on a computer.
+- There is no device-side SD formatting path.
+- Non-FAT32, unmountable or foreign-lineage media are preserved and reported
+  without destructive repair.
+- Retained Public/DM/route/packet data and map/export data use the SD path only
+  when ownership and filesystem checks pass.
+- Never remove a card while a write is active; use the status page before
+  troubleshooting.
+
+The compatibility Core profile has SD history disabled, uses NVS, and omits
+the RP2040 payload. It is not the current production candidate.
+
+## Signed update
+
+The release package contains `d1l-update.bin`, `d1l-update.manifest`, and
+`d1l-update.sig`. Copy them to the package-documented `updates` directory on
+qualified storage, then open **Tools → Storage & maps → Signed update**.
+
+DeskOS verifies the production Ed25519 signer, manifest, exact image SHA-256,
+image size, source commit and a strictly increasing security sequence before
+writing the inactive OTA slot. Installation and reboot each require local
+confirmation. The bootloader can roll back an unconfirmed image; a healthy
+boot confirms the running slot. A lower or equal security sequence is
+rejected.
+
+USB equivalents are:
+
+```text
+update status
+update install CONFIRM-SIGNED-UPDATE
+update cancel
+update reboot CONFIRM-REBOOT-UPDATE
 ```
 
-The release package contains its own checksum manifest, source commit, Actions
-run identifier, release profile, SD mode, provenance, SBOM, supported-feature
-summary, and explicit-port flash helpers.
+## Useful USB diagnostics
 
-Do not use COM8, COM11, or COM29. COM16 is reserved for separately authorized
-SD/RP2040 maintenance and is not used by this Core package.
+The console emits bounded JSON. Start with:
 
-Read `FLASH_RECOVERY_D1L.md` before using recovery. Do not use an erase or full
-image for a normal upgrade.
+```text
+version
+health
+board
+settings get
+mesh status
+radio get
+identity status
+storage status
+messages unread
+nodes
+packets
+signal
+ble status
+observer status
+admin status
+terminal status
+update status
+crashlog
+```
 
-## Core diagnostic commands
+`help` lists the complete allowlist. Commands that transmit, mutate remote
+state, clear evidence, reboot, update or factory-reset have explicit
+confirmation and release-profile gates.
 
-The bounded USB console includes:
+## Install and recovery
 
-- `version`
-- `health`
-- `crashlog`
-- `board`
-- `settings get`
-- `mesh status`
-- `radio get`
-- `identity status`
-- `messages public`
-- `messages dm`
-- `messages unread`
-- `nodes`
-- `contacts`
-- `routes`
-- `packets`
-- `signal`
-- `storage status`
-- controlled `reboot`
+Release firmware is built only by GitHub Actions. Use the exact source-bound
+package and verify `SHA256SUMS.txt` before flashing. The current target is on
+Pi 5 host `neopi5` and must be selected only by:
 
-The device may expose additional read-only recovery or diagnostic probes. A
-read-only unavailable-feature status must say `available=false` and must not
-claim runtime support.
+```text
+/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+VID:PID 1a86:7523
+```
 
-## Safety
+Never substitute a raw `/dev/ttyUSB*` path or a stale Windows COM assignment.
+Normal project flashing is non-erasing. The full 8 MB recovery image can erase
+settings, identity, contacts, messages and logs and requires typed
+confirmation. See `FLASH_RECOVERY_D1L.md`.
 
-- Firmware binaries are built only by GitHub Actions.
-- Flash only an exact package whose checksums and commit binding pass.
-- Use COM12 for the D1L.
-- Never use COM8, COM11, or COM29.
-- Never format SD.
-- Never automate default Public RF.
-- Do not treat predecessor, simulated, dry-run, or source-only output as
-  exact-candidate evidence.
+## Release evidence
 
-## Support and release evidence
-
-See:
-
-- `README.md` for the public Core capability summary;
-- `docs/release/24H_STATUS.md` for the live fail-closed execution ledger;
-- `docs/FLASH_RECOVERY_D1L.md` for install/recovery safety;
-- `docs/release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md` for the
-  authoritative product boundary.
-
-Full Feature development remains tracked separately and
+Firmware completeness and public-release authorization are different gates.
+The feature surface is implemented, but a release is authorized only after
+the exact Actions artifact, checksum/provenance/SBOM checks, exact-target
+flash, automated device acceptance, reboot/persistence, conditional SD,
+controlled-peer RF/DM/admin and final physical UI review all pass. Until then
 `full_feature_release_ready` remains false.

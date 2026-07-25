@@ -1,7 +1,55 @@
-# MeshCore DeskOS D1L Core 1.0 — 24-Hour Status
+# MeshCore DeskOS D1L Full Feature — Production Status
 
-This is the live, fail-closed execution ledger for the Core 1.0 release sprint.
-The authoritative product boundary, roadmap, and work graph are:
+## Current continuation (2026-07-25)
+
+| Field | Current value |
+|---|---|
+| Repository | `n30nex/SIGUI` |
+| Integration branch | `release/24h-core` |
+| Integration worktree | `F:\SIGUI-worktrees\release-24h-core` |
+| Release profile | `full_feature` |
+| SD history mode | `conditional` |
+| Feature implementation | `100%` |
+| Public release readiness | `false` pending exact candidate evidence |
+| Candidate SHA | pending final commit |
+| Candidate Actions run | pending exact-SHA run |
+| Current D1L host | Pi 5 `neopi5` / `192.168.0.24` |
+| Development account | `siguidev`, unprivileged and key-only |
+| Authorized selector | `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` |
+| Required USB identity | `1a86:7523` |
+| Controlled-peer access | still requires narrow explicit authorization |
+
+All user-facing domains are now implemented: full navigation/messaging,
+multi-channel/contact/QR management, Nodes/Packets/Map/TRACE, Wi-Fi, bonded
+BLE companion core protocol, authenticated repeater/room administration,
+TLS/QoS1 Observer, conditional SD history, Ed25519-signed dual-slot update,
+display/accessibility, notifications, structured terminal/event log,
+diagnostics and recovery.
+
+Release closure now has one straight-line sequence: source gates → immutable
+commit → exact-SHA Actions package → checksum verification → exact Pi 5 flash
+→ automated device/reboot/storage/controlled-peer acceptance → one
+consolidated physical UI confirmation → final audit. No predecessor evidence
+is transferred to the candidate.
+
+Immutable current rules:
+
+- use only the stable Pi by-id selector after proving `1a86:7523`;
+- never probe another Pi serial device and never substitute a raw tty;
+- stale Windows COM assignments are historical only;
+- never format SD;
+- never automate default Public RF;
+- never disclose or export identity/private/update signing secrets;
+- keep `full_feature_release_ready=false` until every exact-candidate receipt
+  exists and passes.
+
+## Historical Core sprint ledger
+
+The remainder of this file is the preserved 2026-07-18 through 2026-07-24
+Core sprint ledger. Its profile, percentages, commits, runs and Windows routes
+are historical, not the current candidate state.
+
+The authoritative historical product boundary, roadmap, and work graph were:
 
 - `SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md`
 - `SIGUI_24H_AUDIT_AND_ROADMAP_2026-07-18.md`

@@ -7,13 +7,15 @@
 
 typedef struct _lv_obj_t lv_obj_t;
 
-#define D1L_UI_BLE_BINDING_COUNT 2U
-#define D1L_UI_BLE_CONTROLLER_MAX_BYTES 512U
+#define D1L_UI_BLE_BINDING_COUNT 4U
+#define D1L_UI_BLE_CONTROLLER_MAX_BYTES 640U
 
 typedef enum {
     D1L_UI_BLE_ACTION_NONE = 0,
     D1L_UI_BLE_ACTION_CLOSE,
     D1L_UI_BLE_ACTION_TOGGLE,
+    D1L_UI_BLE_ACTION_PAIR,
+    D1L_UI_BLE_ACTION_FORGET,
 } d1l_ui_ble_action_t;
 
 typedef void (*d1l_ui_ble_action_handler_t)(d1l_ui_ble_action_t action,

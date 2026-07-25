@@ -2,8 +2,10 @@
 
 #include <string.h>
 
+#include "comms/ble_companion_protocol.h"
 #include "comms/ble_companion_queue.h"
 #include "comms/companion_3byte.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "sdkconfig.h"
 
@@ -15,6 +17,7 @@
 #include "host/ble_hs.h"
 #include "host/ble_sm.h"
 #include "host/ble_uuid.h"
+#include "host/util/util.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "os/os_mbuf.h"
@@ -22,7 +25,9 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "store/config/ble_store_config.h"
 
-#define D1L_BLE_COMPANION_STATIC_PASSKEY 123456U
+/* Declared by ESP-IDF's NimBLE store configuration module. The official
+ * ESP-IDF 5.5 examples forward-declare it because the public header does not. */
+void ble_store_config_init(void);
 
 typedef enum {
     D1L_BLE_STATE_OFF = 0,
@@ -49,11 +54,14 @@ static bool s_bonded;
 static bool s_notification_requested;
 static bool s_notification_enabled;
 static bool s_tx_busy;
+static bool s_peer_known;
+static ble_addr_t s_peer_id_addr;
 static uint8_t s_own_addr_type;
 static uint16_t s_connection_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_att_mtu = D1L_BLE_COMPANION_DEFAULT_ATT_MTU;
 static uint16_t s_rx_value_handle;
 static uint16_t s_tx_value_handle;
+static uint32_t s_pairing_passkey;
 static uint32_t s_connect_count;
 static uint32_t s_disconnect_count;
 static uint32_t s_rx_frame_count;
@@ -438,6 +446,15 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         s_state = D1L_BLE_STATE_PAIRING;
         portEXIT_CRITICAL(&s_lock);
         {
+            struct ble_gap_conn_desc desc = {0};
+            if (ble_gap_conn_find(event->connect.conn_handle, &desc) == 0) {
+                portENTER_CRITICAL(&s_lock);
+                s_peer_id_addr = desc.peer_id_addr;
+                s_peer_known = true;
+                portEXIT_CRITICAL(&s_lock);
+            }
+        }
+        {
             const int rc =
                 ble_gap_security_initiate(event->connect.conn_handle);
             if (rc != 0) {
@@ -501,10 +518,15 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         return 0;
     case BLE_GAP_EVENT_PASSKEY_ACTION:
         if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
+            const uint32_t pairing_passkey =
+                100000U + (esp_random() % 900000U);
             struct ble_sm_io passkey = {
                 .action = BLE_SM_IOACT_DISP,
-                .passkey = D1L_BLE_COMPANION_STATIC_PASSKEY,
+                .passkey = pairing_passkey,
             };
+            portENTER_CRITICAL(&s_lock);
+            s_pairing_passkey = pairing_passkey;
+            portEXIT_CRITICAL(&s_lock);
             const int rc = ble_sm_inject_io(event->passkey.conn_handle,
                                             &passkey);
             if (rc != 0) {
@@ -576,13 +598,10 @@ esp_err_t d1l_ble_companion_start(void)
     ble_hs_cfg.sm_their_key_dist =
         BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
-    int rc = ble_sm_configure_static_passkey(
-        D1L_BLE_COMPANION_STATIC_PASSKEY, true);
-    if (rc == 0) {
-        ble_svc_gap_init();
-        ble_svc_gatt_init();
-        rc = ble_gatts_count_cfg(s_gatt_services);
-    }
+    int rc = 0;
+    ble_svc_gap_init();
+    ble_svc_gatt_init();
+    rc = ble_gatts_count_cfg(s_gatt_services);
     if (rc == 0) {
         rc = ble_gatts_add_svcs(s_gatt_services);
     }
@@ -606,6 +625,12 @@ esp_err_t d1l_ble_companion_start(void)
     s_stack_initialized = true;
     portEXIT_CRITICAL(&s_lock);
     nimble_port_freertos_init(host_task);
+    const esp_err_t protocol_result =
+        d1l_ble_companion_protocol_start();
+    if (protocol_result != ESP_OK) {
+        (void)d1l_ble_companion_stop();
+        return protocol_result;
+    }
     return ESP_OK;
 }
 
@@ -625,6 +650,8 @@ esp_err_t d1l_ble_companion_stop(void)
         return ESP_OK;
     }
 
+    const esp_err_t protocol_result =
+        d1l_ble_companion_protocol_stop();
     if (advertising) {
         (void)ble_gap_adv_stop();
     }
@@ -651,12 +678,70 @@ esp_err_t d1l_ble_companion_stop(void)
         s_last_nimble_error = rc;
     }
     portEXIT_CRITICAL(&s_lock);
+    if (protocol_result != ESP_OK) {
+        return protocol_result;
+    }
     return rc == 0 ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t d1l_ble_companion_prepare_reboot(void)
 {
     return d1l_ble_companion_stop();
+}
+
+esp_err_t d1l_ble_companion_begin_pairing(void)
+{
+    bool initialized;
+    bool connected;
+    bool advertising;
+    portENTER_CRITICAL(&s_lock);
+    initialized = s_stack_initialized;
+    connected = s_connected;
+    advertising = s_advertising;
+    portEXIT_CRITICAL(&s_lock);
+    if (!initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (advertising) {
+        return ESP_OK;
+    }
+    return start_advertising() == 0 ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t d1l_ble_companion_forget_peer(void)
+{
+    ble_addr_t peer;
+    bool peer_known;
+    uint16_t connection_handle;
+    portENTER_CRITICAL(&s_lock);
+    peer = s_peer_id_addr;
+    peer_known = s_peer_known;
+    connection_handle = s_connection_handle;
+    portEXIT_CRITICAL(&s_lock);
+    if (!s_stack_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!peer_known) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    const int rc = ble_store_util_delete_peer(&peer);
+    if (rc != 0) {
+        note_nimble_error(rc);
+        return ESP_FAIL;
+    }
+    if (connection_handle != BLE_HS_CONN_HANDLE_NONE) {
+        (void)ble_gap_terminate(connection_handle,
+                                BLE_ERR_REM_USER_CONN_TERM);
+    }
+    portENTER_CRITICAL(&s_lock);
+    memset(&s_peer_id_addr, 0, sizeof(s_peer_id_addr));
+    s_peer_known = false;
+    s_pairing_passkey = 0U;
+    portEXIT_CRITICAL(&s_lock);
+    return ESP_OK;
 }
 
 void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status)
@@ -679,8 +764,10 @@ void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status)
     out_status->transport_ready =
         s_connected && s_encrypted && s_authenticated && s_bonded &&
         s_notification_enabled;
+    out_status->peer_known = s_peer_known;
     out_status->connection_handle = s_connection_handle;
     out_status->att_mtu = s_att_mtu;
+    out_status->pairing_passkey = s_pairing_passkey;
     out_status->rx_queue_depth = s_rx_queue.count;
     out_status->tx_queue_depth = s_tx_queue.count;
     out_status->connect_count = s_connect_count;
@@ -695,6 +782,15 @@ void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status)
     out_status->last_nimble_error = s_last_nimble_error;
     out_status->state = state_name(s_state);
     portEXIT_CRITICAL(&s_lock);
+    d1l_ble_companion_protocol_status_t protocol = {0};
+    d1l_ble_companion_protocol_status(&protocol);
+    out_status->protocol_running = protocol.running;
+    out_status->protocol_ready =
+        protocol.running && protocol.transport_ready;
+    out_status->protocol_command_count = protocol.command_count;
+    out_status->protocol_response_count = protocol.response_count;
+    out_status->protocol_unsupported_count = protocol.unsupported_count;
+    out_status->protocol_malformed_count = protocol.malformed_count;
     out_status->security_policy = "secure_connections_mitm_bonded";
     out_status->wire_policy = "raw_gatt_internal_meshcore_3byte";
 }
@@ -782,6 +878,16 @@ esp_err_t d1l_ble_companion_stop(void)
 esp_err_t d1l_ble_companion_prepare_reboot(void)
 {
     return ESP_OK;
+}
+
+esp_err_t d1l_ble_companion_begin_pairing(void)
+{
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t d1l_ble_companion_forget_peer(void)
+{
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status)

@@ -5109,8 +5109,20 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
         MUTED,
     )
     if management_gated:
-        s.text("Manage locked", (36, 426, 428, 446), 11, MUTED, True)
-        s.text("Authenticated admin session required.", (36, 448, 428, 468), 10, MUTED)
+        draw_button(
+            s,
+            (24, 412, 128, 452),
+            "Admin",
+            VIOLET,
+            action="open_server_admin",
+            destination=None,
+        )
+        s.text(
+            "Verified server; local authenticated login required.",
+            (136, 420, 412, 460),
+            10,
+            MUTED,
+        )
     s.metrics.update(
         {
             "node_detail_location_provenance": (
@@ -5128,7 +5140,7 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
             "node_detail_dm_rf_tx": False,
             "node_detail_management_gated": management_gated,
             "node_detail_frame": [16, 60, 464, 476],
-            "node_detail_content_bottom": 468 if management_gated else 424,
+            "node_detail_content_bottom": 460 if management_gated else 424,
             "node_detail_content_clipped": False,
         }
     )
@@ -6800,8 +6812,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Why no DM?",
         "DM unavailable [role_not_dm_capable]",
         "This verified role does not support direct chat.",
-        "Manage locked",
-        "Authenticated admin session required.",
+        "Admin",
+        "Verified server; local authenticated login required.",
         "Close",
     ),
     "contact_edit_sheet": ("Rename Contact", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"),

@@ -22,7 +22,9 @@ def test_connectivity_truth_is_owned_outside_the_ui_task_monolith():
     assert "d1l_ui_connectivity_ble_view" in phase1
     assert '"Scan to list nearby 2.4 GHz networks"' in source
     assert '"BLE companion transport is unavailable in this release."' in source
-    assert '"USB remains the reliable companion path' in source
+    assert '"USB remains available for recovery and diagnostics."' in source
+    assert '"Official MeshCore framing;' in source
+    assert '"Enter PIN %06lu on the companion device."' in source
 
     assert "lv_" not in source
     assert "d1l_app_model_" not in source

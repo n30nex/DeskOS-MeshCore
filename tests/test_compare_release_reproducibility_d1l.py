@@ -386,6 +386,73 @@ def rewrite_package_checksums(package_dir: Path) -> None:
     package_release_d1l.write_sha256sums(package_dir)
 
 
+def write_fixture_signed_update_bundle(
+    root: Path,
+    package_dir: Path,
+    update_image: dict,
+    source_commit: str,
+    version: str,
+    security_sequence: int,
+    _signing_key: Path,
+) -> dict:
+    image_path = package_dir / update_image["path"]
+    update_dir = image_path.parent
+    manifest_path = update_dir / "d1l-update.manifest"
+    signature_path = update_dir / "d1l-update.sig"
+    manifest_path.write_text(
+        (
+            f"{package_release_d1l.UPDATE_MANIFEST_HEADER}\n"
+            f"product={package_release_d1l.UPDATE_PRODUCT}\n"
+            f"target={package_release_d1l.UPDATE_TARGET}\n"
+            f"version={version}\n"
+            f"source_sha={source_commit}\n"
+            "partition_table_sha256="
+            f"{package_release_d1l.sha256_file(root / 'partitions_d1l.csv')}\n"
+            f"image_sha256={package_release_d1l.sha256_file(image_path)}\n"
+            f"image_size={image_path.stat().st_size}\n"
+            f"security_sequence={security_sequence}\n"
+            f"signer_key_id={package_release_d1l.UPDATE_SIGNER_KEY_ID}\n"
+        ),
+        encoding="ascii",
+        newline="\n",
+    )
+    signature_path.write_bytes(hashlib.sha512(manifest_path.read_bytes()).digest())
+    return {
+        "schema": 1,
+        "signed": True,
+        "product": package_release_d1l.UPDATE_PRODUCT,
+        "target": package_release_d1l.UPDATE_TARGET,
+        "version": version,
+        "source_commit": source_commit,
+        "security_sequence": security_sequence,
+        "signer_key_id": package_release_d1l.UPDATE_SIGNER_KEY_ID,
+        "partition_table_sha256": package_release_d1l.sha256_file(
+            root / "partitions_d1l.csv"
+        ),
+        "image": {
+            **update_image,
+            "sd_destination": "updates/d1l-update.bin",
+        },
+        "manifest": {
+            "path": manifest_path.relative_to(package_dir).as_posix(),
+            "sd_destination": "updates/d1l-update.manifest",
+            "size": manifest_path.stat().st_size,
+            "sha256": package_release_d1l.sha256_file(manifest_path),
+        },
+        "signature": {
+            "path": signature_path.relative_to(package_dir).as_posix(),
+            "sd_destination": "updates/d1l-update.sig",
+            "size": signature_path.stat().st_size,
+            "sha256": package_release_d1l.sha256_file(signature_path),
+            "algorithm": "Ed25519",
+        },
+        "trigger_policy": "local_ui_or_usb_confirmation_only",
+        "rf_trigger_allowed": False,
+        "partition_table_replacement_in_firmware": False,
+        "rollback_required": True,
+    }
+
+
 def build_pair(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -412,6 +479,14 @@ def build_pair(
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+
+    signing_key = root / "test-update-signing-key.pem"
+    signing_key.write_text("fixture key; signing is covered by release CI\n", encoding="ascii")
+    monkeypatch.setattr(
+        package_release_d1l,
+        "write_signed_update_bundle",
+        write_fixture_signed_update_bundle,
+    )
 
     packages = []
     for index, (run_id, app_payload) in enumerate(
@@ -441,6 +516,7 @@ def build_pair(
             rp2040_artifact_root=rp2040_artifacts,
             meshcore_conformance_json=conformance,
             meshcore_signed_advert_runtime_json=signed_advert,
+            update_signing_key=signing_key,
         )
         packages.append(root / "artifacts" / f"run-{index}" / package_name)
     return root, packages[0], packages[1], identity

@@ -15,7 +15,7 @@ def test_settings_model_defaults_and_nvs_contract():
     source = read("main/app/settings_model.c")
     time_service = read("main/platform/time_service.c")
     time_migration = read("main/app/settings_protocol_migration.h")
-    assert "D1L_SETTINGS_SCHEMA_VERSION 8U" in header
+    assert "D1L_SETTINGS_SCHEMA_VERSION 9U" in header
     assert "D1L_WIFI_SSID_LEN 33U" in header
     assert "D1L_WIFI_PASSWORD_LEN 65U" in header
     assert "wifi_profile_saved" in header
@@ -32,6 +32,8 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "D1L_MAP_TILE_DEFAULT_ZOOM 10U" in header
     assert "map_lat_e7" in header
     assert "map_lon_e7" in header
+    assert "map_location_source" in header
+    assert "D1L_MAP_LOCATION_SOURCE_AUTHENTICATED_COMPANION" in header
     assert "D1L_MAP_LOCATION_LAT_E7_MIN" in header
     assert "D1L_MAP_LOCATION_LON_E7_MAX" in header
     assert "d1l_settings_complete_onboarding" in header
@@ -44,12 +46,14 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "d1l_settings_v5_t" in source
     assert "d1l_settings_v6_t" in source
     assert "d1l_settings_v7_t" in source
+    assert "d1l_settings_v8_t" in source
     assert "migrate_v2_settings" in source
     assert "migrate_v3_settings" in source
     assert "migrate_v4_settings" in source
     assert "migrate_v5_settings" in source
     assert "migrate_v6_settings" in source
     assert "migrate_v7_settings" in source
+    assert "migrate_v8_settings" in source
     assert '#include "settings_envelope.h"' in source
     assert "persist_settings_envelope" in source
     persist = source.split("static esp_err_t persist_settings_envelope", 1)[1].split(
@@ -71,6 +75,7 @@ def test_settings_model_defaults_and_nvs_contract():
     )[0]
     for schema in [
         "D1L_SETTINGS_SCHEMA_VERSION",
+        "8U",
         "7U",
         "6U",
         "5U",
@@ -110,6 +115,10 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->map_location_set = false" in source
     assert "settings->map_lat_e7 = 0" in source
     assert "settings->map_lon_e7 = 0" in source
+    assert (
+        "settings->map_location_source = D1L_MAP_LOCATION_SOURCE_UNKNOWN"
+        in source
+    )
     assert "settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM" in source
     assert "settings->timezone_schema_version" in source
     assert "settings->timezone_offset_minutes = 0" in source
@@ -332,6 +341,19 @@ def test_v7_envelope_migration_adds_safe_utc_default():
     assert "legacy_header.revision" in load
     assert "d1l_settings_envelope_next_revision" in load
     assert "D1L_SETTINGS_PERSISTENCE_MIGRATED_LEGACY" in load
+
+
+def test_v8_migration_preserves_location_as_explicit_manual_provenance():
+    source = read("main/app/settings_model.c")
+    migration = source.split("static void migrate_v8_settings", 1)[1].split(
+        "static void migrate_v6_settings", 1
+    )[0]
+    assert "src->schema_version != 8U" in migration
+    assert "dest->map_location_set = src->map_location_set" in migration
+    assert "D1L_MAP_LOCATION_SOURCE_MANUAL" in migration
+    assert "D1L_MAP_LOCATION_SOURCE_UNKNOWN" in migration
+    assert "dest->timezone_schema_version = src->timezone_schema_version" in migration
+    assert "dest->timezone_offset_minutes = src->timezone_offset_minutes" in migration
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():

@@ -130,6 +130,8 @@ void d1l_meshcore_service_admin_snapshot(
 esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
                                            const char *password);
 esp_err_t d1l_meshcore_service_admin_request_status(void);
+esp_err_t d1l_meshcore_service_admin_request_mutation(
+    d1l_meshcore_admin_mutation_t mutation, bool local_confirmed);
 esp_err_t d1l_meshcore_service_admin_logout(void);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,

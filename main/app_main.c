@@ -8,8 +8,11 @@
 #include "app/release_profile.h"
 #include "app/settings_model.h"
 #include "diagnostics/crash_log.h"
+#include "diagnostics/event_log.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
+#include "hal/backlight.h"
+#include "hal/display_preferences.h"
 #include "hal/rp2040_bridge.h"
 #include "mesh/channel_message_coordinator.h"
 #include "mesh/channel_store.h"
@@ -27,8 +30,10 @@
 #include "storage/retained_blob_store.h"
 #include "storage/factory_reset.h"
 #include "storage/storage_status.h"
+#include "update/update_manager.h"
 #include "ui/ui_phase1.h"
 #include "comms/connectivity_manager.h"
+#include "comms/observer_manager.h"
 #include "comms/usb_console.h"
 
 static const char *TAG = "d1l_main";
@@ -45,6 +50,9 @@ void app_main(void)
     }
     esp_err_t nvs_ret = nvs_flash_init();
     d1l_health_monitor_init(nvs_ret);
+    d1l_event_log_init();
+    d1l_event_log_append(D1L_EVENT_LOG_LEVEL_INFO, "system", "boot",
+                         "application startup");
     if (nvs_ret != ESP_OK) {
         ESP_LOGE(TAG, "NVS unavailable; preserving persisted data: %s",
                  esp_err_to_name(nvs_ret));
@@ -158,6 +166,11 @@ void app_main(void)
     if (settings_ret != ESP_OK) {
         ESP_LOGW(TAG, "settings load failed: %s", esp_err_to_name(settings_ret));
     }
+    esp_err_t display_preferences_ret = d1l_display_preferences_init();
+    if (display_preferences_ret != ESP_OK) {
+        ESP_LOGW(TAG, "display preferences load failed: %s",
+                 esp_err_to_name(display_preferences_ret));
+    }
     esp_err_t channel_store_ret = d1l_channel_store_init();
     if (channel_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "channel store load failed: %s", esp_err_to_name(channel_store_ret));
@@ -213,6 +226,20 @@ void app_main(void)
 
     esp_err_t board_ret = d1l_board_init();
     if (board_ret == ESP_OK) {
+        d1l_display_preferences_t display_preferences = {0};
+        d1l_display_preferences_get(&display_preferences);
+        d1l_settings_t public_settings = {0};
+        (void)d1l_settings_public_snapshot(&public_settings);
+        const uint8_t startup_brightness = public_settings.night_mode ?
+            25U : display_preferences.brightness_percent;
+        const esp_err_t backlight_ret =
+            d1l_backlight_set_percent(startup_brightness);
+        if (backlight_ret != ESP_OK) {
+            ESP_LOGW(TAG, "saved backlight apply failed: %s",
+                     esp_err_to_name(backlight_ret));
+        }
+    }
+    if (board_ret == ESP_OK) {
         esp_err_t mesh_rx_ret = d1l_meshcore_service_start_rx_async();
         if (mesh_rx_ret != ESP_OK) {
             ESP_LOGW(TAG, "MeshCore RX start queue failed: %s", esp_err_to_name(mesh_rx_ret));
@@ -222,6 +249,16 @@ void app_main(void)
     if (connectivity_ret != ESP_OK) {
         ESP_LOGW(TAG, "connectivity policy init failed: %s", esp_err_to_name(connectivity_ret));
     }
+    esp_err_t observer_ret = d1l_observer_manager_init();
+    if (observer_ret != ESP_OK && observer_ret != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "observer manager init failed: %s",
+                 esp_err_to_name(observer_ret));
+    }
+    esp_err_t update_ret = d1l_update_manager_init();
+    if (update_ret != ESP_OK && update_ret != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "signed update manager init failed: %s",
+                 esp_err_to_name(update_ret));
+    }
 
     if (board_ret == ESP_OK) {
         ESP_LOGI(TAG, "D1L board initialized");
@@ -230,6 +267,16 @@ void app_main(void)
         ESP_LOGE(TAG, "D1L board init failed: %s", esp_err_to_name(board_ret));
         printf("{\"schema\":%d,\"event\":\"board_init\",\"ok\":false,\"code\":\"%s\",\"hint\":\"verify D1L hardware, I2C expander, and display power\"}\n",
                D1L_CONSOLE_SCHEMA, esp_err_to_name(board_ret));
+    }
+
+    const esp_err_t update_boot_health =
+        nvs_ret == ESP_OK && settings_ret == ESP_OK && board_ret == ESP_OK ?
+            ESP_OK : ESP_FAIL;
+    esp_err_t update_confirm_ret =
+        d1l_update_boot_confirm(update_boot_health);
+    if (update_confirm_ret != ESP_OK) {
+        ESP_LOGW(TAG, "update boot confirmation failed: %s",
+                 esp_err_to_name(update_confirm_ret));
     }
 
     d1l_usb_console_run();

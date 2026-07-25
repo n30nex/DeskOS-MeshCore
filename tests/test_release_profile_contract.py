@@ -17,12 +17,12 @@ def between(source: str, start: str, end: str) -> str:
     return source.split(start, 1)[1].split(end, 1)[0]
 
 
-def test_core_profile_is_the_deterministic_build_default():
+def test_full_feature_profile_is_the_deterministic_build_default():
     root_cmake = read("CMakeLists.txt")
     component_cmake = read("main/CMakeLists.txt")
 
-    assert 'set(D1L_RELEASE_PROFILE "core_1_0" CACHE STRING' in root_cmake
-    assert 'set(D1L_SD_HISTORY_MODE "disabled" CACHE STRING' in root_cmake
+    assert 'set(D1L_RELEASE_PROFILE "full_feature" CACHE STRING' in root_cmake
+    assert 'set(D1L_SD_HISTORY_MODE "conditional" CACHE STRING' in root_cmake
     assert '"app/release_profile.c"' in component_cmake
     assert "D1L_RELEASE_PROFILE=${D1L_RELEASE_PROFILE_DEFINE}" in component_cmake
     assert "D1L_SD_HISTORY_MODE=${D1L_SD_HISTORY_MODE_DEFINE}" in component_cmake
@@ -45,6 +45,7 @@ def test_release_profile_is_one_immutable_authority_with_no_runtime_setter():
     assert '.admin = false' in source
     assert '.observer_mqtt = false' in source
     assert '.signed_update = false' in source
+    assert '.mutable_terminal = false' in source
     assert '.location = false' in source
     assert "d1l_release_capabilities_t release_capabilities;" in app_header
     assert "snapshot->release_profile = d1l_release_profile_name();" in app_source
@@ -189,21 +190,36 @@ def test_app_boundary_forces_public_and_rejects_unavailable_mutations():
             "d1l_meshcore_service_"
         )
 
+    validator = between(
+        app,
+        "static esp_err_t validate_map_location",
+        "esp_err_t d1l_app_model_set_map_location",
+    )
+    assert "D1L_RELEASE_FEATURE_LOCATION" in validator
     for start, end in (
         (
             "esp_err_t d1l_app_model_set_map_location",
-            "esp_err_t d1l_app_model_clear_map_location",
+            "esp_err_t d1l_app_model_set_companion_map_location",
         ),
         (
+            "esp_err_t d1l_app_model_set_companion_map_location",
             "esp_err_t d1l_app_model_clear_map_location",
-            "esp_err_t d1l_app_model_set_timezone_offset_minutes",
         ),
     ):
         body = between(app, start, end)
-        assert "D1L_RELEASE_FEATURE_LOCATION" in body
-        assert body.index("D1L_RELEASE_FEATURE_LOCATION") < body.index(
+        assert "validate_map_location" in body
+        assert body.index("validate_map_location") < body.index(
             "d1l_settings_update_fields"
         )
+    clear = between(
+        app,
+        "esp_err_t d1l_app_model_clear_map_location",
+        "esp_err_t d1l_app_model_set_timezone_offset_minutes",
+    )
+    assert "D1L_RELEASE_FEATURE_LOCATION" in clear
+    assert clear.index("D1L_RELEASE_FEATURE_LOCATION") < clear.index(
+        "d1l_settings_update_fields"
+    )
 
 
 def test_release_profile_native_matrix(tmp_path):
@@ -236,9 +252,9 @@ def test_release_profile_native_matrix(tmp_path):
         (
             "full",
             "D1L_RELEASE_PROFILE_FULL_FEATURE",
-            "D1L_SD_HISTORY_MODE_SUPPORTED_OPTIONAL",
-            ("EXPECT_CORE=0", "EXPECT_FULL=1", "EXPECT_SD_CONDITIONAL=0",
-             "EXPECT_SD_SUPPORTED=1"),
+            "D1L_SD_HISTORY_MODE_CONDITIONAL",
+            ("EXPECT_CORE=0", "EXPECT_FULL=1", "EXPECT_SD_CONDITIONAL=1",
+             "EXPECT_SD_SUPPORTED=0"),
         ),
     )
     for name, profile, sd_mode, expectations in cases:

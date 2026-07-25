@@ -80,8 +80,8 @@ def test_node_detail_preserves_truthful_fields_geometry_and_actions() -> None:
         "Advert location not provided",
         "Last heard %lums  first %lums  count %lu",
         "DM %s [%s]: %s",
-        "Manage locked",
-        "Authenticated admin session required.",
+        "Admin",
+        "Verified server; local authenticated login required.",
     ):
         assert f'"{exact}"' in source
     assert "GPS" not in source
@@ -91,8 +91,9 @@ def test_node_detail_preserves_truthful_fields_geometry_and_actions() -> None:
     assert '"Why no DM?", 174, 0, 120, 44' in source
     assert '"DM", 208, 0, 54, 44' in source
     assert '"Close", 316, 0, 76, 44' in source
-    assert "lv_obj_set_pos(managed_reason, 8, 376);" in source
-    assert 12 + 376 + 20 <= 416
+    assert '"Admin", 8, 352, 104, 40' in source
+    assert "lv_obj_set_pos(managed_reason, 120, 360);" in source
+    assert 12 + 360 + 40 <= 416
     assert 60 + 416 <= 480
 
     handler = body(
@@ -138,6 +139,6 @@ def test_node_detail_focused_simulator_views_remain_truthful(tmp_path: Path) -> 
     assert heard_only["metrics"]["node_detail_dm_opens_compose"] is False
     assert heard_only["metrics"]["node_detail_dm_rf_tx"] is False
     assert managed["metrics"]["node_detail_management_gated"] is True
-    assert managed["metrics"]["node_detail_content_bottom"] == 468
+    assert managed["metrics"]["node_detail_content_bottom"] == 460
     assert managed["metrics"]["node_detail_content_clipped"] is False
-    assert "Authenticated admin session required." in managed["labels"]
+    assert "Verified server; local authenticated login required." in managed["labels"]

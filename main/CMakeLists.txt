@@ -18,15 +18,19 @@ idf_component_register(
         "app/settings_time_checkpoint.c"
         "comms/connectivity_boot_guard.c"
         "comms/connectivity_manager.c"
+        "comms/observer_manager.c"
         "comms/wifi_retry_policy.c"
         "comms/ble_companion.c"
+        "comms/ble_companion_protocol.c"
         "comms/ble_companion_queue.c"
         "comms/companion_3byte.c"
         "comms/usb_command_parser.c"
         "comms/usb_console.c"
         "diagnostics/crash_log.c"
+        "diagnostics/event_log.c"
         "diagnostics/health_monitor.c"
         "hal/backlight.c"
+        "hal/display_preferences.c"
         "hal/indicator_board.c"
         "hal/indicator_pins.c"
         "hal/rp2040_bridge.c"
@@ -88,6 +92,7 @@ idf_component_register(
         "ui/ui_dm_identity.c"
         "ui/ui_home.c"
         "ui/ui_home_view.c"
+        "ui/ui_font_symbols_14.c"
         "ui/ui_keyboard.c"
         "ui/ui_map.c"
         "ui/ui_messages.c"
@@ -101,9 +106,11 @@ idf_component_register(
         "ui/ui_phase1.c"
         "ui/ui_radio_settings.c"
         "ui/ui_screen.c"
+        "ui/ui_service_sheets.c"
         "ui/ui_settings.c"
         "ui/ui_storage_view.c"
         "ui/ui_wifi.c"
+        "update/update_manager.c"
     INCLUDE_DIRS
         "."
         "app"
@@ -116,6 +123,7 @@ idf_component_register(
         "storage"
         "../third_party/MeshCore/lib/ed25519"
         "ui"
+        "update"
     REQUIRES
         bsp
         bt
@@ -132,6 +140,7 @@ idf_component_register(
         lora
         lvgl
         mbedtls
+        mqtt
         nvs_flash
 )
 
@@ -174,6 +183,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     MESHCORE_CA_DESK_MODE=1
     D1L_BUILD_GIT_COMMIT="${D1L_BUILD_GIT_COMMIT}"
     D1L_BUILD_EPOCH_SEC=${D1L_BUILD_EPOCH_SEC}ULL
+    D1L_PARTITION_TABLE_SHA256="${D1L_PARTITION_TABLE_SHA256}"
     D1L_RELEASE_PROFILE=${D1L_RELEASE_PROFILE_DEFINE}
     D1L_SD_HISTORY_MODE=${D1L_SD_HISTORY_MODE_DEFINE}
 )

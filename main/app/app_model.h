@@ -31,7 +31,7 @@
 #define D1L_HOME_MESSAGE_PREVIEW 5U
 #define D1L_HOME_REPEATER_PREVIEW 3U
 #define D1L_MAP_TILE_RENDER_SUPPORTED true
-#define D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false
+#define D1L_BLE_COMPANION_TRANSPORT_SUPPORTED true
 
 typedef struct {
     bool is_dm;
@@ -99,6 +99,9 @@ typedef struct {
     bool wifi_build_enabled;
     bool ble_build_enabled;
     bool ble_transport_supported;
+    bool ble_peer_known;
+    bool ble_protocol_running;
+    bool ble_protocol_ready;
     bool storage_direct_supported;
     bool storage_rp2040_bridge_required;
     bool storage_rp2040_bridge_ready;
@@ -120,6 +123,11 @@ typedef struct {
     bool time_available;
     bool time_approximate;
     bool timezone_settings_ready;
+    bool high_contrast;
+    bool night_mode;
+    uint8_t display_brightness_percent;
+    uint16_t display_timeout_seconds;
+    uint8_t notification_mode;
     bool protocol_tx_ready;
     esp_err_t protocol_tx_error;
     esp_err_t settings_load_status;
@@ -174,6 +182,11 @@ typedef struct {
     const char *wifi_last_error;
     int8_t wifi_rssi_dbm;
     uint8_t wifi_channel;
+    uint32_t ble_pairing_passkey;
+    uint32_t ble_protocol_command_count;
+    uint32_t ble_protocol_response_count;
+    uint32_t ble_protocol_unsupported_count;
+    uint32_t ble_protocol_malformed_count;
     uint32_t radio_frequency_hz;
     uint16_t radio_bandwidth_tenths_khz;
     uint8_t radio_spreading_factor;
@@ -354,6 +367,8 @@ esp_err_t d1l_app_model_mark_channel_read(uint64_t channel_id);
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);
+esp_err_t d1l_app_model_set_companion_map_location(
+    int32_t lat_e7, int32_t lon_e7);
 esp_err_t d1l_app_model_clear_map_location(void);
 esp_err_t d1l_app_model_set_timezone_offset_minutes(
     int16_t offset_minutes);
@@ -364,6 +379,8 @@ esp_err_t d1l_app_model_wifi_disconnect(void);
 esp_err_t d1l_app_model_save_wifi_profile(const char *ssid, const char *password);
 esp_err_t d1l_app_model_clear_wifi_profile(void);
 esp_err_t d1l_app_model_set_ble_enabled(bool enabled);
+esp_err_t d1l_app_model_ble_begin_pairing(void);
+esp_err_t d1l_app_model_ble_forget_peer(void);
 void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile);
 void d1l_app_model_default_radio_profile(d1l_app_radio_profile_edit_t *profile);
 esp_err_t d1l_app_model_save_radio_profile(const d1l_app_radio_profile_edit_t *profile);

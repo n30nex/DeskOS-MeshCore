@@ -8,7 +8,7 @@
 
 typedef struct _lv_obj_t lv_obj_t;
 
-#define D1L_UI_NODE_DETAIL_BINDING_COUNT 3U
+#define D1L_UI_NODE_DETAIL_BINDING_COUNT 4U
 #define D1L_UI_NODE_DETAIL_CONTROLLER_MAX_BYTES 512U
 
 typedef struct {
@@ -24,6 +24,7 @@ typedef enum {
     D1L_UI_NODE_DETAIL_ACTION_CLOSE,
     D1L_UI_NODE_DETAIL_ACTION_OPEN_DM,
     D1L_UI_NODE_DETAIL_ACTION_EXPLAIN_DM,
+    D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN,
 } d1l_ui_node_detail_action_t;
 
 typedef struct {

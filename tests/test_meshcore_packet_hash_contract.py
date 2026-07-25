@@ -86,22 +86,25 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
     dm = receiver(
         service, "static bool parse_rx_dm_packet", "typedef enum {\n    D1L_RX_ACK_UNMATCHED"
     )
-    assert dm.index("meshcore_decrypt_after_mac(") < dm.index(
-        "d1l_meshcore_text_plaintext_view("
-    ) < dm.index("d1l_dm_store_find_rx_identity(") < dm.index(
+    plain_marker = "if (txt_type != D1L_MESHCORE_TXT_TYPE_PLAIN)"
+    dm_plain = dm.split(plain_marker, 1)[1]
+    assert dm_plain.index("d1l_meshcore_text_plaintext_view(") < dm_plain.index(
+        "d1l_dm_store_find_rx_identity("
+    ) < dm_plain.index(
         "d1l_meshcore_packet_hash_cache_contains("
     )
-    hit = dm.split("d1l_meshcore_packet_hash_cache_contains(", 1)[1].split(
+    assert dm.index("meshcore_decrypt_after_mac(") < dm.index(plain_marker)
+    hit = dm_plain.split("d1l_meshcore_packet_hash_cache_contains(", 1)[1].split(
         "if (duplicate)", 1
     )[0]
-    assert "duplicate &&" in dm[dm.index("packet_hash_ready"):dm.index(
+    assert "duplicate &&" in dm_plain[dm_plain.index("packet_hash_ready"):dm_plain.index(
         "d1l_meshcore_packet_hash_cache_contains("
     )]
     assert "dispatch_bounded_dm_ack(" in hit
-    assert dm.index("d1l_dm_store_append_rx_identity(") < dm.index(
+    assert dm_plain.index("d1l_dm_store_append_rx_identity(") < dm_plain.index(
         "store_outcome.inserted"
-    ) < dm.rindex("d1l_meshcore_packet_hash_cache_remember(")
-    assert "append_packet_log_deferred(" in dm
+    ) < dm_plain.rindex("d1l_meshcore_packet_hash_cache_remember(")
+    assert "append_packet_log_deferred(" in dm_plain
     assert dm.index("d1l_meshcore_peer_dispatch_classify(") < dm.index(
         "derive_local_identity_shared_secret("
     )

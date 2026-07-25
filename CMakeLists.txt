@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(D1L_RELEASE_PROFILE "core_1_0" CACHE STRING
+set(D1L_RELEASE_PROFILE "full_feature" CACHE STRING
     "Immutable DeskOS release profile")
 set_property(CACHE D1L_RELEASE_PROFILE PROPERTY STRINGS
     development
@@ -14,7 +14,7 @@ if(NOT D1L_RELEASE_PROFILE STREQUAL "development" AND
         "D1L_RELEASE_PROFILE must be development, core_1_0, or full_feature")
 endif()
 
-set(D1L_SD_HISTORY_MODE "disabled" CACHE STRING
+set(D1L_SD_HISTORY_MODE "conditional" CACHE STRING
     "Immutable release-package SD history claim")
 set_property(CACHE D1L_SD_HISTORY_MODE PROPERTY STRINGS
     disabled
@@ -37,6 +37,8 @@ d1l_resolve_source_provenance(
     D1L_BUILD_GIT_COMMIT
     D1L_BUILD_EPOCH_SEC
 )
+file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/partitions_d1l.csv"
+     D1L_PARTITION_TABLE_SHA256)
 
 if(NOT DEFINED PROJECT_VER)
     execute_process(

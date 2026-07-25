@@ -77,6 +77,14 @@ PROJECT = "MeshCore DeskOS D1L"
 DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
 FLASH_BAUD = 460800
 PACKAGE_METADATA_SCHEMA = 1
+UPDATE_MANIFEST_HEADER = "D1L-UPDATE-MANIFEST-V1"
+UPDATE_PRODUCT = "MeshCore DeskOS D1L"
+UPDATE_TARGET = "seeed_indicator_d1l"
+UPDATE_SIGNER_KEY_ID = "d1l-prod-8241789a002d0b50"
+UPDATE_SIGNING_PUBLIC_KEY_HEX = (
+    "e048dd4ebb613fb55378714ae527d7de"
+    "9374270c7a18b29565c2715b17e5b26c"
+)
 BUILD_INPUTS_SOURCE = Path(".github/d1l-build-inputs.json")
 HOST_REQUIREMENTS_SOURCE = Path("requirements/ci-host-windows.txt")
 COMPLETION_LEDGER_SOURCE = Path("docs/COMPLETION_LEDGER.yaml")
@@ -118,7 +126,9 @@ MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
 MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
 MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT = MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
 CORE_RELEASE_PROFILE = "core_1_0"
+FULL_FEATURE_RELEASE_PROFILE = "full_feature"
 CORE_PACKAGE_SCHEMA = 2
+FULL_FEATURE_PACKAGE_SCHEMA = 2
 CORE_INSTALL_CONTRACT_SCHEMA = 2
 CORE_GENERATED_INSTALL_FILES = (
     "d1l_serial_target.py",
@@ -128,7 +138,12 @@ CORE_GENERATED_INSTALL_FILES = (
     "flash_full_8mb.ps1",
     "docs/CORE_INSTALL_RECOVERY.md",
 )
-RELEASE_PROFILES = frozenset({"development", CORE_RELEASE_PROFILE, "full_feature"})
+RELEASE_PROFILES = frozenset(
+    {"development", CORE_RELEASE_PROFILE, FULL_FEATURE_RELEASE_PROFILE}
+)
+PRODUCTION_RELEASE_PROFILES = frozenset(
+    {CORE_RELEASE_PROFILE, FULL_FEATURE_RELEASE_PROFILE}
+)
 SD_HISTORY_MODES = frozenset({"disabled", "conditional", "supported_optional"})
 CORE_SUPPORTED_CAPABILITIES_BASE = (
     "board_initialization",
@@ -161,6 +176,38 @@ CORE_UNAVAILABLE_CAPABILITIES_BASE = (
     "user_trace",
     "notification_system",
 )
+FULL_FEATURE_SUPPORTED_CAPABILITIES = (
+    "board_initialization",
+    "display_touch_backlight",
+    "display_preferences_accessibility",
+    "home_navigation",
+    "public_messages",
+    "direct_messages",
+    "contacts",
+    "heard_nodes",
+    "packets",
+    "multi_channel_management",
+    "routes_and_trace",
+    "radio_settings",
+    "identity_and_adverts",
+    "retained_nvs",
+    "sd_history",
+    "map",
+    "wifi_user_control",
+    "secure_ble_companion_core_protocol",
+    "authenticated_repeater_room_admin",
+    "observer_mqtt_tls",
+    "signed_sd_ota_update",
+    "usb_terminal",
+    "location",
+    "qr_sharing",
+    "curated_glyph_palette",
+    "notifications",
+    "event_log",
+    "service_control_sheets",
+    "diagnostics_and_recovery",
+    "time_truth",
+)
 
 
 def utc_stamp() -> str:
@@ -179,6 +226,26 @@ def validate_release_settings(
     if sd_history_mode not in SD_HISTORY_MODES:
         raise ValueError(f"Unsupported SD history mode: {sd_history_mode}")
     return release_profile, sd_history_mode
+
+
+def source_security_sequence(source_identity: dict) -> int:
+    """Return the exact source-commit epoch used by the firmware build."""
+    created = source_identity.get("created")
+    if not isinstance(created, str) or not created.endswith("Z"):
+        raise ValueError("D1L source commit timestamp is missing or non-canonical")
+    try:
+        timestamp = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        epoch = int(timestamp.timestamp())
+    except (OverflowError, OSError, ValueError) as exc:
+        raise ValueError("D1L source commit timestamp is invalid") from exc
+    canonical = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    if created != canonical or epoch < 1767225600 or epoch > 3978743295:
+        raise ValueError(
+            "D1L source commit timestamp is outside the release-safe sequence range"
+        )
+    return epoch
 
 
 def build_release_settings(
@@ -242,6 +309,29 @@ def core_capability_truth(sd_history_mode: str) -> dict:
             "nvs"
             if sd_history_mode in {"disabled", "conditional"}
             else "nvs_with_qualified_optional_sd_history"
+        ),
+    }
+
+
+def full_feature_capability_truth(sd_history_mode: str) -> dict:
+    if sd_history_mode not in SD_HISTORY_MODES:
+        raise ValueError(f"Unsupported SD history mode: {sd_history_mode}")
+    return {
+        "supported_capabilities": list(FULL_FEATURE_SUPPORTED_CAPABILITIES),
+        "unavailable_capabilities": [],
+        "sd_history_state": (
+            "disabled_nvs_authoritative"
+            if sd_history_mode == "disabled"
+            else (
+                "qualified_optional"
+                if sd_history_mode == "supported_optional"
+                else "runtime_conditional_on_verified_bridge"
+            )
+        ),
+        "storage_authority": (
+            "nvs"
+            if sd_history_mode == "disabled"
+            else "nvs_with_runtime_verified_sd_history"
         ),
     }
 
@@ -571,6 +661,50 @@ def package_inventory_payloads(
                     "Packaging does not evaluate Core release readiness. "
                     "scripts/core_release_gate_audit_d1l.py evaluates exact "
                     "candidate evidence separately."
+                ),
+            }
+        )
+    elif release_profile == FULL_FEATURE_RELEASE_PROFILE:
+        truth = full_feature_capability_truth(sd_history_mode)
+        capability_payload.update(
+            {
+                "release_profile": release_profile,
+                "sd_history_mode": sd_history_mode,
+                "supported_capabilities": truth["supported_capabilities"],
+                "unavailable_capabilities": truth["unavailable_capabilities"],
+                "full_feature_release_ready": False,
+                "capabilities": [
+                    {"id": capability, "full_feature_state": "supported"}
+                    for capability in truth["supported_capabilities"]
+                ],
+                "note": (
+                    "Full Feature capability truth generated from the immutable "
+                    "production profile. Packaging does not itself close the "
+                    "exact-candidate or physical release gates."
+                ),
+            }
+        )
+        evidence_payload.update(
+            {
+                "release_profile": release_profile,
+                "sd_history_mode": sd_history_mode,
+                "full_feature_release_ready": False,
+                "full_feature_evidence_requirements": [
+                    "exact_actions_candidate",
+                    "signed_update_bundle",
+                    "checksums_provenance_sbom",
+                    "stable_by_id_flash",
+                    "automated_device_acceptance",
+                    "controlled_rf_acceptance",
+                    "ble_companion_acceptance",
+                    "wifi_map_observer_acceptance",
+                    "sd_update_recovery_acceptance",
+                    "final_physical_ui_confirmation",
+                    "zero_release_blocking_defects",
+                ],
+                "note": (
+                    "Packaging indexes the current ledger but does not evaluate "
+                    "Full Feature readiness or create physical evidence."
                 ),
             }
         )
@@ -1236,13 +1370,184 @@ def copy_update_image(package_dir: Path, firmware_dir: Path, app: dict) -> dict:
     update_dir = package_dir / "update"
     update_dir.mkdir(parents=True, exist_ok=True)
     source = firmware_dir.parent / app["path"]
-    dest = update_dir / "meshcore_deskos_d1l-app.bin"
+    dest = update_dir / "d1l-update.bin"
     shutil.copy2(source, dest)
     return {
         "path": dest.relative_to(package_dir).as_posix(),
         "size": dest.stat().st_size,
         "sha256": sha256_file(dest),
-        "note": "Application image for OTA/update flows once enabled; serial release flashing still uses the project flash set.",
+        "note": (
+            "Application image for the fixed local SD update path. Serial "
+            "project flashing remains the partition-migration and USB recovery path."
+        ),
+    }
+
+
+def write_signed_update_bundle(
+    root: Path,
+    package_dir: Path,
+    update_image: dict,
+    source_commit: str,
+    version: str,
+    security_sequence: int,
+    signing_key: Path,
+) -> dict:
+    """Create the exact canonical manifest consumed by update_manager.c."""
+    source_commit = exact_sha(source_commit, "signed update source commit")
+    if (
+        isinstance(security_sequence, bool)
+        or not isinstance(security_sequence, int)
+        or security_sequence <= 0
+        or security_sequence > 0xFFFFFFFF
+    ):
+        raise ValueError("D1L update security sequence is invalid")
+    signing_key = signing_key.resolve(strict=True)
+    if not signing_key.is_file() or signing_key.stat().st_size == 0:
+        raise ValueError("D1L update signing key is missing or empty")
+    image_path = package_dir / update_image["path"]
+    if not image_path.is_file():
+        raise FileNotFoundError("D1L update image is missing")
+    partition_table = root / "partitions_d1l.csv"
+    if not partition_table.is_file():
+        raise FileNotFoundError("D1L partition table is missing")
+    update_dir = image_path.parent
+    manifest_path = update_dir / "d1l-update.manifest"
+    signature_path = update_dir / "d1l-update.sig"
+    public_der_path = update_dir / ".signer-public.der"
+    public_pem_path = update_dir / ".signer-public.pem"
+
+    manifest_text = (
+        f"{UPDATE_MANIFEST_HEADER}\n"
+        f"product={UPDATE_PRODUCT}\n"
+        f"target={UPDATE_TARGET}\n"
+        f"version={version}\n"
+        f"source_sha={source_commit}\n"
+        f"partition_table_sha256={sha256_file(partition_table)}\n"
+        f"image_sha256={sha256_file(image_path)}\n"
+        f"image_size={image_path.stat().st_size}\n"
+        f"security_sequence={security_sequence}\n"
+        f"signer_key_id={UPDATE_SIGNER_KEY_ID}\n"
+    )
+    manifest_path.write_text(manifest_text, encoding="ascii", newline="\n")
+    try:
+        subprocess.run(
+            [
+                "openssl",
+                "pkey",
+                "-in",
+                str(signing_key),
+                "-pubout",
+                "-outform",
+                "DER",
+                "-out",
+                str(public_der_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        public_der = public_der_path.read_bytes()
+        if (
+            len(public_der) != 44
+            or public_der[-32:].hex() != UPDATE_SIGNING_PUBLIC_KEY_HEX
+        ):
+            raise ValueError(
+                "D1L update signing secret does not match the firmware public key"
+            )
+        subprocess.run(
+            [
+                "openssl",
+                "pkeyutl",
+                "-sign",
+                "-rawin",
+                "-inkey",
+                str(signing_key),
+                "-in",
+                str(manifest_path),
+                "-out",
+                str(signature_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if signature_path.stat().st_size != 64:
+            raise ValueError("D1L Ed25519 update signature is not 64 bytes")
+        subprocess.run(
+            [
+                "openssl",
+                "pkey",
+                "-in",
+                str(signing_key),
+                "-pubout",
+                "-out",
+                str(public_pem_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "openssl",
+                "pkeyutl",
+                "-verify",
+                "-pubin",
+                "-inkey",
+                str(public_pem_path),
+                "-rawin",
+                "-in",
+                str(manifest_path),
+                "-sigfile",
+                str(signature_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise ValueError("OpenSSL is required to sign D1L updates") from exc
+    except subprocess.CalledProcessError as exc:
+        raise ValueError("D1L update signing or verification failed") from exc
+    finally:
+        public_der_path.unlink(missing_ok=True)
+        public_pem_path.unlink(missing_ok=True)
+
+    return {
+        "schema": 1,
+        "signed": True,
+        "product": UPDATE_PRODUCT,
+        "target": UPDATE_TARGET,
+        "version": version,
+        "source_commit": source_commit,
+        "security_sequence": security_sequence,
+        "signer_key_id": UPDATE_SIGNER_KEY_ID,
+        "partition_table_sha256": sha256_file(partition_table),
+        "image": {
+            **update_image,
+            "sd_destination": "updates/d1l-update.bin",
+        },
+        "manifest": {
+            "path": manifest_path.relative_to(package_dir).as_posix(),
+            "sd_destination": "updates/d1l-update.manifest",
+            "size": manifest_path.stat().st_size,
+            "sha256": sha256_file(manifest_path),
+        },
+        "signature": {
+            "path": signature_path.relative_to(package_dir).as_posix(),
+            "sd_destination": "updates/d1l-update.sig",
+            "size": signature_path.stat().st_size,
+            "sha256": sha256_file(signature_path),
+            "algorithm": "Ed25519",
+        },
+        "trigger_policy": "local_ui_or_usb_confirmation_only",
+        "rf_trigger_allowed": False,
+        "partition_table_replacement_in_firmware": False,
+        "rollback_required": True,
     }
 
 
@@ -2123,6 +2428,109 @@ App SHA256: `{app['sha256']}`
             encoding="ascii",
         )
         return
+    if manifest.get("release_profile") == FULL_FEATURE_RELEASE_PROFILE:
+        supported_lines = "\n".join(
+            f"- `{capability}`"
+            for capability in manifest["supported_capabilities"]
+        )
+        signed_update = manifest["signed_update"]
+        readme.write_text(
+            f"""# {PROJECT} Full Feature Release Package
+
+Package: `{package_name}`
+
+Release profile: `{manifest['release_profile']}`
+
+Firmware commit: `{manifest['firmware_commit']}`
+
+GitHub Actions run: `{manifest['actions_run']}`
+
+GitHub Actions run attempt: `{manifest['actions_run_attempt']}`
+
+SD history mode: `{manifest['sd_history_mode']}`
+
+This package contains the production Full Feature firmware and a verified
+Ed25519-signed local update bundle. `full_feature_release_ready` remains
+`false` until the exact package is flashed and its physical release gates are
+recorded; packaging never manufactures that evidence.
+
+## Supported capabilities
+
+{supported_lines}
+
+The BLE companion deliberately rejects factory reset, remote reboot, and
+private-key import/export. Those are production security boundaries, not
+missing user features. RF-triggered firmware update is also impossible.
+
+## Contents
+
+- `firmware/` contains the bootloader, OTA partition table, application image,
+  and `flasher_args.json`.
+- `update/d1l-update.bin`, `update/d1l-update.manifest`, and
+  `update/d1l-update.sig` are one exact signed update set.
+- `full-flash/meshcore_deskos_d1l-full-8mb.bin` is the destructive
+  factory/recovery image.
+- `docs/`, `notices/`, `evidence/`, the SBOM, provenance, and package metadata
+  are bound by `SHA256SUMS.txt`.
+
+Update signer: `{signed_update['signer_key_id']}`
+
+Update security sequence: `{signed_update['security_sequence']}`
+
+## Normal project flash
+
+On the current Pi 5 development route, open only the stable D1L identity:
+
+```sh
+export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+./flash_project.sh
+```
+
+The target must enumerate as VID:PID `1A86:7523`. Never substitute
+`/dev/ttyUSB<number>` and never probe another Pi serial device. On Windows,
+resolve the D1L by the same VID:PID immediately before use; do not reuse an
+old COM assignment.
+
+Normal project flashing writes bootloader, OTA partition table, and app at the
+ESP-IDF offsets. Use the full 8MB image only for reviewed recovery because it
+can overwrite settings, logs, contacts, and message state.
+
+## Signed local update
+
+Copy this exact set to the mounted card without renaming:
+
+- `update/d1l-update.bin` -> `updates/d1l-update.bin`
+- `update/d1l-update.manifest` -> `updates/d1l-update.manifest`
+- `update/d1l-update.sig` -> `updates/d1l-update.sig`
+
+Then use the on-device Update sheet, or the local USB console:
+
+```text
+update status
+update install CONFIRM-SIGNED-UPDATE
+update status
+update reboot CONFIRM-REBOOT-UPDATE
+```
+
+The device verifies product, target, exact image size/hash, partition-table
+hash, signer identity, signature, and monotonic security sequence before
+writing the inactive OTA slot. It confirms the new image after a healthy boot
+and otherwise retains ESP-IDF rollback behavior. Never format the SD card.
+
+## Checksums and reporting
+
+Verify `SHA256SUMS.txt` before flashing. Report defects at
+https://github.com/n30nex/SIGUI/issues/new with firmware commit
+`{manifest['firmware_commit']}`, Actions run `{manifest['actions_run']}`,
+attempt `{manifest['actions_run_attempt']}`, and the relevant device receipt.
+
+App image: `{app['path']}`
+
+App SHA256: `{app['sha256']}`
+""",
+            encoding="ascii",
+        )
+        return
     if manifest.get("rp2040_artifacts"):
         rp2040_contents = "- `rp2040/` contains the Actions-built RP2040 SD bridge, legacy smoke, and official Seeed SD smoke UF2 artifacts."
     else:
@@ -2141,7 +2549,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 
 - `firmware/` contains the bootloader, partition table, app binary, and `flasher_args.json`.
 {rp2040_contents}
-- `update/meshcore_deskos_d1l-app.bin` is the application image for future OTA/update flows.
+- `update/d1l-update.bin` is the application image for development update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
 - `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.
 - `notices/` contains the project license, third-party notices, source audit notes, attributions, and the verbatim orlp Ed25519 zlib license for public distribution.
@@ -2199,10 +2607,18 @@ def create_release_package(
     meshcore_signed_advert_runtime_json: Path | None = None,
     release_profile: str = "full_feature",
     sd_history_mode: str = "conditional",
+    update_signing_key: Path | None = None,
 ) -> dict:
     release_profile, sd_history_mode = validate_release_settings(
         release_profile, sd_history_mode
     )
+    if (
+        release_profile == FULL_FEATURE_RELEASE_PROFILE
+        and update_signing_key is None
+    ):
+        raise ValueError(
+            "full_feature release packaging requires an update signing key"
+        )
     flasher_args = load_flasher_args(build_dir)
     package_dir = out_dir / package_name
     if package_dir.exists():
@@ -2223,20 +2639,29 @@ def create_release_package(
     source_git["commit"] = expected_commit
     source_git["short_commit"] = expected_commit[:7]
     workflow = workflow_info()
-    if release_profile == CORE_RELEASE_PROFILE:
+    if release_profile in PRODUCTION_RELEASE_PROFILES:
+        profile_label = (
+            "Core"
+            if release_profile == CORE_RELEASE_PROFILE
+            else "Full Feature"
+        )
         workflow_sha = workflow.get("sha")
         workflow_run_id = workflow.get("run_id")
         workflow_run_attempt = workflow.get("run_attempt")
-        if exact_sha(workflow_sha, "Core package Actions SHA") != expected_commit:
+        if exact_sha(
+            workflow_sha, f"{profile_label} package Actions SHA"
+        ) != expected_commit:
             raise ValueError(
-                "Core package requires GITHUB_SHA to match the exact firmware commit"
+                f"{profile_label} package requires GITHUB_SHA to match the "
+                "exact firmware commit"
             )
         if (
             not isinstance(workflow_run_id, str)
             or re.fullmatch(r"[1-9][0-9]*", workflow_run_id) is None
         ):
             raise ValueError(
-                "Core package requires the exact numeric GitHub Actions run ID"
+                f"{profile_label} package requires the exact numeric GitHub "
+                "Actions run ID"
             )
         if (
             not isinstance(workflow_run_attempt, str)
@@ -2244,12 +2669,13 @@ def create_release_package(
             is None
         ):
             raise ValueError(
-                "Core package requires the exact positive GitHub Actions "
+                f"{profile_label} package requires the exact positive GitHub Actions "
                 "run attempt"
             )
         if workflow.get("repository") != "n30nex/SIGUI":
             raise ValueError(
-                "Core package requires the canonical n30nex/SIGUI Actions repository"
+                f"{profile_label} package requires the canonical n30nex/SIGUI "
+                "Actions repository"
             )
     meshcore_conformance = copy_meshcore_conformance_evidence(
         meshcore_conformance_json,
@@ -2271,6 +2697,19 @@ def create_release_package(
         None
         if release_profile == CORE_RELEASE_PROFILE
         else copy_update_image(package_dir, firmware_dir, app)
+    )
+    signed_update = (
+        write_signed_update_bundle(
+            root,
+            package_dir,
+            update_image,
+            expected_commit,
+            d1l_firmware_version(root),
+            source_security_sequence(source_identity),
+            update_signing_key,
+        )
+        if update_image is not None and update_signing_key is not None
+        else None
     )
     full_image = write_full_flash_image(build_dir, package_dir, flasher_args, full_size)
     debug_files = copy_optional_debug_files(build_dir, package_dir)
@@ -2317,7 +2756,11 @@ def create_release_package(
         "schema": (
             CORE_PACKAGE_SCHEMA
             if release_profile == CORE_RELEASE_PROFILE
-            else 1
+            else (
+                FULL_FEATURE_PACKAGE_SCHEMA
+                if release_profile == FULL_FEATURE_RELEASE_PROFILE
+                else 1
+            )
         ),
         "project": PROJECT,
         "app_version": d1l_firmware_version(root),
@@ -2332,6 +2775,7 @@ def create_release_package(
         "meshcore_conformance": meshcore_conformance,
         "meshcore_signed_advert_runtime": meshcore_signed_advert_runtime,
         "update_image": update_image,
+        "signed_update": signed_update,
         "full_flash_image": full_image,
         "debug_files": debug_files,
         "release_docs": release_docs,
@@ -2422,6 +2866,38 @@ def create_release_package(
                     "RP2040 release payloads are intentionally omitted.",
                 )
             )
+    elif release_profile == FULL_FEATURE_RELEASE_PROFILE:
+        capability_truth = full_feature_capability_truth(sd_history_mode)
+        manifest.update(
+            {
+                "release_profile": release_profile,
+                "firmware_commit": expected_commit,
+                "actions_run": str(workflow["run_id"]),
+                "actions_run_attempt": str(workflow["run_attempt"]),
+                "supported_capabilities": capability_truth[
+                    "supported_capabilities"
+                ],
+                "unavailable_capabilities": capability_truth[
+                    "unavailable_capabilities"
+                ],
+                "sd_history_mode": sd_history_mode,
+                "sd_history_state": capability_truth["sd_history_state"],
+                "storage_authority": capability_truth["storage_authority"],
+                "full_feature_release_ready": False,
+                "signed_update_required": True,
+                "security_constraints": [
+                    "No RF-triggered firmware update",
+                    "No BLE private-key import or export",
+                    "No BLE factory reset or remote reboot",
+                    "Admin mutations require authenticated capability gates and local confirmation",
+                    "Room administration never synchronizes room history",
+                ],
+            }
+        )
+        if not isinstance(signed_update, dict) or not signed_update.get("signed"):
+            raise ValueError(
+                "Full Feature package requires a verified signed update bundle"
+            )
     manifest.update(
         write_package_inventory_metadata(
             root,
@@ -2463,6 +2939,7 @@ def main() -> int:
     parser.add_argument("--meshcore-signed-advert-runtime-json", default=None)
     parser.add_argument("--release-profile", choices=sorted(RELEASE_PROFILES))
     parser.add_argument("--sd-history-mode", choices=sorted(SD_HISTORY_MODES))
+    parser.add_argument("--update-signing-key", default=None)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -2506,6 +2983,19 @@ def main() -> int:
             root / meshcore_signed_advert_runtime_json
         )
 
+    update_signing_key = (
+        Path(args.update_signing_key) if args.update_signing_key else None
+    )
+    if update_signing_key and not update_signing_key.is_absolute():
+        update_signing_key = root / update_signing_key
+    if (
+        release_profile == FULL_FEATURE_RELEASE_PROFILE
+        and update_signing_key is None
+    ):
+        parser.error(
+            "full_feature release packaging requires --update-signing-key"
+        )
+
     manifest = create_release_package(
         root,
         build_dir,
@@ -2517,6 +3007,7 @@ def main() -> int:
         meshcore_signed_advert_runtime_json=meshcore_signed_advert_runtime_json,
         release_profile=release_profile,
         sd_history_mode=sd_history_mode,
+        update_signing_key=update_signing_key,
     )
     print(json.dumps(manifest))
     return 0

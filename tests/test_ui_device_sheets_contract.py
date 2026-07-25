@@ -22,7 +22,7 @@ def test_device_sheets_have_one_small_persistent_owner():
 
     assert '"ui/ui_device_sheets.c"' in cmake
     assert '#include "ui_device_sheets.h"' in phase1
-    assert "D1L_UI_DEVICE_SHEETS_CONTROLLER_MAX_BYTES 96U" in header
+    assert "D1L_UI_DEVICE_SHEETS_CONTROLLER_MAX_BYTES 192U" in header
     assert "_Static_assert(sizeof(d1l_ui_device_sheets_controller_t)" in source
     assert "s_device_sheets_controller EXT_RAM_BSS_ATTR" in phase1
     assert "static lv_obj_t *s_display_sheet" not in phase1
@@ -77,10 +77,21 @@ def test_display_render_is_truthful_disabled_and_fails_closed():
         "static lv_obj_t *create_diagnostic_line",
     )
 
-    for label in ("Brightness", "Night", "Contrast", "Timeout"):
+    for label in (
+        "Brightness %u%%",
+        "Night %s",
+        "Contrast %s",
+        "Timeout Off",
+        "Timeout %us",
+    ):
         assert f'"{label}"' in render
-    assert render.count("D1L_UI_DEVICE_SHEETS_ACTION_NONE") == 4
-    assert "LV_STATE_DISABLED" in render
+    for action in (
+        "BRIGHTNESS",
+        "NIGHT_MODE",
+        "HIGH_CONTRAST",
+        "TIMEOUT",
+    ):
+        assert f"D1L_UI_DEVICE_SHEETS_ACTION_{action}" in render
     assert "const d1l_app_snapshot_t *snapshot" in render
     assert '"Local display time"' in render
     assert '"Fixed UTC offset only; daylight saving is not automatic.' in render
@@ -107,10 +118,10 @@ def test_diagnostics_render_is_snapshot_only_and_read_only():
         "packets rx %lu tx %lu  rejected %lu",
     ):
         assert f'"{line}"' in render
-    for label in ("Crashlog", "Export", "Soak"):
-        assert f'"{label}"' in render
-    assert render.count("D1L_UI_DEVICE_SHEETS_ACTION_NONE") == 3
-    assert "LV_STATE_DISABLED" in render
+    assert '"Crashlog  Events  Serial"' in render
+    assert '"Open Terminal"' in render
+    assert "D1L_UI_DEVICE_SHEETS_ACTION_OPEN_TERMINAL" in render
+    assert "D1L_RELEASE_FEATURE_MUTABLE_TERMINAL" in render
     assert "if (!snapshot" in render
     assert "if (!complete)" in render
     assert "d1l_app_model_snapshot" not in source

@@ -7,7 +7,8 @@ The current package has two explicitly permitted byte-variable metadata files:
   id/attempt/URL, ``source_build_dir``, and the bound raw wire-conformance and
   signed-advert runtime receipt identities whose semantic projections are
   byte-stable in the package;
-* ``SHA256SUMS.txt`` may consequently differ only in its ``manifest.json`` row.
+* ``README_RELEASE.md`` carries the same exact run identity for operators;
+* ``SHA256SUMS.txt`` may consequently differ only in those two rows.
 
 Every other file, resolved build input, toolchain lock, package identity, and
 SHA-256 digest must match. The receipt contains no current timestamp or absolute
@@ -33,6 +34,7 @@ if __package__:
         validate_completed_report as validate_signed_advert_report,
     )
     from .package_release_d1l import (
+        FULL_FEATURE_PACKAGE_SCHEMA,
         git_info,
         package_inventory_payloads,
         validate_generated_package_metadata,
@@ -65,6 +67,7 @@ else:
         validate_completed_report as validate_signed_advert_report,
     )
     from package_release_d1l import (  # type: ignore[no-redef]
+        FULL_FEATURE_PACKAGE_SCHEMA,
         git_info,
         package_inventory_payloads,
         validate_generated_package_metadata,
@@ -107,6 +110,8 @@ CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
 CONFORMANCE_MAX_AGE_DAYS = 14
 SIGNED_ADVERT_ACTIONS_ARTIFACT = CONFORMANCE_ACTIONS_ARTIFACT
 PERMITTED_MANIFEST_PATHS = (
+    "/actions_run",
+    "/actions_run_attempt",
     "/created_at",
     "/meshcore_conformance/run_receipt/expires_at",
     "/meshcore_conformance/run_receipt/generated_at",
@@ -121,7 +126,11 @@ PERMITTED_MANIFEST_PATHS = (
     "/workflow/run_id",
     "/workflow/run_url",
 )
-PERMITTED_BYTE_VARIABLE_FILES = ("SHA256SUMS.txt", "manifest.json")
+PERMITTED_BYTE_VARIABLE_FILES = (
+    "README_RELEASE.md",
+    "SHA256SUMS.txt",
+    "manifest.json",
+)
 PROVENANCE_EXCLUSIONS = {
     "README_RELEASE.md",
     "SHA256SUMS.txt",
@@ -295,6 +304,8 @@ def normalize_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(manifest)
     normalized["created_at"] = "<permitted-created-at>"
     normalized["source_build_dir"] = "<permitted-source-build-dir>"
+    normalized["actions_run"] = "<permitted-run-id>"
+    normalized["actions_run_attempt"] = "<permitted-run-attempt>"
     workflow = normalized["workflow"]
     workflow["run_id"] = "<permitted-run-id>"
     workflow["run_attempt"] = "<permitted-run-attempt>"
@@ -383,7 +394,9 @@ def required_package_paths(source_commit: str, profile: str) -> set[str]:
         f"provenance_{source_commit}.json",
         f"release_evidence_index_{source_commit}.json",
         f"sbom_{source_commit}.spdx.json",
-        "update/meshcore_deskos_d1l-app.bin",
+        "update/d1l-update.bin",
+        "update/d1l-update.manifest",
+        "update/d1l-update.sig",
     }
     if profile == PROFILE_FULL_RELEASE:
         required.update(
@@ -501,7 +514,10 @@ def validate_manifest_shape(
     source_commit: str,
     profile: str,
 ) -> dict[str, str]:
-    if manifest.get("schema") != 1 or manifest.get("project") != PROJECT:
+    if (
+        manifest.get("schema") != FULL_FEATURE_PACKAGE_SCHEMA
+        or manifest.get("project") != PROJECT
+    ):
         raise ComparisonError(
             "invalid_manifest", "manifest schema or project identity is invalid"
         )
@@ -925,7 +941,9 @@ def load_snapshot(
         if path not in PERMITTED_BYTE_VARIABLE_FILES
     }
     comparable_checksums = {
-        path: digest for path, digest in checksums.items() if path != "manifest.json"
+        path: digest
+        for path, digest in checksums.items()
+        if path not in {"manifest.json", "README_RELEASE.md"}
     }
     return {
         "label": label,
@@ -975,7 +993,10 @@ def base_receipt(source_commit: str, profile: str) -> dict[str, Any]:
         "permitted_nonreproducible_metadata": {
             "files": {
                 "manifest.json": list(PERMITTED_MANIFEST_PATHS),
-                "SHA256SUMS.txt": ["manifest.json checksum row only"],
+                "README_RELEASE.md": ["exact Actions run identity only"],
+                "SHA256SUMS.txt": [
+                    "manifest.json and README_RELEASE.md checksum rows only"
+                ],
             },
             "observed_manifest_differences": [],
         },

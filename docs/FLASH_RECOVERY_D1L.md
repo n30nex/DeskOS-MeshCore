@@ -1,7 +1,7 @@
-# Core 1.0 Install and Recovery
+# Full Feature Install and Recovery
 
-This repository guide applies only to an extracted MeshCore DeskOS D1L Core
-1.0 release package. Build firmware only in GitHub Actions and use the exact
+This repository guide applies only to an extracted MeshCore DeskOS D1L Full
+Feature release package. Build firmware only in GitHub Actions and use the exact
 package whose commit and Actions run match the release candidate.
 
 ## Safety rules
@@ -14,10 +14,8 @@ package whose commit and Actions run match the release candidate.
   `1A86:7523` before opening or flashing it.
 - The current `/dev/ttyUSB2` resolution is observational only. Never pass a
   raw `/dev/ttyUSB*` name to a release command.
-- `COM12` remains the valid Windows alternative for the D1L.
-- `COM16` is reserved for separately authorized SD/RP2040 work, is not needed
-  by the Core package, and is never the Core D1L target.
-- Never use COM8, COM11, or COM29.
+- The old Windows COM assignment is stale. There is no current Windows
+  alternative release route.
 - Never format SD.
 - A normal install is non-erasing. Do not use the full-flash helper for an
   update.
@@ -69,14 +67,6 @@ Stop unless both expected USB properties are present. The symlink may resolve
 through a different `/dev/ttyUSB*` number after a move or reboot; that is why
 only the stable by-id path is passed to the helper.
 
-When the D1L is intentionally moved back to the Windows host, `COM12` remains
-the valid alternative:
-
-```powershell
-$env:D1L_PORT = "COM12"
-.\flash_project.ps1 -Port $env:D1L_PORT
-```
-
 Do not substitute a repository build directory, `idf.py flash`, a predecessor
 artifact, an unverified binary, or another serial device.
 
@@ -86,14 +76,5 @@ Use `flash_full_8mb.ps1` only when normal install cannot recover the device and
 a destructive recovery has been separately authorized. It writes the full
 8 MB image and can overwrite settings, contacts, messages, and logs. The
 current package has no authorized Pi destructive-recovery helper; do not
-improvise one against the by-id device. If the D1L is intentionally moved to
-the Windows recovery route, confirm that a recoverable backup exists when
-possible, re-verify the package checksums, and run only against `COM12`:
-
-```powershell
-$env:D1L_PORT = "COM12"
-.\flash_full_8mb.ps1 -Port $env:D1L_PORT
-```
-
-The helper requires the typed confirmation `FULL-FLASH-COM12`. Cancel if the
-port or confirmation text differs.
+improvise one against the by-id device. Stop and establish a separately
+reviewed exact-target recovery route before attempting a full 8 MB write.

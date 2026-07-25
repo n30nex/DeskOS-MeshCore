@@ -645,8 +645,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Why no DM?",
         "DM unavailable [role_not_dm_capable]",
         "This verified role does not support direct chat.",
-        "Manage locked",
-        "Authenticated admin session required.",
+        "Admin",
+        "Verified server; local authenticated login required.",
     } <= labels_by_view["managed_node_detail_sheet"]
     assert {
         "Contact Options",
@@ -773,7 +773,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert views["node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
     assert views["heard_only_node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
     assert views["managed_node_detail_sheet"]["metrics"]["node_detail_frame"] == [16, 60, 464, 476]
-    assert views["managed_node_detail_sheet"]["metrics"]["node_detail_content_bottom"] == 468
+    assert views["managed_node_detail_sheet"]["metrics"]["node_detail_content_bottom"] == 460
     assert views["managed_node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
     assert views["managed_node_detail_sheet"]["metrics"]["node_detail_management_gated"] is True
     assert views["nodes"]["metrics"]["contact_dm_shortcut_min_height"] >= ui_simulator.MIN_TOUCH_TARGET

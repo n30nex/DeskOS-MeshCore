@@ -21,8 +21,10 @@
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
 #include "comms/companion_3byte.h"
+#include "comms/observer_manager.h"
 #include "comms/usb_command_parser.h"
 #include "diagnostics/crash_log.h"
+#include "diagnostics/event_log.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/backlight.h"
 #include "hal/indicator_board.h"
@@ -50,6 +52,7 @@
 #include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
+#include "update/update_manager.h"
 
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
@@ -116,6 +119,16 @@ static void err_result(const char *cmd, const char *code, const char *hint)
 static const char *bool_json(bool value)
 {
     return value ? "true" : "false";
+}
+
+static const char *map_location_source_name(const d1l_settings_t *settings)
+{
+    if (!settings || !settings->map_location_set) {
+        return "unset";
+    }
+    return settings->map_location_source ==
+            D1L_MAP_LOCATION_SOURCE_AUTHENTICATED_COMPANION ?
+        "authenticated_companion" : "manual";
 }
 
 static void print_e7_json(int32_t value)
@@ -440,6 +453,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_EXACT(
         "repeaters", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_EXACT(
+        "admin status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_ADMIN),
     D1L_RELEASE_RULE_TOKEN(
         "admin", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_ADMIN),
     D1L_RELEASE_RULE_TOKEN(
@@ -465,6 +481,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "ui scroll-probe mesh_repeaters", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_ADMIN),
 
+    D1L_RELEASE_RULE_EXACT(
+        "observer status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_OBSERVER_MQTT),
     D1L_RELEASE_RULE_TOKEN(
         "observer", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_OBSERVER_MQTT),
@@ -475,6 +494,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "settings set observer", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_OBSERVER_MQTT),
 
+    D1L_RELEASE_RULE_EXACT(
+        "update status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SIGNED_UPDATE),
     D1L_RELEASE_RULE_TOKEN(
         "update", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SIGNED_UPDATE),
@@ -494,6 +516,12 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "storage update", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SIGNED_UPDATE),
 
+    D1L_RELEASE_RULE_EXACT(
+        "terminal status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_MUTABLE_TERMINAL),
+    D1L_RELEASE_RULE_EXACT(
+        "logs", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_MUTABLE_TERMINAL),
     D1L_RELEASE_RULE_TOKEN(
         "terminal", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MUTABLE_TERMINAL),
@@ -1473,7 +1501,7 @@ static void cmd_settings_get(void)
     print_e7_json(location_set ? settings->map_lon_e7 : 0);
     printf(",\"source\":");
     print_json_string(!location_available ? "unavailable_in_release_profile" :
-                      location_set ? "manual" : "unset");
+                      map_location_source_name(settings));
     printf("},\"map_tiles\":{\"available\":%s,\"source\":",
            bool_json(map_available));
     print_json_string(map_available ? D1L_MAP_TILE_SOURCE_ID : "");
@@ -1679,7 +1707,7 @@ static void print_map_location_result(const char *cmd, const d1l_settings_t *set
     printf(",\"lat_e7\":%ld,\"lon_e7\":%ld,\"source\":\"%s\"}}\n",
            (long)(settings && settings->map_location_set ? settings->map_lat_e7 : 0),
            (long)(settings && settings->map_location_set ? settings->map_lon_e7 : 0),
-           settings && settings->map_location_set ? "manual" : "unset");
+           map_location_source_name(settings));
 }
 
 static void persist_map_location_from_args(const char *cmd, const char *arg)
@@ -4405,7 +4433,7 @@ static bool build_data_export_payload(const char *token,
                             bool_json(settings->rx_boost),
                             d1l_settings_tcxo_name(settings->tcxo_mode),
                             bool_json(settings->map_location_set),
-                            settings->map_location_set ? "manual" : "unset",
+                            map_location_source_name(settings),
                             (long)(settings->map_location_set ? settings->map_lat_e7 : 0),
                             (long)(settings->map_location_set ? settings->map_lon_e7 : 0)) ||
         !append_export_json_string_field(dest, dest_size, &used, "node_name", settings->node_name) ||
@@ -6935,6 +6963,198 @@ static void cmd_repeaters(void)
     printf("],\"persisted\":true,\"note\":\"Repeater candidates are inferred from nonzero path-hop route and heard-node evidence\"}\n");
 }
 
+static const char *admin_state_name(d1l_meshcore_admin_state_t state)
+{
+    switch (state) {
+    case D1L_MESHCORE_ADMIN_IDLE:
+        return "idle";
+    case D1L_MESHCORE_ADMIN_LOGIN_PENDING:
+        return "login_pending";
+    case D1L_MESHCORE_ADMIN_AUTHENTICATED:
+        return "authenticated";
+    case D1L_MESHCORE_ADMIN_STATUS_PENDING:
+        return "status_pending";
+    case D1L_MESHCORE_ADMIN_MUTATION_PENDING:
+        return "mutation_pending";
+    case D1L_MESHCORE_ADMIN_TIMED_OUT:
+        return "timed_out";
+    default:
+        return "invalid";
+    }
+}
+
+static const char *admin_role_name(d1l_meshcore_admin_role_t role)
+{
+    switch (role) {
+    case D1L_MESHCORE_ADMIN_ROLE_REPEATER:
+        return "repeater";
+    case D1L_MESHCORE_ADMIN_ROLE_ROOM:
+        return "room";
+    case D1L_MESHCORE_ADMIN_ROLE_NONE:
+    default:
+        return "none";
+    }
+}
+
+static void cmd_admin_status(const char *command)
+{
+    d1l_meshcore_admin_snapshot_t status = {0};
+    d1l_meshcore_service_admin_snapshot(&status);
+    ok_begin(command);
+    printf(",\"state\":\"%s\",\"role\":\"%s\",\"fingerprint\":\"%s\","
+           "\"generation\":%lu,\"permissions\":%u,"
+           "\"firmware_level\":%u,\"server_timestamp\":%lu,"
+           "\"pending_tag\":%lu,\"pending_mutation\":\"%s\","
+           "\"last_mutation\":\"%s\",\"last_mutation_success\":%s,"
+           "\"status_valid\":%s,"
+           "\"session_secret_exposed\":false,\"credential_exposed\":false,"
+           "\"login_tx_queued\":%lu,\"status_tx_queued\":%lu,"
+           "\"mutation_tx_queued\":%lu,\"mutation_accepted\":%lu,"
+           "\"mutation_rejected\":%lu,"
+           "\"response_accepted\":%lu,\"response_unmatched\":%lu,"
+           "\"response_malformed\":%lu,\"response_expired\":%lu,"
+           "\"response_replayed\":%lu,\"last_error\":\"%s\"",
+           admin_state_name(status.state), admin_role_name(status.role),
+           status.fingerprint, (unsigned long)status.generation,
+           (unsigned)status.permissions, (unsigned)status.firmware_level,
+           (unsigned long)status.server_timestamp,
+           (unsigned long)status.pending_tag,
+           d1l_meshcore_admin_mutation_name(status.pending_mutation),
+           d1l_meshcore_admin_mutation_name(status.last_mutation),
+           bool_json(status.last_mutation_success),
+           bool_json(status.status_valid),
+           (unsigned long)status.login_tx_queued,
+           (unsigned long)status.status_tx_queued,
+           (unsigned long)status.mutation_tx_queued,
+           (unsigned long)status.mutation_accepted,
+           (unsigned long)status.mutation_rejected,
+           (unsigned long)status.response_accepted,
+           (unsigned long)status.response_unmatched,
+           (unsigned long)status.response_malformed,
+           (unsigned long)status.response_expired,
+           (unsigned long)status.response_replayed,
+           esp_err_to_name(status.last_error));
+    if (status.status_valid) {
+        printf(",\"server_status\":{\"battery_millivolts\":%u,"
+               "\"tx_queue_length\":%u,\"noise_floor_dbm\":%d,"
+               "\"last_rssi_dbm\":%d,\"packets_received\":%lu,"
+               "\"packets_sent\":%lu,\"uptime_seconds\":%lu,"
+               "\"error_flags\":%u,\"posts_created\":%u,"
+               "\"posts_pushed\":%u}",
+               (unsigned)status.status.battery_millivolts,
+               (unsigned)status.status.tx_queue_length,
+               (int)status.status.noise_floor_dbm,
+               (int)status.status.last_rssi_dbm,
+               (unsigned long)status.status.packets_received,
+               (unsigned long)status.status.packets_sent,
+               (unsigned long)status.status.uptime_seconds,
+               (unsigned)status.status.error_flags,
+               (unsigned)status.status.posts_created,
+               (unsigned)status.status.posts_pushed);
+    } else {
+        printf(",\"server_status\":null");
+    }
+    printf(",\"supported_roles\":[\"repeater\",\"room\"],"
+           "\"allowlisted_mutations\":[\"clear_stats\","
+           "\"advertise_zero_hop\"],"
+           "\"mutating_remote_commands_require_local_confirmation\":true,"
+           "\"raw_remote_cli\":false}\n");
+}
+
+static void cmd_admin_login(const char *line)
+{
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    char password[D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] = {0};
+    int consumed = 0;
+    if (!line ||
+        sscanf(line, "admin login %16s %15s%n",
+               fingerprint, password, &consumed) != 2 ||
+        line[consumed] != '\0' ||
+        strlen(fingerprint) != D1L_NODE_FINGERPRINT_LEN - 1U) {
+        wipe_console_bytes(password, sizeof(password));
+        err_result("admin login", "INVALID_ARGUMENT",
+                   "usage: admin login <16-hex-fingerprint> <password>");
+        return;
+    }
+    for (size_t i = 0U; fingerprint[i] != '\0'; ++i) {
+        if (!isxdigit((unsigned char)fingerprint[i])) {
+            wipe_console_bytes(password, sizeof(password));
+            err_result("admin login", "INVALID_FINGERPRINT",
+                       "fingerprint must be exactly 16 hexadecimal characters");
+            return;
+        }
+        fingerprint[i] =
+            (char)tolower((unsigned char)fingerprint[i]);
+    }
+    const esp_err_t ret =
+        d1l_meshcore_service_admin_login(fingerprint, password);
+    wipe_console_bytes(password, sizeof(password));
+    if (ret != ESP_OK) {
+        err_result("admin login", esp_err_to_name(ret),
+                   "require a verified repeater or room contact, valid route, and idle admin session");
+        return;
+    }
+    cmd_admin_status("admin login");
+}
+
+static void cmd_admin_refresh(void)
+{
+    const esp_err_t ret =
+        d1l_meshcore_service_admin_request_status();
+    if (ret != ESP_OK) {
+        err_result("admin refresh", esp_err_to_name(ret),
+                   "an authenticated idle admin session is required");
+        return;
+    }
+    cmd_admin_status("admin refresh");
+}
+
+static void cmd_admin_logout(void)
+{
+    const esp_err_t ret = d1l_meshcore_service_admin_logout();
+    if (ret != ESP_OK) {
+        err_result("admin logout", esp_err_to_name(ret),
+                   "could not clear volatile admin authority");
+        return;
+    }
+    cmd_admin_status("admin logout");
+}
+
+static void cmd_admin_mutation(const char *line)
+{
+    d1l_meshcore_admin_mutation_t mutation =
+        D1L_MESHCORE_ADMIN_MUTATION_NONE;
+    const char *command = "admin mutation";
+    if (line && strcmp(
+            line,
+            "admin clear-stats CONFIRM-REMOTE-MUTATION") == 0) {
+        mutation = D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS;
+        command = "admin clear-stats";
+    } else if (line && strcmp(
+                   line,
+                   "admin advertise-zero-hop CONFIRM-REMOTE-MUTATION") ==
+                   0) {
+        mutation = D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP;
+        command = "admin advertise-zero-hop";
+    } else {
+        err_result(
+            command, "CONFIRMATION_REQUIRED",
+            "usage: admin <clear-stats|advertise-zero-hop> "
+            "CONFIRM-REMOTE-MUTATION");
+        return;
+    }
+    const esp_err_t ret =
+        d1l_meshcore_service_admin_request_mutation(mutation, true);
+    if (ret != ESP_OK) {
+        err_result(
+            command, esp_err_to_name(ret),
+            "requires an authenticated admin-capable room/repeater session, "
+            "current verified route, and no pending request");
+        return;
+    }
+    cmd_admin_status(command);
+}
+
 static void print_crash_log_entry_json(const d1l_crash_log_entry_t *e)
 {
     printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"reset_reason\":\"%s\",\"reset_reason_code\":%u,\"crash_like\":%s,\"heap_free\":%lu,\"heap_min_free\":%lu,\"psram_free\":%lu}",
@@ -6969,6 +7189,298 @@ static void cmd_crashlog_clear(void)
     }
     ok_begin("crashlog clear");
     printf(",\"persisted\":true,\"count\":0}\n");
+}
+
+static void print_event_log_entry_json(const d1l_event_log_entry_t *entry)
+{
+    if (!entry) {
+        printf("null");
+        return;
+    }
+    printf("{\"sequence\":%lu,\"uptime_ms\":%lu,\"level\":\"%s\","
+           "\"source\":",
+           (unsigned long)entry->sequence,
+           (unsigned long)entry->uptime_ms,
+           d1l_event_log_level_name(entry->level));
+    print_json_string(entry->source);
+    printf(",\"kind\":");
+    print_json_string(entry->kind);
+    printf(",\"message\":");
+    print_json_string(entry->message);
+    printf("}");
+}
+
+static void cmd_logs(void)
+{
+    d1l_event_log_entry_t entries[D1L_EVENT_LOG_CAPACITY] = {0};
+    const size_t copied = d1l_event_log_copy_recent(
+        entries, D1L_EVENT_LOG_CAPACITY);
+    const d1l_event_log_status_t status = d1l_event_log_status();
+    ok_begin("logs");
+    printf(",\"redacted\":true,\"count\":%u,\"capacity\":%u,"
+           "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+           "\"runtime_level\":\"%s\",\"entries\":[",
+           (unsigned)copied, (unsigned)status.capacity,
+           (unsigned long)status.total_written,
+           (unsigned long)status.dropped_oldest,
+           d1l_event_log_level_name(status.runtime_level));
+    for (size_t i = 0U; i < copied; ++i) {
+        printf("%s", i ? "," : "");
+        print_event_log_entry_json(&entries[i]);
+    }
+    printf("],\"arbitrary_shell\":false,\"secrets_included\":false}\n");
+}
+
+static void cmd_logs_clear(const char *line)
+{
+    if (!line ||
+        strcmp(line, "logs clear CONFIRM-CLEAR-LOGS") != 0) {
+        err_result("logs clear", "CONFIRMATION_REQUIRED",
+                   "usage: logs clear CONFIRM-CLEAR-LOGS");
+        return;
+    }
+    const esp_err_t ret = d1l_event_log_clear();
+    if (ret != ESP_OK) {
+        err_result("logs clear", esp_err_to_name(ret),
+                   "could not clear local event history");
+        return;
+    }
+    ok_begin("logs clear");
+    printf(",\"cleared\":true,\"local_confirmation\":true,"
+           "\"arbitrary_shell\":false}\n");
+}
+
+static void cmd_terminal_status(void)
+{
+    const d1l_event_log_status_t status = d1l_event_log_status();
+    ok_begin("terminal status");
+    printf(",\"mode\":\"allowlisted_application_commands\","
+           "\"default_read_only\":true,\"arbitrary_shell\":false,"
+           "\"rf_guard_bypass\":false,\"format_guard_bypass\":false,"
+           "\"update_guard_bypass\":false,\"runtime_level\":\"%s\","
+           "\"event_count\":%u,\"event_capacity\":%u,"
+           "\"mutable_actions\":[\"terminal level error\","
+           "\"terminal level warn\",\"terminal level info\","
+           "\"terminal level debug\",\"logs clear CONFIRM-CLEAR-LOGS\"]}\n",
+           d1l_event_log_level_name(status.runtime_level),
+           (unsigned)status.count, (unsigned)status.capacity);
+}
+
+static void cmd_terminal_level(const char *line)
+{
+    const char *prefix = "terminal level ";
+    const char *value = line ? line + strlen(prefix) : NULL;
+    d1l_event_log_level_t level = D1L_EVENT_LOG_LEVEL_INFO;
+    if (!line || strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !d1l_event_log_level_from_name(value, &level)) {
+        err_result("terminal level", "INVALID_LEVEL",
+                   "usage: terminal level <error|warn|info|debug>");
+        return;
+    }
+    const esp_err_t ret = d1l_event_log_set_runtime_level(level);
+    if (ret != ESP_OK) {
+        err_result("terminal level", esp_err_to_name(ret),
+                   "could not set runtime log level");
+        return;
+    }
+    ok_begin("terminal level");
+    printf(",\"runtime_level\":\"%s\",\"persisted\":false,"
+           "\"arbitrary_shell\":false}\n",
+           d1l_event_log_level_name(level));
+}
+
+static void print_observer_status(const char *command)
+{
+    d1l_observer_status_t status = {0};
+    d1l_observer_status(&status);
+    ok_begin(command);
+    printf(",\"state\":\"%s\",\"initialized\":%s,\"configured\":%s,"
+           "\"enabled\":%s,\"connected\":%s,\"include_location\":%s,"
+           "\"broker_host\":",
+           d1l_observer_state_name(status.state),
+           bool_json(status.initialized), bool_json(status.configured),
+           bool_json(status.enabled), bool_json(status.connected),
+           bool_json(status.include_location));
+    print_json_string(status.broker_host);
+    printf(",\"topic\":");
+    print_json_string(status.topic);
+    printf(",\"queue\":{\"count\":%lu,\"capacity\":%lu,"
+           "\"queued_total\":%lu,\"published_total\":%lu,"
+           "\"acknowledged_total\":%lu,\"dropped_oldest\":%lu},"
+           "\"reconnects\":%lu,\"last_message_id\":%lu,"
+           "\"last_error\":\"%s\",\"tls_required\":true,"
+           "\"broker_identity_verified\":true,\"credentials_redacted\":true,"
+           "\"message_text_uploaded\":false,\"rf_forwarding\":false}\n",
+           (unsigned long)status.queued,
+           (unsigned long)status.queue_capacity,
+           (unsigned long)status.queued_total,
+           (unsigned long)status.published_total,
+           (unsigned long)status.acknowledged_total,
+           (unsigned long)status.dropped_oldest,
+           (unsigned long)status.reconnects,
+           (unsigned long)status.last_message_id,
+           esp_err_to_name(status.last_error));
+}
+
+static void cmd_observer_configure(const char *line, bool authenticated,
+                                   bool include_location)
+{
+    char uri[D1L_OBSERVER_URI_LEN] = {0};
+    char topic[D1L_OBSERVER_TOPIC_LEN] = {0};
+    char username[D1L_OBSERVER_USERNAME_LEN] = {0};
+    char password[D1L_OBSERVER_PASSWORD_LEN] = {0};
+    int consumed = -1;
+    const int parsed = authenticated ?
+        sscanf(line, "observer configure-auth %191s %95s %63s %95s %n",
+               uri, topic, username, password, &consumed) :
+        sscanf(line, include_location ?
+               "observer configure-location %191s %95s %n" :
+               "observer configure %191s %95s %n",
+               uri, topic, &consumed);
+    const int expected = authenticated ? 4 : 2;
+    if (parsed != expected || consumed < 0 || line[consumed] != '\0') {
+        wipe_console_bytes(username, sizeof(username));
+        wipe_console_bytes(password, sizeof(password));
+        err_result("observer configure", "INVALID_ARGUMENT",
+                   authenticated ?
+                   "usage: observer configure-auth <mqtts-uri> <topic> <username> <password>" :
+                   "usage: observer configure[-location] <mqtts-uri> <topic>");
+        return;
+    }
+    const esp_err_t ret = d1l_observer_configure(
+        uri, topic, authenticated ? username : "",
+        authenticated ? password : "", include_location);
+    wipe_console_bytes(username, sizeof(username));
+    wipe_console_bytes(password, sizeof(password));
+    if (ret != ESP_OK) {
+        err_result("observer configure", esp_err_to_name(ret),
+                   "require mqtts:// URI, bounded topic, and printable credentials");
+        return;
+    }
+    print_observer_status("observer configure");
+}
+
+static void cmd_observer_set_enabled(bool enabled)
+{
+    const esp_err_t ret = d1l_observer_set_enabled(enabled);
+    if (ret != ESP_OK) {
+        err_result(enabled ? "observer on" : "observer off",
+                   esp_err_to_name(ret),
+                   enabled ?
+                   "save a TLS broker configuration before enabling uploads" :
+                   "could not persist observer disabled state");
+        return;
+    }
+    print_observer_status(enabled ? "observer on" : "observer off");
+}
+
+static void cmd_observer_clear(void)
+{
+    const esp_err_t ret = d1l_observer_clear_configuration();
+    if (ret != ESP_OK) {
+        err_result("observer clear", esp_err_to_name(ret),
+                   "could not clear broker configuration");
+        return;
+    }
+    print_observer_status("observer clear");
+}
+
+static void cmd_update_status(void)
+{
+    d1l_update_status_t status = {0};
+    d1l_update_status(&status);
+    ok_begin("update status");
+    printf(",\"state\":\"%s\",\"initialized\":%s,"
+           "\"install_requested\":%s,\"cancel_allowed\":%s,"
+           "\"reboot_required\":%s,\"running_image_confirmed\":%s,"
+           "\"rollback_enabled\":%s,\"progress_percent\":%u,"
+           "\"image_size\":%lu,\"bytes_verified\":%lu,"
+           "\"bytes_written\":%lu,\"security_sequence\":%lu,"
+           "\"highest_security_sequence\":%lu,\"version\":",
+           d1l_update_state_name(status.state),
+           bool_json(status.initialized),
+           bool_json(status.install_requested),
+           bool_json(status.cancel_allowed),
+           bool_json(status.reboot_required),
+           bool_json(status.running_image_confirmed),
+           bool_json(status.rollback_enabled),
+           (unsigned)status.progress_percent,
+           (unsigned long)status.image_size,
+           (unsigned long)status.bytes_verified,
+           (unsigned long)status.bytes_written,
+           (unsigned long)status.security_sequence,
+           (unsigned long)status.highest_security_sequence);
+    print_json_string(status.version);
+    printf(",\"source_sha\":");
+    print_json_string(status.source_sha);
+    printf(",\"signer_key_id\":");
+    print_json_string(status.signer_key_id);
+    printf(",\"running_partition\":");
+    print_json_string(status.running_partition);
+    printf(",\"target_partition\":");
+    print_json_string(status.target_partition);
+    printf(",\"last_error\":\"%s\",\"manifest_path\":\"%s\","
+           "\"signature_path\":\"%s\",\"image_path\":\"%s\","
+           "\"local_confirmation_required\":true,"
+           "\"rf_trigger_allowed\":false,"
+           "\"partition_table_replacement_in_firmware\":false}\n",
+           esp_err_to_name(status.last_error),
+           D1L_UPDATE_MANIFEST_PATH, D1L_UPDATE_SIGNATURE_PATH,
+           D1L_UPDATE_IMAGE_PATH);
+}
+
+static void cmd_update_install(const char *line)
+{
+    if (!line ||
+        strcmp(line,
+               "update install CONFIRM-SIGNED-UPDATE") != 0) {
+        err_result("update install", "CONFIRMATION_REQUIRED",
+                   "usage: update install CONFIRM-SIGNED-UPDATE");
+        return;
+    }
+    const esp_err_t ret = d1l_update_request_install();
+    if (ret != ESP_OK) {
+        err_result("update install", esp_err_to_name(ret),
+                   "update service is busy or unavailable");
+        return;
+    }
+    ok_begin("update install");
+    printf(",\"accepted\":true,\"asynchronous\":true,"
+           "\"local_confirmation\":true,\"rf_trigger\":false,"
+           "\"cancel_before_write_only\":true}\n");
+}
+
+static void cmd_update_cancel(void)
+{
+    const esp_err_t ret = d1l_update_cancel();
+    if (ret != ESP_OK) {
+        err_result("update cancel", esp_err_to_name(ret),
+                   "cancellation is allowed only before flash writing begins");
+        return;
+    }
+    ok_begin("update cancel");
+    printf(",\"cancel_requested\":true,\"before_irreversible_stage\":true}\n");
+}
+
+static void cmd_update_reboot(const char *line)
+{
+    if (!line ||
+        strcmp(line, "update reboot CONFIRM-REBOOT-UPDATE") != 0) {
+        err_result("update reboot", "CONFIRMATION_REQUIRED",
+                   "usage: update reboot CONFIRM-REBOOT-UPDATE");
+        return;
+    }
+    const esp_err_t ret = d1l_update_prepare_reboot();
+    if (ret != ESP_OK) {
+        err_result("update reboot", esp_err_to_name(ret),
+                   "verified update was not ready or quiesce failed");
+        return;
+    }
+    ok_begin("update reboot");
+    printf(",\"rebooting\":true,\"local_confirmation\":true,"
+           "\"target\":\"verified_inactive_ota_slot\"}\n");
+    fflush(stdout);
+    d1l_update_execute_prepared_reboot();
 }
 
 static void cmd_health(void)
@@ -7395,10 +7907,23 @@ static void cmd_help(void)
            "\"routes probe <fingerprint>\",\"routes clear\",\"packets\","
            "\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\","
            "\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\","
-           "\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\","
+           "\"roomservers\",\"repeaters\",\"admin status\","
+           "\"admin login <fingerprint> <password>\",\"admin refresh\","
+           "\"admin clear-stats CONFIRM-REMOTE-MUTATION\","
+           "\"admin advertise-zero-hop CONFIRM-REMOTE-MUTATION\","
+           "\"admin logout\",\"health\",\"crashlog\",\"crashlog clear\","
            "\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\","
            "\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\","
-           "\"ble on\",\"ble off\",\"reboot\",\"factory-reset-status\","
+           "\"ble on\",\"ble off\",\"observer status\",\"observer configure "
+           "<mqtts-uri> <topic>\",\"observer configure-location "
+           "<mqtts-uri> <topic>\",\"observer configure-auth "
+           "<mqtts-uri> <topic> <username> <password>\","
+           "\"observer on\",\"observer off\",\"observer clear\","
+           "\"logs\",\"logs clear CONFIRM-CLEAR-LOGS\","
+           "\"terminal status\",\"terminal level <error|warn|info|debug>\","
+           "\"update status\",\"update install CONFIRM-SIGNED-UPDATE\","
+           "\"update cancel\",\"update reboot CONFIRM-REBOOT-UPDATE\","
+           "\"reboot\",\"factory-reset-status\","
            "\"factory-reset-confirm\"]}\n");
 }
 
@@ -7672,6 +8197,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         return;
     }
     const char *line = command->text;
+    d1l_event_log_append(D1L_EVENT_LOG_LEVEL_INFO, "usb", "command",
+                         "allowlisted command accepted");
     if (strcmp(line, "help") == 0) {
         cmd_help();
     } else if (strcmp(line, "version") == 0) {
@@ -7893,12 +8420,35 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_roomservers();
     } else if (strcmp(line, "repeaters") == 0) {
         cmd_repeaters();
+    } else if (strcmp(line, "admin status") == 0) {
+        cmd_admin_status("admin status");
+    } else if (strncmp(line, "admin login ",
+                       strlen("admin login ")) == 0) {
+        cmd_admin_login(line);
+    } else if (strcmp(line, "admin refresh") == 0) {
+        cmd_admin_refresh();
+    } else if (strncmp(line, "admin clear-stats",
+                       strlen("admin clear-stats")) == 0 ||
+               strncmp(line, "admin advertise-zero-hop",
+                       strlen("admin advertise-zero-hop")) == 0) {
+        cmd_admin_mutation(line);
+    } else if (strcmp(line, "admin logout") == 0) {
+        cmd_admin_logout();
     } else if (strcmp(line, "health") == 0) {
         cmd_health();
     } else if (strcmp(line, "crashlog") == 0) {
         cmd_crashlog();
     } else if (strcmp(line, "crashlog clear") == 0) {
         cmd_crashlog_clear();
+    } else if (strcmp(line, "logs") == 0) {
+        cmd_logs();
+    } else if (strncmp(line, "logs clear", strlen("logs clear")) == 0) {
+        cmd_logs_clear(line);
+    } else if (strcmp(line, "terminal status") == 0) {
+        cmd_terminal_status();
+    } else if (strncmp(line, "terminal level ",
+                       strlen("terminal level ")) == 0) {
+        cmd_terminal_level(line);
     } else if (strcmp(line, "wifi status") == 0) {
         cmd_wifi_status();
     } else if (strcmp(line, "wifi off") == 0) {
@@ -7919,6 +8469,33 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_ble_off();
     } else if (strcmp(line, "ble on") == 0) {
         cmd_ble_on();
+    } else if (strcmp(line, "observer status") == 0) {
+        print_observer_status("observer status");
+    } else if (strncmp(line, "observer configure-auth ",
+                       strlen("observer configure-auth ")) == 0) {
+        cmd_observer_configure(line, true, false);
+    } else if (strncmp(line, "observer configure-location ",
+                       strlen("observer configure-location ")) == 0) {
+        cmd_observer_configure(line, false, true);
+    } else if (strncmp(line, "observer configure ",
+                       strlen("observer configure ")) == 0) {
+        cmd_observer_configure(line, false, false);
+    } else if (strcmp(line, "observer on") == 0) {
+        cmd_observer_set_enabled(true);
+    } else if (strcmp(line, "observer off") == 0) {
+        cmd_observer_set_enabled(false);
+    } else if (strcmp(line, "observer clear") == 0) {
+        cmd_observer_clear();
+    } else if (strcmp(line, "update status") == 0) {
+        cmd_update_status();
+    } else if (strncmp(line, "update install",
+                       strlen("update install")) == 0) {
+        cmd_update_install(line);
+    } else if (strcmp(line, "update cancel") == 0) {
+        cmd_update_cancel();
+    } else if (strncmp(line, "update reboot",
+                       strlen("update reboot")) == 0) {
+        cmd_update_reboot(line);
     } else if (strcmp(line, "mesh advert zero") == 0) {
         cmd_mesh_advert("mesh advert zero", false);
     } else if (strcmp(line, "mesh advert flood") == 0) {

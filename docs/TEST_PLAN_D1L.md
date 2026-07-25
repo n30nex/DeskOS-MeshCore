@@ -1,5 +1,45 @@
 # D1L Test Plan
 
+## Exact Full Feature candidate plan (2026-07-25)
+
+The active candidate is `release_profile=full_feature` with
+`sd_history_mode=conditional`. Feature implementation is complete. Validation
+is intentionally limited to the release-critical gates below; historical
+edge-case campaigns are not being repeated unless the exact candidate fails a
+required gate.
+
+Required sequence:
+
+1. Run the repository host suite, completion-ledger validation, generated-pack
+   validation and `git diff --check`.
+2. Push one immutable commit and require exact-SHA `d1l-ci` success.
+3. Download the exact package; verify all checksums, provenance, SBOM, Actions
+   identity, release profile, signed update signer and security sequence.
+4. On Pi 5 host `neopi5`, prove the target symlink is
+   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`, prove
+   `ID_VENDOR_ID=1a86` and `ID_MODEL_ID=7523`, then flash that exact package.
+   Never enumerate or probe another Pi serial device.
+5. Run automated version/health/board/settings/radio/identity/storage/BLE/
+   Observer/Admin/update/terminal probes, required UI navigation/scroll
+   probes, message/store checks, controlled reboot and persistence checks.
+6. Run conditional SD/RP2040 checks without formatting. If the required media
+   path is absent or unsafe, report the exact blocked gate; do not erase it.
+7. Use only a narrowly authorized controlled peer for DM/RF/admin acceptance.
+   Never automate a default Public transmission.
+8. Ask for one final consolidated physical confirmation covering display,
+   touch, keyboard, brightness/timeout wake behavior and the five dock roots.
+
+Pass requires receipts bound to the exact firmware commit and Actions run.
+Predecessor artifacts, simulator images, dry runs, a reachable serial port or
+a green source test alone do not pass.
+
+The current device has moved permanently for this development cycle. Raw
+`/dev/ttyUSB*` names and stale Windows COM assignments are not valid target
+identity.
+
+The remaining content is retained historical test rationale and prior exact
+candidate evidence.
+
 Last strict-verified exact-main software/artifact checkpoint: PR #182 at `de0bb75bd91146f0dc9896540d12c71889d7766b` / Actions `29548300732` passes 1,263 host and 33 checksum-contract tests plus 1,008 wire vectors, 931 oracle checks, existing wire/advert fuzzing, and 100,000 native plus 100,000 Clang 18 semantic-packet cases with zero findings. Five downloaded artifacts / 46 entries verify across 341 files with exact-source provenance and SPDX 2.3. The canonical strict receipt SHA-256 is `8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9`; canonical PR Actions `29547584817` and exact main share the reviewed tree. PRs #177-#182 cover replay/hash authority, bounded USB parsing, ACK/lifetime behavior, configured-channel admission, and semantic-packet parsing/fuzzing. A non-erasing exact-main COM12 flash passed, but retained-DM compatibility/migration must be fixed before reboot persistence can pass. Full WP-05, WP-06, official-peer RF, exact-candidate physical acceptance, and release gates remain open.
 
 ## Current Core hardware target (2026-07-24)
@@ -9,10 +49,9 @@ Hardware tests run from the unprivileged, key-only account `siguidev` and use
 only `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after proving USB
 VID:PID `1A86:7523`, symlink resolution, and read/write access. The current
 `/dev/ttyUSB2` resolution is observational only and is never a release target.
-`COM12` remains the valid Windows alternative if the D1L is intentionally
-moved back. `COM8`, `COM11`, and `COM29` remain forbidden. `COM16` remains
-restricted to separately authorized SD/RP2040 work and is never the Core D1L
-target.
+The old `COM12` assignment is historical and is not a current alternative.
+The legacy COM restrictions below remain preserved only for interpreting old
+receipts; current work never routes through them.
 
 On `neopi5`, begin every hardware evidence session with:
 

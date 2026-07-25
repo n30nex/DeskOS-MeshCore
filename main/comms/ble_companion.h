@@ -27,8 +27,12 @@ typedef struct {
     bool notification_requested;
     bool notification_enabled;
     bool transport_ready;
+    bool peer_known;
+    bool protocol_running;
+    bool protocol_ready;
     uint16_t connection_handle;
     uint16_t att_mtu;
+    uint32_t pairing_passkey;
     uint8_t rx_queue_depth;
     uint8_t tx_queue_depth;
     uint32_t connect_count;
@@ -39,6 +43,10 @@ typedef struct {
     uint32_t tx_drop_count;
     uint32_t malformed_frame_count;
     uint32_t security_reject_count;
+    uint32_t protocol_command_count;
+    uint32_t protocol_response_count;
+    uint32_t protocol_unsupported_count;
+    uint32_t protocol_malformed_count;
     esp_err_t last_error;
     int last_nimble_error;
     const char *state;
@@ -50,6 +58,8 @@ bool d1l_ble_companion_build_enabled(void);
 esp_err_t d1l_ble_companion_start(void);
 esp_err_t d1l_ble_companion_stop(void);
 esp_err_t d1l_ble_companion_prepare_reboot(void);
+esp_err_t d1l_ble_companion_begin_pairing(void);
+esp_err_t d1l_ble_companion_forget_peer(void);
 void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status);
 
 /*

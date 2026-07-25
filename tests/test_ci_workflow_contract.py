@@ -99,13 +99,7 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python -m pytest -q tests/test_checksum_manifest.py tests/test_package_release_d1l.py" in host
     assert "python ./scripts/verify_checksums.py artifacts" not in host
     assert "python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json" in host
-    assert (
-        "python ./scripts/core_release_gate_audit_d1l.py --dry-run "
-        "--commit ${{ github.sha }} --github-run-id ${{ github.run_id }} "
-        "--github-run-attempt ${{ github.run_attempt }} "
-        "--sd-history-mode disabled --out "
-        "artifacts/release-gate/core-release-gate-audit-ci.json"
-    ) in host
+    assert "core_release_gate_audit_d1l.py" not in host
 
 
 def test_ci_detects_when_sd_bridge_scope_is_required():
@@ -113,30 +107,18 @@ def test_ci_detects_when_sd_bridge_scope_is_required():
     job = job_block("change-filter")
 
     assert "include_sd_bridge:" in text
-    assert "default: false" in text
+    assert "default: true" in text
     assert "include_sd_bridge=true" in job
+    assert "reason=full_feature_candidate" in job
     assert "reason=manual_dispatch" in job
-    assert "reason=sd_bridge_paths" in job
-    assert "core_sd_disabled=false" in job
-    assert (
-        """grep -Eq '^set\\(D1L_RELEASE_PROFILE "core_1_0" CACHE STRING' CMakeLists.txt"""
-        in job
-    )
-    assert (
-        """grep -Eq '^set\\(D1L_SD_HISTORY_MODE "disabled" CACHE STRING' CMakeLists.txt"""
-        in job
-    )
-    assert 'if [[ "$core_sd_disabled" == "true" ]]' in job
-    assert "reason=core_sd_disabled" in job
+    assert "reason=full_feature_sd_paths" in job
+    assert "core_sd_disabled" not in job
     dispatch = job.split(
         'if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]', 1
     )[1].split("else", 1)[0]
     assert 'if [[ "${{ inputs.include_sd_bridge }}" == "true" ]]' in dispatch
     assert "reason=manual_dispatch" in dispatch
     assert "changed-files.txt" not in dispatch
-    assert job.index("reason=manual_dispatch") < job.index(
-        'if [[ "$core_sd_disabled" == "true" ]]'
-    )
     assert "firmware/rp2040_sd_bridge/" in job
     assert "firmware/rp2040_sd_smoke/" in job
     assert "tools/rp2040_sd_protocol.py" in job
@@ -310,7 +292,7 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "path: artifacts/rp2040-release-inputs" in job
     assert "merge-multiple: false" in job
     assert "package_args=(--build-dir build --out-dir artifacts/release" in job
-    assert "--release-profile core_1_0 --sd-history-mode disabled" in job
+    assert "--release-profile full_feature --sd-history-mode conditional" in job
     assert '--meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON"' in job
     assert 'python scripts/package_release_d1l.py "${package_args[@]}"' in job
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job
