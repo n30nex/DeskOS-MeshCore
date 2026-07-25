@@ -305,7 +305,9 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
     assert fetch.index("d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true") < fetch.index(
         "write_attribution_metadata(&provider, &result)"
     )
-    metadata_failure = fetch.split("ret = write_attribution_metadata(&result);", 1)[1].split(
+    metadata_failure = fetch.split(
+        "ret = write_attribution_metadata(&provider, &result);", 1
+    )[1].split(
         'download_step(&result, "ok"', 1
     )[0]
     assert "d1l_rp2040_bridge_file_delete(result.path" in metadata_failure
