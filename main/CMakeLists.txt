@@ -125,11 +125,13 @@ idf_component_register(
         "ui"
         "update"
     REQUIRES
+        app_update
         bsp
         bt
         bootloader_support
         driver
         esp_app_format
+        esp_partition
         esp_timer
         esp_system
         esp_event
