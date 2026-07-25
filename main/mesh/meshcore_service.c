@@ -7934,15 +7934,7 @@ esp_err_t d1l_meshcore_service_reset_contact_route(
         return ret;
     }
     forget_boot_route(fingerprint);
-    ret = d1l_contact_store_flush();
-    if (ret != ESP_OK) {
-        return ret;
-    }
     ret = d1l_route_store_clear_target(fingerprint);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    ret = d1l_route_store_flush();
     if (ret != ESP_OK) {
         return ret;
     }

@@ -1482,7 +1482,7 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     assert "d1l_app_model_send_trace_contact(" in source
     assert 'create_button(s_route_trace_sheet, "Trace"' in source
     assert '"Alias only; retained history remains"' in contact_source
-    assert '"Correlated TRACE; proven outbound path; no Public RF"' in source
+    assert '"Probe and TRACE are contact-only RF; Reset forgets only this contact; no Public RF"' in source
     assert '"Authenticated TRACE' not in source
     assert '"Contact Export"' in contact_source
     assert '"MeshCore QR  %.16s  type %u"' in contact_source
@@ -1748,7 +1748,8 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "password && password[0] != '\\0' ? password : NULL" in source
     assert "d1l_app_model_wifi_scan(&s_wifi_scan_result)" in source
     assert "d1l_app_model_wifi_connect()" in source
-    assert "d1l_app_model_clear_wifi_profile()" in source
+    assert "d1l_app_model_delete_wifi_profile(" in source
+    assert "d1l_app_model_select_wifi_profile(" in source
     assert "d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled)" in source
     assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED true" in header
     app_model = read("main/app/app_model.c")

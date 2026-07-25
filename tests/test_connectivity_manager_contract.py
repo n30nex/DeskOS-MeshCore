@@ -529,7 +529,8 @@ def test_console_reports_wifi_ble_status_scan_and_connect_without_password_echo(
     )
     error_branch = wifi_save.index("if (ret != ESP_OK)")
     assert save_call < password_wipe < error_branch
-    assert "const char *password_to_save = password" in wifi_save
+    assert "const char *password_to_save = NULL" in wifi_save
+    assert "password_to_save = password" in wifi_save
     wipe_helper = console.split("static void wipe_console_bytes", 1)[1].split(
         "static uint32_t deadline_remaining_ms", 1
     )[0]
