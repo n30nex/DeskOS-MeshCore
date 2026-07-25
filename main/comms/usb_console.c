@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_random.h"
@@ -3120,7 +3121,12 @@ static void print_storage_diag_probe(const char *name,
            (unsigned long)capacity_kb);
 }
 
-static d1l_rp2040_sd_diag_t s_console_storage_diag;
+/*
+ * The console owns large, cold command snapshots that do not participate in
+ * ISR or cache-disabled paths. Keep them in PSRAM so optional Wi-Fi can retain
+ * the internal-DMA heap it needs when it is enabled after the full UI starts.
+ */
+static d1l_rp2040_sd_diag_t s_console_storage_diag EXT_RAM_BSS_ATTR;
 
 static void cmd_storage_diag(void)
 {
@@ -4363,13 +4369,20 @@ static bool build_data_export_payload(const char *token,
         return false;
     }
 
-    static d1l_message_entry_t messages[D1L_EXPORT_DATA_SAMPLE_MAX];
-    static d1l_dm_entry_t dms[D1L_EXPORT_DATA_SAMPLE_MAX];
-    static d1l_route_entry_t routes[D1L_EXPORT_DATA_SAMPLE_MAX];
-    static d1l_packet_log_entry_t packets[D1L_EXPORT_DATA_SAMPLE_MAX];
-    static d1l_contact_entry_t contacts[D1L_EXPORT_DATA_SAMPLE_MAX];
-    static d1l_node_entry_t nodes[D1L_EXPORT_DATA_SAMPLE_MAX];
-    static d1l_read_state_dm_thread_t read_threads[D1L_EXPORT_DATA_SAMPLE_MAX];
+    static d1l_message_entry_t
+        messages[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR;
+    static d1l_dm_entry_t
+        dms[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR;
+    static d1l_route_entry_t
+        routes[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR;
+    static d1l_packet_log_entry_t
+        packets[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR;
+    static d1l_contact_entry_t
+        contacts[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR;
+    static d1l_node_entry_t
+        nodes[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR;
+    static d1l_read_state_dm_thread_t
+        read_threads[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR;
 
     d1l_settings_t settings_snapshot = {0};
     (void)d1l_settings_public_snapshot(&settings_snapshot);
@@ -4562,7 +4575,7 @@ static void cmd_storage_export_diagnostics(const char *line)
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 
-    static char payload[D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX];
+    static char payload[D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX] EXT_RAM_BSS_ATTR;
     size_t payload_len = 0;
     if (!build_diagnostic_export_payload(token, &status, payload, sizeof(payload),
                                          &payload_len)) {
@@ -4624,7 +4637,7 @@ static void cmd_storage_export_data(const char *line)
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 
-    static char payload[D1L_EXPORT_DATA_PAYLOAD_MAX];
+    static char payload[D1L_EXPORT_DATA_PAYLOAD_MAX] EXT_RAM_BSS_ATTR;
     size_t payload_len = 0;
     if (!build_data_export_payload(token, &status, payload, sizeof(payload),
                                    &payload_len)) {
@@ -5039,7 +5052,7 @@ static void copy_packet_search(char *dest, size_t dest_size, const char *src)
 static void cmd_packets(void)
 {
     d1l_packet_log_stats_t stats = d1l_packet_log_stats();
-    static d1l_packet_log_entry_t entries[8];
+    static d1l_packet_log_entry_t entries[8] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_packet_log_copy_recent(entries, 8);
     print_packet_entries_json("packets", NULL, NULL, NULL, entries, copied, &stats);
 }
@@ -5057,7 +5070,7 @@ static void cmd_packets_filter(const char *line)
     }
 
     d1l_packet_log_stats_t stats = d1l_packet_log_stats();
-    static d1l_packet_log_entry_t entries[8];
+    static d1l_packet_log_entry_t entries[8] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_packet_log_query(entries, 8, direction, kind, NULL);
     print_packet_entries_json("packets filter", direction, kind, NULL, entries, copied, &stats);
 }
@@ -5072,7 +5085,7 @@ static void cmd_packets_search(const char *line)
     }
 
     d1l_packet_log_stats_t stats = d1l_packet_log_stats();
-    static d1l_packet_log_entry_t entries[8];
+    static d1l_packet_log_entry_t entries[8] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_packet_log_query(entries, 8, "any", "any", search);
     print_packet_entries_json("packets search", "any", "any", search, entries, copied, &stats);
 }
@@ -5253,7 +5266,8 @@ static void print_public_message_entry_json(const d1l_message_entry_t *e,
 
 static void cmd_messages_public(const char *line)
 {
-    static d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY];
+    static d1l_message_entry_t
+        entries[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     char search[D1L_MESSAGE_TEXT_LEN] = {0};
     bool filtered = false;
     size_t offset = 0;
@@ -5389,7 +5403,8 @@ static void print_dm_entry_json(const d1l_dm_entry_t *e, bool retained)
 
 static void cmd_messages_dm(const char *line)
 {
-    static d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
+    static d1l_dm_entry_t
+        entries[D1L_DM_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     char thread_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
     bool filtered = false;
     size_t offset = 0;
@@ -5503,7 +5518,7 @@ static void cmd_messages_dm_clear(void)
 static void cmd_messages_unread(void)
 {
     d1l_read_state_stats_t stats = d1l_read_state_stats();
-    static d1l_read_state_dm_thread_t threads[8];
+    static d1l_read_state_dm_thread_t threads[8] EXT_RAM_BSS_ATTR;
     size_t thread_count = d1l_read_state_copy_dm_threads(threads, 8);
     ok_begin("messages unread");
     printf(",\"public_unread\":%lu,\"dm_unread\":%lu,\"muted_dm_unread\":%lu,\"dm_thread_count\":%lu,\"last_public_read_seq\":%lu,\"last_dm_read_seq\":%lu,\"newest_public_rx_seq\":%lu,\"newest_dm_rx_seq\":%lu,\"mark_read_count\":%lu,\"dm_threads\":[",
@@ -5585,7 +5600,7 @@ static void cmd_nodes(void)
     const bool include_location = !d1l_release_profile_is_core();
     const uint32_t marker_generation = include_location ?
         d1l_node_store_marker_generation() : 0U;
-    static d1l_node_view_t entries[8];
+    static d1l_node_view_t entries[8] EXT_RAM_BSS_ATTR;
     const d1l_node_query_t query = {
         .filter = D1L_NODE_FILTER_ALL,
         .sort = D1L_NODE_SORT_LAST_HEARD,
@@ -5686,7 +5701,8 @@ static void cmd_channels(void)
             "channels", D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
         return;
     }
-    static d1l_channel_info_t entries[D1L_CHANNEL_STORE_CAPACITY];
+    static d1l_channel_info_t
+        entries[D1L_CHANNEL_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     size_t count = 0U;
     uint64_t active_channel_id = 0U;
     d1l_channel_store_stats_t stats = {0};
@@ -5743,7 +5759,8 @@ static void cmd_contacts(void)
 {
     const d1l_contact_store_stats_t stats_before =
         d1l_contact_store_stats();
-    static d1l_contact_entry_t entries[D1L_CONTACT_STORE_CAPACITY];
+    static d1l_contact_entry_t
+        entries[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_contact_store_copy_recent(
         entries, D1L_CONTACT_STORE_CAPACITY);
     const d1l_contact_store_stats_t stats = d1l_contact_store_stats();
@@ -5847,7 +5864,7 @@ static void cmd_contacts_export(const char *line)
 
     if (*arg == '\0') {
         d1l_contact_store_stats_t stats = d1l_contact_store_stats();
-        static d1l_contact_entry_t entries[8];
+        static d1l_contact_entry_t entries[8] EXT_RAM_BSS_ATTR;
         size_t copied = d1l_contact_store_copy_recent(entries, 8);
         ok_begin("contacts export");
         printf(",\"count\":%u,\"capacity\":%u,\"entries\":[",
@@ -5963,7 +5980,8 @@ static bool core_retained_public_witness(
     const d1l_message_store_stats_t *expected,
     d1l_message_entry_t *out_entry)
 {
-    static d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY];
+    static d1l_message_entry_t
+        entries[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     if (!expected || !out_entry || expected->count != expected->capacity ||
         expected->public_count != expected->capacity || !expected->loaded ||
         expected->persistence_dirty || expected->nvs_fallback_dirty ||
@@ -5999,7 +6017,8 @@ static bool core_retained_dm_witness(
     const d1l_dm_store_stats_t *expected,
     d1l_dm_entry_t *out_entry)
 {
-    static d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
+    static d1l_dm_entry_t
+        entries[D1L_DM_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     if (!expected || !out_entry || expected->count != expected->capacity ||
         expected->count == 0U || !expected->loaded ||
         expected->persistence_dirty || expected->nvs_fallback_dirty ||
@@ -6034,7 +6053,8 @@ static bool core_retained_contact_witness(
     const d1l_contact_store_stats_t *expected,
     d1l_contact_entry_t *out_entry)
 {
-    static d1l_contact_entry_t entries[D1L_CONTACT_STORE_CAPACITY];
+    static d1l_contact_entry_t
+        entries[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     if (!expected || !out_entry || expected->count != expected->capacity ||
         expected->count == 0U || expected->persistence_dirty ||
         expected->persistence_last_error != ESP_OK) {
@@ -6517,7 +6537,7 @@ static void print_route_entry_json(const d1l_route_entry_t *e)
 static void cmd_routes(void)
 {
     d1l_route_store_stats_t stats = d1l_route_store_stats();
-    static d1l_route_entry_t entries[8];
+    static d1l_route_entry_t entries[8] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_route_store_copy_recent(entries, 8);
     ok_begin("routes");
     printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,"
@@ -6784,7 +6804,8 @@ static void cmd_routes_trace(const char *line)
 
     d1l_contact_entry_t contact = {0};
     const bool known_contact = d1l_contact_store_find_by_fingerprint(fingerprint, &contact);
-    static d1l_route_entry_t entries[D1L_ROUTE_STORE_CAPACITY];
+    static d1l_route_entry_t
+        entries[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_app_model_copy_route_trace(fingerprint, entries, D1L_ROUTE_STORE_CAPACITY);
     const size_t best = copied ? route_trace_best_index(entries, copied) : 0;
 
@@ -6932,7 +6953,7 @@ static void cmd_roomservers(void)
     }
     d1l_mesh_signal_summary_t summary = {0};
     d1l_mesh_inspector_signal_summary(&summary);
-    static d1l_mesh_room_server_t entries[8];
+    static d1l_mesh_room_server_t entries[8] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_mesh_inspector_copy_room_servers(entries, 8);
     ok_begin("roomservers");
     printf(",\"count\":%u,\"total_known\":%lu,\"entries\":[", (unsigned)copied,
@@ -6953,7 +6974,7 @@ static void cmd_repeaters(void)
     }
     d1l_mesh_signal_summary_t summary = {0};
     d1l_mesh_inspector_signal_summary(&summary);
-    static d1l_mesh_repeater_candidate_t entries[8];
+    static d1l_mesh_repeater_candidate_t entries[8] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_mesh_inspector_copy_repeater_candidates(entries, 8);
     ok_begin("repeaters");
     printf(",\"count\":%u,\"total_known\":%lu,\"entries\":[", (unsigned)copied,
@@ -7169,7 +7190,8 @@ static void print_crash_log_entry_json(const d1l_crash_log_entry_t *e)
 static void cmd_crashlog(void)
 {
     d1l_crash_log_stats_t stats = d1l_crash_log_stats();
-    static d1l_crash_log_entry_t entries[D1L_CRASH_LOG_CAPACITY];
+    static d1l_crash_log_entry_t
+        entries[D1L_CRASH_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_crash_log_copy_recent(entries, D1L_CRASH_LOG_CAPACITY);
     ok_begin("crashlog");
     printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
@@ -8599,7 +8621,7 @@ static void handle_line(const d1l_usb_command_view_t *command)
 
 void d1l_usb_console_run(void)
 {
-    static char line[256];
+    static char line[256] EXT_RAM_BSS_ATTR;
     size_t used = 0;
     bool dropping_overlong = false;
     cmd_help();
@@ -8735,7 +8757,7 @@ static void factory_reset_recovery_export(void)
 void d1l_usb_console_run_factory_reset_recovery(
     const d1l_factory_reset_status_t *boot_status)
 {
-    static char line[128];
+    static char line[128] EXT_RAM_BSS_ATTR;
     char repair_token[9] = {0};
     int64_t repair_deadline_us = 0;
     size_t used = 0U;

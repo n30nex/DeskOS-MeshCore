@@ -183,6 +183,29 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
     assert app_main.index("d1l_connectivity_init()") < app_main.index("d1l_ui_phase1_start()")
 
 
+def test_console_command_snapshots_leave_internal_heap_for_late_wifi_start():
+    console = read("main/comms/usb_console.c")
+
+    assert '#include "esp_attr.h"' in console
+    assert "s_console_storage_diag EXT_RAM_BSS_ATTR" in console
+    for declaration in [
+        "messages[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR",
+        "dms[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR",
+        "routes[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR",
+        "packets[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR",
+        "contacts[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR",
+        "nodes[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR",
+        "read_threads[D1L_EXPORT_DATA_SAMPLE_MAX] EXT_RAM_BSS_ATTR",
+        "payload[D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX] EXT_RAM_BSS_ATTR",
+        "payload[D1L_EXPORT_DATA_PAYLOAD_MAX] EXT_RAM_BSS_ATTR",
+        "entries[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR",
+        "entries[D1L_DM_STORE_CAPACITY] EXT_RAM_BSS_ATTR",
+        "entries[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR",
+        "entries[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR",
+    ]:
+        assert declaration in console
+
+
 def test_connectivity_boot_guard_is_scoped_checksummed_and_not_written_from_events():
     source = read("main/comms/connectivity_manager.c")
     guard_header = read("main/comms/connectivity_boot_guard.h")
