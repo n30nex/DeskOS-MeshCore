@@ -38,7 +38,7 @@ Do not substitute a raw `/dev/ttyUSB*` name or a stale Windows COM assignment.
 | Companion protocol | Official core initial-sync, contact/channel, messaging, time, advert, radio and battery/storage commands |
 | Server administration | Authenticated repeater and room login/status; room login starts with a no-history cursor; two exact allowlisted mutations require local confirmation |
 | Observer | Opt-in `mqtts://` TLS observer, QoS 1/PUBACK accounting, bounded queue and optional center location |
-| Storage | Internal NVS fallback plus optional FAT32 SD/RP2040 retained history, exports and map cache |
+| Storage | Externally prepared FAT32 SD/RP2040 primary history, exports and map cache, with visible degraded operation when SD is unavailable |
 | Updates | Ed25519-signed local SD/OTA bundle, exact signer identity, image hash, anti-rollback sequence, dual-slot boot and rollback |
 | Device UX | Brightness, timeout, night/high-contrast modes, notification pulse/quiet modes, curated glyph palette and service sheets |
 | Support | Structured event terminal, diagnostics, crashlog, health, safe reboot, guarded factory reset and USB recovery |
@@ -82,6 +82,18 @@ device; the automated UI probe covers required scrollable surfaces.
   formatting path. Missing or unusable media falls back to NVS where defined.
 - Normal project flashing is non-erasing. The full recovery image is
   destructive and requires typed confirmation.
+
+Prepare an already-formatted 32GB-or-larger FAT32 card without formatting,
+deleting, or overwriting files:
+
+```powershell
+python .\scripts\prepare_deskos_sd.py --target E:\ --apply
+```
+
+The checked-in payload is under `sdcard/deskos`. Run the command without
+`--apply` for a read-only plan. Optional preloaded tiles require an explicit
+provider manifest granting offline storage; the public OpenStreetMap Standard
+tile service is interactive-cache only and must not be bulk downloaded.
 
 The compatibility `core_1_0` profile remains in source for narrow recovery
 builds. In that profile SD history is disabled, NVS is authoritative, and the

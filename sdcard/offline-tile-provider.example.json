@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "source_id": "replace-with-provider-id",
+  "attribution": "Replace with the provider-required attribution",
+  "license_url": "https://example.invalid/offline-map-license",
+  "offline_storage_permitted": true,
+  "tile_template": "z{z}/x{x}/y{y}.png"
+}

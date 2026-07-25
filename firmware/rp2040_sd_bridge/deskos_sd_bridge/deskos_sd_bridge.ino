@@ -67,9 +67,11 @@ constexpr const char DESKOS_MANIFEST_PAYLOAD[] =
     "\"device\":\"seeed-indicator-d1l\","
     "\"stores\":[\"messages\",\"dm\",\"nodes\",\"routes\",\"packets\",\"map_tiles\"]}\n";
 constexpr const char DESKOS_MAP_MANIFEST_PAYLOAD[] =
-    "{\"schema\":1,\"kind\":\"map_cache\","
-    "\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\","
-    "\"download_supported\":false}\n";
+    "{\"schema\":2,\"kind\":\"map_cache\","
+    "\"tile_template\":\"map/tiles/openstreetmap/z{z}/x{x}/y{y}.png\","
+    "\"interactive_download_supported\":true,"
+    "\"background_prefetch_supported\":false,"
+    "\"source\":\"openstreetmap-standard\"}\n";
 constexpr const char DESKOS_FILE_OPS_PROBE_PAYLOAD[] = "d1l-sd-file-ops-ready\n";
 constexpr const char DESKOS_JSON_PROBE_PAYLOAD[] = "{\"schema\":1,\"probe\":\"d1l\"}\n";
 constexpr uint32_t FILE_WORKER_IDLE_WAIT_MS = 10000;
@@ -1666,9 +1668,15 @@ bool map_manifest_file_valid(const char *path) {
     }
     buffer[read_len] = '\0';
     String text(buffer);
-    return text.indexOf("\"schema\":1") >= 0 &&
-           text.indexOf("\"kind\":\"map_cache\"") >= 0 &&
-           text.indexOf("\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\"") >= 0;
+    const bool legacy_manifest =
+        text.indexOf("\"schema\":1") >= 0 &&
+        text.indexOf("\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\"") >= 0;
+    const bool current_manifest =
+        text.indexOf("\"schema\":2") >= 0 &&
+        text.indexOf(
+            "\"tile_template\":\"map/tiles/openstreetmap/z{z}/x{x}/y{y}.png\"") >= 0;
+    return text.indexOf("\"kind\":\"map_cache\"") >= 0 &&
+           (legacy_manifest || current_manifest);
 }
 
 bool map_manifest_valid() {

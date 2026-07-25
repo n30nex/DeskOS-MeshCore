@@ -1,9 +1,47 @@
 # D1L SD Card Guided Install
 
+## Prepare a Production Card
+
+DeskOS never formats an SD card. On a computer, format a 32GB-or-larger card
+as FAT32, then use the checked-in card payload:
+
+```powershell
+python .\scripts\prepare_deskos_sd.py --target E:\ --apply
+```
+
+Replace `E:\` with the exact mounted card. The command:
+
+- defaults to a read-only plan until `--apply` is supplied;
+- requires FAT32 and a 32GB-class capacity;
+- creates only the documented `deskos` tree;
+- never formats, deletes, or overwrites a different existing file;
+- verifies every copied file by SHA-256; and
+- writes `deskos/card-preparation-receipt.json`.
+
+The source layout is in `sdcard/deskos`. Re-running the preparer accepts
+identical files and refuses changed destinations. `--skip-filesystem-check`
+exists only for staging/test directories and must never bypass the check on a
+real card.
+
+Preloaded map tiles are optional. Import is accepted only when the tile source
+contains `offline-tile-provider.json` with
+`offline_storage_permitted=true`, provider attribution, and its license URL:
+
+```powershell
+python .\scripts\prepare_deskos_sd.py --target E:\ --tiles-from C:\licensed-tiles --apply
+```
+
+Do not bulk-download from `tile.openstreetmap.org`; that service permits
+interactive current-view caching but expressly prohibits offline-area
+prefetch. The example provider manifest is
+`sdcard/offline-tile-provider.example.json`.
+
+## Recover or Upgrade the RP2040 Bridge
+
 The legacy `scripts/autonomous_hardware_validate_d1l.py` runner is
 planning-only: its hardware entry point is disabled until full-key D1L
 admission and stable flash binding are implemented. Use this guided flow only
-when COM12 is working but the RP2040 does
+when the Pi 5 D1L target is working but the RP2040 does
 not answer the DeskOS bridge protocol and no autonomous UF2 path appears. The
 only manual action is putting the RP2040 into BOOTSEL/UF2 mode twice: once for
 the official SD smoke proof and once to restore the DeskOS SD bridge.
@@ -12,8 +50,11 @@ the official SD smoke proof and once to restore the DeskOS SD bridge.
 
 - Use the latest green GitHub Actions run artifacts.
 - Prepare the SD card as FAT32 on a computer, then insert it in the D1L.
-- Keep D1L post-flash validation on `COM12`.
-- Do not use `COM8`, `COM11`, or `COM29`.
+- Build and validate on Pi 5 host `neopi5`.
+- Bind the ESP32 only through
+  `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with USB identity
+  `1a86:7523`; never guess a raw `/dev/ttyUSB*` path or probe another serial
+  device.
 - Do not format the SD card from the device, script, serial console, or UI.
 - Do not send Public RF.
 

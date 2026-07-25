@@ -1,0 +1,1 @@
+{"schema":2,"kind":"map_cache","tile_template":"map/tiles/openstreetmap/z{z}/x{x}/y{y}.png","interactive_download_supported":true,"background_prefetch_supported":false,"source":"openstreetmap-standard"}
