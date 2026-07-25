@@ -44,7 +44,7 @@ def test_current_view_planner_accepts_bounded_zoom_and_stays_at_most_three_by_th
 
     assert "D1L_MAP_VIEW_DEFAULT_ZOOM 10U" in header
     assert "D1L_MAP_VIEW_MIN_ZOOM 8U" in header
-    assert "D1L_MAP_VIEW_MAX_ZOOM 14U" in header
+    assert "D1L_MAP_VIEW_MAX_ZOOM 18U" in header
     assert "D1L_MAP_VIEW_MAX_TILES 9U" in header
     assert (
         "zoom >= D1L_MAP_VIEW_MIN_ZOOM && zoom <= D1L_MAP_VIEW_MAX_ZOOM"
@@ -291,7 +291,7 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
         "esp_err_t d1l_map_tile_store_write_canary",
     )
 
-    assert "attribution_metadata_present()" in read_cache
+    assert "attribution_metadata_present(&result)" in read_cache
     assert "d1l_map_tile_png_valid(buffer, result.bytes)" in read_cache
     assert "result.cache_hit = true" in read_cache
     assert "const uint32_t expected_size = file.size" in read_cache

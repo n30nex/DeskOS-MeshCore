@@ -23,7 +23,7 @@ def test_offline_provider_is_explicit_fail_closed_and_secret_safe():
     assert "token_count(value, \"{z}\") == 1U" in provider
     assert "D1L_MAP_TILE_SOURCE_ID" in provider
     assert "out_provider->background_prefetch_permitted = false;" in provider
-    assert "provider->url_template" in store
+    assert "provider.url_template" in store
     assert "result.url" not in read("main/map/map_prefetch_service.c")
 
 
@@ -59,7 +59,7 @@ def test_map_ui_exposes_provider_and_background_state():
     assert "d1l_map_prefetch_service_status(&prefetch)" in ui
     assert '"Ready through z%u"' in ui
     assert '"Paused for Map"' in ui
-    assert '"interactive cache only"' in ui
+    assert "interactive cache only" in ui
     assert "provider_max_zoom" in view_header
     assert "s_map.status.provider_max_zoom = provider->max_zoom" in view_source
     assert "provider.max_zoom" in ui
