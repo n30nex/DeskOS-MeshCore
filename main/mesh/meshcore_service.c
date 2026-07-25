@@ -57,8 +57,12 @@
     (D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_SIGNATURE_SIZE)
 #define D1L_MESHCORE_MAX_ADVERT_DATA D1L_ADVERT_DATA_MAX_LEN
 #define D1L_MESHCORE_CIPHER_MAC_SIZE D1L_MESHCORE_CRYPTO_MAC_SIZE
-#define D1L_MESHCORE_MAX_TEXT_BYTES 160U
 #define D1L_MESHCORE_USER_TEXT_MAX D1L_MESSAGE_MAX_CHARS
+#define D1L_MESHCORE_CHANNEL_TEXT_PREFIX_MAX \
+    ((D1L_NODE_NAME_LEN - 1U) + 2U)
+#define D1L_MESHCORE_MAX_TEXT_BYTES \
+    (5U + D1L_MESHCORE_CHANNEL_TEXT_PREFIX_MAX + \
+     D1L_MESHCORE_USER_TEXT_MAX)
 #define D1L_MESHCORE_BW_INDEX_62K5 3U
 #define D1L_MESHCORE_PREAMBLE_LOW_SF 32U
 #define D1L_MESHCORE_TX_TIMEOUT_MS 5000U
@@ -86,8 +90,9 @@
 #define D1L_MESHCORE_RECIPROCAL_PATH_DELAY_MS 500U
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ bytes");
-_Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
-               "MeshCore plaintext buffer must fit the user text limit");
+_Static_assert(
+    D1L_MESHCORE_MAX_TEXT_BYTES == 176U,
+    "MeshCore plaintext must fit timestamp, sender prefix, and user text");
 _Static_assert(D1L_CHANNEL_STORE_CAPACITY ==
                    D1L_MESHCORE_CHANNEL_CANDIDATE_CAPACITY,
                "channel RX must execute every configured candidate");
@@ -2268,14 +2273,14 @@ static size_t meshcore_decrypt_after_mac(const uint8_t *secret, uint8_t *dest, s
 }
 
 static esp_err_t build_channel_text_packet(
-    const d1l_channel_protocol_key_t *channel, const char *text,
-    uint8_t path_hash_bytes, uint32_t tx_timestamp, uint8_t *raw,
-    size_t raw_size, uint8_t *out_len)
+    const d1l_channel_protocol_key_t *channel, const char *sender_name,
+    const char *text, uint8_t path_hash_bytes, uint32_t tx_timestamp,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len)
 {
     if (!channel || channel->channel_id == 0U ||
         (channel->secret_len != D1L_CHANNEL_SECRET_128_LEN &&
          channel->secret_len != D1L_CHANNEL_SECRET_256_LEN) ||
-        !raw || !out_len) {
+        !sender_name || !raw || !out_len) {
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t text_ret = validate_user_text(text);
@@ -2289,9 +2294,21 @@ static esp_err_t build_channel_text_packet(
     uint8_t plain[D1L_MESHCORE_MAX_TEXT_BYTES] = {0};
     write_le32(plain, tx_timestamp);
     plain[4] = 0;
+    const size_t sender_name_len =
+        strnlen(sender_name, D1L_NODE_NAME_LEN);
     const size_t message_len = strlen(text);
-    memcpy(&plain[5], text, message_len);
-    const size_t plain_len = 5U + message_len;
+    if (sender_name_len == 0U || sender_name_len >= D1L_NODE_NAME_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t message_offset = 5U + sender_name_len + 2U;
+    if (message_offset + message_len > sizeof(plain)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    memcpy(&plain[5], sender_name, sender_name_len);
+    plain[5U + sender_name_len] = ':';
+    plain[6U + sender_name_len] = ' ';
+    memcpy(&plain[message_offset], text, message_len);
+    const size_t plain_len = message_offset + message_len;
 
     size_t i = 0;
     if (!d1l_meshcore_wire_write_prefix(
@@ -6910,8 +6927,9 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         return ret;
     }
     ret = build_channel_text_packet(
-        &channel_key, text, settings->path_hash_bytes, tx_timestamp, raw,
-        sizeof(raw), &raw_len);
+        &channel_key, settings->node_name, text,
+        settings->path_hash_bytes, tx_timestamp, raw, sizeof(raw),
+        &raw_len);
     secure_zero_channel_key(&channel_key);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;

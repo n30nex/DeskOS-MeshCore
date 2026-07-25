@@ -136,6 +136,9 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     build = c_function(service, "static esp_err_t build_channel_text_packet(")
     assert "raw[i++] = channel->channel_hash" in build
     assert "channel->secret" in build
+    assert "sender_name" in build
+    assert "message_offset = 5U + sender_name_len + 2U" in build
+    assert "settings->node_name, text" in send
 
     active = c_function(
         service, "esp_err_t d1l_meshcore_service_send_active_channel("
