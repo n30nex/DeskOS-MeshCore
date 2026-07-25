@@ -74,7 +74,7 @@
     "tests/native/meshcore_route_selection_test.c": "6c318ccab70eed048687ecf6fb728cc2d3a01fbacb358ce0eac7b9dc55c7f988",
     "tests/native/settings_envelope_test.c": "158353ab42c51142e05bb3b0f180aafdc12167ece20372a4a50cc2ae6924cd7a",
     "tests/test_meshcore_conformance_contract.py": "9c03984db5fa869480691b9dcaeb28de7637f4992160aa4dcafe3d6dd77ac2c7",
-    "tests/test_meshcore_public_rf_contract.py": "0bf9c2ec5402a5151de5c1414239779ed2323e327af7b364d8bcd3e89c650726",
+    "tests/test_meshcore_public_rf_contract.py": "3b8d19be9d5edf2f71cc23fb7a8a8e53e16184a15a54414e0fa05d8095dd94a0",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
