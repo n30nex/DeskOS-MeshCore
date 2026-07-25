@@ -1361,6 +1361,57 @@ esp_err_t d1l_route_store_clear(void)
     return ret;
 }
 
+esp_err_t d1l_route_store_clear_target(const char *target)
+{
+    if (!target || target[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const esp_err_t init_ret = ensure_route_store_initialized();
+    if (init_ret != ESP_OK) {
+        return init_ret;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    bool changed = false;
+    size_t write_index = 0U;
+    for (size_t read_index = 0U; read_index < s_count; ++read_index) {
+        if (strncmp(s_entries[read_index].target, target,
+                    sizeof(s_entries[read_index].target)) == 0) {
+            changed = true;
+            continue;
+        }
+        if (write_index != read_index) {
+            s_entries[write_index] = s_entries[read_index];
+        }
+        write_index++;
+    }
+    if (write_index < s_count) {
+        memset(&s_entries[write_index], 0,
+               (s_count - write_index) * sizeof(s_entries[0]));
+        s_count = write_index;
+    }
+    if (s_volatile_valid &&
+        strncmp(s_volatile_entry.target, target,
+                sizeof(s_volatile_entry.target)) == 0) {
+        memset(&s_volatile_entry, 0, sizeof(s_volatile_entry));
+        s_volatile_valid = false;
+        changed = true;
+    }
+    if (changed) {
+        const uint32_t now_ms =
+            (uint32_t)(esp_timer_get_time() / 1000ULL);
+        s_revision++;
+        s_mutated_since_init = true;
+        s_mutations_since_init++;
+        s_sd_primary_dirty = true;
+        s_nvs_fallback_dirty = true;
+        note_persistence_dirty_locked(true, false, now_ms);
+        s_persistence_coalesced_count++;
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return ESP_OK;
+}
+
 esp_err_t d1l_route_store_flush(void)
 {
     esp_err_t ret = ensure_route_store_initialized();

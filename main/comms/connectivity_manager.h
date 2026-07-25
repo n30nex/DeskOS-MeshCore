@@ -49,6 +49,8 @@ typedef struct {
     bool ble_protocol_ready;
     bool wifi_profile_saved;
     bool wifi_password_saved;
+    uint8_t wifi_profile_count;
+    uint8_t wifi_active_profile;
     const char *wifi_state;
     const char *ble_state;
     char wifi_ssid[D1L_WIFI_SSID_LEN];
@@ -83,4 +85,9 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled);
 esp_err_t d1l_connectivity_ble_begin_pairing(void);
 esp_err_t d1l_connectivity_ble_forget_peer(void);
 esp_err_t d1l_connectivity_save_wifi_profile(const char *ssid, const char *password);
+size_t d1l_connectivity_wifi_profiles(
+    d1l_wifi_profile_info_t *out_profiles, size_t max_profiles,
+    uint8_t *out_active_profile);
+esp_err_t d1l_connectivity_select_wifi_profile(uint8_t profile_index);
+esp_err_t d1l_connectivity_delete_wifi_profile(uint8_t profile_index);
 esp_err_t d1l_connectivity_clear_wifi_profile(void);

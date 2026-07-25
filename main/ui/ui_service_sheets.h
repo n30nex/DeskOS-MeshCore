@@ -12,8 +12,8 @@
 
 typedef struct _lv_obj_t lv_obj_t;
 
-#define D1L_UI_SERVICE_SHEETS_BINDING_COUNT 18U
-#define D1L_UI_SERVICE_SHEETS_CONTROLLER_MAX_BYTES 512U
+#define D1L_UI_SERVICE_SHEETS_BINDING_COUNT 29U
+#define D1L_UI_SERVICE_SHEETS_CONTROLLER_MAX_BYTES 640U
 #define D1L_UI_TERMINAL_PREVIEW_COUNT 6U
 
 typedef enum {
@@ -31,9 +31,17 @@ typedef enum {
     D1L_UI_SERVICE_ACTION_NOTIFICATIONS_MODE,
     D1L_UI_SERVICE_ACTION_OPEN_MESSAGES,
     D1L_UI_SERVICE_ACTION_CLOSE_ADMIN,
+    D1L_UI_SERVICE_ACTION_ADMIN_LOGIN,
     D1L_UI_SERVICE_ACTION_ADMIN_REFRESH,
+    D1L_UI_SERVICE_ACTION_ADMIN_TELEMETRY,
+    D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS,
+    D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT,
+    D1L_UI_SERVICE_ACTION_ADMIN_ACCESS_LIST,
     D1L_UI_SERVICE_ACTION_ADMIN_CLEAR_STATS,
     D1L_UI_SERVICE_ACTION_ADMIN_ADVERTISE_ZERO_HOP,
+    D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND,
+    D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND,
+    D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE,
     D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT,
 } d1l_ui_service_action_t;
 
@@ -69,6 +77,10 @@ typedef struct d1l_ui_service_sheets_controller {
     lv_obj_t *update_sheet;
     lv_obj_t *notifications_sheet;
     lv_obj_t *admin_sheet;
+    lv_obj_t *admin_password_textarea;
+    lv_obj_t *admin_room_textarea;
+    lv_obj_t *admin_cli_textarea;
+    lv_obj_t *admin_keyboard;
     d1l_ui_service_action_handler_t action_handler;
     void *action_context;
     d1l_ui_service_binding_t
@@ -106,8 +118,25 @@ bool d1l_ui_service_sheets_render_admin(
     const d1l_meshcore_admin_snapshot_t *status,
     const char *selected_fingerprint,
     d1l_meshcore_admin_mutation_t armed_mutation,
+    bool cli_command_armed,
+    bool cli_secure_input,
+    const char *room_transcript,
     d1l_ui_service_action_handler_t action_handler,
     void *action_context);
+bool d1l_ui_service_sheets_take_admin_password(
+    d1l_ui_service_sheets_controller_t *controller,
+    char *out_password,
+    size_t out_password_size);
+bool d1l_ui_service_sheets_take_admin_cli(
+    d1l_ui_service_sheets_controller_t *controller,
+    char *out_command,
+    size_t out_command_size);
+bool d1l_ui_service_sheets_take_admin_room_post(
+    d1l_ui_service_sheets_controller_t *controller,
+    char *out_text,
+    size_t out_text_size);
+bool d1l_ui_service_sheets_admin_edit_has_text(
+    const d1l_ui_service_sheets_controller_t *controller);
 void d1l_ui_service_sheets_hide_all(
     d1l_ui_service_sheets_controller_t *controller);
 lv_obj_t *d1l_ui_service_sheets_terminal(

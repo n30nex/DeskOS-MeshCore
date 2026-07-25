@@ -254,6 +254,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_EXACT(
         "wifi status", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
+    D1L_RELEASE_RULE_EXACT(
+        "wifi profiles", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
     D1L_RELEASE_RULE_TOKEN(
         "wifi", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
@@ -433,6 +436,12 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "routes probe", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_TOKEN(
+        "routes telemetry", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_TOKEN(
+        "routes reset", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_USER_TRACE),
     D1L_RELEASE_RULE_EXACT(
         "routes clear", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_USER_TRACE),
@@ -457,6 +466,15 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         D1L_RELEASE_FEATURE_ADMIN),
     D1L_RELEASE_RULE_EXACT(
         "admin status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_EXACT(
+        "admin telemetry", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "admin neighbours", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_EXACT(
+        "admin access-list", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_ADMIN),
     D1L_RELEASE_RULE_TOKEN(
         "admin", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_ADMIN),
@@ -6885,8 +6903,108 @@ static void cmd_routes_probe(const char *line)
     }
 
     ok_begin("routes probe");
-    printf(",\"fingerprint\":\"%s\",\"queued\":true,\"token\":\"%s\",\"dm_rf_tx\":true,\"public_rf_tx\":false,\"path_discovery_probe_supported\":true,\"real_trace_packet\":false,\"note\":\"DM/PATH discovery probe queued; ACK/PATH evidence will appear in messages, packets, and the retained route view when received\"}\n",
+    printf(",\"fingerprint\":\"%s\",\"queued\":true,\"token\":\"%s\",\"dm_rf_tx\":true,\"public_rf_tx\":false,\"path_discovery_probe_supported\":true,\"telemetry_requested\":true,\"real_trace_packet\":false,\"note\":\"Encrypted PATH discovery and base-telemetry request queued; correlated results appear in routes telemetry and the contact route screen\"}\n",
            fingerprint, token);
+}
+
+static void cmd_routes_telemetry(const char *line)
+{
+    const char *arg = line + strlen("routes telemetry ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(
+            arg, fingerprint, sizeof(fingerprint))) {
+        err_result(
+            "routes telemetry", "INVALID_FINGERPRINT",
+            "usage: routes telemetry <16-hex-fingerprint>");
+        return;
+    }
+    const char *tail = arg + strlen(fingerprint);
+    while (*tail == ' ') {
+        tail++;
+    }
+    if (*tail != '\0') {
+        err_result(
+            "routes telemetry", "INVALID_FINGERPRINT",
+            "usage: routes telemetry <16-hex-fingerprint>");
+        return;
+    }
+
+    static d1l_meshcore_contact_telemetry_snapshot_t snapshot
+        EXT_RAM_BSS_ATTR;
+    d1l_app_model_contact_telemetry_snapshot(
+        fingerprint, &snapshot);
+    ok_begin("routes telemetry");
+    printf(
+        ",\"fingerprint\":\"%s\",\"state\":\"%s\","
+        "\"pending\":%s,\"pending_tag\":%lu,"
+        "\"pending_remaining_ms\":%lu,\"history_scope\":\"boot_local\","
+        "\"history_count\":%u,\"history_capacity\":%u,\"entries\":[",
+        fingerprint,
+        d1l_meshcore_contact_telemetry_state_name(snapshot.state),
+        bool_json(snapshot.pending),
+        (unsigned long)snapshot.pending_tag,
+        (unsigned long)snapshot.pending_remaining_ms,
+        (unsigned)snapshot.history_count,
+        (unsigned)D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY);
+    for (size_t i = 0U; i < snapshot.history_count; ++i) {
+        const d1l_meshcore_contact_telemetry_entry_t *entry =
+            &snapshot.history[i];
+        printf(
+            "%s{\"sequence\":%lu,\"tag\":%lu,\"age_ms\":%lu,"
+            "\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hops\":%u,"
+            "\"field_count\":%u,\"truncated\":%s,\"text\":",
+            i ? "," : "", (unsigned long)entry->sequence,
+            (unsigned long)entry->tag, (unsigned long)entry->age_ms,
+            entry->last_rssi_dbm, entry->last_snr_tenths,
+            entry->path_hops, (unsigned)entry->result.count,
+            bool_json(entry->result.truncated));
+        print_json_string(entry->result.text);
+        printf("}");
+    }
+    printf("],\"public_rf_tx\":false}\n");
+}
+
+static void cmd_routes_reset(const char *line)
+{
+    const char *arg = line + strlen("routes reset ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(
+            arg, fingerprint, sizeof(fingerprint))) {
+        err_result(
+            "routes reset", "INVALID_FINGERPRINT",
+            "usage: routes reset <16-hex-fingerprint>");
+        return;
+    }
+    const char *tail = arg + strlen(fingerprint);
+    while (*tail == ' ') {
+        tail++;
+    }
+    if (*tail != '\0') {
+        err_result(
+            "routes reset", "INVALID_FINGERPRINT",
+            "usage: routes reset <16-hex-fingerprint>");
+        return;
+    }
+    const esp_err_t ret =
+        d1l_app_model_reset_contact_route(fingerprint);
+    if (ret != ESP_OK) {
+        err_result(
+            "routes reset", esp_err_to_name(ret),
+            "could not forget the selected contact route");
+        return;
+    }
+    ok_begin("routes reset");
+    printf(
+        ",\"fingerprint\":\"%s\",\"persisted\":true,"
+        "\"contact_only\":true,\"identity_preserved\":true,"
+        "\"messages_preserved\":true}\n",
+        fingerprint);
 }
 
 static void cmd_routes_clear(void)
@@ -6997,6 +7115,10 @@ static const char *admin_state_name(d1l_meshcore_admin_state_t state)
         return "status_pending";
     case D1L_MESHCORE_ADMIN_MUTATION_PENDING:
         return "mutation_pending";
+    case D1L_MESHCORE_ADMIN_CLI_PENDING:
+        return "cli_pending";
+    case D1L_MESHCORE_ADMIN_QUERY_PENDING:
+        return "query_pending";
     case D1L_MESHCORE_ADMIN_TIMED_OUT:
         return "timed_out";
     default:
@@ -7026,12 +7148,19 @@ static void cmd_admin_status(const char *command)
            "\"generation\":%lu,\"permissions\":%u,"
            "\"firmware_level\":%u,\"server_timestamp\":%lu,"
            "\"pending_tag\":%lu,\"pending_mutation\":\"%s\","
+           "\"pending_query\":\"%s\",\"pending_query_offset\":%u,"
            "\"last_mutation\":\"%s\",\"last_mutation_success\":%s,"
+           "\"cli_reply_valid\":%s,\"cli_reply_redacted\":%s,"
+           "\"cli_reply_success\":%s,"
            "\"status_valid\":%s,"
            "\"session_secret_exposed\":false,\"credential_exposed\":false,"
            "\"login_tx_queued\":%lu,\"status_tx_queued\":%lu,"
+           "\"query_tx_queued\":%lu,\"query_accepted\":%lu,"
+           "\"query_rejected\":%lu,"
            "\"mutation_tx_queued\":%lu,\"mutation_accepted\":%lu,"
            "\"mutation_rejected\":%lu,"
+           "\"cli_tx_queued\":%lu,\"cli_accepted\":%lu,"
+           "\"cli_rejected\":%lu,"
            "\"response_accepted\":%lu,\"response_unmatched\":%lu,"
            "\"response_malformed\":%lu,\"response_expired\":%lu,"
            "\"response_replayed\":%lu,\"last_error\":\"%s\"",
@@ -7041,20 +7170,45 @@ static void cmd_admin_status(const char *command)
            (unsigned long)status.server_timestamp,
            (unsigned long)status.pending_tag,
            d1l_meshcore_admin_mutation_name(status.pending_mutation),
+           d1l_meshcore_admin_query_name(status.pending_query),
+           (unsigned)status.pending_query_offset,
            d1l_meshcore_admin_mutation_name(status.last_mutation),
            bool_json(status.last_mutation_success),
+           bool_json(status.cli_reply_valid),
+           bool_json(status.cli_reply_redacted),
+           bool_json(status.cli_reply_success),
            bool_json(status.status_valid),
            (unsigned long)status.login_tx_queued,
            (unsigned long)status.status_tx_queued,
+           (unsigned long)status.query_tx_queued,
+           (unsigned long)status.query_accepted,
+           (unsigned long)status.query_rejected,
            (unsigned long)status.mutation_tx_queued,
            (unsigned long)status.mutation_accepted,
            (unsigned long)status.mutation_rejected,
+           (unsigned long)status.cli_tx_queued,
+           (unsigned long)status.cli_accepted,
+           (unsigned long)status.cli_rejected,
            (unsigned long)status.response_accepted,
            (unsigned long)status.response_unmatched,
            (unsigned long)status.response_malformed,
            (unsigned long)status.response_expired,
            (unsigned long)status.response_replayed,
            esp_err_to_name(status.last_error));
+    printf(",\"cli_reply\":");
+    print_json_string(status.cli_reply_valid ? status.cli_reply : "");
+    printf(",\"query_result\":{\"valid\":%s,\"kind\":\"%s\","
+           "\"truncated\":%s,\"offset\":%u,\"total\":%u,\"count\":%u,"
+           "\"text\":",
+           bool_json(status.query_result.valid),
+           d1l_meshcore_admin_query_name(status.query_result.kind),
+           bool_json(status.query_result.truncated),
+           (unsigned)status.query_result.offset,
+           (unsigned)status.query_result.total,
+           (unsigned)status.query_result.count);
+    print_json_string(
+        status.query_result.valid ? status.query_result.text : "");
+    printf("}");
     if (status.status_valid) {
         printf(",\"server_status\":{\"battery_millivolts\":%u,"
                "\"tx_queue_length\":%u,\"noise_floor_dbm\":%d,"
@@ -7079,7 +7233,8 @@ static void cmd_admin_status(const char *command)
            "\"allowlisted_mutations\":[\"clear_stats\","
            "\"advertise_zero_hop\"],"
            "\"mutating_remote_commands_require_local_confirmation\":true,"
-           "\"raw_remote_cli\":false}\n");
+           "\"authenticated_remote_cli\":true,"
+           "\"sensitive_cli_input_requires_masking\":true}\n");
 }
 
 static void cmd_admin_login(const char *line)
@@ -7094,7 +7249,8 @@ static void cmd_admin_login(const char *line)
         strlen(fingerprint) != D1L_NODE_FINGERPRINT_LEN - 1U) {
         wipe_console_bytes(password, sizeof(password));
         err_result("admin login", "INVALID_ARGUMENT",
-                   "usage: admin login <16-hex-fingerprint> <password>");
+                   "usage: admin login <16-hex-fingerprint> "
+                   "<password|<empty>>");
         return;
     }
     for (size_t i = 0U; fingerprint[i] != '\0'; ++i) {
@@ -7106,6 +7262,9 @@ static void cmd_admin_login(const char *line)
         }
         fingerprint[i] =
             (char)tolower((unsigned char)fingerprint[i]);
+    }
+    if (strcmp(password, "<empty>") == 0) {
+        wipe_console_bytes(password, sizeof(password));
     }
     const esp_err_t ret =
         d1l_meshcore_service_admin_login(fingerprint, password);
@@ -7128,6 +7287,45 @@ static void cmd_admin_refresh(void)
         return;
     }
     cmd_admin_status("admin refresh");
+}
+
+static void cmd_admin_query(const char *line)
+{
+    d1l_meshcore_admin_query_t query = D1L_MESHCORE_ADMIN_QUERY_NONE;
+    uint16_t offset = 0U;
+    const char *command = line;
+    if (line && strcmp(line, "admin telemetry") == 0) {
+        query = D1L_MESHCORE_ADMIN_QUERY_TELEMETRY;
+    } else if (line && strcmp(line, "admin access-list") == 0) {
+        query = D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST;
+    } else if (line && strcmp(line, "admin neighbours") == 0) {
+        query = D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS;
+    } else if (line) {
+        unsigned parsed_offset = 0U;
+        int consumed = 0;
+        if (sscanf(line, "admin neighbours %u%n",
+                   &parsed_offset, &consumed) == 1 &&
+            line[consumed] == '\0' && parsed_offset <= UINT16_MAX) {
+            query = D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS;
+            offset = (uint16_t)parsed_offset;
+        }
+    }
+    if (query == D1L_MESHCORE_ADMIN_QUERY_NONE) {
+        err_result(
+            "admin query", "INVALID_ARGUMENT",
+            "usage: admin <telemetry|access-list|neighbours [offset]>");
+        return;
+    }
+    const esp_err_t ret =
+        d1l_meshcore_service_admin_request_query(query, offset);
+    if (ret != ESP_OK) {
+        err_result(
+            command, esp_err_to_name(ret),
+            "requires an authenticated compatible server session, "
+            "current verified route, permission, and no pending request");
+        return;
+    }
+    cmd_admin_status(command);
 }
 
 static void cmd_admin_logout(void)
@@ -7560,6 +7758,8 @@ static void print_wifi_status_result(const char *command)
            "\"configured_setting_enabled\":%s,\"build_enabled\":%s,"
            "\"stack_active\":%s,\"connected\":%s,\"connecting\":%s,"
            "\"scan_supported\":%s,\"profile_saved\":%s,"
+           "\"profile_count\":%u,\"active_profile\":%u,"
+           "\"profile_capacity\":%u,"
            "\"password_saved\":%s,\"runtime_policy_violation\":%s,\"ssid\":",
             bool_json(available),
             bool_json(available && status.wifi_enabled_setting),
@@ -7569,6 +7769,10 @@ static void print_wifi_status_result(const char *command)
             bool_json(status.wifi_connecting),
             bool_json(available && status.wifi_scan_supported),
             bool_json(available && status.wifi_profile_saved),
+            available ? (unsigned)status.wifi_profile_count : 0U,
+            available && status.wifi_profile_count > 0U ?
+                (unsigned)status.wifi_active_profile + 1U : 0U,
+            (unsigned)D1L_WIFI_PROFILE_CAPACITY,
             bool_json(available && status.wifi_password_saved),
             bool_json(runtime_policy_violation));
     print_json_string(
@@ -7607,6 +7811,34 @@ static void print_wifi_status_result(const char *command)
 static void cmd_wifi_status(void)
 {
     print_wifi_status_result("wifi status");
+}
+
+static void cmd_wifi_profiles(void)
+{
+    d1l_wifi_profile_info_t profiles[D1L_WIFI_PROFILE_CAPACITY] = {0};
+    uint8_t active_profile = 0U;
+    const size_t count = d1l_connectivity_wifi_profiles(
+        profiles, D1L_WIFI_PROFILE_CAPACITY, &active_profile);
+    ok_begin("wifi profiles");
+    printf(",\"count\":%u,\"active_profile\":%u,\"capacity\":%u,"
+           "\"passwords_printed\":false,\"profiles\":[",
+           (unsigned)count,
+           count > 0U ? (unsigned)active_profile + 1U : 0U,
+           (unsigned)D1L_WIFI_PROFILE_CAPACITY);
+    for (size_t i = 0U; i < count; ++i) {
+        if (i > 0U) {
+            printf(",");
+        }
+        printf("{\"index\":%u,\"active\":%s,\"saved\":%s,"
+               "\"password_saved\":%s,\"ssid\":",
+               (unsigned)i + 1U,
+               bool_json(i == active_profile),
+               bool_json(profiles[i].saved),
+               bool_json(profiles[i].password_saved));
+        print_json_string(profiles[i].ssid);
+        printf("}");
+    }
+    printf("]}\n");
 }
 
 static void cmd_wifi_off(void)
@@ -7652,7 +7884,7 @@ static void cmd_wifi_save(const char *line)
     char ssid[D1L_WIFI_SSID_LEN] = {0};
     char password[D1L_WIFI_PASSWORD_LEN] = {0};
     const char *space = strchr(args, ' ');
-    const char *password_to_save = password;
+    const char *password_to_save = NULL;
     size_t ssid_len = space ? (size_t)(space - args) : strlen(args);
     if (ssid_len == 0 || ssid_len >= sizeof(ssid)) {
         err_result("wifi save", "INVALID_SSID", "SSID must be 1-32 printable characters without spaces");
@@ -7670,6 +7902,7 @@ static void cmd_wifi_save(const char *line)
             return;
         }
         snprintf(password, sizeof(password), "%s", password_arg);
+        password_to_save = password;
     }
     esp_err_t ret = d1l_connectivity_save_wifi_profile(ssid, password_to_save);
     wipe_console_bytes(password, sizeof(password));
@@ -7685,6 +7918,89 @@ static void cmd_wifi_save(const char *line)
            bool_json(status.wifi_profile_saved), bool_json(status.wifi_password_saved));
     print_json_string(status.wifi_ssid);
     printf(",\"public_rf_tx\":false,\"note\":\"Wi-Fi profile saved for the measured runtime path; password is not printed\"}\n");
+}
+
+static bool wifi_parse_one_based_profile(
+    const char *line, const char *prefix, uint8_t *out_profile_index)
+{
+    if (!line || !prefix || !out_profile_index) {
+        return false;
+    }
+    const char *arg = line + strlen(prefix);
+    if (*arg == '\0') {
+        return false;
+    }
+    char *end = NULL;
+    const unsigned long value = strtoul(arg, &end, 10);
+    if (end == arg || *end != '\0' ||
+        value == 0UL || value > D1L_WIFI_PROFILE_CAPACITY) {
+        return false;
+    }
+    *out_profile_index = (uint8_t)(value - 1UL);
+    return true;
+}
+
+static void cmd_wifi_select(const char *line)
+{
+    uint8_t profile_index = 0U;
+    if (!wifi_parse_one_based_profile(
+            line, "wifi select ", &profile_index)) {
+        err_result(
+            "wifi select", "INVALID_INDEX",
+            "usage: wifi select <1-based-index>");
+        return;
+    }
+    const esp_err_t ret =
+        d1l_connectivity_select_wifi_profile(profile_index);
+    if (ret != ESP_OK) {
+        err_result(
+            "wifi select", esp_err_to_name(ret),
+            "profile does not exist or could not be persisted/applied");
+        return;
+    }
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("wifi select");
+    printf(",\"persisted\":true,\"active_profile\":%u,"
+           "\"profile_count\":%u,\"ssid\":",
+           (unsigned)status.wifi_active_profile + 1U,
+           (unsigned)status.wifi_profile_count);
+    print_json_string(status.wifi_ssid);
+    printf(",\"password_printed\":false,\"public_rf_tx\":false}\n");
+}
+
+static void cmd_wifi_delete(const char *line)
+{
+    uint8_t profile_index = 0U;
+    if (!wifi_parse_one_based_profile(
+            line, "wifi delete ", &profile_index)) {
+        err_result(
+            "wifi delete", "INVALID_INDEX",
+            "usage: wifi delete <1-based-index>");
+        return;
+    }
+    const esp_err_t ret =
+        d1l_connectivity_delete_wifi_profile(profile_index);
+    if (ret != ESP_OK) {
+        err_result(
+            "wifi delete", esp_err_to_name(ret),
+            "profile does not exist or could not be deleted/applied");
+        return;
+    }
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("wifi delete");
+    printf(",\"persisted\":true,\"deleted_profile\":%u,"
+           "\"profile_count\":%u,\"active_profile\":%u,\"ssid\":",
+           (unsigned)profile_index + 1U,
+           (unsigned)status.wifi_profile_count,
+           status.wifi_profile_count > 0U ?
+               (unsigned)status.wifi_active_profile + 1U : 0U);
+    print_json_string(
+        status.wifi_profile_saved ? status.wifi_ssid : "");
+    printf(",\"setting_enabled\":%s,\"password_printed\":false,"
+           "\"public_rf_tx\":false}\n",
+           bool_json(status.wifi_enabled_setting));
 }
 
 static void cmd_wifi_clear(void)
@@ -7935,16 +8251,22 @@ static void cmd_help(void)
            "\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\","
            "\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\","
            "\"routes trace contact <fingerprint>\",\"routes trace status\","
-           "\"routes probe <fingerprint>\",\"routes clear\",\"packets\","
+           "\"routes probe <fingerprint>\","
+           "\"routes telemetry <fingerprint>\","
+           "\"routes reset <fingerprint>\",\"routes clear\",\"packets\","
            "\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\","
            "\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\","
            "\"roomservers\",\"repeaters\",\"admin status\","
-           "\"admin login <fingerprint> <password>\",\"admin refresh\","
+           "\"admin login <fingerprint> <password|<empty>>\",\"admin refresh\","
+           "\"admin telemetry\",\"admin neighbours [offset]\","
+           "\"admin access-list\","
            "\"admin clear-stats CONFIRM-REMOTE-MUTATION\","
            "\"admin advertise-zero-hop CONFIRM-REMOTE-MUTATION\","
            "\"admin logout\",\"health\",\"crashlog\",\"crashlog clear\","
-           "\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\","
-           "\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\","
+           "\"wifi status\",\"wifi profiles\",\"wifi scan\","
+           "\"wifi save <ssid> [password]\",\"wifi select <1-based-index>\","
+           "\"wifi delete <1-based-index>\",\"wifi connect\",\"wifi clear\","
+           "\"wifi on\",\"wifi off\",\"ble status\","
            "\"ble on\",\"ble off\",\"observer status\",\"observer configure "
            "<mqtts-uri> <topic>\",\"observer configure-location "
            "<mqtts-uri> <topic>\",\"observer configure-auth "
@@ -8443,6 +8765,10 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_routes_trace(line);
     } else if (strncmp(line, "routes probe ", 13) == 0) {
         cmd_routes_probe(line);
+    } else if (strncmp(line, "routes telemetry ", 17) == 0) {
+        cmd_routes_telemetry(line);
+    } else if (strncmp(line, "routes reset ", 13) == 0) {
+        cmd_routes_reset(line);
     } else if (strcmp(line, "routes clear") == 0) {
         cmd_routes_clear();
     } else if (strcmp(line, "signal") == 0) {
@@ -8458,6 +8784,12 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_admin_login(line);
     } else if (strcmp(line, "admin refresh") == 0) {
         cmd_admin_refresh();
+    } else if (strcmp(line, "admin telemetry") == 0 ||
+               strcmp(line, "admin access-list") == 0 ||
+               strcmp(line, "admin neighbours") == 0 ||
+               strncmp(line, "admin neighbours ",
+                       strlen("admin neighbours ")) == 0) {
+        cmd_admin_query(line);
     } else if (strncmp(line, "admin clear-stats",
                        strlen("admin clear-stats")) == 0 ||
                strncmp(line, "admin advertise-zero-hop",
@@ -8482,6 +8814,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_terminal_level(line);
     } else if (strcmp(line, "wifi status") == 0) {
         cmd_wifi_status();
+    } else if (strcmp(line, "wifi profiles") == 0) {
+        cmd_wifi_profiles();
     } else if (strcmp(line, "wifi off") == 0) {
         cmd_wifi_off();
     } else if (strcmp(line, "wifi on") == 0) {
@@ -8492,6 +8826,12 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_wifi_connect();
     } else if (strncmp(line, "wifi save ", strlen("wifi save ")) == 0) {
         cmd_wifi_save(line);
+    } else if (strncmp(line, "wifi select ",
+                       strlen("wifi select ")) == 0) {
+        cmd_wifi_select(line);
+    } else if (strncmp(line, "wifi delete ",
+                       strlen("wifi delete ")) == 0) {
+        cmd_wifi_delete(line);
     } else if (strcmp(line, "wifi clear") == 0) {
         cmd_wifi_clear();
     } else if (strcmp(line, "ble status") == 0) {

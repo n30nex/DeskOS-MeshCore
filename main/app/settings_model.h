@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -9,10 +10,11 @@
 #include "platform/time_display.h"
 #include "storage/map_tile_store.h"
 
-#define D1L_SETTINGS_SCHEMA_VERSION 9U
+#define D1L_SETTINGS_SCHEMA_VERSION 10U
 #define D1L_NODE_NAME_LEN 32U
 #define D1L_WIFI_SSID_LEN 33U
 #define D1L_WIFI_PASSWORD_LEN 65U
+#define D1L_WIFI_PROFILE_CAPACITY 3U
 #define D1L_IDENTITY_PUBLIC_KEY_LEN 32U
 #define D1L_IDENTITY_PRIVATE_KEY_LEN 64U
 #define D1L_MAP_LOCATION_LAT_E7_MIN (-900000000L)
@@ -34,6 +36,18 @@ typedef enum {
 typedef enum {
     D1L_TCXO_NONE = 0,
 } d1l_tcxo_mode_t;
+
+typedef struct {
+    bool saved;
+    char ssid[D1L_WIFI_SSID_LEN];
+    char password[D1L_WIFI_PASSWORD_LEN];
+} d1l_wifi_profile_t;
+
+typedef struct {
+    bool saved;
+    bool password_saved;
+    char ssid[D1L_WIFI_SSID_LEN];
+} d1l_wifi_profile_info_t;
 
 typedef enum {
     D1L_SETTINGS_PERSISTENCE_UNINITIALIZED = 0,
@@ -99,6 +113,9 @@ typedef struct {
     uint8_t path_hash_bytes;
     char wifi_ssid[D1L_WIFI_SSID_LEN];
     char wifi_password[D1L_WIFI_PASSWORD_LEN];
+    uint8_t wifi_profile_count;
+    uint8_t wifi_active_profile;
+    d1l_wifi_profile_t wifi_profiles[D1L_WIFI_PROFILE_CAPACITY];
     uint32_t frequency_hz;
     uint16_t bandwidth_tenths_khz;
     uint8_t spreading_factor;
@@ -121,6 +138,8 @@ typedef struct {
 typedef struct {
     bool wifi_enabled;
     bool wifi_profile_saved;
+    uint8_t wifi_profile_count;
+    uint8_t wifi_active_profile;
     char wifi_ssid[D1L_WIFI_SSID_LEN];
     char wifi_password[D1L_WIFI_PASSWORD_LEN];
 } d1l_settings_wifi_secret_t;
@@ -141,6 +160,9 @@ esp_err_t d1l_settings_wifi_secret_snapshot(
     d1l_settings_wifi_secret_t *secret);
 void d1l_settings_wifi_secret_wipe(d1l_settings_wifi_secret_t *secret);
 bool d1l_settings_wifi_password_saved(void);
+size_t d1l_settings_wifi_profiles_snapshot(
+    d1l_wifi_profile_info_t *out_profiles, size_t max_profiles,
+    uint8_t *out_active_profile);
 d1l_identity_state_t d1l_settings_persisted_identity_state(void);
 esp_err_t d1l_settings_identity_secret_snapshot(
     d1l_settings_identity_secret_t *secret);
@@ -153,6 +175,8 @@ esp_err_t d1l_settings_save_identity_if_absent(
     const uint8_t private_key[D1L_IDENTITY_PRIVATE_KEY_LEN]);
 esp_err_t d1l_settings_reset(void);
 esp_err_t d1l_settings_save_wifi_profile(const char *ssid, const char *password);
+esp_err_t d1l_settings_select_wifi_profile(uint8_t profile_index);
+esp_err_t d1l_settings_delete_wifi_profile(uint8_t profile_index);
 esp_err_t d1l_settings_clear_wifi_profile(void);
 esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enabled,
                                            bool ble_companion_enabled, bool observer_enabled);

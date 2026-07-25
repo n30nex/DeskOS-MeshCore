@@ -13,6 +13,8 @@ typedef struct {
     bool connected;
     bool profile_saved;
     bool password_saved;
+    uint8_t profile_count;
+    uint8_t active_profile;
     bool scan_loaded;
     const char *state;
     const char *ip;

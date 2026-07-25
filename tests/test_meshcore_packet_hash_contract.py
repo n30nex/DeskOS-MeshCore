@@ -86,7 +86,7 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
     dm = receiver(
         service, "static bool parse_rx_dm_packet", "typedef enum {\n    D1L_RX_ACK_UNMATCHED"
     )
-    plain_marker = "if (txt_type != D1L_MESHCORE_TXT_TYPE_PLAIN)"
+    plain_marker = "const bool room_post ="
     dm_plain = dm.split(plain_marker, 1)[1]
     assert dm_plain.index("d1l_meshcore_text_plaintext_view(") < dm_plain.index(
         "d1l_dm_store_find_rx_identity("
@@ -94,6 +94,11 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
         "d1l_meshcore_packet_hash_cache_contains("
     )
     assert dm.index("meshcore_decrypt_after_mac(") < dm.index(plain_marker)
+    assert "D1L_MESHCORE_TXT_TYPE_SIGNED_PLAIN" in dm_plain
+    assert "d1l_meshcore_admin_runtime_note_room_activity(" in dm_plain
+    assert "room_post ? settings->identity_public_key : sender_pub" in dm_plain
+    assert "room_post ? 4U : D1L_MESHCORE_DM_ACK_WIRE_BYTES" in dm_plain
+    assert 'room_post ? "room_post" : "dm_text"' in dm_plain
     hit = dm_plain.split("d1l_meshcore_packet_hash_cache_contains(", 1)[1].split(
         "if (duplicate)", 1
     )[0]

@@ -23,13 +23,24 @@ extern "C" {
 #define D1L_MESHCORE_ADMIN_MAX_PADDING_BYTES 15U
 #define D1L_MESHCORE_ADMIN_REPLAY_PEER_CAPACITY 8U
 #define D1L_MESHCORE_ADMIN_REPLAY_RESPONSES_PER_PEER 4U
+#define D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK 0x03U
+#define D1L_MESHCORE_ADMIN_PERMISSION_GUEST 0x00U
+#define D1L_MESHCORE_ADMIN_PERMISSION_READ_ONLY 0x01U
+#define D1L_MESHCORE_ADMIN_PERMISSION_WRITE 0x02U
 #define D1L_MESHCORE_ADMIN_PERMISSION_ADMIN 0x03U
 #define D1L_MESHCORE_ADMIN_REQUEST_GET_STATUS 0x01U
+#define D1L_MESHCORE_ADMIN_REQUEST_GET_TELEMETRY 0x03U
+#define D1L_MESHCORE_ADMIN_REQUEST_GET_ACCESS_LIST 0x05U
+#define D1L_MESHCORE_ADMIN_REQUEST_GET_NEIGHBOURS 0x06U
+#define D1L_MESHCORE_ADMIN_MAX_QUERY_REQUEST_BYTES 15U
+#define D1L_MESHCORE_ADMIN_NEIGHBOUR_PAGE_COUNT 10U
+#define D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES 4U
+#define D1L_MESHCORE_ADMIN_MAX_QUERY_TEXT_BYTES 768U
 #define D1L_MESHCORE_ADMIN_MUTATION_REPLY_MAX_BYTES 64U
-/* A room-admin session is management-only. UINT32_MAX prevents the pinned
- * room server from scheduling stored or future room-post pushes, so the
- * admin client never admits history or owes a room-post ACK. */
-#define D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR UINT32_MAX
+#define D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES 160U
+#define D1L_MESHCORE_ADMIN_MAX_CLI_REPLY_BYTES 160U
+/* Room login uses the current request timestamp as its sync cursor. This
+ * starts a live current-session console without replaying older posts. */
 
 typedef enum {
     D1L_MESHCORE_ADMIN_ROLE_NONE = 0,
@@ -43,6 +54,8 @@ typedef enum {
     D1L_MESHCORE_ADMIN_AUTHENTICATED,
     D1L_MESHCORE_ADMIN_STATUS_PENDING,
     D1L_MESHCORE_ADMIN_MUTATION_PENDING,
+    D1L_MESHCORE_ADMIN_CLI_PENDING,
+    D1L_MESHCORE_ADMIN_QUERY_PENDING,
     D1L_MESHCORE_ADMIN_TIMED_OUT,
 } d1l_meshcore_admin_state_t;
 
@@ -51,6 +64,13 @@ typedef enum {
     D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS,
     D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP,
 } d1l_meshcore_admin_mutation_t;
+
+typedef enum {
+    D1L_MESHCORE_ADMIN_QUERY_NONE = 0,
+    D1L_MESHCORE_ADMIN_QUERY_TELEMETRY,
+    D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST,
+    D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS,
+} d1l_meshcore_admin_query_t;
 
 typedef enum {
     D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED = 0,
@@ -105,6 +125,16 @@ typedef struct {
     uint16_t posts_pushed;
 } d1l_meshcore_admin_status_t;
 
+typedef struct {
+    d1l_meshcore_admin_query_t kind;
+    bool valid;
+    bool truncated;
+    uint16_t offset;
+    uint16_t total;
+    uint16_t count;
+    char text[D1L_MESHCORE_ADMIN_MAX_QUERY_TEXT_BYTES + 1U];
+} d1l_meshcore_admin_query_result_t;
+
 /* Runtime-only client authority. The service owns this structure behind its
  * lock. It must never be copied into diagnostics, retained stores, or UI
  * snapshots because it contains the active ECDH session secret. */
@@ -122,7 +152,14 @@ typedef struct {
     uint32_t last_completed_tag;
     d1l_meshcore_admin_mutation_t pending_mutation;
     d1l_meshcore_admin_mutation_t last_mutation;
+    d1l_meshcore_admin_query_t pending_query;
+    uint16_t pending_query_offset;
     bool last_mutation_success;
+    bool pending_cli_sensitive;
+    bool cli_reply_valid;
+    bool cli_reply_redacted;
+    bool cli_reply_success;
+    char cli_reply[D1L_MESHCORE_ADMIN_MAX_CLI_REPLY_BYTES + 1U];
     uint64_t request_deadline_us;
     uint64_t idle_timeout_us;
     uint64_t idle_deadline_us;
@@ -130,6 +167,7 @@ typedef struct {
     uint64_t absolute_deadline_us;
     bool status_valid;
     d1l_meshcore_admin_status_t status;
+    d1l_meshcore_admin_query_result_t query_result;
 } d1l_meshcore_admin_session_t;
 
 void d1l_meshcore_admin_secure_zero(void *value, size_t size);
@@ -141,6 +179,14 @@ bool d1l_meshcore_admin_encode_login_request(
 bool d1l_meshcore_admin_encode_status_request(
     uint32_t tag, uint32_t uniqueness,
     uint8_t out[D1L_MESHCORE_ADMIN_REQUEST_BYTES]);
+const char *d1l_meshcore_admin_query_name(
+    d1l_meshcore_admin_query_t query);
+bool d1l_meshcore_admin_query_allowed(
+    d1l_meshcore_admin_role_t role, uint8_t permissions,
+    d1l_meshcore_admin_query_t query);
+bool d1l_meshcore_admin_encode_query_request(
+    d1l_meshcore_admin_query_t query, uint32_t tag, uint16_t offset,
+    uint32_t uniqueness, uint8_t *out, size_t out_size, size_t *out_len);
 void d1l_meshcore_admin_reset(d1l_meshcore_admin_session_t *session);
 void d1l_meshcore_admin_timeout(d1l_meshcore_admin_session_t *session);
 void d1l_meshcore_admin_replay_cache_clear(
@@ -162,6 +208,8 @@ bool d1l_meshcore_admin_binding_matches(
     const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
     const uint8_t local_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
     const uint8_t session_secret[D1L_MESHCORE_ADMIN_SECRET_BYTES]);
+bool d1l_meshcore_admin_note_authenticated_activity(
+    d1l_meshcore_admin_session_t *session, uint64_t now_us);
 bool d1l_meshcore_admin_canonical_span(const uint8_t *data, size_t data_len,
                                        size_t logical_len);
 d1l_meshcore_admin_response_result_t
@@ -175,6 +223,13 @@ bool d1l_meshcore_admin_begin_status_request(
     uint64_t now_us, uint64_t request_deadline_us);
 bool d1l_meshcore_admin_cancel_status_request(
     d1l_meshcore_admin_session_t *session, uint32_t tag);
+bool d1l_meshcore_admin_begin_query_request(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_query_t query, uint16_t offset, uint32_t tag,
+    uint64_t now_us, uint64_t request_deadline_us);
+bool d1l_meshcore_admin_cancel_query_request(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_query_t query, uint32_t tag);
 const char *d1l_meshcore_admin_mutation_name(
     d1l_meshcore_admin_mutation_t mutation);
 const char *d1l_meshcore_admin_mutation_command(
@@ -186,6 +241,20 @@ bool d1l_meshcore_admin_begin_mutation(
 bool d1l_meshcore_admin_cancel_mutation(
     d1l_meshcore_admin_session_t *session,
     d1l_meshcore_admin_mutation_t mutation, uint32_t tag);
+bool d1l_meshcore_admin_cli_command_valid(const char *command);
+bool d1l_meshcore_admin_cli_command_sensitive(const char *command);
+bool d1l_meshcore_admin_cli_command_read_only(const char *command);
+bool d1l_meshcore_admin_begin_cli_command(
+    d1l_meshcore_admin_session_t *session, uint32_t tag,
+    bool sensitive, uint64_t now_us, uint64_t request_deadline_us);
+bool d1l_meshcore_admin_cancel_cli_command(
+    d1l_meshcore_admin_session_t *session, uint32_t tag);
+d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_accept_cli_response(
+    d1l_meshcore_admin_session_t *session,
+    const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
+    uint32_t response_timestamp, const uint8_t *text, size_t text_len,
+    uint64_t now_us);
 d1l_meshcore_admin_response_result_t
 d1l_meshcore_admin_accept_mutation_response(
     d1l_meshcore_admin_session_t *session,
@@ -199,6 +268,20 @@ d1l_meshcore_admin_accept_status_response(
     d1l_meshcore_admin_session_t *session,
     const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
     const uint8_t *plaintext, size_t plaintext_len, uint64_t now_us);
+d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_accept_query_response(
+    d1l_meshcore_admin_session_t *session,
+    const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
+    const uint8_t *plaintext, size_t plaintext_len, uint64_t now_us);
+/*
+ * Decode one authenticated MeshCore telemetry response whose first four
+ * bytes are the caller's correlation tag.  This pure formatter is shared by
+ * authenticated server sessions and ordinary contact path-discovery
+ * responses; it never retains the plaintext or any session secret.
+ */
+bool d1l_meshcore_telemetry_decode(
+    const uint8_t *plaintext, size_t plaintext_len,
+    d1l_meshcore_admin_query_result_t *out_result);
 bool d1l_meshcore_admin_expire_if_due(
     d1l_meshcore_admin_session_t *session, uint64_t now_us);
 

@@ -26,6 +26,7 @@
 #include "hal/backlight.h"
 #include "hal/display_preferences.h"
 #include "hal/indicator_board.h"
+#include "mesh/dm_store.h"
 #include "mesh/user_text.h"
 #include "ui_ble.h"
 #include "ui_channel_sheets.h"
@@ -57,6 +58,8 @@
 static const char *TAG = "d1l_ui";
 #define D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS 5U
 #define D1L_PUBLIC_HISTORY_UI_LOAD_OLDER_STEP 5U
+#define D1L_UI_ADMIN_ROOM_PREVIEW_COUNT 3U
+#define D1L_UI_ADMIN_ROOM_TRANSCRIPT_BYTES 512U
 
 static lv_disp_draw_buf_t s_draw_buf;
 static lv_disp_drv_t s_disp_drv;
@@ -150,10 +153,17 @@ static bool s_update_install_armed;
 static bool s_update_reboot_armed;
 static d1l_meshcore_admin_mutation_t s_admin_mutation_armed =
     D1L_MESHCORE_ADMIN_MUTATION_NONE;
+static char s_admin_cli_armed[
+    D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] EXT_RAM_BSS_ATTR;
+static bool s_admin_cli_secure_input;
+static bool s_admin_rendered_generation_valid;
+static uint32_t s_admin_rendered_dm_revision;
 static uint32_t s_terminal_clear_deadline;
 static uint32_t s_update_install_deadline;
 static uint32_t s_update_reboot_deadline;
 static uint32_t s_admin_mutation_deadline;
+static uint32_t s_admin_cli_deadline;
+static uint32_t s_admin_rendered_generation;
 static bool s_backlight_dimmed;
 static bool s_backlight_pulse_active;
 static uint32_t s_backlight_pulse_until;
@@ -169,9 +179,17 @@ static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
 static char s_admin_target_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static d1l_dm_entry_t
+    s_admin_room_preview[D1L_UI_ADMIN_ROOM_PREVIEW_COUNT] EXT_RAM_BSS_ATTR;
+static char
+    s_admin_room_transcript[D1L_UI_ADMIN_ROOM_TRANSCRIPT_BYTES]
+        EXT_RAM_BSS_ATTR;
 static d1l_node_view_t s_map_node_rows[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY]
     EXT_RAM_BSS_ATTR;
+static d1l_meshcore_contact_telemetry_snapshot_t
+    s_route_trace_telemetry EXT_RAM_BSS_ATTR;
+static uint32_t s_route_trace_telemetry_rendered_generation;
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]
     EXT_RAM_BSS_ATTR;
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
@@ -226,6 +244,7 @@ static void open_home_dm_preview_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_map_node_detail(const char *fingerprint);
 static void open_route_trace_event_cb(lv_event_t *event);
+static void render_route_trace_sheet(void);
 static void open_route_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
 static void open_packet_search_event_cb(lv_event_t *event);
@@ -1574,6 +1593,13 @@ static void hide_diagnostics_sheet(void)
     restore_dock_for_active_tab();
 }
 
+static void clear_admin_cli_confirmation(void)
+{
+    d1l_meshcore_admin_secure_zero(
+        s_admin_cli_armed, sizeof(s_admin_cli_armed));
+    s_admin_cli_deadline = 0U;
+}
+
 static void hide_service_sheets(void)
 {
     d1l_ui_service_sheets_hide_all(&s_service_sheets_controller);
@@ -1581,6 +1607,9 @@ static void hide_service_sheets(void)
     s_update_install_armed = false;
     s_update_reboot_armed = false;
     s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+    clear_admin_cli_confirmation();
+    s_admin_cli_secure_input = false;
+    s_admin_rendered_generation_valid = false;
     restore_dock_for_active_tab();
 }
 
@@ -1777,6 +1806,8 @@ static void more_view_input_from_snapshot(
         admin.state == D1L_MESHCORE_ADMIN_LOGIN_PENDING ? "login pending" :
         admin.state == D1L_MESHCORE_ADMIN_STATUS_PENDING ? "refreshing" :
         admin.state == D1L_MESHCORE_ADMIN_MUTATION_PENDING ? "applying" :
+        admin.state == D1L_MESHCORE_ADMIN_CLI_PENDING ? "command pending" :
+        admin.state == D1L_MESHCORE_ADMIN_QUERY_PENDING ? "query pending" :
         admin.state == D1L_MESHCORE_ADMIN_TIMED_OUT ? "timed out" : "idle";
     *out_input = (d1l_ui_more_view_input_t) {
         .packet_count = snapshot->packet_count,
@@ -2908,11 +2939,57 @@ static void route_trace_request_event_cb(lv_event_t *event)
     }
 }
 
+static void route_probe_request_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE) ||
+        s_route_trace_contact.fingerprint[0] == '\0') {
+        show_toast("Probe", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    char token[D1L_MESSAGE_TEXT_LEN] = {0};
+    const esp_err_t ret =
+        d1l_app_model_request_path_discovery_probe(
+            s_route_trace_contact.fingerprint, token, sizeof(token));
+    memset(token, 0, sizeof(token));
+    if (ret == ESP_OK) {
+        show_toast_text("Reachability + telemetry probe sent", true);
+        render_route_trace_sheet();
+    } else {
+        show_toast("Probe", ret);
+    }
+}
+
+static void route_reset_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_route_trace_contact.fingerprint[0] == '\0') {
+        show_toast("Route reset", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    esp_err_t ret = d1l_app_model_reset_contact_route(
+        s_route_trace_contact.fingerprint);
+    if (ret == ESP_OK) {
+        d1l_contact_entry_t refreshed = {0};
+        ret = d1l_app_model_find_contact(
+            s_route_trace_contact.fingerprint, &refreshed);
+        if (ret == ESP_OK) {
+            s_route_trace_contact = refreshed;
+        }
+    }
+    show_toast("Route reset", ret);
+    if (ret == ESP_OK) {
+        render_route_trace_sheet();
+    }
+}
+
 static void render_route_trace_sheet(void)
 {
     if (!s_route_trace_sheet) {
         return;
     }
+    const lv_coord_t previous_scroll_y =
+        lv_obj_get_scroll_y(s_route_trace_sheet);
     lv_obj_clean(s_route_trace_sheet);
 
     const d1l_contact_entry_t *contact = &s_route_trace_contact;
@@ -2921,17 +2998,25 @@ static void render_route_trace_sheet(void)
         d1l_app_model_copy_route_trace(contact->fingerprint, s_route_trace_entries,
                                        D1L_ROUTE_STORE_CAPACITY);
     const size_t best = route_count ? ui_route_trace_best_index(s_route_trace_entries, route_count) : 0;
+    d1l_app_model_contact_telemetry_snapshot(
+        contact->fingerprint, &s_route_trace_telemetry);
+    s_route_trace_telemetry_rendered_generation =
+        s_route_trace_telemetry.generation;
 
     create_button(s_route_trace_sheet, "Back", 12, 6, 72, 44,
                   close_route_trace_event_cb, NULL);
     lv_obj_t *title = create_label(s_route_trace_sheet, alias, 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 260);
-    lv_obj_set_pos(title, 100, 10);
+    lv_obj_set_width(title, 150);
+    lv_obj_set_pos(title, 94, 10);
 
-    create_button(s_route_trace_sheet, "Trace", 376, 6, 88, 44,
+    create_button(s_route_trace_sheet, "Probe", 250, 6, 68, 44,
+                  route_probe_request_event_cb, NULL);
+    create_button(s_route_trace_sheet, "Trace", 324, 6, 66, 44,
                   route_trace_request_event_cb, NULL);
+    create_button(s_route_trace_sheet, "Reset", 396, 6, 68, 44,
+                  route_reset_event_cb, NULL);
 
     lv_obj_t *meta = create_label(s_route_trace_sheet, "", 0x8EA0AE);
     label_set_fmt(meta, "Trace %.16s  rows %u/%u",
@@ -2962,12 +3047,111 @@ static void render_route_trace_sheet(void)
     lv_obj_set_width(best_label, 448);
     lv_obj_set_pos(best_label, 16, 116);
 
+    lv_obj_t *telemetry_state =
+        create_label(s_route_trace_sheet, "", 0x93C5FD);
+    if (s_route_trace_telemetry.pending) {
+        label_set_fmt(
+            telemetry_state,
+            "Reachability/telemetry pending  tag %08lX  timeout %lus",
+            (unsigned long)s_route_trace_telemetry.pending_tag,
+            (unsigned long)(
+                (s_route_trace_telemetry.pending_remaining_ms + 999U) /
+                1000U));
+    } else {
+        label_set_fmt(
+            telemetry_state, "Telemetry %s  history %u/%u",
+            d1l_meshcore_contact_telemetry_state_name(
+                s_route_trace_telemetry.state),
+            (unsigned)s_route_trace_telemetry.history_count,
+            (unsigned)D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY);
+    }
+    lv_label_set_long_mode(telemetry_state, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(telemetry_state, 448);
+    lv_obj_set_pos(telemetry_state, 16, 142);
+
+    int content_y = 168;
+    if (s_route_trace_telemetry.history_count == 0U) {
+        lv_obj_t *empty = create_label(
+            s_route_trace_sheet,
+            "Tap Probe to discover a route, verify reachability, and request base telemetry.",
+            0x8EA0AE);
+        lv_label_set_long_mode(empty, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(empty, 448);
+        lv_obj_set_pos(empty, 16, content_y);
+        content_y += 56;
+    } else {
+        for (size_t i = 0U;
+             i < s_route_trace_telemetry.history_count; ++i) {
+            const d1l_meshcore_contact_telemetry_entry_t *entry =
+                &s_route_trace_telemetry.history[i];
+            lv_obj_t *panel =
+                create_object(s_route_trace_sheet, "telemetry history row");
+            if (!panel) {
+                continue;
+            }
+            lv_obj_set_width(panel, 448);
+            lv_obj_set_pos(panel, 16, content_y);
+            lv_obj_set_style_bg_color(
+                panel, lv_color_hex(i == 0U ? 0x10282A : 0x111923), 0);
+            lv_obj_set_style_border_color(
+                panel, lv_color_hex(0x334155), 0);
+            lv_obj_set_style_border_width(panel, 1, 0);
+            lv_obj_set_style_radius(panel, 8, 0);
+            lv_obj_set_style_pad_all(panel, 8, 0);
+            lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_obj_t *record_meta = create_label(panel, "", 0x5EEAD4);
+            label_set_fmt(
+                record_meta,
+                "#%lu  %lus ago  RSSI %d  SNR %s%d.%d  hops %u",
+                (unsigned long)entry->sequence,
+                (unsigned long)(entry->age_ms / 1000U),
+                entry->last_rssi_dbm,
+                entry->last_snr_tenths < 0 ? "-" : "",
+                (entry->last_snr_tenths < 0 ?
+                     -entry->last_snr_tenths :
+                     entry->last_snr_tenths) /
+                    10,
+                (entry->last_snr_tenths < 0 ?
+                     -entry->last_snr_tenths :
+                     entry->last_snr_tenths) %
+                    10,
+                entry->path_hops);
+            lv_label_set_long_mode(record_meta, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(record_meta, 416);
+            lv_obj_set_pos(record_meta, 8, 4);
+
+            lv_obj_t *record_text =
+                create_label(panel, entry->result.text, 0xE5EDF5);
+            lv_label_set_long_mode(record_text, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(record_text, 416);
+            lv_obj_set_pos(record_text, 8, 28);
+            lv_obj_update_layout(record_text);
+            int panel_height = lv_obj_get_height(record_text) + 44;
+            if (panel_height < 76) {
+                panel_height = 76;
+            }
+            if (panel_height > 300) {
+                panel_height = 300;
+                lv_label_set_long_mode(record_text, LV_LABEL_LONG_DOT);
+                lv_obj_set_height(record_text, 256);
+            }
+            lv_obj_set_height(panel, panel_height);
+            content_y += panel_height + 10;
+        }
+    }
+
+    lv_obj_t *route_heading =
+        create_label(s_route_trace_sheet, "Route evidence", 0xFBBF24);
+    lv_obj_set_pos(route_heading, 16, content_y);
+    content_y += 26;
+
     lv_obj_t *list = create_object(s_route_trace_sheet, "route trace list");
     if (!list) {
         return;
     }
     lv_obj_set_size(list, 448, 200);
-    lv_obj_set_pos(list, 16, 148);
+    lv_obj_set_pos(list, 16, content_y);
     lv_obj_set_style_bg_color(list, lv_color_hex(0x0B111B), 0);
     lv_obj_set_style_border_color(list, lv_color_hex(0x253447), 0);
     lv_obj_set_style_border_width(list, 1, 0);
@@ -3009,13 +3193,18 @@ static void render_route_trace_sheet(void)
         lv_obj_set_pos(line2, 10, 28);
         y += 58;
     }
+    content_y += 210;
 
     lv_obj_t *note = create_label(s_route_trace_sheet,
-                                  "Correlated TRACE; proven outbound path; no Public RF",
+                                  "Probe and TRACE are contact-only RF; Reset forgets only this contact; no Public RF",
                                   0x8EA0AE);
-    lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, 448);
-    lv_obj_set_pos(note, 16, 360);
+    lv_obj_set_pos(note, 16, content_y);
+    lv_obj_set_height(note, 50);
+    lv_obj_update_layout(s_route_trace_sheet);
+    lv_obj_scroll_to_y(
+        s_route_trace_sheet, previous_scroll_y, LV_ANIM_OFF);
 }
 
 static void open_route_trace_event_cb(lv_event_t *event)
@@ -3115,6 +3304,23 @@ static void handle_node_detail_action(
         break;
     case D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN:
         if (event->node && event->node->node.fingerprint[0] != '\0') {
+            clear_admin_cli_confirmation();
+            s_admin_cli_secure_input = false;
+            s_admin_rendered_generation_valid = false;
+            d1l_meshcore_admin_snapshot_t admin_status = {0};
+            d1l_meshcore_service_admin_snapshot(&admin_status);
+            if (admin_status.fingerprint[0] != '\0' &&
+                strcmp(admin_status.fingerprint,
+                       event->node->node.fingerprint) != 0 &&
+                admin_status.state != D1L_MESHCORE_ADMIN_IDLE &&
+                admin_status.state != D1L_MESHCORE_ADMIN_TIMED_OUT) {
+                const esp_err_t logout_result =
+                    d1l_meshcore_service_admin_logout();
+                if (logout_result != ESP_OK) {
+                    show_toast("Admin switch", logout_result);
+                    break;
+                }
+            }
             snprintf(s_admin_target_fingerprint,
                      sizeof(s_admin_target_fingerprint), "%s",
                      event->node->node.fingerprint);
@@ -6040,8 +6246,11 @@ static void wifi_action_handler(d1l_ui_wifi_action_t action,
         request_content_refresh();
         return;
     case D1L_UI_WIFI_ACTION_CLEAR:
-        ret = d1l_app_model_clear_wifi_profile();
-        show_toast("Wi-Fi clear", ret);
+        ret = s_snapshot.wifi_profile_count > 0U ?
+            d1l_app_model_delete_wifi_profile(
+                s_snapshot.wifi_active_profile) :
+            ESP_ERR_NOT_FOUND;
+        show_toast("Wi-Fi delete", ret);
         if (ret != ESP_OK) {
             return;
         }
@@ -6058,6 +6267,20 @@ static void wifi_action_handler(d1l_ui_wifi_action_t action,
     case D1L_UI_WIFI_ACTION_CONNECT:
         ret = d1l_app_model_wifi_connect();
         show_toast("Wi-Fi connect", ret);
+        wifi_refresh_sheet();
+        request_content_refresh();
+        return;
+    case D1L_UI_WIFI_ACTION_NEXT_PROFILE:
+        ret = s_snapshot.wifi_profile_count > 1U ?
+            d1l_app_model_select_wifi_profile(
+                (uint8_t)(
+                    (s_snapshot.wifi_active_profile + 1U) %
+                    s_snapshot.wifi_profile_count)) :
+            ESP_ERR_NOT_FOUND;
+        show_toast("Wi-Fi profile", ret);
+        if (ret != ESP_OK) {
+            return;
+        }
         wifi_refresh_sheet();
         request_content_refresh();
         return;
@@ -6158,6 +6381,8 @@ static bool render_wifi_sheet(void)
         .connected = s_snapshot.wifi_connected,
         .profile_saved = s_snapshot.wifi_profile_saved,
         .password_saved = s_snapshot.wifi_password_saved,
+        .profile_count = s_snapshot.wifi_profile_count,
+        .active_profile = s_snapshot.wifi_active_profile,
         .scan_loaded = s_wifi_scan_loaded,
         .state = s_snapshot.wifi_state,
         .ip = s_snapshot.wifi_ip,
@@ -6384,6 +6609,56 @@ static bool render_notifications_service_sheet(void)
         service_sheets_action_handler, NULL);
 }
 
+static void build_admin_room_transcript(
+    const d1l_meshcore_admin_snapshot_t *status)
+{
+    s_admin_room_transcript[0] = '\0';
+    memset(s_admin_room_preview, 0, sizeof(s_admin_room_preview));
+    if (!status ||
+        status->state != D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+        status->role != D1L_MESHCORE_ADMIN_ROLE_ROOM ||
+        status->fingerprint[0] == '\0') {
+        return;
+    }
+
+    const size_t count = d1l_dm_store_copy_thread(
+        status->fingerprint, s_admin_room_preview,
+        D1L_UI_ADMIN_ROOM_PREVIEW_COUNT);
+    if (count == 0U) {
+        snprintf(
+            s_admin_room_transcript, sizeof(s_admin_room_transcript),
+            "No room posts received yet.");
+        return;
+    }
+
+    size_t used = 0U;
+    for (size_t i = 0U; i < count; ++i) {
+        const d1l_dm_entry_t *entry = &s_admin_room_preview[i];
+        const bool outbound = strcmp(entry->direction, "tx") == 0;
+        const char *delivery = outbound ?
+            (entry->acked ? " [delivered]" : " [pending]") : "";
+        const int written = snprintf(
+            &s_admin_room_transcript[used],
+            sizeof(s_admin_room_transcript) - used,
+            "%s%s%s%s",
+            i == 0U ? "" : "\n",
+            outbound ? "You: " : "",
+            entry->text,
+            delivery);
+        if (written < 0) {
+            s_admin_room_transcript[0] = '\0';
+            return;
+        }
+        if ((size_t)written >=
+            sizeof(s_admin_room_transcript) - used) {
+            used = sizeof(s_admin_room_transcript) - 1U;
+            break;
+        }
+        used += (size_t)written;
+    }
+    s_admin_room_transcript[used] = '\0';
+}
+
 static bool render_admin_service_sheet(void)
 {
     d1l_meshcore_admin_snapshot_t status = {0};
@@ -6394,11 +6669,53 @@ static bool render_admin_service_sheet(void)
             s_admin_mutation_deadline)) {
         s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
     }
-    return d1l_ui_service_sheets_render_admin(
+    if (status.state != D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+        !confirmation_active(
+            s_admin_cli_armed[0] != '\0', s_admin_cli_deadline)) {
+        clear_admin_cli_confirmation();
+    }
+    build_admin_room_transcript(&status);
+    const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
+    const bool complete = d1l_ui_service_sheets_render_admin(
         &s_service_sheets_controller, &status,
         s_admin_target_fingerprint,
         s_admin_mutation_armed,
+        s_admin_cli_armed[0] != '\0',
+        s_admin_cli_secure_input,
+        s_admin_room_transcript,
         service_sheets_action_handler, NULL);
+    if (complete) {
+        s_admin_rendered_generation = status.generation;
+        s_admin_rendered_dm_revision = dm_stats.content_revision;
+        s_admin_rendered_generation_valid = true;
+    }
+    return complete;
+}
+
+static void refresh_admin_service_sheet_if_changed(void)
+{
+    d1l_meshcore_admin_snapshot_t status = {0};
+    d1l_meshcore_service_admin_snapshot(&status);
+    const bool mutation_expired =
+        s_admin_mutation_armed != D1L_MESHCORE_ADMIN_MUTATION_NONE &&
+        !confirmation_active(true, s_admin_mutation_deadline);
+    const bool cli_expired =
+        s_admin_cli_armed[0] != '\0' &&
+        !confirmation_active(true, s_admin_cli_deadline);
+    const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
+    const bool room_content_changed =
+        status.state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+        status.role == D1L_MESHCORE_ADMIN_ROLE_ROOM &&
+        dm_stats.content_revision != s_admin_rendered_dm_revision;
+    const bool edit_in_progress =
+        d1l_ui_service_sheets_admin_edit_has_text(
+            &s_service_sheets_controller);
+    if (!s_admin_rendered_generation_valid ||
+        status.generation != s_admin_rendered_generation ||
+        mutation_expired || cli_expired ||
+        (room_content_changed && !edit_in_progress)) {
+        (void)render_admin_service_sheet();
+    }
 }
 
 static void service_sheets_action_handler(
@@ -6411,7 +6728,13 @@ static void service_sheets_action_handler(
     case D1L_UI_SERVICE_ACTION_CLOSE_OBSERVER:
     case D1L_UI_SERVICE_ACTION_CLOSE_UPDATE:
     case D1L_UI_SERVICE_ACTION_CLOSE_NOTIFICATIONS:
+        hide_service_sheets();
+        return;
     case D1L_UI_SERVICE_ACTION_CLOSE_ADMIN:
+        s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+        clear_admin_cli_confirmation();
+        s_admin_cli_secure_input = false;
+        (void)d1l_meshcore_service_admin_logout();
         hide_service_sheets();
         return;
     case D1L_UI_SERVICE_ACTION_TERMINAL_LEVEL: {
@@ -6496,14 +6819,78 @@ static void service_sheets_action_handler(
         s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
         request_tab_switch(D1L_UI_TAB_MESSAGES);
         return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_LOGIN: {
+        char password[D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] = {0};
+        clear_admin_cli_confirmation();
+        s_admin_cli_secure_input = false;
+        if (s_admin_target_fingerprint[0] == '\0') {
+            show_toast_text("Select a repeater or room first", true);
+            return;
+        }
+        if (!d1l_ui_service_sheets_take_admin_password(
+                &s_service_sheets_controller, password, sizeof(password))) {
+            show_toast("Admin login", ESP_ERR_INVALID_STATE);
+            return;
+        }
+        const esp_err_t result = d1l_meshcore_service_admin_login(
+            s_admin_target_fingerprint, password);
+        d1l_meshcore_admin_secure_zero(password, sizeof(password));
+        show_toast("Admin login", result);
+        (void)render_admin_service_sheet();
+        return;
+    }
     case D1L_UI_SERVICE_ACTION_ADMIN_REFRESH:
         s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+        clear_admin_cli_confirmation();
         show_toast("Admin status",
                    d1l_meshcore_service_admin_request_status());
         (void)render_admin_service_sheet();
         return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_TELEMETRY:
+    case D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS:
+    case D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT:
+    case D1L_UI_SERVICE_ACTION_ADMIN_ACCESS_LIST: {
+        s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+        clear_admin_cli_confirmation();
+        d1l_meshcore_admin_query_t query =
+            D1L_MESHCORE_ADMIN_QUERY_TELEMETRY;
+        uint16_t offset = 0U;
+        const char *label = "Server telemetry";
+        if (action == D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS ||
+            action == D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT) {
+            query = D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS;
+            label = "Repeater neighbours";
+        } else if (action ==
+                   D1L_UI_SERVICE_ACTION_ADMIN_ACCESS_LIST) {
+            query = D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST;
+            label = "Server access list";
+        }
+        if (action == D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT) {
+            d1l_meshcore_admin_snapshot_t status = {0};
+            d1l_meshcore_service_admin_snapshot(&status);
+            const uint32_t next_offset =
+                (uint32_t)status.query_result.offset +
+                (uint32_t)status.query_result.count;
+            if (!status.query_result.valid ||
+                status.query_result.kind !=
+                    D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS ||
+                status.query_result.count == 0U ||
+                next_offset >= status.query_result.total ||
+                next_offset > UINT16_MAX) {
+                show_toast_text("No next neighbour page", true);
+                (void)render_admin_service_sheet();
+                return;
+            }
+            offset = (uint16_t)next_offset;
+        }
+        show_toast(label,
+                   d1l_meshcore_service_admin_request_query(query, offset));
+        (void)render_admin_service_sheet();
+        return;
+    }
     case D1L_UI_SERVICE_ACTION_ADMIN_CLEAR_STATS:
     case D1L_UI_SERVICE_ACTION_ADMIN_ADVERTISE_ZERO_HOP: {
+        clear_admin_cli_confirmation();
         const d1l_meshcore_admin_mutation_t mutation =
             action == D1L_UI_SERVICE_ACTION_ADMIN_CLEAR_STATS ?
                 D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS :
@@ -6529,8 +6916,85 @@ static void service_sheets_action_handler(
         (void)render_admin_service_sheet();
         return;
     }
+    case D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND: {
+        char text[D1L_USER_TEXT_MAX_BYTES + 1U] = {0};
+        if (!d1l_ui_service_sheets_take_admin_room_post(
+                &s_service_sheets_controller, text, sizeof(text))) {
+            show_toast_text("Enter one valid room message", true);
+            (void)render_admin_service_sheet();
+            return;
+        }
+        const esp_err_t result =
+            d1l_meshcore_service_admin_send_room_post(text);
+        d1l_meshcore_admin_secure_zero(text, sizeof(text));
+        show_toast("Room post", result);
+        (void)render_admin_service_sheet();
+        return;
+    }
+    case D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE:
+        clear_admin_cli_confirmation();
+        s_admin_cli_secure_input = !s_admin_cli_secure_input;
+        show_toast_text(
+            s_admin_cli_secure_input ?
+                "Secure masked command input enabled" :
+                "Visible command input enabled",
+            false);
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND: {
+        char command[D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
+        if (s_admin_cli_armed[0] != '\0' &&
+            confirmation_active(true, s_admin_cli_deadline)) {
+            snprintf(command, sizeof(command), "%s", s_admin_cli_armed);
+            clear_admin_cli_confirmation();
+            const esp_err_t result =
+                d1l_meshcore_service_admin_request_cli(command, true);
+            d1l_meshcore_admin_secure_zero(command, sizeof(command));
+            show_toast("Server command", result);
+            (void)render_admin_service_sheet();
+            return;
+        }
+        clear_admin_cli_confirmation();
+        if (!d1l_ui_service_sheets_take_admin_cli(
+                &s_service_sheets_controller, command, sizeof(command)) ||
+            !d1l_meshcore_admin_cli_command_valid(command)) {
+            d1l_meshcore_admin_secure_zero(command, sizeof(command));
+            show_toast_text("Enter one valid single-line command", true);
+            (void)render_admin_service_sheet();
+            return;
+        }
+        const bool sensitive =
+            d1l_meshcore_admin_cli_command_sensitive(command);
+        if (sensitive && !s_admin_cli_secure_input) {
+            d1l_meshcore_admin_secure_zero(command, sizeof(command));
+            show_toast_text(
+                "Enable Secure Input before entering passwords or keys",
+                true);
+            (void)render_admin_service_sheet();
+            return;
+        }
+        if (d1l_meshcore_admin_cli_command_read_only(command)) {
+            const esp_err_t result =
+                d1l_meshcore_service_admin_request_cli(command, false);
+            d1l_meshcore_admin_secure_zero(command, sizeof(command));
+            show_toast("Server command", result);
+            (void)render_admin_service_sheet();
+            return;
+        }
+        snprintf(s_admin_cli_armed, sizeof(s_admin_cli_armed), "%s",
+                 command);
+        s_admin_cli_deadline =
+            lv_tick_get() + D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS;
+        d1l_meshcore_admin_secure_zero(command, sizeof(command));
+        show_toast_text(
+            "Tap Confirm Command within 5 seconds", true);
+        (void)render_admin_service_sheet();
+        return;
+    }
     case D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT:
         s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+        clear_admin_cli_confirmation();
+        s_admin_cli_secure_input = false;
         show_toast("Admin logout",
                    d1l_meshcore_service_admin_logout());
         (void)render_admin_service_sheet();
@@ -8160,10 +8624,19 @@ static void refresh_timer_cb(lv_timer_t *timer)
         (void)render_observer_service_sheet();
     } else if (d1l_ui_modal_visible(d1l_ui_service_sheets_admin(
                    &s_service_sheets_controller))) {
-        (void)render_admin_service_sheet();
+        refresh_admin_service_sheet_if_changed();
     } else if (d1l_ui_modal_visible(d1l_ui_service_sheets_notifications(
                    &s_service_sheets_controller))) {
         (void)render_notifications_service_sheet();
+    } else if (d1l_ui_modal_visible(s_route_trace_sheet) &&
+               s_route_trace_contact.fingerprint[0] != '\0') {
+        d1l_app_model_contact_telemetry_snapshot(
+            s_route_trace_contact.fingerprint,
+            &s_route_trace_telemetry);
+        if (s_route_trace_telemetry.generation !=
+            s_route_trace_telemetry_rendered_generation) {
+            render_route_trace_sheet();
+        }
     }
     const bool map_active = d1l_ui_navigation_active() == D1L_UI_TAB_MAP;
     const bool map_uncovered = map_active &&
@@ -8554,7 +9027,9 @@ static void create_route_trace_sheet(lv_obj_t *screen)
     lv_obj_set_style_bg_color(s_route_trace_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_width(s_route_trace_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_route_trace_sheet, 0, 0);
-    lv_obj_clear_flag(s_route_trace_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(s_route_trace_sheet, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(
+        s_route_trace_sheet, LV_SCROLLBAR_MODE_AUTO);
     d1l_ui_modal_hide(s_route_trace_sheet);
 }
 

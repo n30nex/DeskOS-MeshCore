@@ -234,12 +234,12 @@ static int test_login_replay_and_room_no_history(void)
     static const uint8_t password[] = {'r', 'o', 'o', 'm'};
     CHECK(d1l_meshcore_admin_encode_login_request(
         D1L_MESHCORE_ADMIN_ROLE_ROOM, 0x01020304U,
-        D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR, password,
+        0x01020304U, password,
         sizeof(password), room_request, sizeof(room_request),
         &room_request_len));
     static const uint8_t expected_room_request[] = {
         0x04U, 0x03U, 0x02U, 0x01U,
-        0xFFU, 0xFFU, 0xFFU, 0xFFU,
+        0x04U, 0x03U, 0x02U, 0x01U,
         'r', 'o', 'o', 'm'};
     CHECK(room_request_len == sizeof(expected_room_request));
     CHECK(memcmp(room_request, expected_room_request,
@@ -344,6 +344,274 @@ static int test_allowlisted_mutations(void)
     return 0;
 }
 
+static int test_guest_sessions_are_read_only(void)
+{
+    d1l_meshcore_admin_session_t repeater = {0};
+    d1l_meshcore_admin_replay_cache_t replay = {0};
+    uint8_t login[16];
+    login_response(login, 0x49U);
+    login[6] = 0U;
+    login[7] = D1L_MESHCORE_ADMIN_PERMISSION_GUEST;
+    CHECK(begin(&repeater, 500U, 100U, 500U));
+    CHECK(d1l_meshcore_admin_accept_login_response(
+              &repeater, &replay, PEER, login, sizeof(login), 400U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(repeater.permissions == D1L_MESHCORE_ADMIN_PERMISSION_GUEST);
+    CHECK(d1l_meshcore_admin_begin_status_request(
+        &repeater, 0x01020311U, 410U, 470U));
+    CHECK(d1l_meshcore_admin_cancel_status_request(
+        &repeater, 0x01020311U));
+    CHECK(!d1l_meshcore_admin_begin_mutation(
+        &repeater, D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS,
+        0x01020312U, 420U, 480U));
+    CHECK(!d1l_meshcore_admin_begin_cli_command(
+        &repeater, 0x01020313U, false, 420U, 480U));
+
+    d1l_meshcore_admin_session_t room = {0};
+    CHECK(d1l_meshcore_admin_begin_login(
+        &room, D1L_MESHCORE_ADMIN_ROLE_ROOM, PEER, LOCAL, SECRET,
+        700U, 100U, 500U));
+    login_response_for_role(login, 0x4AU, 1U);
+    login[6] = 0U;
+    login[7] = D1L_MESHCORE_ADMIN_PERMISSION_WRITE;
+    CHECK(d1l_meshcore_admin_accept_login_response(
+              &room, &replay, PEER, login, sizeof(login), 600U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(room.permissions == D1L_MESHCORE_ADMIN_PERMISSION_WRITE);
+    CHECK(!d1l_meshcore_admin_begin_cli_command(
+        &room, 0x01020314U, false, 610U, 680U));
+    CHECK(d1l_meshcore_admin_note_authenticated_activity(&room, 620U));
+    CHECK(room.idle_deadline_us == 720U);
+    return 0;
+}
+
+static int test_server_queries_and_protocol_permissions(void)
+{
+    uint8_t request[D1L_MESHCORE_ADMIN_MAX_QUERY_REQUEST_BYTES] = {0};
+    size_t request_len = 0U;
+    CHECK(d1l_meshcore_admin_encode_query_request(
+        D1L_MESHCORE_ADMIN_QUERY_TELEMETRY, 0x01020304U, 0U,
+        0xA1A2A3A4U, request, sizeof(request), &request_len));
+    static const uint8_t expected_telemetry[] = {
+        0x04U, 0x03U, 0x02U, 0x01U, 0x03U, 0U, 0U, 0U, 0U,
+        0xA4U, 0xA3U, 0xA2U, 0xA1U};
+    CHECK(request_len == sizeof(expected_telemetry));
+    CHECK(memcmp(request, expected_telemetry,
+                 sizeof(expected_telemetry)) == 0);
+
+    CHECK(d1l_meshcore_admin_encode_query_request(
+        D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST, 0x01020304U, 0U,
+        0xA1A2A3A4U, request, sizeof(request), &request_len));
+    static const uint8_t expected_access[] = {
+        0x04U, 0x03U, 0x02U, 0x01U, 0x05U, 0U, 0U,
+        0xA4U, 0xA3U, 0xA2U, 0xA1U};
+    CHECK(request_len == sizeof(expected_access));
+    CHECK(memcmp(request, expected_access, sizeof(expected_access)) == 0);
+
+    CHECK(d1l_meshcore_admin_encode_query_request(
+        D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS, 0x01020304U, 0x1234U,
+        0xA1A2A3A4U, request, sizeof(request), &request_len));
+    static const uint8_t expected_neighbours[] = {
+        0x04U, 0x03U, 0x02U, 0x01U, 0x06U, 0U, 10U,
+        0x34U, 0x12U, 0U, 4U, 0xA4U, 0xA3U, 0xA2U, 0xA1U};
+    CHECK(request_len == sizeof(expected_neighbours));
+    CHECK(memcmp(request, expected_neighbours,
+                 sizeof(expected_neighbours)) == 0);
+    CHECK(!d1l_meshcore_admin_encode_query_request(
+        D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST, 0x01020304U, 1U,
+        0xA1A2A3A4U, request, sizeof(request), &request_len));
+
+    d1l_meshcore_admin_session_t session = {0};
+    d1l_meshcore_admin_replay_cache_t replay = {0};
+    CHECK(authenticate_repeater(&session, &replay, 0x61U, 100U));
+    CHECK(d1l_meshcore_admin_query_allowed(
+        D1L_MESHCORE_ADMIN_ROLE_REPEATER,
+        D1L_MESHCORE_ADMIN_PERMISSION_GUEST,
+        D1L_MESHCORE_ADMIN_QUERY_TELEMETRY));
+    CHECK(d1l_meshcore_admin_query_allowed(
+        D1L_MESHCORE_ADMIN_ROLE_REPEATER,
+        D1L_MESHCORE_ADMIN_PERMISSION_GUEST,
+        D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS));
+    CHECK(!d1l_meshcore_admin_query_allowed(
+        D1L_MESHCORE_ADMIN_ROLE_REPEATER,
+        D1L_MESHCORE_ADMIN_PERMISSION_READ_ONLY,
+        D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST));
+    CHECK(!d1l_meshcore_admin_query_allowed(
+        D1L_MESHCORE_ADMIN_ROLE_ROOM,
+        D1L_MESHCORE_ADMIN_PERMISSION_ADMIN,
+        D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS));
+
+    const uint32_t telemetry_tag = 0x10203061U;
+    CHECK(d1l_meshcore_admin_begin_query_request(
+        &session, D1L_MESHCORE_ADMIN_QUERY_TELEMETRY, 0U,
+        telemetry_tag, 120U, 200U));
+    uint8_t telemetry[16] = {0};
+    write_le32(telemetry, telemetry_tag);
+    telemetry[4] = 1U;
+    telemetry[5] = 116U;
+    telemetry[6] = 0x01U;
+    telemetry[7] = 0xA4U;
+    telemetry[8] = 2U;
+    telemetry[9] = 103U;
+    telemetry[10] = 0xFFU;
+    telemetry[11] = 0xC9U;
+    telemetry[12] = 3U;
+    telemetry[13] = 104U;
+    telemetry[14] = 101U;
+    CHECK(d1l_meshcore_admin_accept_query_response(
+              &session, PEER, telemetry, sizeof(telemetry), 130U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.query_result.valid);
+    CHECK(session.query_result.kind ==
+          D1L_MESHCORE_ADMIN_QUERY_TELEMETRY);
+    CHECK(session.query_result.count == 3U);
+    CHECK(strstr(session.query_result.text, "voltage 4.20 V") != NULL);
+    CHECK(strstr(session.query_result.text, "temperature -5.5 C") != NULL);
+    CHECK(strstr(session.query_result.text, "humidity 50.5 %") != NULL);
+
+    const uint32_t access_tag = telemetry_tag + 1U;
+    CHECK(d1l_meshcore_admin_begin_query_request(
+        &session, D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST, 0U,
+        access_tag, 140U, 220U));
+    uint8_t access[16] = {0};
+    write_le32(access, access_tag);
+    static const uint8_t access_entry[] = {
+        0xA1U, 0xB2U, 0xC3U, 0xD4U, 0xE5U, 0xF6U,
+        D1L_MESHCORE_ADMIN_PERMISSION_WRITE};
+    memcpy(&access[4], access_entry, sizeof(access_entry));
+    CHECK(d1l_meshcore_admin_accept_query_response(
+              &session, PEER, access, sizeof(access), 150U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.query_result.count == 1U);
+    CHECK(strstr(
+              session.query_result.text,
+              "A1B2C3D4E5F6  read-write") != NULL);
+
+    const uint32_t neighbours_tag = access_tag + 1U;
+    CHECK(d1l_meshcore_admin_begin_query_request(
+        &session, D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS, 0U,
+        neighbours_tag, 160U, 240U));
+    uint8_t neighbours[32] = {0};
+    write_le32(neighbours, neighbours_tag);
+    write_le16(&neighbours[4], 12U);
+    write_le16(&neighbours[6], 2U);
+    neighbours[8] = 0x01U;
+    neighbours[9] = 0x02U;
+    neighbours[10] = 0x03U;
+    neighbours[11] = 0x04U;
+    write_le32(&neighbours[12], 90U);
+    neighbours[16] = (uint8_t)-5;
+    neighbours[17] = 0xA0U;
+    neighbours[18] = 0xB0U;
+    neighbours[19] = 0xC0U;
+    neighbours[20] = 0xD0U;
+    write_le32(&neighbours[21], 4U);
+    neighbours[25] = 7U;
+    CHECK(d1l_meshcore_admin_accept_query_response(
+              &session, PEER, neighbours, sizeof(neighbours), 170U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.query_result.offset == 0U);
+    CHECK(session.query_result.total == 12U);
+    CHECK(session.query_result.count == 2U);
+    CHECK(strstr(session.query_result.text, "-1.25 dB") != NULL);
+    CHECK(strstr(session.query_result.text, "1.75 dB") != NULL);
+
+    d1l_meshcore_admin_session_t guest_repeater = {0};
+    uint8_t login[16];
+    CHECK(begin(&guest_repeater, 400U, 100U, 300U));
+    login_response(login, 0x62U);
+    login[6] = 0U;
+    login[7] = D1L_MESHCORE_ADMIN_PERMISSION_GUEST;
+    CHECK(d1l_meshcore_admin_accept_login_response(
+              &guest_repeater, &replay, PEER, login, sizeof(login), 300U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+
+    d1l_meshcore_admin_session_t guest_room = {0};
+    CHECK(d1l_meshcore_admin_begin_login(
+        &guest_room, D1L_MESHCORE_ADMIN_ROLE_ROOM, PEER, LOCAL, SECRET,
+        600U, 100U, 300U));
+    login_response_for_role(login, 0x63U, 1U);
+    login[6] = 2U;
+    login[7] = D1L_MESHCORE_ADMIN_PERMISSION_GUEST;
+    CHECK(d1l_meshcore_admin_accept_login_response(
+              &guest_room, &replay, PEER, login, sizeof(login), 500U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    return 0;
+}
+
+static int test_bounded_cli_session_and_redaction(void)
+{
+    CHECK(d1l_meshcore_admin_cli_command_valid("neighbors"));
+    CHECK(d1l_meshcore_admin_cli_command_read_only("neighbors"));
+    CHECK(d1l_meshcore_admin_cli_command_read_only("NEIGHBORS"));
+    CHECK(d1l_meshcore_admin_cli_command_read_only("get name"));
+    CHECK(d1l_meshcore_admin_cli_command_read_only("region list allowed"));
+    CHECK(d1l_meshcore_admin_cli_command_read_only("region get home"));
+    CHECK(!d1l_meshcore_admin_cli_command_read_only("region put test"));
+    CHECK(!d1l_meshcore_admin_cli_command_read_only("set name repeater"));
+    CHECK(d1l_meshcore_admin_cli_command_sensitive(
+        "set guest.password secret"));
+    CHECK(d1l_meshcore_admin_cli_command_sensitive(
+        "PASSWORD new-secret"));
+    CHECK(d1l_meshcore_admin_cli_command_sensitive(
+        "set bridge.secret secret"));
+    CHECK(!d1l_meshcore_admin_cli_command_read_only(
+        "get guest.password"));
+    CHECK(!d1l_meshcore_admin_cli_command_valid(" neighbors"));
+    CHECK(!d1l_meshcore_admin_cli_command_valid("neighbors\n"));
+
+    d1l_meshcore_admin_session_t session = {0};
+    d1l_meshcore_admin_replay_cache_t replay = {0};
+    CHECK(authenticate_repeater(&session, &replay, 0x51U, 100U));
+    const uint32_t tag = 0x10203050U;
+    CHECK(d1l_meshcore_admin_begin_cli_command(
+        &session, tag, false, 120U, 200U));
+    static const uint8_t reply[] = "2 neighbors\nA1B2";
+    CHECK(d1l_meshcore_admin_accept_cli_response(
+              &session, PEER, 0x55667789U, reply, sizeof(reply) - 1U,
+              130U) == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED);
+    CHECK(session.cli_reply_valid);
+    CHECK(session.cli_reply_success);
+    CHECK(!session.cli_reply_redacted);
+    CHECK(strcmp(session.cli_reply, (const char *)reply) == 0);
+
+    CHECK(d1l_meshcore_admin_begin_cli_command(
+        &session, tag + 1U, true, 140U, 210U));
+    static const uint8_t sensitive_reply[] = "password now: secret";
+    CHECK(d1l_meshcore_admin_accept_cli_response(
+              &session, PEER, 0x5566778AU, sensitive_reply,
+              sizeof(sensitive_reply) - 1U, 150U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.cli_reply_valid);
+    CHECK(session.cli_reply_redacted);
+    CHECK(strstr(session.cli_reply, "secret") == NULL);
+    CHECK(strcmp(session.cli_reply, "[sensitive response hidden]") == 0);
+
+    CHECK(d1l_meshcore_admin_begin_cli_command(
+        &session, tag + 2U, false, 160U, 220U));
+    static const uint8_t error_reply[] = "Unknown command";
+    CHECK(d1l_meshcore_admin_accept_cli_response(
+              &session, PEER, 0x5566778BU, error_reply,
+              sizeof(error_reply) - 1U, 170U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
+    CHECK(!session.cli_reply_success);
+    CHECK(d1l_meshcore_admin_begin_cli_command(
+        &session, tag + 3U, false, 175U, 225U));
+    static const uint8_t config_error_reply[] = "unknown config: bogus";
+    CHECK(d1l_meshcore_admin_accept_cli_response(
+              &session, PEER, 0x5566778CU, config_error_reply,
+              sizeof(config_error_reply) - 1U, 176U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
+    CHECK(!session.cli_reply_success);
+    CHECK(d1l_meshcore_admin_begin_cli_command(
+        &session, tag + 4U, false, 180U, 230U));
+    CHECK(d1l_meshcore_admin_cancel_cli_command(
+        &session, tag + 4U));
+    CHECK(session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED);
+    return 0;
+}
+
 static int test_replay_capacity_and_deterministic_eviction(void)
 {
     d1l_meshcore_admin_session_t session = {0};
@@ -388,6 +656,9 @@ int main(void)
     CHECK(test_exact_deadlines_and_zeroization() == 0);
     CHECK(test_login_replay_and_room_no_history() == 0);
     CHECK(test_allowlisted_mutations() == 0);
+    CHECK(test_guest_sessions_are_read_only() == 0);
+    CHECK(test_server_queries_and_protocol_permissions() == 0);
+    CHECK(test_bounded_cli_session_and_redaction() == 0);
     CHECK(test_replay_capacity_and_deterministic_eviction() == 0);
     puts("meshcore_admin_dispatch_test: ok");
     return 0;

@@ -116,6 +116,195 @@ def test_full_feature_smoke_reads_every_service_surface_without_mutation():
     )
 
 
+def test_server_admin_login_is_available_on_device_and_scrubs_credentials():
+    header = read("main/ui/ui_service_sheets.h")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    assert "D1L_UI_SERVICE_ACTION_ADMIN_LOGIN" in header
+    assert "admin_password_textarea" in header
+    assert "admin_keyboard" in header
+    assert "d1l_ui_service_sheets_take_admin_password" in header
+
+    assert "lv_textarea_set_password_mode(" in sheets
+    assert "D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES" in sheets
+    assert "Password (empty allowed for repeaters)" in sheets
+    assert "d1l_ui_keyboard_configure_input(" in sheets
+    assert "d1l_ui_keyboard_clear_textarea(controller->admin_keyboard)" in sheets
+    assert 'lv_textarea_set_text(controller->admin_password_textarea, "")' in \
+        sheets
+    assert "clear_admin_sensitive_input(controller);" in sheets
+    assert "Login is accepted only over local USB" not in sheets
+
+    login = phase1.split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_LOGIN:", 1
+    )[1].split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_REFRESH:", 1
+    )[0]
+    assert "d1l_ui_service_sheets_take_admin_password(" in login
+    assert "d1l_meshcore_service_admin_login(" in login
+    assert "d1l_meshcore_admin_secure_zero(password, sizeof(password));" in login
+    assert "show_toast_text(password" not in login
+    assert "ESP_LOG" not in login
+
+
+def test_server_admin_session_is_cleared_when_closed_or_target_changes():
+    phase1 = read("main/ui/ui_phase1.c")
+    close = phase1.split(
+        "case D1L_UI_SERVICE_ACTION_CLOSE_ADMIN:", 1
+    )[1].split(
+        "case D1L_UI_SERVICE_ACTION_TERMINAL_LEVEL:", 1
+    )[0]
+    switch = phase1.split(
+        "case D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN:", 1
+    )[1].split(
+        "case D1L_UI_NODE_DETAIL_ACTION_NONE:", 1
+    )[0]
+    assert "d1l_meshcore_service_admin_logout();" in close
+    assert "strcmp(admin_status.fingerprint," in switch
+    assert "d1l_meshcore_service_admin_logout();" in switch
+
+
+def test_authenticated_server_management_is_available_on_device_and_bounded():
+    header = read("main/ui/ui_service_sheets.h")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    assert "D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND" in header
+    assert "D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE" in header
+    assert "admin_cli_textarea" in header
+    assert "d1l_ui_service_sheets_take_admin_cli" in header
+
+    assert "D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES" in sheets
+    assert "Authenticated server command" in sheets
+    assert "Read-only commands send immediately." in sheets
+    assert "Secure Input for passwords, secrets or private keys." in sheets
+    assert "status->cli_reply" in sheets
+    assert "D1L_MESHCORE_ADMIN_CLI_PENDING" in sheets
+
+    cli = phase1.split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND:", 1
+    )[1].split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT:", 1
+    )[0]
+    assert "d1l_ui_service_sheets_take_admin_cli(" in cli
+    assert "d1l_meshcore_admin_cli_command_sensitive(command)" in cli
+    assert "d1l_meshcore_admin_cli_command_read_only(command)" in cli
+    assert "d1l_meshcore_service_admin_request_cli(command, false)" in cli
+    assert "d1l_meshcore_service_admin_request_cli(command, true)" in cli
+    assert "Tap Confirm Command within 5 seconds" in cli
+    assert cli.count(
+        "d1l_meshcore_admin_secure_zero(command, sizeof(command));"
+    ) >= 4
+    assert "show_toast_text(command" not in cli
+
+
+def test_authenticated_room_console_receives_acks_and_posts_on_device():
+    header = read("main/ui/ui_service_sheets.h")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+    service = read("main/mesh/meshcore_service.c")
+
+    assert "D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND" in header
+    assert "admin_room_textarea" in header
+    assert "d1l_ui_service_sheets_take_admin_room_post" in header
+    assert "d1l_ui_service_sheets_admin_edit_has_text" in header
+    assert "Live room console" in sheets
+    assert "Guest permission: live room posts are read-only." in sheets
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_WRITE" in sheets
+    assert "lv_keyboard_get_textarea(" in sheets
+
+    room_send = phase1.split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND:", 1
+    )[1].split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE:", 1
+    )[0]
+    assert "d1l_ui_service_sheets_take_admin_room_post(" in room_send
+    assert "d1l_meshcore_service_admin_send_room_post(text)" in room_send
+    assert "d1l_meshcore_admin_secure_zero(text, sizeof(text));" in room_send
+    assert "build_admin_room_transcript(&status);" in phase1
+    assert "dm_stats.content_revision != s_admin_rendered_dm_revision" in phase1
+
+    dm_rx = service.split(
+        "static bool parse_rx_dm_packet", 1
+    )[1].split(
+        "typedef enum {\n    D1L_RX_ACK_UNMATCHED", 1
+    )[0]
+    for required in (
+        "D1L_MESHCORE_TXT_TYPE_SIGNED_PLAIN",
+        "d1l_meshcore_admin_runtime_capture_active(",
+        "d1l_meshcore_admin_runtime_note_room_activity(",
+        "wire_message_len",
+        "settings->identity_public_key",
+        "ack_wire_len",
+        'room_post ? "room_post" : "dm_text"',
+        "d1l_dm_store_append_rx_identity(",
+    ):
+        assert required in dm_rx
+    assert "room_post ? 4U : D1L_MESHCORE_DM_ACK_WIRE_BYTES" in dm_rx
+
+    public_send = service.split(
+        "esp_err_t d1l_meshcore_service_admin_send_room_post", 1
+    )[1].split(
+        "esp_err_t d1l_meshcore_service_admin_logout", 1
+    )[0]
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_WRITE" in public_send
+    assert "d1l_meshcore_service_send_dm(fingerprint, text)" in public_send
+
+
+def test_authenticated_server_data_is_available_and_paged_on_device():
+    header = read("main/ui/ui_service_sheets.h")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+    service_h = read("main/mesh/meshcore_service.h")
+    console = read("main/comms/usb_console.c")
+
+    for action in (
+        "D1L_UI_SERVICE_ACTION_ADMIN_TELEMETRY",
+        "D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS",
+        "D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT",
+        "D1L_UI_SERVICE_ACTION_ADMIN_ACCESS_LIST",
+    ):
+        assert action in header
+        assert action in phase1
+    for label in (
+        "Authenticated server data",
+        "Telemetry",
+        "Neighbours",
+        "Access List",
+        "Next Neighbours",
+    ):
+        assert label in sheets
+    assert "status->query_result.text" in sheets
+    assert "status->query_result.offset" in sheets
+    assert "status->query_result.total" in sheets
+    assert "d1l_meshcore_service_admin_request_query" in service_h
+    assert "d1l_meshcore_service_admin_request_query(query, offset)" in phase1
+    assert '"admin telemetry"' in console
+    assert "admin neighbours [offset]" in console
+    assert '"admin access-list"' in console
+
+
+def test_admin_edit_fields_are_not_destroyed_by_periodic_refresh():
+    phase1 = read("main/ui/ui_phase1.c")
+    timer = phase1.split(
+        "static void refresh_timer_cb", 1
+    )[1].split(
+        "static void create_top_bar", 1
+    )[0]
+    conditional = phase1.split(
+        "static void refresh_admin_service_sheet_if_changed", 1
+    )[1].split(
+        "static void service_sheets_action_handler", 1
+    )[0]
+    assert "refresh_admin_service_sheet_if_changed();" in timer
+    assert "(void)render_admin_service_sheet();" not in timer
+    assert "status.generation != s_admin_rendered_generation" in conditional
+    assert "mutation_expired || cli_expired" in conditional
+    assert "d1l_ui_service_sheets_admin_edit_has_text(" in conditional
+    assert "room_content_changed && !edit_in_progress" in conditional
+
+
 def test_logs_snapshot_uses_psram_instead_of_console_task_stack():
     console = read("main/comms/usb_console.c")
     function = console.split("static void cmd_logs(void)", 1)[1].split(

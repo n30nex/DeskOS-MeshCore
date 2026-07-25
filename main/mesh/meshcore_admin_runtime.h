@@ -31,8 +31,12 @@ typedef struct {
     d1l_meshcore_admin_binding_t binding;
     d1l_meshcore_admin_state_t state;
     uint32_t generation;
+    uint8_t permissions;
     uint64_t request_deadline_us;
     d1l_meshcore_admin_mutation_t pending_mutation;
+    d1l_meshcore_admin_query_t pending_query;
+    uint16_t pending_query_offset;
+    bool pending_cli_sensitive;
 } d1l_meshcore_admin_context_t;
 
 typedef struct {
@@ -46,14 +50,27 @@ typedef struct {
     uint32_t pending_tag;
     d1l_meshcore_admin_mutation_t pending_mutation;
     d1l_meshcore_admin_mutation_t last_mutation;
+    d1l_meshcore_admin_query_t pending_query;
+    uint16_t pending_query_offset;
     bool last_mutation_success;
+    bool cli_reply_valid;
+    bool cli_reply_redacted;
+    bool cli_reply_success;
+    char cli_reply[D1L_MESHCORE_ADMIN_MAX_CLI_REPLY_BYTES + 1U];
     bool status_valid;
     d1l_meshcore_admin_status_t status;
+    d1l_meshcore_admin_query_result_t query_result;
     uint32_t login_tx_queued;
     uint32_t status_tx_queued;
+    uint32_t query_tx_queued;
+    uint32_t query_accepted;
+    uint32_t query_rejected;
     uint32_t mutation_tx_queued;
     uint32_t mutation_accepted;
     uint32_t mutation_rejected;
+    uint32_t cli_tx_queued;
+    uint32_t cli_accepted;
+    uint32_t cli_rejected;
     uint32_t response_accepted;
     uint32_t response_unmatched;
     uint32_t response_malformed;
@@ -91,11 +108,25 @@ esp_err_t d1l_meshcore_admin_build_status_packet(
     const d1l_meshcore_route_selection_t *selection, uint32_t tag,
     uint32_t uniqueness, d1l_meshcore_admin_encrypt_fn encrypt,
     uint8_t *raw, size_t raw_size, uint8_t *out_len);
+esp_err_t d1l_meshcore_admin_build_query_packet(
+    const d1l_settings_t *settings,
+    const d1l_meshcore_admin_binding_t *binding,
+    const d1l_meshcore_route_selection_t *selection,
+    d1l_meshcore_admin_query_t query, uint16_t offset, uint32_t tag,
+    uint32_t uniqueness, d1l_meshcore_admin_encrypt_fn encrypt,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len);
 esp_err_t d1l_meshcore_admin_build_mutation_packet(
     const d1l_settings_t *settings,
     const d1l_meshcore_admin_binding_t *binding,
     const d1l_meshcore_route_selection_t *selection,
     d1l_meshcore_admin_mutation_t mutation, uint32_t timestamp,
+    d1l_meshcore_admin_encrypt_fn encrypt,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len);
+esp_err_t d1l_meshcore_admin_build_cli_packet(
+    const d1l_settings_t *settings,
+    const d1l_meshcore_admin_binding_t *binding,
+    const d1l_meshcore_route_selection_t *selection,
+    const char *command, uint32_t timestamp,
     d1l_meshcore_admin_encrypt_fn encrypt,
     uint8_t *raw, size_t raw_size, uint8_t *out_len);
 
@@ -113,16 +144,30 @@ bool d1l_meshcore_admin_runtime_capture_pending(
     d1l_meshcore_admin_context_t *out_context);
 bool d1l_meshcore_admin_runtime_capture_authenticated(
     d1l_meshcore_admin_context_t *out_context);
+bool d1l_meshcore_admin_runtime_capture_active(
+    d1l_meshcore_admin_context_t *out_context);
 bool d1l_meshcore_admin_runtime_capture_mutation_pending(
+    d1l_meshcore_admin_context_t *out_context);
+bool d1l_meshcore_admin_runtime_capture_cli_pending(
     d1l_meshcore_admin_context_t *out_context);
 bool d1l_meshcore_admin_runtime_validate_binding(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation);
+bool d1l_meshcore_admin_runtime_note_room_activity(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    uint64_t now_us);
 bool d1l_meshcore_admin_runtime_begin_status(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
     uint32_t tag, uint64_t now_us, uint32_t *out_request_generation);
 void d1l_meshcore_admin_runtime_note_status_tx(uint32_t request_generation,
                                                uint32_t tag,
                                                esp_err_t result);
+bool d1l_meshcore_admin_runtime_begin_query(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    d1l_meshcore_admin_query_t query, uint16_t offset, uint32_t tag,
+    uint64_t now_us, uint32_t *out_request_generation);
+void d1l_meshcore_admin_runtime_note_query_tx(
+    uint32_t request_generation, d1l_meshcore_admin_query_t query,
+    uint32_t tag, esp_err_t result);
 bool d1l_meshcore_admin_runtime_begin_mutation(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
     d1l_meshcore_admin_mutation_t mutation, uint32_t tag, uint64_t now_us,
@@ -130,8 +175,19 @@ bool d1l_meshcore_admin_runtime_begin_mutation(
 void d1l_meshcore_admin_runtime_note_mutation_tx(
     uint32_t request_generation, d1l_meshcore_admin_mutation_t mutation,
     uint32_t tag, esp_err_t result);
+bool d1l_meshcore_admin_runtime_begin_cli(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    uint32_t tag, bool sensitive, uint64_t now_us,
+    uint32_t *out_request_generation);
+void d1l_meshcore_admin_runtime_note_cli_tx(
+    uint32_t request_generation, uint32_t tag, esp_err_t result);
 d1l_meshcore_admin_response_result_t
 d1l_meshcore_admin_runtime_dispatch_mutation_response(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    uint32_t response_timestamp, const uint8_t *text, size_t text_len,
+    uint64_t now_us, bool *out_considered);
+d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_runtime_dispatch_cli_response(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
     uint32_t response_timestamp, const uint8_t *text, size_t text_len,
     uint64_t now_us, bool *out_considered);

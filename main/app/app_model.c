@@ -350,6 +350,11 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->observer_enabled = connectivity.observer_enabled_setting;
     snapshot->wifi_profile_saved = connectivity.wifi_profile_saved;
     snapshot->wifi_password_saved = connectivity.wifi_password_saved;
+    snapshot->wifi_profile_count = (uint8_t)
+        d1l_connectivity_wifi_profiles(
+            snapshot->wifi_profiles,
+            D1L_WIFI_PROFILE_CAPACITY,
+            &snapshot->wifi_active_profile);
     snapshot->wifi_scan_supported =
         d1l_release_feature_available(
             D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
@@ -876,6 +881,22 @@ esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
         fingerprint, out_token, out_token_size);
 }
 
+void d1l_app_model_contact_telemetry_snapshot(
+    const char *fingerprint,
+    d1l_meshcore_contact_telemetry_snapshot_t *out_snapshot)
+{
+    d1l_meshcore_service_contact_telemetry_snapshot(
+        fingerprint, out_snapshot);
+}
+
+esp_err_t d1l_app_model_reset_contact_route(const char *fingerprint)
+{
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return d1l_meshcore_service_reset_contact_route(fingerprint);
+}
+
 esp_err_t d1l_app_model_send_trace_contact(const char *fingerprint)
 {
     if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
@@ -1118,6 +1139,16 @@ esp_err_t d1l_app_model_wifi_disconnect(void)
 esp_err_t d1l_app_model_save_wifi_profile(const char *ssid, const char *password)
 {
     return d1l_connectivity_save_wifi_profile(ssid, password);
+}
+
+esp_err_t d1l_app_model_select_wifi_profile(uint8_t profile_index)
+{
+    return d1l_connectivity_select_wifi_profile(profile_index);
+}
+
+esp_err_t d1l_app_model_delete_wifi_profile(uint8_t profile_index)
+{
+    return d1l_connectivity_delete_wifi_profile(profile_index);
 }
 
 esp_err_t d1l_app_model_clear_wifi_profile(void)

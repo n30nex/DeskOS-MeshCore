@@ -1606,6 +1606,57 @@ esp_err_t d1l_contact_store_update_path_from_source(
     return ESP_OK;
 }
 
+esp_err_t d1l_contact_store_reset_path(
+    const char *fingerprint, d1l_contact_entry_t *out_entry)
+{
+    if (!fingerprint || fingerprint[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_loaded) {
+        const esp_err_t init_ret = d1l_contact_store_init();
+        if (init_ret != ESP_OK) {
+            return init_ret;
+        }
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    const int existing = find_index_by_fingerprint(fingerprint);
+    if (existing < 0) {
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_NOT_FOUND;
+    }
+    d1l_contact_entry_t *entry = &s_entries[(size_t)existing];
+    const d1l_meshcore_path_state_t empty_state = {0};
+    const bool already_clear =
+        !entry->out_path_valid && entry->out_path_len == 0U &&
+        memcmp(entry->out_path, (uint8_t[D1L_CONTACT_OUT_PATH_MAX]){0},
+               sizeof(entry->out_path)) == 0 &&
+        memcmp(&entry->out_path_state, &empty_state,
+               sizeof(entry->out_path_state)) == 0;
+    if (!already_clear) {
+        const esp_err_t revision_ret = reserve_sequenced_mutation_locked();
+        if (revision_ret != ESP_OK) {
+            d1l_store_lock_give(&s_store_lock);
+            return revision_ret;
+        }
+        const uint32_t now_ms =
+            (uint32_t)(esp_timer_get_time() / 1000ULL);
+        d1l_meshcore_path_state_reset(&entry->out_path_state);
+        entry->seq = s_next_seq++;
+        entry->updated_ms = now_ms;
+        entry->out_path_updated_ms = now_ms;
+        entry->out_path_valid = false;
+        entry->out_path_len = 0U;
+        memset(entry->out_path, 0, sizeof(entry->out_path));
+        mark_deferred_persistence_locked(now_ms);
+    }
+    if (out_entry) {
+        *out_entry = *entry;
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return ESP_OK;
+}
+
 esp_err_t d1l_contact_store_prepare_path_route(
     const char *fingerprint, uint32_t now_ms, d1l_contact_entry_t *out_entry,
     bool *out_expired)

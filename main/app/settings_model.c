@@ -30,12 +30,8 @@ _Static_assert(D1L_IDENTITY_PUBLIC_KEY_LEN == D1L_IDENTITY_STATE_PUBLIC_KEY_LEN,
                "identity public key lengths must match");
 _Static_assert(D1L_IDENTITY_PRIVATE_KEY_LEN == D1L_IDENTITY_STATE_PRIVATE_KEY_LEN,
                "identity private key lengths must match");
-_Static_assert(offsetof(d1l_settings_t, wifi_password) <
-                   offsetof(d1l_settings_t, frequency_hz),
-               "public settings copy requires password before radio fields");
-_Static_assert(offsetof(d1l_settings_t, frequency_hz) <
-                   offsetof(d1l_settings_t, identity_private_key),
-               "public settings copy requires private key after public fields");
+_Static_assert(D1L_WIFI_PROFILE_CAPACITY > 1U,
+               "multi-profile Wi-Fi storage must retain more than one network");
 
 static bool identity_bytes_all_zero(const uint8_t *bytes, size_t length)
 {
@@ -78,17 +74,16 @@ static void copy_public_settings(d1l_settings_t *destination,
     if (!destination || !source) {
         return;
     }
-    const size_t password_offset =
-        offsetof(d1l_settings_t, wifi_password);
-    const size_t after_password_offset =
-        offsetof(d1l_settings_t, frequency_hz);
-    const size_t private_key_offset =
-        offsetof(d1l_settings_t, identity_private_key);
-    wipe_sensitive_bytes(destination, sizeof(*destination));
-    memcpy(destination, source, password_offset);
-    memcpy((uint8_t *)destination + after_password_offset,
-           (const uint8_t *)source + after_password_offset,
-           private_key_offset - after_password_offset);
+    *destination = *source;
+    wipe_sensitive_bytes(destination->wifi_password,
+                         sizeof(destination->wifi_password));
+    for (size_t i = 0U; i < D1L_WIFI_PROFILE_CAPACITY; ++i) {
+        wipe_sensitive_bytes(
+            destination->wifi_profiles[i].password,
+            sizeof(destination->wifi_profiles[i].password));
+    }
+    wipe_sensitive_bytes(destination->identity_private_key,
+                         sizeof(destination->identity_private_key));
 }
 
 static void wipe_derived_identity_key(
@@ -152,6 +147,39 @@ const char *d1l_identity_state_name(d1l_identity_state_t state)
             return "inconsistent";
     }
 }
+
+typedef struct {
+    uint32_t schema_version;
+    char node_name[D1L_NODE_NAME_LEN];
+    uint8_t role;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool high_contrast;
+    bool night_mode;
+    bool onboarding_complete;
+    bool wifi_profile_saved;
+    uint8_t path_hash_bytes;
+    char wifi_ssid[D1L_WIFI_SSID_LEN];
+    char wifi_password[D1L_WIFI_PASSWORD_LEN];
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+    uint8_t tcxo_mode;
+    bool map_location_set;
+    int32_t map_lat_e7;
+    int32_t map_lon_e7;
+    uint8_t map_location_source;
+    uint8_t map_tile_zoom;
+    uint16_t timezone_schema_version;
+    int16_t timezone_offset_minutes;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
+} d1l_settings_v9_t;
 
 typedef struct {
     uint32_t schema_version;
@@ -388,6 +416,142 @@ static void zero_text_tail(char *text, size_t size, bool sensitive)
     }
 }
 
+static void reconcile_wifi_profiles(d1l_settings_t *settings)
+{
+    if (!settings) {
+        return;
+    }
+
+    settings->wifi_ssid[D1L_WIFI_SSID_LEN - 1U] = '\0';
+    settings->wifi_password[D1L_WIFI_PASSWORD_LEN - 1U] = '\0';
+    sanitize_printable(
+        settings->wifi_ssid, sizeof(settings->wifi_ssid), false);
+    sanitize_printable(
+        settings->wifi_password, sizeof(settings->wifi_password), true);
+    settings->wifi_profile_saved =
+        settings->wifi_profile_saved ? true : false;
+    if (!settings->wifi_profile_saved ||
+        settings->wifi_ssid[0] == '\0') {
+        settings->wifi_profile_saved = false;
+        memset(settings->wifi_ssid, 0, sizeof(settings->wifi_ssid));
+        wipe_sensitive_bytes(
+            settings->wifi_password, sizeof(settings->wifi_password));
+    } else {
+        zero_text_tail(
+            settings->wifi_ssid, sizeof(settings->wifi_ssid), false);
+        zero_text_tail(
+            settings->wifi_password,
+            sizeof(settings->wifi_password), true);
+    }
+
+    for (size_t i = 0U; i < D1L_WIFI_PROFILE_CAPACITY; ++i) {
+        settings->wifi_profiles[i].ssid[
+            D1L_WIFI_SSID_LEN - 1U] = '\0';
+        settings->wifi_profiles[i].password[
+            D1L_WIFI_PASSWORD_LEN - 1U] = '\0';
+    }
+    char preferred_ssid[D1L_WIFI_SSID_LEN] = {0};
+    if (settings->wifi_active_profile < D1L_WIFI_PROFILE_CAPACITY &&
+        settings->wifi_profiles[
+            settings->wifi_active_profile].saved) {
+        snprintf(
+            preferred_ssid, sizeof(preferred_ssid), "%s",
+            settings->wifi_profiles[
+                settings->wifi_active_profile].ssid);
+    } else if (settings->wifi_profile_saved) {
+        snprintf(
+            preferred_ssid, sizeof(preferred_ssid), "%s",
+            settings->wifi_ssid);
+    }
+
+    d1l_wifi_profile_t compact[D1L_WIFI_PROFILE_CAPACITY] = {0};
+    size_t compact_count = 0U;
+    for (size_t i = 0U; i < D1L_WIFI_PROFILE_CAPACITY; ++i) {
+        d1l_wifi_profile_t *profile = &settings->wifi_profiles[i];
+        profile->saved = profile->saved ? true : false;
+        profile->ssid[D1L_WIFI_SSID_LEN - 1U] = '\0';
+        profile->password[D1L_WIFI_PASSWORD_LEN - 1U] = '\0';
+        sanitize_printable(profile->ssid, sizeof(profile->ssid), false);
+        sanitize_printable(
+            profile->password, sizeof(profile->password), true);
+        if (!profile->saved || profile->ssid[0] == '\0') {
+            continue;
+        }
+        bool duplicate = false;
+        for (size_t existing = 0U;
+             existing < compact_count; ++existing) {
+            if (strcmp(compact[existing].ssid, profile->ssid) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate || compact_count >= D1L_WIFI_PROFILE_CAPACITY) {
+            continue;
+        }
+        compact[compact_count] = *profile;
+        compact[compact_count].saved = true;
+        zero_text_tail(
+            compact[compact_count].ssid,
+            sizeof(compact[compact_count].ssid), false);
+        zero_text_tail(
+            compact[compact_count].password,
+            sizeof(compact[compact_count].password), true);
+        compact_count++;
+    }
+    if (compact_count == 0U && settings->wifi_profile_saved) {
+        compact[0].saved = true;
+        snprintf(
+            compact[0].ssid, sizeof(compact[0].ssid), "%s",
+            settings->wifi_ssid);
+        snprintf(
+            compact[0].password, sizeof(compact[0].password), "%s",
+            settings->wifi_password);
+        compact_count = 1U;
+    }
+
+    size_t active = 0U;
+    if (preferred_ssid[0] != '\0') {
+        for (size_t i = 0U; i < compact_count; ++i) {
+            if (strcmp(compact[i].ssid, preferred_ssid) == 0) {
+                active = i;
+                break;
+            }
+        }
+    }
+    wipe_sensitive_bytes(
+        settings->wifi_profiles, sizeof(settings->wifi_profiles));
+    if (compact_count > 0U) {
+        memcpy(
+            settings->wifi_profiles, compact,
+            compact_count * sizeof(compact[0]));
+        settings->wifi_profile_count = (uint8_t)compact_count;
+        settings->wifi_active_profile = (uint8_t)active;
+        settings->wifi_profile_saved = true;
+        memset(settings->wifi_ssid, 0, sizeof(settings->wifi_ssid));
+        snprintf(
+            settings->wifi_ssid, sizeof(settings->wifi_ssid), "%s",
+            compact[active].ssid);
+        wipe_sensitive_bytes(
+            settings->wifi_password, sizeof(settings->wifi_password));
+        snprintf(
+            settings->wifi_password, sizeof(settings->wifi_password), "%s",
+            compact[active].password);
+        zero_text_tail(
+            settings->wifi_ssid, sizeof(settings->wifi_ssid), false);
+        zero_text_tail(
+            settings->wifi_password,
+            sizeof(settings->wifi_password), true);
+    } else {
+        settings->wifi_profile_count = 0U;
+        settings->wifi_active_profile = 0U;
+        settings->wifi_profile_saved = false;
+        memset(settings->wifi_ssid, 0, sizeof(settings->wifi_ssid));
+        wipe_sensitive_bytes(
+            settings->wifi_password, sizeof(settings->wifi_password));
+    }
+    wipe_sensitive_bytes(compact, sizeof(compact));
+}
+
 void d1l_settings_defaults(d1l_settings_t *settings)
 {
     if (settings == NULL) {
@@ -407,6 +571,8 @@ void d1l_settings_defaults(d1l_settings_t *settings)
     settings->path_hash_bytes = 1;
     settings->wifi_ssid[0] = '\0';
     settings->wifi_password[0] = '\0';
+    settings->wifi_profile_count = 0U;
+    settings->wifi_active_profile = 0U;
     settings->frequency_hz = D1L_RADIO_FREQ_HZ;
     settings->bandwidth_tenths_khz = bandwidth_to_tenths(D1L_RADIO_BW_KHZ);
     settings->spreading_factor = D1L_RADIO_SF;
@@ -441,21 +607,7 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
         snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk");
     }
     sanitize_printable(settings->node_name, sizeof(settings->node_name), false);
-    settings->wifi_ssid[sizeof(settings->wifi_ssid) - 1U] = '\0';
-    settings->wifi_password[sizeof(settings->wifi_password) - 1U] = '\0';
-    sanitize_printable(settings->wifi_ssid, sizeof(settings->wifi_ssid), false);
-    sanitize_printable(settings->wifi_password, sizeof(settings->wifi_password), true);
-    settings->wifi_profile_saved = settings->wifi_profile_saved ? true : false;
-    if (!settings->wifi_profile_saved || settings->wifi_ssid[0] == '\0') {
-        settings->wifi_profile_saved = false;
-        memset(settings->wifi_ssid, 0, sizeof(settings->wifi_ssid));
-        wipe_sensitive_bytes(settings->wifi_password,
-                             sizeof(settings->wifi_password));
-    } else {
-        zero_text_tail(settings->wifi_ssid, sizeof(settings->wifi_ssid), false);
-        zero_text_tail(settings->wifi_password,
-                       sizeof(settings->wifi_password), true);
-    }
+    reconcile_wifi_profiles(settings);
     if (settings->role != D1L_ROLE_DESK_COMPANION) {
         settings->role = D1L_ROLE_DESK_COMPANION;
     }
@@ -687,6 +839,58 @@ static void migrate_v7_settings(d1l_settings_t *dest, const d1l_settings_v7_t *s
     d1l_settings_sanitize(dest);
 }
 
+static void migrate_v9_settings(d1l_settings_t *dest,
+                                const d1l_settings_v9_t *src)
+{
+    if (!dest) {
+        return;
+    }
+    d1l_settings_defaults(dest);
+    if (!src || src->schema_version != 9U) {
+        return;
+    }
+    memcpy(dest->node_name, src->node_name, sizeof(dest->node_name));
+    dest->node_name[D1L_NODE_NAME_LEN - 1U] = '\0';
+    dest->role = src->role;
+    dest->wifi_enabled = src->wifi_enabled;
+    dest->ble_companion_enabled = src->ble_companion_enabled;
+    dest->observer_enabled = src->observer_enabled;
+    dest->high_contrast = src->high_contrast;
+    dest->night_mode = src->night_mode;
+    dest->onboarding_complete = src->onboarding_complete;
+    dest->wifi_profile_saved = src->wifi_profile_saved;
+    memcpy(dest->wifi_ssid, src->wifi_ssid, sizeof(dest->wifi_ssid));
+    dest->wifi_ssid[D1L_WIFI_SSID_LEN - 1U] = '\0';
+    memcpy(
+        dest->wifi_password, src->wifi_password,
+        sizeof(dest->wifi_password));
+    dest->wifi_password[D1L_WIFI_PASSWORD_LEN - 1U] = '\0';
+    dest->path_hash_bytes = src->path_hash_bytes;
+    dest->frequency_hz = src->frequency_hz;
+    dest->bandwidth_tenths_khz = src->bandwidth_tenths_khz;
+    dest->spreading_factor = src->spreading_factor;
+    dest->coding_rate = src->coding_rate;
+    dest->tx_power_dbm = src->tx_power_dbm;
+    dest->rx_boost = src->rx_boost;
+    dest->tcxo_mode = src->tcxo_mode;
+    dest->map_location_set = src->map_location_set;
+    dest->map_lat_e7 = src->map_lat_e7;
+    dest->map_lon_e7 = src->map_lon_e7;
+    dest->map_location_source = src->map_location_source;
+    dest->map_tile_zoom = src->map_tile_zoom;
+    dest->timezone_schema_version = src->timezone_schema_version;
+    dest->timezone_offset_minutes = src->timezone_offset_minutes;
+    dest->identity_ready = src->identity_ready;
+    memcpy(
+        dest->identity_public_key, src->identity_public_key,
+        sizeof(dest->identity_public_key));
+    memcpy(
+        dest->identity_private_key, src->identity_private_key,
+        sizeof(dest->identity_private_key));
+    dest->schema_version = D1L_SETTINGS_SCHEMA_VERSION;
+    d1l_settings_sanitize(dest);
+}
+
 static void migrate_v8_settings(d1l_settings_t *dest,
                                 const d1l_settings_v8_t *src)
 {
@@ -867,6 +1071,17 @@ static bool migrate_legacy_settings_blob(d1l_settings_t *destination,
         }
         memcpy(destination, blob, sizeof(*destination));
         d1l_settings_sanitize(destination);
+        return true;
+    case 9U:
+        if (blob_length != sizeof(d1l_settings_v9_t)) {
+            return false;
+        }
+        {
+            d1l_settings_v9_t legacy = {0};
+            memcpy(&legacy, blob, sizeof(legacy));
+            migrate_v9_settings(destination, &legacy);
+            wipe_sensitive_bytes(&legacy, sizeof(legacy));
+        }
         return true;
     case 8U:
         if (blob_length != sizeof(d1l_settings_v8_t)) {
@@ -1359,6 +1574,8 @@ esp_err_t d1l_settings_wifi_secret_snapshot(
     if (s_loaded) {
         secret->wifi_enabled = s_current.wifi_enabled;
         secret->wifi_profile_saved = s_current.wifi_profile_saved;
+        secret->wifi_profile_count = s_current.wifi_profile_count;
+        secret->wifi_active_profile = s_current.wifi_active_profile;
         memcpy(secret->wifi_ssid, s_current.wifi_ssid,
                sizeof(secret->wifi_ssid));
         memcpy(secret->wifi_password, s_current.wifi_password,
@@ -1377,6 +1594,47 @@ bool d1l_settings_wifi_password_saved(void)
                        s_current.wifi_password[0] != '\0';
     settings_owner_give();
     return saved;
+}
+
+size_t d1l_settings_wifi_profiles_snapshot(
+    d1l_wifi_profile_info_t *out_profiles, size_t max_profiles,
+    uint8_t *out_active_profile)
+{
+    if (out_active_profile) {
+        *out_active_profile = 0U;
+    }
+    if (!out_profiles || max_profiles == 0U) {
+        return 0U;
+    }
+    const size_t clear_count =
+        max_profiles < D1L_WIFI_PROFILE_CAPACITY ?
+            max_profiles : D1L_WIFI_PROFILE_CAPACITY;
+    memset(out_profiles, 0, clear_count * sizeof(out_profiles[0]));
+    if (!settings_owner_take()) {
+        return 0U;
+    }
+    size_t copied = 0U;
+    if (s_loaded) {
+        const size_t limit =
+            s_current.wifi_profile_count < max_profiles ?
+                s_current.wifi_profile_count : max_profiles;
+        for (size_t i = 0U; i < limit; ++i) {
+            out_profiles[i].saved =
+                s_current.wifi_profiles[i].saved;
+            out_profiles[i].password_saved =
+                s_current.wifi_profiles[i].password[0] != '\0';
+            snprintf(
+                out_profiles[i].ssid,
+                sizeof(out_profiles[i].ssid), "%s",
+                s_current.wifi_profiles[i].ssid);
+            copied++;
+        }
+        if (out_active_profile) {
+            *out_active_profile = s_current.wifi_active_profile;
+        }
+    }
+    settings_owner_give();
+    return copied;
 }
 
 d1l_identity_state_t d1l_settings_persisted_identity_state(void)
@@ -1495,17 +1753,105 @@ esp_err_t d1l_settings_save_wifi_profile(const char *ssid, const char *password)
         return ESP_ERR_NO_MEM;
     }
     d1l_settings_t settings = s_current;
-    memset(settings.wifi_ssid, 0, sizeof(settings.wifi_ssid));
-    snprintf(settings.wifi_ssid, sizeof(settings.wifi_ssid), "%s", ssid);
-    if (password) {
-        wipe_sensitive_bytes(settings.wifi_password,
-                             sizeof(settings.wifi_password));
-        snprintf(settings.wifi_password, sizeof(settings.wifi_password), "%s", password);
-    } else {
-        zero_text_tail(settings.wifi_password,
-                       sizeof(settings.wifi_password), true);
+    size_t profile_index = settings.wifi_profile_count;
+    bool existing = false;
+    for (size_t i = 0U; i < settings.wifi_profile_count; ++i) {
+        if (strcmp(settings.wifi_profiles[i].ssid, ssid) == 0) {
+            profile_index = i;
+            existing = true;
+            break;
+        }
     }
+    if (!existing &&
+        settings.wifi_profile_count >= D1L_WIFI_PROFILE_CAPACITY) {
+        wipe_sensitive_bytes(&settings, sizeof(settings));
+        settings_owner_give();
+        return ESP_ERR_NO_MEM;
+    }
+    d1l_wifi_profile_t *profile =
+        &settings.wifi_profiles[profile_index];
+    if (!existing) {
+        wipe_sensitive_bytes(profile, sizeof(*profile));
+        settings.wifi_profile_count++;
+    }
+    profile->saved = true;
+    memset(profile->ssid, 0, sizeof(profile->ssid));
+    snprintf(profile->ssid, sizeof(profile->ssid), "%s", ssid);
+    if (password) {
+        wipe_sensitive_bytes(
+            profile->password, sizeof(profile->password));
+        snprintf(
+            profile->password, sizeof(profile->password), "%s",
+            password);
+    } else if (!existing) {
+        wipe_sensitive_bytes(
+            profile->password, sizeof(profile->password));
+    }
+    settings.wifi_active_profile = (uint8_t)profile_index;
     settings.wifi_profile_saved = true;
+    const esp_err_t ret = settings_save_locked(&settings);
+    wipe_sensitive_bytes(&settings, sizeof(settings));
+    settings_owner_give();
+    return ret;
+}
+
+esp_err_t d1l_settings_select_wifi_profile(uint8_t profile_index)
+{
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (!s_loaded ||
+        profile_index >= s_current.wifi_profile_count ||
+        !s_current.wifi_profiles[profile_index].saved) {
+        const esp_err_t ret =
+            s_loaded ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_STATE;
+        settings_owner_give();
+        return ret;
+    }
+    d1l_settings_t settings = s_current;
+    settings.wifi_active_profile = profile_index;
+    const esp_err_t ret = settings_save_locked(&settings);
+    wipe_sensitive_bytes(&settings, sizeof(settings));
+    settings_owner_give();
+    return ret;
+}
+
+esp_err_t d1l_settings_delete_wifi_profile(uint8_t profile_index)
+{
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (!s_loaded ||
+        profile_index >= s_current.wifi_profile_count) {
+        const esp_err_t ret =
+            s_loaded ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_STATE;
+        settings_owner_give();
+        return ret;
+    }
+    d1l_settings_t settings = s_current;
+    const uint8_t previous_active = settings.wifi_active_profile;
+    for (size_t i = profile_index;
+         i + 1U < settings.wifi_profile_count; ++i) {
+        settings.wifi_profiles[i] =
+            settings.wifi_profiles[i + 1U];
+    }
+    wipe_sensitive_bytes(
+        &settings.wifi_profiles[settings.wifi_profile_count - 1U],
+        sizeof(settings.wifi_profiles[0]));
+    settings.wifi_profile_count--;
+    if (settings.wifi_profile_count == 0U) {
+        settings.wifi_active_profile = 0U;
+        settings.wifi_profile_saved = false;
+        settings.wifi_enabled = false;
+    } else if (previous_active > profile_index) {
+        settings.wifi_active_profile =
+            (uint8_t)(previous_active - 1U);
+    } else if (previous_active == profile_index) {
+        settings.wifi_active_profile =
+            profile_index < settings.wifi_profile_count ?
+                profile_index :
+                (uint8_t)(settings.wifi_profile_count - 1U);
+    }
     const esp_err_t ret = settings_save_locked(&settings);
     wipe_sensitive_bytes(&settings, sizeof(settings));
     settings_owner_give();
@@ -1522,6 +1868,10 @@ esp_err_t d1l_settings_clear_wifi_profile(void)
     memset(settings.wifi_ssid, 0, sizeof(settings.wifi_ssid));
     wipe_sensitive_bytes(settings.wifi_password,
                          sizeof(settings.wifi_password));
+    settings.wifi_profile_count = 0U;
+    settings.wifi_active_profile = 0U;
+    wipe_sensitive_bytes(
+        settings.wifi_profiles, sizeof(settings.wifi_profiles));
     settings.wifi_enabled = false;
     const esp_err_t ret = settings_save_locked(&settings);
     wipe_sensitive_bytes(&settings, sizeof(settings));

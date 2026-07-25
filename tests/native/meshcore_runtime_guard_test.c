@@ -149,7 +149,11 @@ static bool request_password_clear(
     return request && !request->admin_password_present &&
            request->admin_password_len == 0U &&
            bytes_zero(request->admin_password,
-                      sizeof(request->admin_password));
+                      sizeof(request->admin_password)) &&
+           !request->admin_cli_present &&
+           request->admin_cli_len == 0U &&
+           bytes_zero(request->admin_cli,
+                      sizeof(request->admin_cli));
 }
 
 static bool admin_test_enqueue(void *context, const void *command)
@@ -250,6 +254,70 @@ static void finish_admitted_admin_login(
     assert(d1l_mesh_command_request_complete(request, request_id));
     assert(d1l_mesh_command_request_release(
         request, request_id, D1L_MESH_REQUEST_COMPLETED));
+}
+
+static void publish_admin_cli(d1l_mesh_command_request_t *request,
+                              uint32_t request_id,
+                              const char *command)
+{
+    assert(request && command);
+    assert(d1l_mesh_command_request_claim(request, request_id));
+    assert(request_password_clear(request));
+    assert(d1l_mesh_command_request_publish(request, request_id));
+    assert(d1l_mesh_command_request_store_admin_cli(
+        request, request_id, command, strlen(command)));
+}
+
+static void finish_admitted_admin_cli(
+    d1l_mesh_command_request_t *request, uint32_t request_id,
+    const char *expected_command)
+{
+    char owner_command[D1L_MESH_COMMAND_ADMIN_CLI_CAPACITY] = {0};
+    size_t owner_command_len = 0U;
+    assert(d1l_mesh_command_request_admit(request, request_id));
+    assert(d1l_mesh_command_request_take_admin_cli(
+        request, request_id, owner_command, sizeof(owner_command),
+        &owner_command_len));
+    assert(owner_command_len == strlen(expected_command));
+    assert(strcmp(owner_command, expected_command) == 0);
+    assert(request_password_clear(request));
+    d1l_mesh_command_secure_zero(owner_command, sizeof(owner_command));
+    assert(bytes_zero(owner_command, sizeof(owner_command)));
+    assert(d1l_mesh_command_request_complete(request, request_id));
+    assert(d1l_mesh_command_request_release(
+        request, request_id, D1L_MESH_REQUEST_COMPLETED));
+}
+
+static void test_admin_cli_guard_is_bounded_and_generation_safe(void)
+{
+    d1l_mesh_command_request_t cancelled = {0};
+    publish_admin_cli(
+        &cancelled, 91U, "set guest.password should-never-survive");
+    assert(d1l_mesh_command_request_cancel_and_release(&cancelled, 91U));
+    assert(request_password_clear(&cancelled));
+    assert(!d1l_mesh_command_request_admit(&cancelled, 91U));
+
+    d1l_mesh_command_request_t queued = {0};
+    admin_test_queue_t accepting_queue = {.accept = true};
+    const uint32_t dummy_command = 0xC11U;
+    publish_admin_cli(&queued, 92U, "neighbors");
+    assert(d1l_mesh_command_request_enqueue(
+        &queued, 92U, admin_test_enqueue, &accepting_queue,
+        &dummy_command) == D1L_MESH_COMMAND_ENQUEUE_QUEUED);
+    finish_admitted_admin_cli(&queued, 92U, "neighbors");
+
+    d1l_mesh_command_request_t reused = {0};
+    publish_admin_cli(&reused, 93U, "old-command");
+    assert(d1l_mesh_command_request_cancel_and_release(&reused, 93U));
+    publish_admin_cli(&reused, 94U, "set name current");
+    char stale_output[D1L_MESH_COMMAND_ADMIN_CLI_CAPACITY] = {0};
+    size_t stale_len = 0U;
+    assert(!d1l_mesh_command_request_admit(&reused, 93U));
+    assert(!d1l_mesh_command_request_take_admin_cli(
+        &reused, 93U, stale_output, sizeof(stale_output), &stale_len));
+    assert(reused.admin_cli_present);
+    assert(strcmp(reused.admin_cli, "set name current") == 0);
+    finish_admitted_admin_cli(&reused, 94U, "set name current");
 }
 
 static void test_admin_cancel_and_expiry_have_no_side_effects(void)
@@ -1279,6 +1347,7 @@ int main(void)
     test_admission_wins_timeout_and_requires_exact_completion();
     test_expiry_and_stale_reply_cannot_cross_slot_generations();
     test_atomic_identity_state_tuple_blocks_slot_reuse_aba();
+    test_admin_cli_guard_is_bounded_and_generation_safe();
     test_admin_cancel_and_expiry_have_no_side_effects();
     test_admin_queue_saturation_and_admission_execute_production_guard();
     test_admin_slot_reuse_rejects_stale_generation_without_wipe();

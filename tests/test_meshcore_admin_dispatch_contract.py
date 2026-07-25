@@ -44,10 +44,51 @@ def test_admin_protocol_and_runtime_are_separate_production_modules() -> None:
     assert "d1l_meshcore_admin_timeout(session);" in dispatch_c
     assert "role != D1L_MESHCORE_ADMIN_ROLE_REPEATER" in dispatch_c
     assert "role != D1L_MESHCORE_ADMIN_ROLE_ROOM" in dispatch_c
-    assert "D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR" in dispatch_h
-    assert "D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR" in runtime
+    assert "current request timestamp as its sync cursor" in dispatch_h
+    assert (
+        "role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?\n"
+        "                timestamp : 0U"
+    ) in runtime
     assert "role == D1L_MESHCORE_ADMIN_ROLE_ROOM && password_len == 0U" in \
         runtime
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_GUEST" in dispatch_c
+
+
+def test_admin_login_permissions_and_binary_queries_match_upstream() -> None:
+    dispatch_h = read("main/mesh/meshcore_admin_dispatch.h")
+    dispatch = read("main/mesh/meshcore_admin_dispatch.c")
+    runtime = read("main/mesh/meshcore_admin_runtime.c")
+    service = read("main/mesh/meshcore_service.c")
+
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_GUEST 0x00U" in dispatch_h
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_READ_ONLY 0x01U" in dispatch_h
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_WRITE 0x02U" in dispatch_h
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_ADMIN 0x03U" in dispatch_h
+    login_accept = body(
+        dispatch,
+        "d1l_meshcore_admin_accept_login_response",
+        "bool d1l_meshcore_admin_begin_status_request",
+    )
+    assert "expected_legacy_role" in login_accept
+    assert "permission_role == D1L_MESHCORE_ADMIN_PERMISSION_GUEST ? 2U" in \
+        login_accept
+
+    for constant in (
+        "D1L_MESHCORE_ADMIN_REQUEST_GET_TELEMETRY 0x03U",
+        "D1L_MESHCORE_ADMIN_REQUEST_GET_ACCESS_LIST 0x05U",
+        "D1L_MESHCORE_ADMIN_REQUEST_GET_NEIGHBOURS 0x06U",
+        "D1L_MESHCORE_ADMIN_NEIGHBOUR_PAGE_COUNT 10U",
+        "D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES 4U",
+    ):
+        assert constant in dispatch_h
+    assert "d1l_meshcore_admin_encode_query_request" in dispatch
+    assert "parse_telemetry_query" in dispatch
+    assert "parse_access_list_query" in dispatch
+    assert "parse_neighbours_query" in dispatch
+    assert "d1l_meshcore_admin_build_query_packet" in runtime
+    assert "d1l_meshcore_admin_runtime_begin_query" in runtime
+    assert "meshcore_service_handle_admin_query" in service
+    assert "d1l_meshcore_service_admin_request_query" in service
 
 
 def test_admin_mutations_are_exactly_allowlisted_and_locally_confirmed() -> None:
@@ -108,7 +149,7 @@ def test_runtime_snapshot_redacts_all_authority_material() -> None:
     )
     copy_context = body(
         runtime_c,
-        "static bool copy_context_locked",
+        "static bool copy_session_context_locked",
         "static bool binding_matches_locked",
     )
     capture_pending = body(
@@ -335,6 +376,7 @@ def test_admin_commands_and_secrets_are_owned_by_the_mesh_runtime_task() -> None
     for command_name in (
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN",
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_CLI",
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGOUT",
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_RESPONSE",
     ):
@@ -364,6 +406,8 @@ def test_admin_commands_and_secrets_are_owned_by_the_mesh_runtime_task() -> None
     assert "admin_password[D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY]" in \
         command_guard
     assert "admin_password_present" in command_guard
+    assert "admin_cli[D1L_MESH_COMMAND_ADMIN_CLI_CAPACITY]" in command_guard
+    assert "admin_cli_present" in command_guard
     assert '#include "mesh/meshcore_command_guard.h"' in service
     assert "d1l_meshcore_admin_runtime_init();" in task
     assert "d1l_meshcore_admin_runtime_init();" not in body(
@@ -395,6 +439,16 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
         "static bool meshcore_request_take_admin_password",
         "static esp_err_t meshcore_request_consume",
     )
+    cli_store = body(
+        service,
+        "static esp_err_t meshcore_request_store_admin_cli",
+        "static bool meshcore_request_take_admin_cli",
+    )
+    cli_take = body(
+        service,
+        "static bool meshcore_request_take_admin_cli",
+        "static esp_err_t meshcore_request_consume",
+    )
     wait = body(
         service,
         "static esp_err_t meshcore_request_wait",
@@ -422,10 +476,17 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
         "static esp_err_t meshcore_service_handle_admin_login",
         "static esp_err_t meshcore_service_handle_admin_request_status",
     )
+    cli_handler = body(
+        service,
+        "static esp_err_t meshcore_service_handle_admin_cli",
+        "static esp_err_t meshcore_service_handle_admin_logout",
+    )
 
     assert "password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES" in secret_store
     assert "d1l_mesh_command_request_store_admin_password" in secret_store
     assert "d1l_mesh_command_request_take_admin_password" in secret_take
+    assert "d1l_mesh_command_request_store_admin_cli" in cli_store
+    assert "d1l_mesh_command_request_take_admin_cli" in cli_take
     assert "d1l_mesh_command_request_expire" in admit
     assert "d1l_mesh_command_request_admit" in admit
     assert "d1l_mesh_request_guard_release(" not in admit
@@ -440,6 +501,14 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
     assert "secure_zero_bytes(password, sizeof(password));" in login_handler
     assert "d1l_meshcore_admin_binding_wipe(&binding);" in login_handler
     assert "secure_zero_bytes(&raw_cmd, sizeof(raw_cmd));" in login_handler
+    assert "meshcore_request_take_admin_cli" in cli_handler
+    assert cli_handler.index("meshcore_request_take_admin_cli") < \
+        cli_handler.index("d1l_settings_next_mesh_timestamp")
+    assert cli_handler.index("secure_zero_bytes(command, sizeof(command));") < \
+        cli_handler.index("d1l_meshcore_admin_runtime_begin_cli")
+    assert "d1l_meshcore_admin_build_cli_packet" in cli_handler
+    assert "d1l_meshcore_admin_runtime_note_cli_tx" in cli_handler
+    assert "append_packet_log" not in cli_handler
 
     cancel_guard = body(
         command_guard,
@@ -462,12 +531,19 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
         "static inline bool d1l_mesh_command_sync_wait_allowed",
     )
     assert cancel_guard.index("D1L_MESH_REQUEST_CALLER_CANCELLED") < \
-        cancel_guard.index("d1l_mesh_command_request_wipe_admin_password") < \
+        cancel_guard.index("d1l_mesh_command_request_wipe_admin_authority") < \
         cancel_guard.index("d1l_mesh_request_guard_release")
     assert expire_guard.index("D1L_MESH_REQUEST_OWNER_EXPIRED") < \
-        expire_guard.index("d1l_mesh_command_request_wipe_admin_password")
+        expire_guard.index("d1l_mesh_command_request_wipe_admin_authority")
     assert take_guard.index("memcpy(out_password") < \
-        take_guard.index("d1l_mesh_command_request_wipe_admin_password")
+        take_guard.index("d1l_mesh_command_request_wipe_admin_authority")
+    cli_take_guard = body(
+        command_guard,
+        "static inline bool d1l_mesh_command_request_take_admin_cli",
+        "static inline bool d1l_mesh_command_request_cancel_and_release",
+    )
+    assert cli_take_guard.index("memcpy(out_command") < \
+        cli_take_guard.index("d1l_mesh_command_request_wipe_admin_authority")
     assert "d1l_mesh_command_request_cancel_and_release" in queue_guard
 
 
