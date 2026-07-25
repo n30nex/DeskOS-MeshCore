@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_random.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
@@ -7213,7 +7214,15 @@ static void print_event_log_entry_json(const d1l_event_log_entry_t *entry)
 
 static void cmd_logs(void)
 {
-    d1l_event_log_entry_t entries[D1L_EVENT_LOG_CAPACITY] = {0};
+    d1l_event_log_entry_t *entries = heap_caps_calloc(
+        D1L_EVENT_LOG_CAPACITY,
+        sizeof(*entries),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!entries) {
+        err_result("logs", "ESP_ERR_NO_MEM",
+                   "event log snapshot buffer unavailable");
+        return;
+    }
     const size_t copied = d1l_event_log_copy_recent(
         entries, D1L_EVENT_LOG_CAPACITY);
     const d1l_event_log_status_t status = d1l_event_log_status();
@@ -7230,6 +7239,7 @@ static void cmd_logs(void)
         print_event_log_entry_json(&entries[i]);
     }
     printf("],\"arbitrary_shell\":false,\"secrets_included\":false}\n");
+    heap_caps_free(entries);
 }
 
 static void cmd_logs_clear(const char *line)

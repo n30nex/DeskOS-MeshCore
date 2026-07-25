@@ -1261,6 +1261,11 @@ def _run_serial_soak_reserved(
         expected_release_profile == "core_1_0"
         and expected_sd_history_mode == "disabled"
     )
+    full_feature_conditional = (
+        expected_release_profile == "full_feature"
+        and expected_sd_history_mode == "conditional"
+    )
+    release_contract = core_disabled or full_feature_conditional
     normalized_d1l_public_key = (
         rf_acceptance.exact_public_key(expected_d1l_public_key)
         if expected_d1l_public_key is not None
@@ -1268,14 +1273,14 @@ def _run_serial_soak_reserved(
     )
     if release_bound and (
         normalized_commit is None
-        or not core_disabled
+        or not release_contract
         or normalized_d1l_public_key is None
     ):
         raise ValueError(
             "release-bound hardware soak requires an exact firmware commit, "
             "an exact D1L public key, "
-            "--expected-release-profile core_1_0, and "
-            "--expected-sd-history-mode disabled"
+            "and one supported release pair: core_1_0/disabled or "
+            "full_feature/conditional"
         )
     if normalized_commit is not None and release_bound:
         source = git_metadata(root)
@@ -1289,12 +1294,12 @@ def _run_serial_soak_reserved(
             )
     d1l_target: dict[str, Any] | None = None
     d1l_target_after: dict[str, Any] | None = None
-    if core_disabled:
+    if release_contract:
         try:
             port = enforce_core_port(port)
         except ValueError as exc:
             raise ValueError(
-                "Core 1.0 soak requires COM12 or the exact Pi D1L by-id "
+                "Release soak requires COM12 or the exact Pi D1L by-id "
                 "target"
             ) from exc
     if core_disabled and not (
@@ -1312,12 +1317,12 @@ def _run_serial_soak_reserved(
         import serial
     except ImportError as exc:
         raise SystemExit("pyserial is required for hardware soak: python -m pip install pyserial") from exc
-    if core_disabled:
+    if release_contract:
         try:
             from serial.tools import list_ports
         except ImportError as exc:
             raise SystemExit(
-                "pyserial list_ports is required to identify the Core D1L target"
+                "pyserial list_ports is required to identify the release D1L target"
             ) from exc
         d1l_target = resolve_core_target(
             port,
@@ -1833,7 +1838,7 @@ def _run_serial_soak_reserved(
         summary["ok"] = False
 
     report = {
-        "schema": 2 if core_disabled else 1,
+        "schema": 2 if release_contract else 1,
         "mode": "hardware",
         "hardware_required": True,
         "physical_observed": True,
@@ -1928,7 +1933,7 @@ def _run_serial_soak_reserved(
         "active_events": active_events,
         "samples": samples,
     }
-    if core_disabled:
+    if release_contract:
         report.update(
             {
                 "d1l_target": d1l_target,

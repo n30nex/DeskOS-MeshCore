@@ -1,26 +1,25 @@
 # MeshCore DeskOS D1L Documentation
 
-The active public product boundary is MeshCore DeskOS D1L Core 1.0 with
-immutable profile `core_1_0`. SD history is disabled for this candidate and
-internal NVS is authoritative.
+The active production candidate is MeshCore DeskOS D1L Full Feature with
+immutable profile `full_feature` and `conditional` SD history. The complete
+user-facing surface is present; public release remains fail-closed until one
+exact Actions package passes the Pi 5 device, reboot, storage, controlled-peer,
+physical UI, and 12-hour soak gates.
 
-## Core release documents
+## Active release documents
 
 - [Public project overview](../README.md)
-- [Core user guide](USER_GUIDE_D1L.md)
+- [Full Feature user guide](USER_GUIDE_D1L.md)
 - [Flash and recovery](FLASH_RECOVERY_D1L.md)
-- [Core product contract](release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md)
-- [24-hour execution ledger](release/24H_STATUS.md)
-- [Core audit and roadmap](release/SIGUI_24H_AUDIT_AND_ROADMAP_2026-07-18.md)
-- [Core execution backlog](release/SIGUI_24H_EXECUTION_BACKLOG_2026-07-18.yaml)
+- [Production status and evidence ledger](release/24H_STATUS.md)
 - [Fast release workflow](FAST_RELEASE_WORKFLOW_D1L.md)
 - [Build decision](D1L_BUILD_DECISION.md)
 - [Attributions](ATTRIBUTIONS.md)
 - [Source audit and attribution](SOURCE_AUDIT_AND_ATTRIBUTION.md)
 
-The exact GitHub Actions package and Core audit determine release readiness.
+The exact GitHub Actions package and Full Feature audit determine release readiness.
 Historical completion ledgers, screenshots, simulator output, predecessor
-hardware evidence, and full-feature plans do not qualify a Core candidate.
+hardware evidence, and Core sprint plans do not qualify the current candidate.
 
 ## Current hardware route
 
@@ -37,16 +36,11 @@ protocol-time migration, controlled RF/DM, active/idle soak, install review,
 and final audit remain fail-closed. Narrow controlled-peer access for
 `siguidev` is still required before RF or active-soak evidence can qualify.
 
-## Historical Full Feature development
+## Historical Core sprint
 
-[The Full Feature development guide](FULL_FEATURE_DEVELOPMENT_GUIDE_D1L_2026-07-18.md)
-is preserved as planning/history. It describes Map, Wi-Fi, BLE, SD,
-multi-channel, administration, update, location, and advanced surfaces that
-are intentionally unreachable in Core 1.0 and is excluded from the Core
-release package.
-
-Full Feature work continues in the broader roadmap and
-`full_feature_release_ready` remains false.
+The Core 1.0 product contract, 24-hour audit/roadmap, and execution backlog
+under `docs/release/` are retained as historical recovery-sprint records. They
+do not define the current Full Feature package or its production gates.
 
 ## Safety summary
 

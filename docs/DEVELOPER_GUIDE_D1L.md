@@ -27,6 +27,26 @@ python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 1
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
 ```
 
+The final Full Feature idle soak runs on `neopi5` from the clean exact Actions
+candidate checkout and uses the stable by-id target:
+
+```bash
+python ./scripts/soak_d1l.py \
+  --port /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0 \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_ACTIONS_ATTEMPT" \
+  --expected-release-profile full_feature \
+  --expected-sd-history-mode conditional \
+  --duration-sec 43200 \
+  --sample-interval-sec 300 \
+  --out "artifacts/soak/full-feature-idle-12h-${D1L_COMMIT}-neopi5-by-id.json"
+```
+
+Run conditional-SD canaries separately. The 12-hour idle/listening gate is
+RF-silent and intentionally does not repeat storage writes for its duration.
+
 ## Firmware Build
 
 Do not build firmware on the Windows host. Use GitHub Actions for ESP32

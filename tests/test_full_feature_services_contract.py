@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from scripts.smoke_d1l import SMOKE_COMMANDS
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -82,3 +84,45 @@ def test_device_service_sheets_and_notification_glyph_surfaces_are_live():
     assert "s_last_notification_unread" in phase1
     assert "d1l_ui_font_symbols_14" in messages
     assert "const lv_font_t d1l_ui_font_symbols_14" in font
+
+
+def test_full_feature_smoke_reads_every_service_surface_without_mutation():
+    for command in (
+        "channels",
+        "admin status",
+        "logs",
+        "terminal status",
+        "observer status",
+        "update status",
+    ):
+        assert command in SMOKE_COMMANDS
+    assert not any(
+        command.startswith(
+            (
+                "admin login ",
+                "admin clear-stats",
+                "admin advertise-zero-hop",
+                "logs clear",
+                "observer configure",
+                "observer on",
+                "observer off",
+                "observer clear",
+                "update install",
+                "update cancel",
+                "update reboot",
+            )
+        )
+        for command in SMOKE_COMMANDS
+    )
+
+
+def test_logs_snapshot_uses_psram_instead_of_console_task_stack():
+    console = read("main/comms/usb_console.c")
+    function = console.split("static void cmd_logs(void)", 1)[1].split(
+        "static void cmd_logs_clear", 1
+    )[0]
+    assert "d1l_event_log_entry_t entries[D1L_EVENT_LOG_CAPACITY]" not in function
+    assert "heap_caps_calloc(" in function
+    assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in function
+    assert "heap_caps_free(entries);" in function
+    assert 'err_result("logs", "ESP_ERR_NO_MEM"' in function

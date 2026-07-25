@@ -499,10 +499,30 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 
 Full idle/listening acceptance window:
 
-```powershell
-$env:D1L_PORT = "COMx"
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 43200 --sample-interval-sec 300 --out artifacts\soak\d1l-soak-idle-12h-COMx.json
+```bash
+export D1L_PORT='/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0'
+export D1L_COMMIT='<exact-40-hex-Actions-candidate>'
+export D1L_ACTIONS_RUN='<numeric-run-id>'
+export D1L_ACTIONS_ATTEMPT='<numeric-run-attempt>'
+export D1L_PUBLIC_KEY='<exact-64-hex-retained-D1L-public-key>'
+python ./scripts/soak_d1l.py \
+  --port "$D1L_PORT" \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_ACTIONS_ATTEMPT" \
+  --expected-release-profile full_feature \
+  --expected-sd-history-mode conditional \
+  --duration-sec 43200 \
+  --sample-interval-sec 300 \
+  --out "artifacts/soak/full-feature-idle-12h-${D1L_COMMIT}-neopi5-by-id.json"
 ```
+
+This invocation is release-bound. The runner rejects raw ttys, validates the
+stable `1A86:7523` target before and after the run, binds the exact retained
+D1L public key, and requires a clean checkout of the exact firmware commit.
+The idle soak does not run an SD file canary; conditional-SD acceptance is a
+separate bounded gate and is not repeated for 12 hours.
 
 Full active messaging acceptance window through that controlled DM peer:
 

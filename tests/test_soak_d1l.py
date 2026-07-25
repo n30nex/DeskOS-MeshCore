@@ -1070,10 +1070,11 @@ def test_core_disabled_soak_rejects_unsafe_target_before_serial_open(port):
         ("core_1_0", None),
         (None, "disabled"),
         ("full_feature", "disabled"),
+        ("full_feature", "supported_optional"),
         ("core_1_0", "enabled"),
     ],
 )
-def test_release_bound_soak_requires_exact_core_contract_before_io(
+def test_release_bound_soak_requires_supported_release_contract_before_io(
     release_profile,
     sd_history_mode,
     monkeypatch,
@@ -1082,14 +1083,14 @@ def test_release_bound_soak_requires_exact_core_contract_before_io(
         soak_d1l,
         "git_metadata",
         lambda _root: pytest.fail(
-            "source or hardware I/O must not begin without the Core contract"
+            "source or hardware I/O must not begin without a release contract"
         ),
     )
     monkeypatch.setattr(
         soak_d1l,
         "open_d1l_serial",
         lambda *_args, **_kwargs: pytest.fail(
-            "serial must not open without the Core contract"
+            "serial must not open without a release contract"
         ),
     )
 
@@ -1275,6 +1276,55 @@ def test_core_soak_binds_target_before_and_after_serial(monkeypatch):
         expected_sd_history_mode="disabled",
         sample_storage=True,
         allow_sd_unavailable=True,
+        port_lister=list_target,
+        platform_name="nt",
+    )
+
+    assert report["schema"] == 2
+    assert report["port"] == "COM12"
+    assert report["d1l_target"]["requested_path"] == "COM12"
+    assert report["d1l_target_after"]["requested_path"] == "COM12"
+    assert report["target_identity_continuity_ok"] is True
+    assert (
+        report["d1l_target"]["stable_identity_sha256"]
+        == report["d1l_target_after"]["stable_identity_sha256"]
+    )
+    assert opened == ["COM12"]
+    assert len(lister_calls) == 2
+
+
+def test_full_feature_soak_binds_target_before_and_after_serial(monkeypatch):
+    lister_calls = []
+    opened = []
+
+    def list_target():
+        lister_calls.append(True)
+        return [windows_target_row()]
+
+    def fake_collect(_ser, _timeout, label, elapsed_sec, *_args, **_kwargs):
+        row = sample(
+            label,
+            elapsed_sec,
+            base_health(),
+            {"rx_packets": 0, "tx_packets": 0},
+        )
+        row["aborted_after_timeout"] = None
+        return row
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **kwargs: (
+            opened.append(kwargs["port"]) or FakeSoakPort()
+        ),
+    )
+    monkeypatch.setattr(soak_d1l, "collect_sample", fake_collect)
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        expected_release_profile="full_feature",
+        expected_sd_history_mode="conditional",
         port_lister=list_target,
         platform_name="nt",
     )
