@@ -15,9 +15,14 @@ def test_settings_model_defaults_and_nvs_contract():
     source = read("main/app/settings_model.c")
     time_service = read("main/platform/time_service.c")
     time_migration = read("main/app/settings_protocol_migration.h")
-    assert "D1L_SETTINGS_SCHEMA_VERSION 9U" in header
+    assert "D1L_SETTINGS_SCHEMA_VERSION 10U" in header
     assert "D1L_WIFI_SSID_LEN 33U" in header
     assert "D1L_WIFI_PASSWORD_LEN 65U" in header
+    assert "D1L_WIFI_PROFILE_CAPACITY 3U" in header
+    assert "d1l_wifi_profile_t" in header
+    assert "wifi_profiles[D1L_WIFI_PROFILE_CAPACITY]" in header
+    assert "wifi_profile_count" in header
+    assert "wifi_active_profile" in header
     assert "wifi_profile_saved" in header
     assert "wifi_ssid" in header
     assert "wifi_password" in header
@@ -47,6 +52,7 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "d1l_settings_v6_t" in source
     assert "d1l_settings_v7_t" in source
     assert "d1l_settings_v8_t" in source
+    assert "d1l_settings_v9_t" in source
     assert "migrate_v2_settings" in source
     assert "migrate_v3_settings" in source
     assert "migrate_v4_settings" in source
@@ -54,6 +60,7 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "migrate_v6_settings" in source
     assert "migrate_v7_settings" in source
     assert "migrate_v8_settings" in source
+    assert "migrate_v9_settings" in source
     assert '#include "settings_envelope.h"' in source
     assert "persist_settings_envelope" in source
     persist = source.split("static esp_err_t persist_settings_envelope", 1)[1].split(
@@ -75,6 +82,7 @@ def test_settings_model_defaults_and_nvs_contract():
     )[0]
     for schema in [
         "D1L_SETTINGS_SCHEMA_VERSION",
+        "9U",
         "8U",
         "7U",
         "6U",
@@ -89,6 +97,9 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "D1L_SETTINGS_PERSISTENCE_QUARANTINED_CHECKSUM" in source
     assert "s_persistence_write_blocked = true" in source
     assert "d1l_settings_save_wifi_profile" in header
+    assert "d1l_settings_wifi_profiles_snapshot" in header
+    assert "d1l_settings_select_wifi_profile" in header
+    assert "d1l_settings_delete_wifi_profile" in header
     assert "d1l_settings_clear_wifi_profile" in header
     assert "strlen(ssid) >= D1L_WIFI_SSID_LEN" in source
     assert "settings.wifi_profile_saved = true" in source
@@ -155,11 +166,10 @@ def test_settings_model_defaults_and_nvs_contract():
     public_copy = source.split("static void copy_public_settings", 1)[1].split(
         "static void wipe_derived_identity_key", 1
     )[0]
-    assert "wipe_sensitive_bytes(destination, sizeof(*destination))" in public_copy
-    assert "offsetof(d1l_settings_t, wifi_password)" in public_copy
-    assert "offsetof(d1l_settings_t, identity_private_key)" in public_copy
-    assert "source->wifi_password" not in public_copy
-    assert "source->identity_private_key" not in public_copy
+    assert "*destination = *source" in public_copy
+    assert "destination->wifi_password" in public_copy
+    assert "destination->wifi_profiles[i].password" in public_copy
+    assert "destination->identity_private_key" in public_copy
     assert "d1l_settings_wifi_secret_snapshot" in header
     assert "d1l_settings_wifi_secret_wipe" in header
     assert "d1l_settings_identity_secret_snapshot" in header
@@ -180,24 +190,29 @@ def test_settings_model_defaults_and_nvs_contract():
     )
     save_wifi = source.split(
         "esp_err_t d1l_settings_save_wifi_profile", 1
+    )[1].split("esp_err_t d1l_settings_select_wifi_profile", 1)[0]
+    assert "settings.wifi_profile_count >= D1L_WIFI_PROFILE_CAPACITY" in save_wifi
+    assert "strcmp(settings.wifi_profiles[i].ssid, ssid) == 0" in save_wifi
+    assert "if (password)" in save_wifi
+    assert "else if (!existing)" in save_wifi
+    assert "settings.wifi_active_profile = (uint8_t)profile_index" in save_wifi
+    assert "settings_save_locked(&settings)" in save_wifi
+    delete_wifi = source.split(
+        "esp_err_t d1l_settings_delete_wifi_profile", 1
     )[1].split("esp_err_t d1l_settings_clear_wifi_profile", 1)[0]
-    ssid_wipe = save_wifi.index(
-        "memset(settings.wifi_ssid, 0, sizeof(settings.wifi_ssid))"
-    )
-    password_wipe = save_wifi.index(
-        "wipe_sensitive_bytes(settings.wifi_password,"
-    )
-    ssid_copy = save_wifi.index("snprintf(settings.wifi_ssid")
-    password_copy = save_wifi.index("snprintf(settings.wifi_password")
-    assert ssid_wipe < ssid_copy
-    assert password_wipe < password_copy
-    assert "zero_text_tail(settings.wifi_password," in save_wifi
+    assert "settings.wifi_profile_count--" in delete_wifi
+    assert "settings.wifi_enabled = false" in delete_wifi
     sanitize = source.split("void d1l_settings_sanitize", 1)[1].split(
         "const char *d1l_settings_role_name", 1
     )[0]
-    assert "!settings->wifi_profile_saved" in sanitize
-    assert "zero_text_tail(settings->wifi_ssid" in sanitize
-    assert "zero_text_tail(settings->wifi_password" in sanitize
+    assert "reconcile_wifi_profiles(settings)" in sanitize
+    reconcile = source.split("static void reconcile_wifi_profiles", 1)[1].split(
+        "void d1l_settings_defaults", 1
+    )[0]
+    assert "!settings->wifi_profile_saved" in reconcile
+    assert "settings->wifi_ssid, sizeof(settings->wifi_ssid), false" in reconcile
+    assert "sizeof(settings->wifi_password), true" in reconcile
+    assert "settings->wifi_profile_count = (uint8_t)compact_count" in reconcile
 
 
 def test_console_exposes_phase2_foundation_commands():

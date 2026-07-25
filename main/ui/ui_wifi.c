@@ -14,6 +14,7 @@ enum {
     BINDING_CLEAR,
     BINDING_SCAN,
     BINDING_CONNECT,
+    BINDING_NEXT_PROFILE,
     BINDING_TOGGLE,
     BINDING_SSID_FOCUS,
     BINDING_PASSWORD_FOCUS,
@@ -391,14 +392,17 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
 
     create_button(controller, "Save", 16, 258, 62, 38, BINDING_SAVE,
                   D1L_UI_WIFI_ACTION_SAVE);
-    create_button(controller, "Clear", 86, 258, 66, 38, BINDING_CLEAR,
+    create_button(controller, "Delete", 86, 258, 68, 38, BINDING_CLEAR,
                   D1L_UI_WIFI_ACTION_CLEAR);
-    create_button(controller, "Scan", 160, 258, 62, 38, BINDING_SCAN,
+    create_button(controller, "Next", 162, 258, 62, 38,
+                  BINDING_NEXT_PROFILE,
+                  D1L_UI_WIFI_ACTION_NEXT_PROFILE);
+    create_button(controller, "Scan", 232, 258, 60, 38, BINDING_SCAN,
                   D1L_UI_WIFI_ACTION_SCAN);
-    create_button(controller, "Connect", 230, 258, 86, 38, BINDING_CONNECT,
+    create_button(controller, "Connect", 300, 258, 84, 38, BINDING_CONNECT,
                   D1L_UI_WIFI_ACTION_CONNECT);
     create_button(controller, controller->rendered.toggle_label,
-                  324, 258, 86, 38, BINDING_TOGGLE,
+                  392, 258, 72, 38, BINDING_TOGGLE,
                   D1L_UI_WIFI_ACTION_TOGGLE);
 
     lv_obj_t *scan = create_label(controller->sheet,

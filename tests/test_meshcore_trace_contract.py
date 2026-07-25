@@ -288,13 +288,14 @@ def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     )
     assert "d1l_app_model_request_path_discovery_probe" in console
     assert "real_trace_packet" in console
-    assert "DM/PATH discovery probe queued" in console
+    assert "Encrypted PATH discovery and base-telemetry request queued" in console
+    assert '\\"telemetry_requested\\":true' in console
     assert "d1l_meshcore_service_request_path_discovery_probe" in app
     assert "d1l_app_model_send_trace_contact" in app_header
     assert "d1l_meshcore_service_send_trace_contact(fingerprint)" in app
     assert "d1l_app_model_send_trace_contact(" in ui
-    assert "d1l_app_model_request_path_discovery_probe(" not in ui
-    assert '"Correlated TRACE; proven outbound path; no Public RF"' in ui
+    assert "d1l_app_model_request_path_discovery_probe(" in ui
+    assert '"Probe and TRACE are contact-only RF; Reset forgets only this contact; no Public RF"' in ui
     assert "\"Authenticated TRACE" not in ui
     assert "routes trace send <loop-path-hex>" not in test_plan
     assert "contact_trace_supported=false" not in test_plan

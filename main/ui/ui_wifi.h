@@ -7,7 +7,7 @@
 
 typedef struct _lv_obj_t lv_obj_t;
 
-#define D1L_UI_WIFI_BINDING_COUNT 9U
+#define D1L_UI_WIFI_BINDING_COUNT 10U
 #define D1L_UI_WIFI_CONTROLLER_MAX_BYTES 1024U
 
 typedef enum {
@@ -17,6 +17,7 @@ typedef enum {
     D1L_UI_WIFI_ACTION_CLEAR,
     D1L_UI_WIFI_ACTION_SCAN,
     D1L_UI_WIFI_ACTION_CONNECT,
+    D1L_UI_WIFI_ACTION_NEXT_PROFILE,
     D1L_UI_WIFI_ACTION_TOGGLE,
 } d1l_ui_wifi_action_t;
 

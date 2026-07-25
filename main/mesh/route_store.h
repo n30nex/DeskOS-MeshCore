@@ -63,6 +63,7 @@ typedef struct {
 
 esp_err_t d1l_route_store_init(void);
 esp_err_t d1l_route_store_clear(void);
+esp_err_t d1l_route_store_clear_target(const char *target);
 esp_err_t d1l_route_store_flush(void);
 esp_err_t d1l_route_store_flush_if_due(void);
 esp_err_t d1l_route_store_upsert_observation(const char *target, const char *label,

@@ -14,9 +14,15 @@
 typedef struct {
     uint32_t login_tx_queued;
     uint32_t status_tx_queued;
+    uint32_t query_tx_queued;
+    uint32_t query_accepted;
+    uint32_t query_rejected;
     uint32_t mutation_tx_queued;
     uint32_t mutation_accepted;
     uint32_t mutation_rejected;
+    uint32_t cli_tx_queued;
+    uint32_t cli_accepted;
+    uint32_t cli_rejected;
     uint32_t response_accepted;
     uint32_t response_unmatched;
     uint32_t response_malformed;
@@ -198,7 +204,7 @@ esp_err_t d1l_meshcore_admin_build_login_packet(
     if (!d1l_meshcore_admin_encode_login_request(
             role, timestamp,
             role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?
-                D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR : 0U,
+                timestamp : 0U,
             (const uint8_t *)password, password_len,
             plaintext, sizeof(plaintext), &plaintext_len)) {
         d1l_meshcore_admin_binding_wipe(out_binding);
@@ -255,6 +261,55 @@ esp_err_t d1l_meshcore_admin_build_status_packet(
     const esp_err_t ret = encrypt(
         binding->session_secret, &raw[index], raw_size - index, plaintext,
         sizeof(plaintext), &cipher_len);
+    d1l_meshcore_admin_secure_zero(plaintext, sizeof(plaintext));
+    if (ret != ESP_OK || index + cipher_len > UINT8_MAX) {
+        return ret != ESP_OK ? ret : ESP_ERR_INVALID_SIZE;
+    }
+    index += cipher_len;
+    *out_len = (uint8_t)index;
+    return ESP_OK;
+}
+
+esp_err_t d1l_meshcore_admin_build_query_packet(
+    const d1l_settings_t *settings,
+    const d1l_meshcore_admin_binding_t *binding,
+    const d1l_meshcore_route_selection_t *selection,
+    d1l_meshcore_admin_query_t query, uint16_t offset, uint32_t tag,
+    uint32_t uniqueness, d1l_meshcore_admin_encrypt_fn encrypt,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len)
+{
+    if (!settings || !settings->identity_ready || !binding || !selection ||
+        tag == 0U || !encrypt || !raw || !out_len ||
+        (binding->role != D1L_MESHCORE_ADMIN_ROLE_REPEATER &&
+         binding->role != D1L_MESHCORE_ADMIN_ROLE_ROOM) ||
+        !same_bytes(settings->identity_public_key, binding->local_public_key,
+                    sizeof(binding->local_public_key)) ||
+        !d1l_meshcore_admin_route_valid(selection)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t index = 0U;
+    const uint8_t header = (uint8_t)(
+        (D1L_MESHCORE_ADMIN_REQUEST_TYPE << 2U) | selection->route);
+    if (!d1l_meshcore_wire_write_prefix(
+            header, 0U, 0U, selection->path_len,
+            selection->path_byte_len > 0U ? selection->path : NULL,
+            raw, raw_size, &index) || raw_size - index < 2U) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    raw[index++] = binding->peer_public_key[0];
+    raw[index++] = binding->local_public_key[0];
+
+    uint8_t plaintext[D1L_MESHCORE_ADMIN_MAX_QUERY_REQUEST_BYTES] = {0};
+    size_t plaintext_len = 0U;
+    if (!d1l_meshcore_admin_encode_query_request(
+            query, tag, offset, uniqueness, plaintext, sizeof(plaintext),
+            &plaintext_len)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t cipher_len = 0U;
+    const esp_err_t ret = encrypt(
+        binding->session_secret, &raw[index], raw_size - index, plaintext,
+        plaintext_len, &cipher_len);
     d1l_meshcore_admin_secure_zero(plaintext, sizeof(plaintext));
     if (ret != ESP_OK || index + cipher_len > UINT8_MAX) {
         return ret != ESP_OK ? ret : ESP_ERR_INVALID_SIZE;
@@ -321,20 +376,68 @@ esp_err_t d1l_meshcore_admin_build_mutation_packet(
     return ESP_OK;
 }
 
+esp_err_t d1l_meshcore_admin_build_cli_packet(
+    const d1l_settings_t *settings,
+    const d1l_meshcore_admin_binding_t *binding,
+    const d1l_meshcore_route_selection_t *selection,
+    const char *command, uint32_t timestamp,
+    d1l_meshcore_admin_encrypt_fn encrypt,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len)
+{
+    if (!settings || !settings->identity_ready || !binding || !selection ||
+        !d1l_meshcore_admin_cli_command_valid(command) ||
+        timestamp == 0U || !encrypt || !raw || !out_len ||
+        (binding->role != D1L_MESHCORE_ADMIN_ROLE_REPEATER &&
+         binding->role != D1L_MESHCORE_ADMIN_ROLE_ROOM) ||
+        !same_bytes(settings->identity_public_key, binding->local_public_key,
+                    sizeof(binding->local_public_key)) ||
+        !d1l_meshcore_admin_route_valid(selection)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t command_len = strlen(command);
+    size_t index = 0U;
+    const uint8_t header =
+        selection->route == D1L_MESHCORE_ROUTE_DIRECT ?
+            D1L_MESHCORE_HEADER_DM_TEXT_DIRECT :
+            D1L_MESHCORE_HEADER_DM_TEXT_FLOOD;
+    if (!d1l_meshcore_wire_write_prefix(
+            header, 0U, 0U, selection->path_len,
+            selection->path_byte_len > 0U ? selection->path : NULL,
+            raw, raw_size, &index) ||
+        raw_size - index < 2U) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    raw[index++] = binding->peer_public_key[0];
+    raw[index++] = binding->local_public_key[0];
+
+    uint8_t plaintext[
+        5U + D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES] = {0};
+    write_le32(plaintext, timestamp);
+    plaintext[4] = (uint8_t)(D1L_MESHCORE_TXT_TYPE_CLI_DATA << 2U);
+    memcpy(&plaintext[5], command, command_len);
+    size_t cipher_len = 0U;
+    const esp_err_t ret = encrypt(
+        binding->session_secret, &raw[index], raw_size - index, plaintext,
+        5U + command_len, &cipher_len);
+    d1l_meshcore_admin_secure_zero(plaintext, sizeof(plaintext));
+    if (ret != ESP_OK || index + cipher_len > UINT8_MAX) {
+        return ret != ESP_OK ? ret : ESP_ERR_INVALID_SIZE;
+    }
+    index += cipher_len;
+    *out_len = (uint8_t)index;
+    return ESP_OK;
+}
+
 static void clear_session_locked(void)
 {
     d1l_meshcore_admin_reset(&s_session);
     s_fingerprint[0] = '\0';
 }
 
-static bool copy_context_locked(d1l_meshcore_admin_context_t *out_context,
-                                bool authenticated)
+static bool copy_session_context_locked(
+    d1l_meshcore_admin_context_t *out_context)
 {
-    const bool eligible = authenticated
-        ? s_session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED
-        : (s_session.state == D1L_MESHCORE_ADMIN_LOGIN_PENDING ||
-           s_session.state == D1L_MESHCORE_ADMIN_STATUS_PENDING);
-    if (!out_context || !eligible || s_fingerprint[0] == '\0') {
+    if (!out_context || s_fingerprint[0] == '\0') {
         return false;
     }
     memset(out_context, 0, sizeof(*out_context));
@@ -349,9 +452,33 @@ static bool copy_context_locked(d1l_meshcore_admin_context_t *out_context,
            sizeof(out_context->binding.session_secret));
     out_context->state = s_session.state;
     out_context->generation = s_session.generation;
+    out_context->permissions = s_session.permissions;
     out_context->request_deadline_us = s_session.request_deadline_us;
     out_context->pending_mutation = s_session.pending_mutation;
+    out_context->pending_query = s_session.pending_query;
+    out_context->pending_query_offset = s_session.pending_query_offset;
+    out_context->pending_cli_sensitive = s_session.pending_cli_sensitive;
     return true;
+}
+
+static bool copy_context_locked(d1l_meshcore_admin_context_t *out_context,
+                                bool authenticated)
+{
+    const bool eligible = authenticated
+        ? s_session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED
+        : (s_session.state == D1L_MESHCORE_ADMIN_LOGIN_PENDING ||
+           s_session.state == D1L_MESHCORE_ADMIN_STATUS_PENDING ||
+           s_session.state == D1L_MESHCORE_ADMIN_QUERY_PENDING);
+    return eligible && copy_session_context_locked(out_context);
+}
+
+static bool admin_session_active_locked(void)
+{
+    return s_session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+           s_session.state == D1L_MESHCORE_ADMIN_STATUS_PENDING ||
+           s_session.state == D1L_MESHCORE_ADMIN_MUTATION_PENDING ||
+           s_session.state == D1L_MESHCORE_ADMIN_CLI_PENDING ||
+           s_session.state == D1L_MESHCORE_ADMIN_QUERY_PENDING;
 }
 
 static bool binding_matches_locked(
@@ -435,6 +562,16 @@ bool d1l_meshcore_admin_runtime_capture_authenticated(
     return copied;
 }
 
+bool d1l_meshcore_admin_runtime_capture_active(
+    d1l_meshcore_admin_context_t *out_context)
+{
+    d1l_store_lock_take(&s_lock);
+    const bool copied = admin_session_active_locked() &&
+                        copy_session_context_locked(out_context);
+    d1l_store_lock_give(&s_lock);
+    return copied;
+}
+
 bool d1l_meshcore_admin_runtime_capture_mutation_pending(
     d1l_meshcore_admin_context_t *out_context)
 {
@@ -446,24 +583,24 @@ bool d1l_meshcore_admin_runtime_capture_mutation_pending(
         s_session.state == D1L_MESHCORE_ADMIN_MUTATION_PENDING &&
         s_fingerprint[0] != '\0';
     if (eligible) {
-        memset(out_context, 0, sizeof(*out_context));
-        snprintf(out_context->binding.fingerprint,
-                 sizeof(out_context->binding.fingerprint), "%s",
-                 s_fingerprint);
-        out_context->binding.role = s_session.role;
-        memcpy(out_context->binding.peer_public_key,
-               s_session.peer_public_key,
-               sizeof(out_context->binding.peer_public_key));
-        memcpy(out_context->binding.local_public_key,
-               s_session.local_public_key,
-               sizeof(out_context->binding.local_public_key));
-        memcpy(out_context->binding.session_secret,
-               s_session.session_secret,
-               sizeof(out_context->binding.session_secret));
-        out_context->state = s_session.state;
-        out_context->generation = s_session.generation;
-        out_context->request_deadline_us = s_session.request_deadline_us;
-        out_context->pending_mutation = s_session.pending_mutation;
+        (void)copy_session_context_locked(out_context);
+    }
+    d1l_store_lock_give(&s_lock);
+    return eligible;
+}
+
+bool d1l_meshcore_admin_runtime_capture_cli_pending(
+    d1l_meshcore_admin_context_t *out_context)
+{
+    if (!out_context) {
+        return false;
+    }
+    d1l_store_lock_take(&s_lock);
+    const bool eligible =
+        s_session.state == D1L_MESHCORE_ADMIN_CLI_PENDING &&
+        s_fingerprint[0] != '\0';
+    if (eligible) {
+        (void)copy_session_context_locked(out_context);
     }
     d1l_store_lock_give(&s_lock);
     return eligible;
@@ -478,6 +615,27 @@ bool d1l_meshcore_admin_runtime_validate_binding(
     if (!valid && s_session.generation == generation) {
         clear_session_locked();
         s_metrics.last_error = ESP_ERR_INVALID_STATE;
+    }
+    d1l_store_lock_give(&s_lock);
+    return valid;
+}
+
+bool d1l_meshcore_admin_runtime_note_room_activity(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    uint64_t now_us)
+{
+    d1l_store_lock_take(&s_lock);
+    bool valid = admin_session_active_locked() &&
+                 s_session.role == D1L_MESHCORE_ADMIN_ROLE_ROOM &&
+                 s_session.generation == generation &&
+                 binding_matches_locked(binding);
+    if (valid &&
+        !d1l_meshcore_admin_note_authenticated_activity(
+            &s_session, now_us)) {
+        s_fingerprint[0] = '\0';
+        s_metrics.response_expired++;
+        s_metrics.last_error = ESP_ERR_TIMEOUT;
+        valid = false;
     }
     d1l_store_lock_give(&s_lock);
     return valid;
@@ -530,6 +688,55 @@ void d1l_meshcore_admin_runtime_note_status_tx(uint32_t request_generation,
     d1l_store_lock_give(&s_lock);
 }
 
+bool d1l_meshcore_admin_runtime_begin_query(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    d1l_meshcore_admin_query_t query, uint16_t offset, uint32_t tag,
+    uint64_t now_us, uint32_t *out_request_generation)
+{
+    if (!out_request_generation) {
+        return false;
+    }
+    d1l_store_lock_take(&s_lock);
+    const bool valid = s_session.generation == generation &&
+                       binding_matches_locked(binding);
+    bool began = false;
+    if (valid) {
+        began = d1l_meshcore_admin_begin_query_request(
+            &s_session, query, offset, tag, now_us,
+            deadline_after(now_us, D1L_MESHCORE_ADMIN_REQUEST_TIMEOUT_US));
+    } else if (s_session.generation == generation) {
+        clear_session_locked();
+        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+    }
+    if (began) {
+        *out_request_generation = s_session.generation;
+        s_metrics.last_error = ESP_OK;
+    } else if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
+        s_fingerprint[0] = '\0';
+        s_metrics.response_expired++;
+        s_metrics.last_error = ESP_ERR_TIMEOUT;
+    }
+    d1l_store_lock_give(&s_lock);
+    return began;
+}
+
+void d1l_meshcore_admin_runtime_note_query_tx(
+    uint32_t request_generation, d1l_meshcore_admin_query_t query,
+    uint32_t tag, esp_err_t result)
+{
+    d1l_store_lock_take(&s_lock);
+    if (result == ESP_OK) {
+        s_metrics.query_tx_queued++;
+    } else {
+        if (s_session.generation == request_generation) {
+            (void)d1l_meshcore_admin_cancel_query_request(
+                &s_session, query, tag);
+        }
+        s_metrics.last_error = result;
+    }
+    d1l_store_lock_give(&s_lock);
+}
+
 bool d1l_meshcore_admin_runtime_begin_mutation(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
     d1l_meshcore_admin_mutation_t mutation, uint32_t tag, uint64_t now_us,
@@ -573,6 +780,54 @@ void d1l_meshcore_admin_runtime_note_mutation_tx(
         if (s_session.generation == request_generation) {
             (void)d1l_meshcore_admin_cancel_mutation(
                 &s_session, mutation, tag);
+        }
+        s_metrics.last_error = result;
+    }
+    d1l_store_lock_give(&s_lock);
+}
+
+bool d1l_meshcore_admin_runtime_begin_cli(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    uint32_t tag, bool sensitive, uint64_t now_us,
+    uint32_t *out_request_generation)
+{
+    if (!out_request_generation) {
+        return false;
+    }
+    d1l_store_lock_take(&s_lock);
+    const bool valid = s_session.generation == generation &&
+                       binding_matches_locked(binding);
+    bool began = false;
+    if (valid) {
+        began = d1l_meshcore_admin_begin_cli_command(
+            &s_session, tag, sensitive, now_us,
+            deadline_after(now_us, D1L_MESHCORE_ADMIN_REQUEST_TIMEOUT_US));
+    } else if (s_session.generation == generation) {
+        clear_session_locked();
+        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+    }
+    if (began) {
+        *out_request_generation = s_session.generation;
+        s_metrics.last_error = ESP_OK;
+    } else if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
+        s_fingerprint[0] = '\0';
+        s_metrics.response_expired++;
+        s_metrics.last_error = ESP_ERR_TIMEOUT;
+    }
+    d1l_store_lock_give(&s_lock);
+    return began;
+}
+
+void d1l_meshcore_admin_runtime_note_cli_tx(
+    uint32_t request_generation, uint32_t tag, esp_err_t result)
+{
+    d1l_store_lock_take(&s_lock);
+    if (result == ESP_OK) {
+        s_metrics.cli_tx_queued++;
+    } else {
+        if (s_session.generation == request_generation) {
+            (void)d1l_meshcore_admin_cancel_cli_command(
+                &s_session, tag);
         }
         s_metrics.last_error = result;
     }
@@ -659,6 +914,54 @@ d1l_meshcore_admin_runtime_dispatch_mutation_response(
 }
 
 d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_runtime_dispatch_cli_response(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    uint32_t response_timestamp, const uint8_t *text, size_t text_len,
+    uint64_t now_us, bool *out_considered)
+{
+    if (out_considered) {
+        *out_considered = false;
+    }
+    if (!binding || !text) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+    }
+    d1l_store_lock_take(&s_lock);
+    const bool same_attempt =
+        s_session.state == D1L_MESHCORE_ADMIN_CLI_PENDING &&
+        s_session.generation == generation &&
+        strncmp(s_fingerprint, binding->fingerprint,
+                sizeof(s_fingerprint)) == 0;
+    if (!same_attempt) {
+        d1l_store_lock_give(&s_lock);
+        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+    }
+    if (out_considered) {
+        *out_considered = true;
+    }
+    if (!binding_matches_locked(binding)) {
+        clear_session_locked();
+        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        d1l_store_lock_give(&s_lock);
+        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+    }
+    const d1l_meshcore_admin_response_result_t result =
+        d1l_meshcore_admin_accept_cli_response(
+            &s_session, binding->peer_public_key, response_timestamp,
+            text, text_len, now_us);
+    if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
+        s_fingerprint[0] = '\0';
+    }
+    if (result == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
+        s_metrics.cli_accepted++;
+    } else if (result == D1L_MESHCORE_ADMIN_RESPONSE_REJECTED) {
+        s_metrics.cli_rejected++;
+    }
+    note_response_locked(result);
+    d1l_store_lock_give(&s_lock);
+    return result;
+}
+
+d1l_meshcore_admin_response_result_t
 d1l_meshcore_admin_runtime_dispatch_response(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
     const uint8_t *plaintext, size_t plaintext_len, uint64_t now_us,
@@ -673,7 +976,10 @@ d1l_meshcore_admin_runtime_dispatch_response(
     d1l_store_lock_take(&s_lock);
     const bool pending =
         s_session.state == D1L_MESHCORE_ADMIN_LOGIN_PENDING ||
-        s_session.state == D1L_MESHCORE_ADMIN_STATUS_PENDING;
+        s_session.state == D1L_MESHCORE_ADMIN_STATUS_PENDING ||
+        s_session.state == D1L_MESHCORE_ADMIN_QUERY_PENDING;
+    const bool query_attempt =
+        s_session.state == D1L_MESHCORE_ADMIN_QUERY_PENDING;
     const bool same_attempt = pending && s_session.generation == generation &&
         strncmp(s_fingerprint, binding->fingerprint,
                 sizeof(s_fingerprint)) == 0;
@@ -696,13 +1002,24 @@ d1l_meshcore_admin_runtime_dispatch_response(
         result = d1l_meshcore_admin_accept_login_response(
             &s_session, &s_replay_cache, binding->peer_public_key, plaintext,
             plaintext_len, now_us);
-    } else {
+    } else if (s_session.state == D1L_MESHCORE_ADMIN_STATUS_PENDING) {
         result = d1l_meshcore_admin_accept_status_response(
+            &s_session, binding->peer_public_key, plaintext, plaintext_len,
+            now_us);
+    } else {
+        result = d1l_meshcore_admin_accept_query_response(
             &s_session, binding->peer_public_key, plaintext, plaintext_len,
             now_us);
     }
     if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
         s_fingerprint[0] = '\0';
+    }
+    if (query_attempt) {
+        if (result == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
+            s_metrics.query_accepted++;
+        } else if (result != D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED) {
+            s_metrics.query_rejected++;
+        }
     }
     note_response_locked(result);
     d1l_store_lock_give(&s_lock);
@@ -741,14 +1058,28 @@ void d1l_meshcore_admin_runtime_snapshot(
     snapshot.pending_tag = s_session.pending_tag;
     snapshot.pending_mutation = s_session.pending_mutation;
     snapshot.last_mutation = s_session.last_mutation;
+    snapshot.pending_query = s_session.pending_query;
+    snapshot.pending_query_offset = s_session.pending_query_offset;
     snapshot.last_mutation_success = s_session.last_mutation_success;
+    snapshot.cli_reply_valid = s_session.cli_reply_valid;
+    snapshot.cli_reply_redacted = s_session.cli_reply_redacted;
+    snapshot.cli_reply_success = s_session.cli_reply_success;
+    memcpy(snapshot.cli_reply, s_session.cli_reply,
+           sizeof(snapshot.cli_reply));
     snapshot.status_valid = s_session.status_valid;
     snapshot.status = s_session.status;
+    snapshot.query_result = s_session.query_result;
     snapshot.login_tx_queued = s_metrics.login_tx_queued;
     snapshot.status_tx_queued = s_metrics.status_tx_queued;
+    snapshot.query_tx_queued = s_metrics.query_tx_queued;
+    snapshot.query_accepted = s_metrics.query_accepted;
+    snapshot.query_rejected = s_metrics.query_rejected;
     snapshot.mutation_tx_queued = s_metrics.mutation_tx_queued;
     snapshot.mutation_accepted = s_metrics.mutation_accepted;
     snapshot.mutation_rejected = s_metrics.mutation_rejected;
+    snapshot.cli_tx_queued = s_metrics.cli_tx_queued;
+    snapshot.cli_accepted = s_metrics.cli_accepted;
+    snapshot.cli_rejected = s_metrics.cli_rejected;
     snapshot.response_accepted = s_metrics.response_accepted;
     snapshot.response_unmatched = s_metrics.response_unmatched;
     snapshot.response_malformed = s_metrics.response_malformed;

@@ -112,6 +112,10 @@ esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *
 esp_err_t d1l_contact_store_update_path_from_source(
     const char *fingerprint, const uint8_t *path, uint8_t path_len,
     d1l_meshcore_path_source_t source, d1l_contact_entry_t *out_entry);
+/* Forget only this contact's learned outbound route. Identity, preferences,
+ * messages, and every other contact remain untouched. */
+esp_err_t d1l_contact_store_reset_path(
+    const char *fingerprint, d1l_contact_entry_t *out_entry);
 esp_err_t d1l_contact_store_prepare_path_route(
     const char *fingerprint, uint32_t now_ms, d1l_contact_entry_t *out_entry,
     bool *out_expired);

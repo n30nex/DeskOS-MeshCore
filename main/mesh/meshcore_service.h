@@ -116,6 +116,39 @@ typedef struct {
 
 typedef d1l_meshcore_admin_runtime_snapshot_t d1l_meshcore_admin_snapshot_t;
 
+#define D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY 4U
+
+typedef enum {
+    D1L_MESHCORE_CONTACT_TELEMETRY_IDLE = 0,
+    D1L_MESHCORE_CONTACT_TELEMETRY_PENDING,
+    D1L_MESHCORE_CONTACT_TELEMETRY_RECEIVED,
+    D1L_MESHCORE_CONTACT_TELEMETRY_EXPIRED,
+    D1L_MESHCORE_CONTACT_TELEMETRY_MALFORMED,
+    D1L_MESHCORE_CONTACT_TELEMETRY_REQUEST_FAILED,
+} d1l_meshcore_contact_telemetry_state_t;
+
+typedef struct {
+    uint32_t sequence;
+    uint32_t tag;
+    uint32_t age_ms;
+    int last_rssi_dbm;
+    int last_snr_tenths;
+    uint8_t path_hops;
+    d1l_meshcore_admin_query_result_t result;
+} d1l_meshcore_contact_telemetry_entry_t;
+
+typedef struct {
+    uint32_t generation;
+    uint32_t total_received;
+    d1l_meshcore_contact_telemetry_state_t state;
+    bool pending;
+    uint32_t pending_tag;
+    uint32_t pending_remaining_ms;
+    size_t history_count;
+    d1l_meshcore_contact_telemetry_entry_t
+        history[D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY];
+} d1l_meshcore_contact_telemetry_snapshot_t;
+
 void d1l_meshcore_service_init(void);
 esp_err_t d1l_meshcore_service_start_rx_async(void);
 esp_err_t d1l_meshcore_service_ensure_identity(void);
@@ -123,6 +156,11 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
 void d1l_meshcore_service_trace_snapshot(d1l_meshcore_trace_snapshot_t *out_snapshot);
 void d1l_meshcore_service_admin_snapshot(
     d1l_meshcore_admin_snapshot_t *out_snapshot);
+void d1l_meshcore_service_contact_telemetry_snapshot(
+    const char *fingerprint,
+    d1l_meshcore_contact_telemetry_snapshot_t *out_snapshot);
+const char *d1l_meshcore_contact_telemetry_state_name(
+    d1l_meshcore_contact_telemetry_state_t state);
 /* Synchronous, bounded owner-task commands. ESP_ERR_TIMEOUT reports request
  * slot or command-queue saturation; no Admin/session side effect is admitted
  * after the caller deadline. The login credential is copied only into the
@@ -130,8 +168,13 @@ void d1l_meshcore_service_admin_snapshot(
 esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
                                            const char *password);
 esp_err_t d1l_meshcore_service_admin_request_status(void);
+esp_err_t d1l_meshcore_service_admin_request_query(
+    d1l_meshcore_admin_query_t query, uint16_t offset);
 esp_err_t d1l_meshcore_service_admin_request_mutation(
     d1l_meshcore_admin_mutation_t mutation, bool local_confirmed);
+esp_err_t d1l_meshcore_service_admin_request_cli(
+    const char *command, bool local_confirmed);
+esp_err_t d1l_meshcore_service_admin_send_room_post(const char *text);
 esp_err_t d1l_meshcore_service_admin_logout(void);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
@@ -143,6 +186,8 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     const char *fingerprint,
     char *out_token,
     size_t out_token_size);
+esp_err_t d1l_meshcore_service_reset_contact_route(
+    const char *fingerprint);
 /* ESP_ERR_NOT_FINISHED means one TRACE is pending; ESP_ERR_NOT_ALLOWED means
  * the bounded post-outcome cooldown is active. */
 esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint);

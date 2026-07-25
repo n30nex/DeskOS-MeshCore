@@ -251,7 +251,8 @@ def test_meshcore_service_builds_private_text_packets_from_contacts():
     assert "d1l_dm_store_transition_delivery" in source
     assert "contact.out_path_valid" in source
     assert '"tx", "dm_text", 0, 0' in source
-    assert 'append_packet_log_deferred(\n            "rx", "dm_text"' in source
+    assert 'const char *packet_kind = room_post ? "room_post" : "dm_text"' in source
+    assert 'append_packet_log_deferred(\n            "rx", packet_kind' in source
     assert 'append_packet_log_deferred(\n        "rx", "dm_ack"' in source
     assert 'append_packet_log_deferred(\n                    "rx", "path_return"' in source
     assert "../third_party/MeshCore/lib/ed25519/key_exchange.c" in cmake

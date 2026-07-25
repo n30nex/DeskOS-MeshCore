@@ -138,12 +138,13 @@ def test_contact_store_is_bounded_and_nvs_backed():
     sequence = c_function(source, "static esp_err_t reserve_sequenced_mutation_locked(")
     assert "s_next_seq == UINT32_MAX" in sequence
     assert "reserve_persistence_revision_locked(true)" in sequence
-    assert source.count("entry->seq = s_next_seq++;") == 8
+    assert source.count("entry->seq = s_next_seq++;") == 9
     for signature in (
         "esp_err_t d1l_contact_store_upsert_from_node(",
         "esp_err_t d1l_contact_store_upsert_verified_advert(",
         "esp_err_t d1l_contact_store_import_uri(",
         "esp_err_t d1l_contact_store_update_path_from_source(",
+        "esp_err_t d1l_contact_store_reset_path(",
         "esp_err_t d1l_contact_store_prepare_path_route(",
         "esp_err_t d1l_contact_store_note_path_result(",
         "esp_err_t d1l_contact_store_set_flags(",

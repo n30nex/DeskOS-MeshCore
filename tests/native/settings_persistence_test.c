@@ -53,7 +53,40 @@ typedef struct {
     uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
 } legacy_v8_t;
 
-_Static_assert(sizeof(legacy_v8_t) == sizeof(d1l_settings_t),
+typedef struct {
+    uint32_t schema_version;
+    char node_name[D1L_NODE_NAME_LEN];
+    uint8_t role;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool high_contrast;
+    bool night_mode;
+    bool onboarding_complete;
+    bool wifi_profile_saved;
+    uint8_t path_hash_bytes;
+    char wifi_ssid[D1L_WIFI_SSID_LEN];
+    char wifi_password[D1L_WIFI_PASSWORD_LEN];
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+    uint8_t tcxo_mode;
+    bool map_location_set;
+    int32_t map_lat_e7;
+    int32_t map_lon_e7;
+    uint8_t map_location_source;
+    uint8_t map_tile_zoom;
+    uint16_t timezone_schema_version;
+    int16_t timezone_offset_minutes;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
+} legacy_v9_t;
+
+_Static_assert(sizeof(legacy_v8_t) == sizeof(legacy_v9_t),
                "schema 8 and 9 must exercise equal-size migration");
 
 static bool bytes_all_zero(const void *data, size_t length)
@@ -446,6 +479,64 @@ static void test_equal_size_v8_envelope_migrates_and_preserves_identity(void)
     uint32_t stored_schema = 0U;
     memcpy(&stored_schema, payload, sizeof(stored_schema));
     assert(stored_schema == D1L_SETTINGS_SCHEMA_VERSION);
+}
+
+static void test_v9_wifi_profile_migrates_to_profile_zero(void)
+{
+    legacy_v9_t legacy = {
+        .schema_version = 9U,
+        .wifi_enabled = true,
+        .wifi_profile_saved = true,
+        .path_hash_bytes = 1U,
+        .map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM,
+        .timezone_schema_version = D1L_TIMEZONE_SETTING_SCHEMA_VERSION,
+    };
+    (void)snprintf(legacy.node_name, sizeof(legacy.node_name), "Legacy v9");
+    (void)snprintf(legacy.wifi_ssid, sizeof(legacy.wifi_ssid),
+                   "Legacy secure network");
+    (void)snprintf(legacy.wifi_password, sizeof(legacy.wifi_password),
+                   "legacy secret");
+    set_common_radio(&legacy.frequency_hz, &legacy.bandwidth_tenths_khz,
+                     &legacy.spreading_factor, &legacy.coding_rate,
+                     &legacy.tx_power_dbm);
+
+    uint8_t blob[TEST_BLOB_MAX] = {0};
+    size_t length = 0U;
+    assert(d1l_settings_envelope_build(
+        blob, sizeof(blob), &legacy, sizeof(legacy), 30U, &length));
+    mock_nvs_reset();
+    assert(mock_nvs_seed_blob(SETTINGS_NAMESPACE, SETTINGS_KEY, blob, length));
+    assert(d1l_settings_load() == ESP_OK);
+    assert(d1l_settings_persistence_state() ==
+           D1L_SETTINGS_PERSISTENCE_MIGRATED_LEGACY);
+    assert(d1l_settings_persistence_revision() == 31U);
+
+    d1l_wifi_profile_info_t profiles[D1L_WIFI_PROFILE_CAPACITY] = {0};
+    uint8_t active_profile = UINT8_MAX;
+    assert(d1l_settings_wifi_profiles_snapshot(
+               profiles, D1L_WIFI_PROFILE_CAPACITY,
+               &active_profile) == 1U);
+    assert(active_profile == 0U);
+    assert(profiles[0].saved);
+    assert(profiles[0].password_saved);
+    assert(strcmp(profiles[0].ssid, "Legacy secure network") == 0);
+
+    d1l_settings_wifi_secret_t secret = {0};
+    assert(d1l_settings_wifi_secret_snapshot(&secret) == ESP_OK);
+    assert(secret.wifi_profile_count == 1U);
+    assert(secret.wifi_active_profile == 0U);
+    assert(strcmp(secret.wifi_ssid, "Legacy secure network") == 0);
+    assert(strcmp(secret.wifi_password, "legacy secret") == 0);
+    d1l_settings_wifi_secret_wipe(&secret);
+
+    d1l_settings_t public_snapshot = {0};
+    assert(d1l_settings_public_snapshot(&public_snapshot) == ESP_OK);
+    assert(public_snapshot.wifi_profile_count == 1U);
+    assert(public_snapshot.wifi_active_profile == 0U);
+    assert(bytes_all_zero(public_snapshot.wifi_password,
+                          sizeof(public_snapshot.wifi_password)));
+    assert(bytes_all_zero(public_snapshot.wifi_profiles[0].password,
+                          sizeof(public_snapshot.wifi_profiles[0].password)));
 }
 
 static void test_invalid_timezone_recovers_to_utc_without_boot_loop(void)
@@ -962,10 +1053,10 @@ static void test_public_snapshot_redacts_typed_secrets(void)
         sizeof(persisted.wifi_password) -
             strlen(persisted.wifi_password) - 1U));
 
-    assert(d1l_settings_save_wifi_profile("Renamed network", NULL) == ESP_OK);
+    assert(d1l_settings_save_wifi_profile("New network", NULL) == ESP_OK);
     assert(d1l_settings_wifi_secret_snapshot(&wifi_secret) == ESP_OK);
     assert(wifi_secret.wifi_profile_saved);
-    assert(strcmp(wifi_secret.wifi_ssid, "Renamed network") == 0);
+    assert(strcmp(wifi_secret.wifi_ssid, "New network") == 0);
     assert(strcmp(wifi_secret.wifi_password, "short") == 0);
     assert(bytes_all_zero(
         &wifi_secret.wifi_password[strlen(wifi_secret.wifi_password) + 1U],
@@ -982,14 +1073,14 @@ static void test_public_snapshot_redacts_typed_secrets(void)
                NULL, &payload) == D1L_SETTINGS_ENVELOPE_VALID);
     memset(&persisted, 0, sizeof(persisted));
     memcpy(&persisted, payload, sizeof(persisted));
-    assert(strcmp(persisted.wifi_ssid, "Renamed network") == 0);
+    assert(strcmp(persisted.wifi_ssid, "New network") == 0);
     assert(strcmp(persisted.wifi_password, "short") == 0);
     assert(bytes_all_zero(
         &persisted.wifi_password[strlen(persisted.wifi_password) + 1U],
         sizeof(persisted.wifi_password) -
             strlen(persisted.wifi_password) - 1U));
 
-    assert(d1l_settings_save_wifi_profile("Open network", "") == ESP_OK);
+    assert(d1l_settings_save_wifi_profile("Open network", NULL) == ESP_OK);
     assert(d1l_settings_wifi_secret_snapshot(&wifi_secret) == ESP_OK);
     assert(wifi_secret.wifi_profile_saved);
     assert(strcmp(wifi_secret.wifi_ssid, "Open network") == 0);
@@ -1009,6 +1100,37 @@ static void test_public_snapshot_redacts_typed_secrets(void)
     assert(strcmp(persisted.wifi_ssid, "Open network") == 0);
     assert(bytes_all_zero(persisted.wifi_password,
                           sizeof(persisted.wifi_password)));
+
+    d1l_wifi_profile_info_t profiles[D1L_WIFI_PROFILE_CAPACITY] = {0};
+    uint8_t active_profile = UINT8_MAX;
+    assert(d1l_settings_wifi_profiles_snapshot(
+               profiles, D1L_WIFI_PROFILE_CAPACITY,
+               &active_profile) == D1L_WIFI_PROFILE_CAPACITY);
+    assert(active_profile == 2U);
+    assert(strcmp(profiles[0].ssid, "Secret network") == 0);
+    assert(strcmp(profiles[1].ssid, "New network") == 0);
+    assert(strcmp(profiles[2].ssid, "Open network") == 0);
+    assert(profiles[0].password_saved);
+    assert(profiles[1].password_saved);
+    assert(!profiles[2].password_saved);
+    assert(d1l_settings_save_wifi_profile(
+               "Capacity overflow", "unused") == ESP_ERR_NO_MEM);
+
+    assert(d1l_settings_select_wifi_profile(1U) == ESP_OK);
+    assert(d1l_settings_wifi_secret_snapshot(&wifi_secret) == ESP_OK);
+    assert(wifi_secret.wifi_active_profile == 1U);
+    assert(strcmp(wifi_secret.wifi_ssid, "New network") == 0);
+    assert(strcmp(wifi_secret.wifi_password, "short") == 0);
+    d1l_settings_wifi_secret_wipe(&wifi_secret);
+
+    assert(d1l_settings_delete_wifi_profile(1U) == ESP_OK);
+    assert(d1l_settings_wifi_secret_snapshot(&wifi_secret) == ESP_OK);
+    assert(wifi_secret.wifi_profile_count == 2U);
+    assert(wifi_secret.wifi_active_profile == 1U);
+    assert(strcmp(wifi_secret.wifi_ssid, "Open network") == 0);
+    assert(bytes_all_zero(wifi_secret.wifi_password,
+                          sizeof(wifi_secret.wifi_password)));
+    d1l_settings_wifi_secret_wipe(&wifi_secret);
 
     assert(d1l_settings_clear_wifi_profile() == ESP_OK);
     assert(d1l_settings_wifi_secret_snapshot(&wifi_secret) == ESP_OK);
@@ -1241,6 +1363,7 @@ int main(void)
     test_all_recognized_raw_legacy_versions_migrate();
     test_v7_envelope_migrates_revision_and_recovers_text();
     test_equal_size_v8_envelope_migrates_and_preserves_identity();
+    test_v9_wifi_profile_migrates_to_profile_zero();
     test_invalid_timezone_recovers_to_utc_without_boot_loop();
     test_failed_legacy_rewrite_leaves_raw_blob_intact();
     test_unknown_newer_envelope_is_preserved_and_write_blocked();

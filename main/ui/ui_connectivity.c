@@ -27,7 +27,10 @@ void d1l_ui_connectivity_wifi_view(const d1l_ui_wifi_view_input_t *input,
                  "Last %s", safe_text(input->last_error, "none"));
     }
     snprintf(out_view->profile_line, sizeof(out_view->profile_line),
-             "Profile %s  password %s",
+             "Profile %u/%u  %s  password %s",
+             input->profile_saved ?
+                 (unsigned)input->active_profile + 1U : 0U,
+             (unsigned)input->profile_count,
              input->profile_saved ? safe_text(input->ssid, "saved") :
                                     "not saved",
              input->password_saved ? "saved" : "open/empty");

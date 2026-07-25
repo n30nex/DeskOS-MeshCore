@@ -164,7 +164,8 @@ def test_ui_console_and_smoke_expose_routes():
     assert "routes trace <fingerprint>" in console
     assert "routes probe <fingerprint>" in console
     assert "Routes are learned from MeshCore path metadata" in console
-    assert "DM/PATH discovery probe queued" in console
+    assert "Encrypted PATH discovery and base-telemetry request queued" in console
+    assert '\\"telemetry_requested\\":true' in console
     assert "routes" in SMOKE_COMMANDS
     assert "routes trace 0BF0A701D5AE2DB6" in SMOKE_COMMANDS
     assert "routes clear" in roadmap

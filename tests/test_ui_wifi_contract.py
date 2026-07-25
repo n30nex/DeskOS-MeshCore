@@ -114,7 +114,7 @@ def test_wifi_renderer_preserves_available_and_unavailable_surfaces():
     assert '"Profile and state"' in source
     assert '"Network name"' in source
     assert '"Password"' in source
-    for label in ("Close", "Save", "Clear", "Scan", "Connect"):
+    for label in ("Close", "Save", "Delete", "Next", "Scan", "Connect"):
         assert f'"{label}"' in source
     assert "if (!controller->rendered.controls_available)" in source
     assert "controller->rendered.scan_line" in source

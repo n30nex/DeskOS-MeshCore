@@ -8,6 +8,7 @@
 #include "comms/connectivity_manager.h"
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
+#include "esp_attr.h"
 #include "hal/display_preferences.h"
 #include "mesh/channel_message_coordinator.h"
 #include "mesh/meshcore_service.h"
@@ -27,13 +28,17 @@ static d1l_app_model_t s_model = {
 /* Snapshot publication is serialized by the UI task.  Keep the bounded
  * retained projection out of that task's stack. */
 static d1l_dm_entry_t
-    s_dm_conversation_source[D1L_DM_CONVERSATION_SOURCE_CAPACITY];
+    s_dm_conversation_source[D1L_DM_CONVERSATION_SOURCE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
 static bool
-    s_dm_conversation_source_unread[D1L_DM_CONVERSATION_SOURCE_CAPACITY];
+    s_dm_conversation_source_unread[D1L_DM_CONVERSATION_SOURCE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
 static d1l_dm_conversation_summary_t
-    s_dm_conversation_summaries[D1L_APP_SNAPSHOT_DM_PREVIEW];
+    s_dm_conversation_summaries[D1L_APP_SNAPSHOT_DM_PREVIEW]
+    EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t
-    s_dm_capable_contact_source[D1L_CONTACT_STORE_CAPACITY];
+    s_dm_capable_contact_source[D1L_CONTACT_STORE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
 
 static size_t count_dm_capable_contacts(void)
 {
@@ -345,6 +350,11 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->observer_enabled = connectivity.observer_enabled_setting;
     snapshot->wifi_profile_saved = connectivity.wifi_profile_saved;
     snapshot->wifi_password_saved = connectivity.wifi_password_saved;
+    snapshot->wifi_profile_count = (uint8_t)
+        d1l_connectivity_wifi_profiles(
+            snapshot->wifi_profiles,
+            D1L_WIFI_PROFILE_CAPACITY,
+            &snapshot->wifi_active_profile);
     snapshot->wifi_scan_supported =
         d1l_release_feature_available(
             D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
@@ -871,6 +881,22 @@ esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
         fingerprint, out_token, out_token_size);
 }
 
+void d1l_app_model_contact_telemetry_snapshot(
+    const char *fingerprint,
+    d1l_meshcore_contact_telemetry_snapshot_t *out_snapshot)
+{
+    d1l_meshcore_service_contact_telemetry_snapshot(
+        fingerprint, out_snapshot);
+}
+
+esp_err_t d1l_app_model_reset_contact_route(const char *fingerprint)
+{
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return d1l_meshcore_service_reset_contact_route(fingerprint);
+}
+
 esp_err_t d1l_app_model_send_trace_contact(const char *fingerprint)
 {
     if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
@@ -1113,6 +1139,16 @@ esp_err_t d1l_app_model_wifi_disconnect(void)
 esp_err_t d1l_app_model_save_wifi_profile(const char *ssid, const char *password)
 {
     return d1l_connectivity_save_wifi_profile(ssid, password);
+}
+
+esp_err_t d1l_app_model_select_wifi_profile(uint8_t profile_index)
+{
+    return d1l_connectivity_select_wifi_profile(profile_index);
+}
+
+esp_err_t d1l_app_model_delete_wifi_profile(uint8_t profile_index)
+{
+    return d1l_connectivity_delete_wifi_profile(profile_index);
 }
 
 esp_err_t d1l_app_model_clear_wifi_profile(void)

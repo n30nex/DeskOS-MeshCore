@@ -14,7 +14,7 @@ static void test_wifi_truth_models_offline_connected_and_scan_states(void)
     assert(strcmp(view.state_line, "State off  build not built") == 0);
     assert(strcmp(view.link_line, "Last not_started") == 0);
     assert(strcmp(view.profile_line,
-                  "Profile not saved  password open/empty") == 0);
+                  "Profile 0/0  not saved  password open/empty") == 0);
     assert(strcmp(view.scan_line,
                   "Wi-Fi is unavailable in this build") == 0);
     assert(strcmp(view.toggle_label, "Enable") == 0);
@@ -32,6 +32,8 @@ static void test_wifi_truth_models_offline_connected_and_scan_states(void)
         .connected = true,
         .profile_saved = true,
         .password_saved = true,
+        .profile_count = 1U,
+        .active_profile = 0U,
         .scan_loaded = true,
         .state = "ready",
         .ip = "192.0.2.5",
@@ -46,7 +48,8 @@ static void test_wifi_truth_models_offline_connected_and_scan_states(void)
     d1l_ui_connectivity_wifi_view(&input, &view);
     assert(view.controls_available);
     assert(strcmp(view.link_line, "IP 192.0.2.5  RSSI -42  ch 6") == 0);
-    assert(strcmp(view.profile_line, "Profile Mesh Lab  password saved") == 0);
+    assert(strcmp(view.profile_line,
+                  "Profile 1/1  Mesh Lab  password saved") == 0);
     assert(strcmp(view.scan_line,
                   "Scan ok  3/4 networks  strongest Mesh Lab") == 0);
     assert(strcmp(view.toggle_label, "Disable") == 0);

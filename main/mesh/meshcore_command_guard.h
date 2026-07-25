@@ -12,6 +12,7 @@
  * FreeRTOS command queue. meshcore_service.c asserts this capacity against the
  * protocol constant at compile time. */
 #define D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY 16U
+#define D1L_MESH_COMMAND_ADMIN_CLI_CAPACITY 161U
 #define D1L_MESH_COMMAND_ADMIN_RESPONSE_FINGERPRINT_CAPACITY 17U
 #define D1L_MESH_COMMAND_ADMIN_RESPONSE_PLAINTEXT_CAPACITY 256U
 
@@ -20,6 +21,9 @@ typedef struct {
     char admin_password[D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY];
     uint8_t admin_password_len;
     bool admin_password_present;
+    char admin_cli[D1L_MESH_COMMAND_ADMIN_CLI_CAPACITY];
+    uint16_t admin_cli_len;
+    bool admin_cli_present;
 } d1l_mesh_command_request_t;
 
 typedef bool (*d1l_mesh_command_enqueue_fn_t)(
@@ -83,6 +87,25 @@ static inline void d1l_mesh_command_request_wipe_admin_password(
     request->admin_password_present = false;
 }
 
+static inline void d1l_mesh_command_request_wipe_admin_cli(
+    d1l_mesh_command_request_t *request)
+{
+    if (!request) {
+        return;
+    }
+    d1l_mesh_command_secure_zero(request->admin_cli,
+                                 sizeof(request->admin_cli));
+    request->admin_cli_len = 0U;
+    request->admin_cli_present = false;
+}
+
+static inline void d1l_mesh_command_request_wipe_admin_authority(
+    d1l_mesh_command_request_t *request)
+{
+    d1l_mesh_command_request_wipe_admin_password(request);
+    d1l_mesh_command_request_wipe_admin_cli(request);
+}
+
 static inline bool d1l_mesh_command_request_matches(
     const d1l_mesh_command_request_t *request, uint32_t request_id)
 {
@@ -104,7 +127,7 @@ static inline bool d1l_mesh_command_request_claim(
         !d1l_mesh_request_guard_claim(&request->lifecycle, request_id)) {
         return false;
     }
-    d1l_mesh_command_request_wipe_admin_password(request);
+    d1l_mesh_command_request_wipe_admin_authority(request);
     return true;
 }
 
@@ -123,7 +146,7 @@ static inline bool d1l_mesh_command_request_release(
         d1l_mesh_command_request_state(request) != expected_state) {
         return false;
     }
-    d1l_mesh_command_request_wipe_admin_password(request);
+    d1l_mesh_command_request_wipe_admin_authority(request);
     return d1l_mesh_request_guard_release(
         &request->lifecycle, request_id, expected_state);
 }
@@ -139,7 +162,7 @@ static inline bool d1l_mesh_command_request_store_admin_password(
             D1L_MESH_REQUEST_PENDING) {
         return false;
     }
-    d1l_mesh_command_request_wipe_admin_password(request);
+    d1l_mesh_command_request_wipe_admin_authority(request);
     if (password_len > 0U) {
         memcpy(request->admin_password, password, password_len);
     }
@@ -168,7 +191,50 @@ static inline bool d1l_mesh_command_request_take_admin_password(
         memcpy(out_password, request->admin_password, password_len + 1U);
         *out_len = password_len;
     }
-    d1l_mesh_command_request_wipe_admin_password(request);
+    d1l_mesh_command_request_wipe_admin_authority(request);
+    return valid;
+}
+
+static inline bool d1l_mesh_command_request_store_admin_cli(
+    d1l_mesh_command_request_t *request, uint32_t request_id,
+    const char *command, size_t command_len)
+{
+    if (!command || command_len == 0U ||
+        command_len >= D1L_MESH_COMMAND_ADMIN_CLI_CAPACITY ||
+        !d1l_mesh_command_request_matches(request, request_id) ||
+        d1l_mesh_command_request_state(request) !=
+            D1L_MESH_REQUEST_PENDING) {
+        return false;
+    }
+    d1l_mesh_command_request_wipe_admin_authority(request);
+    memcpy(request->admin_cli, command, command_len);
+    request->admin_cli[command_len] = '\0';
+    request->admin_cli_len = (uint16_t)command_len;
+    request->admin_cli_present = true;
+    return true;
+}
+
+static inline bool d1l_mesh_command_request_take_admin_cli(
+    d1l_mesh_command_request_t *request, uint32_t request_id,
+    char *out_command, size_t out_size, size_t *out_len)
+{
+    if (!out_command || !out_len ||
+        !d1l_mesh_command_request_matches(request, request_id) ||
+        d1l_mesh_command_request_state(request) !=
+            D1L_MESH_REQUEST_ADMITTED) {
+        return false;
+    }
+    const size_t command_len = request->admin_cli_len;
+    const bool valid = request->admin_cli_present &&
+        command_len > 0U &&
+        command_len < D1L_MESH_COMMAND_ADMIN_CLI_CAPACITY &&
+        out_size > command_len &&
+        request->admin_cli[command_len] == '\0';
+    if (valid) {
+        memcpy(out_command, request->admin_cli, command_len + 1U);
+        *out_len = command_len;
+    }
+    d1l_mesh_command_request_wipe_admin_authority(request);
     return valid;
 }
 
@@ -180,7 +246,7 @@ static inline bool d1l_mesh_command_request_cancel_and_release(
             D1L_MESH_REQUEST_CALLER_CANCELLED)) {
         return false;
     }
-    d1l_mesh_command_request_wipe_admin_password(request);
+    d1l_mesh_command_request_wipe_admin_authority(request);
     return d1l_mesh_request_guard_release(
         &request->lifecycle, request_id,
         D1L_MESH_REQUEST_CALLER_CANCELLED);
@@ -194,7 +260,7 @@ static inline bool d1l_mesh_command_request_expire(
             D1L_MESH_REQUEST_OWNER_EXPIRED)) {
         return false;
     }
-    d1l_mesh_command_request_wipe_admin_password(request);
+    d1l_mesh_command_request_wipe_admin_authority(request);
     return true;
 }
 
@@ -217,7 +283,7 @@ static inline bool d1l_mesh_command_request_complete(
     }
     /* An admitted request is exclusively owner-held until completion is
      * signalled, so wiping before the terminal CAS cannot race slot reuse. */
-    d1l_mesh_command_request_wipe_admin_password(request);
+    d1l_mesh_command_request_wipe_admin_authority(request);
     return d1l_mesh_request_guard_transition(
         &request->lifecycle, request_id, D1L_MESH_REQUEST_ADMITTED,
         D1L_MESH_REQUEST_COMPLETED);

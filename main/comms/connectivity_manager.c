@@ -979,6 +979,10 @@ static void fill_status(d1l_connectivity_status_t *out_status)
         wifi_available && settings.wifi_profile_saved;
     out_status->wifi_password_saved =
         wifi_available && d1l_settings_wifi_password_saved();
+    out_status->wifi_profile_count =
+        wifi_available ? settings.wifi_profile_count : 0U;
+    out_status->wifi_active_profile =
+        wifi_available ? settings.wifi_active_profile : 0U;
     out_status->wifi_scan_supported = out_status->wifi_build_enabled;
     out_status->wifi_state = !wifi_available ?
         "unsupported_in_release_profile" :
@@ -1687,6 +1691,88 @@ esp_err_t d1l_connectivity_save_wifi_profile(const char *ssid, const char *passw
         settings.wifi_profile_saved && settings.wifi_ssid[0] != '\0');
     portEXIT_CRITICAL(&s_wifi_policy_lock);
     if (settings.wifi_enabled && build_wifi_enabled()) {
+        return d1l_connectivity_wifi_connect();
+    }
+    return ESP_OK;
+}
+
+size_t d1l_connectivity_wifi_profiles(
+    d1l_wifi_profile_info_t *out_profiles, size_t max_profiles,
+    uint8_t *out_active_profile)
+{
+    if (!release_wifi_user_control_available()) {
+        if (out_active_profile) {
+            *out_active_profile = 0U;
+        }
+        if (out_profiles && max_profiles > 0U) {
+            const size_t clear_count =
+                max_profiles < D1L_WIFI_PROFILE_CAPACITY ?
+                    max_profiles : D1L_WIFI_PROFILE_CAPACITY;
+            memset(
+                out_profiles, 0,
+                clear_count * sizeof(out_profiles[0]));
+        }
+        return 0U;
+    }
+    return d1l_settings_wifi_profiles_snapshot(
+        out_profiles, max_profiles, out_active_profile);
+}
+
+esp_err_t d1l_connectivity_select_wifi_profile(uint8_t profile_index)
+{
+    if (!release_wifi_user_control_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    esp_err_t ret =
+        d1l_settings_select_wifi_profile(profile_index);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    d1l_wifi_retry_policy_configure(
+        &s_wifi_policy,
+        settings.wifi_enabled && build_wifi_enabled(),
+        settings.wifi_profile_saved &&
+            settings.wifi_ssid[0] != '\0');
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+    if (settings.wifi_enabled && build_wifi_enabled()) {
+        ret = d1l_connectivity_wifi_connect();
+    }
+    return ret;
+}
+
+esp_err_t d1l_connectivity_delete_wifi_profile(uint8_t profile_index)
+{
+    if (!release_wifi_user_control_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    d1l_settings_t before = {0};
+    (void)d1l_settings_public_snapshot(&before);
+    esp_err_t ret =
+        d1l_settings_delete_wifi_profile(profile_index);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    if (!settings.wifi_profile_saved) {
+        const esp_err_t disconnect_ret =
+            d1l_connectivity_wifi_disconnect();
+        portENTER_CRITICAL(&s_wifi_policy_lock);
+        d1l_wifi_retry_policy_configure(
+            &s_wifi_policy, false, false);
+        portEXIT_CRITICAL(&s_wifi_policy_lock);
+        return disconnect_ret;
+    }
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    d1l_wifi_retry_policy_configure(
+        &s_wifi_policy,
+        settings.wifi_enabled && build_wifi_enabled(), true);
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+    if (before.wifi_active_profile == profile_index &&
+        settings.wifi_enabled && build_wifi_enabled()) {
         return d1l_connectivity_wifi_connect();
     }
     return ESP_OK;

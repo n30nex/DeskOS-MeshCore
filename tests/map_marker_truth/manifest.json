@@ -107,10 +107,10 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "6b1f4310efd29c1a540661b9d0474a3156867f624db895d225a70803cced5b02",
-    "main/app/app_model.h": "8ad54aa8180d342b74bac7b2bc1fd27c8f86945fc38471d7e66147c5c6cfc02d",
-    "main/app/settings_model.c": "c61099b8475719e21e51dee3c2216014f7687a03fc8ddf4faf83fa5cf1509a38",
-    "main/app/settings_model.h": "1d56b09a11cb0ccfec0a0a60018955915512248e8b41189e1b8a05804c28f63c",
+    "main/app/app_model.c": "f22e0c3f870456be77684a3193fc21e64a1173a467763df4d7a35486139d9e67",
+    "main/app/app_model.h": "d67408a0e852bf541b66e5b3804171aa2b78d87d7b4ab4e4dc2a761a9740284e",
+    "main/app/settings_model.c": "e0e7e4b6f084e829eb3967da38dc1ecb9d3f42bdbb0a757be76289bc17c8ddf4",
+    "main/app/settings_model.h": "007127211f82d275e7af01dfc6b9c348d0576678b48ba4688685f56f71949b88",
     "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
     "main/map/map_marker_truth.h": "0aa1723d730016c870e1f6cb93e892803ab6bda589672e4bb99b3abe518466cc",
     "main/map/map_math.c": "a7915104c13d8dc9c3e094fb3ed658da45adec14f65ad3e3493444cee4624943",
@@ -123,7 +123,7 @@
     "main/map/map_viewport_truth_transition.h": "4de9fd54634d0f3481a5069895e72357bee55593ead88d44db526c98f37bc66e",
     "main/mesh/advert_data.c": "b046f34629d8f04fbf680cc8b517958162c5401acb991d5bb3231c75f3ac6818",
     "main/mesh/meshcore_lifetime.h": "b480f554ac3979e3caefdd1d815a334e0de47bddc8f21c7ac8305d4643fba535",
-    "main/mesh/meshcore_service.c": "7593e4230bcb4154aeb85d7ff26044c1b1888b0c6d5445135eff22fa6d10ffe3",
+    "main/mesh/meshcore_service.c": "3fcb6ad9e71736a16403470f3d8396cb2628df27cf2eb7513cc4d7ca5407b375",
     "main/mesh/node_store.c": "e2fcfecd12aa8b22c203806f700086bb18daf7c0f983786e8a4294463ddb8db6",
     "main/mesh/node_store.h": "6f9ebf9b92bcca3d405df25483454192011a372c7eaedee2a5625badd22daa23",
     "main/platform/time_service.c": "ef1602a22a9cc97580877bd42867ba04524e5a5697c8e14f7e955c268badc7b9",
@@ -134,7 +134,7 @@
     "main/ui/ui_map.h": "35833cc85e96764c126cb311697f43c238bc742130b42c87d603d51ce8695176",
     "main/ui/ui_node_detail.c": "9cfd5f1c4a63341416df3463caa260b8ed5dfbc3b2479d5b40c9b7a6ec56a139",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "93d2d572b25e77c8aa6073012b33b7bd4297e50b15e9a3af624ac00e76492887",
+    "main/ui/ui_phase1.c": "2208d377f880be3eb16fa06b320a34bcf68c03ad714d897521a49009789b48d9",
     "tools/ui_simulator.py": "9b80a6ccde4ec55a6d199a546fc2380d2a7b55ba8c1faa96da2ea922052558f0"
   }
 }

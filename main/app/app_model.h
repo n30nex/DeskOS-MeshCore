@@ -15,6 +15,7 @@
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
 #include "mesh/mesh_inspector.h"
+#include "mesh/meshcore_service.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
 #include "mesh/route_store.h"
@@ -91,6 +92,10 @@ typedef struct {
     bool observer_enabled;
     bool wifi_profile_saved;
     bool wifi_password_saved;
+    uint8_t wifi_profile_count;
+    uint8_t wifi_active_profile;
+    d1l_wifi_profile_info_t
+        wifi_profiles[D1L_WIFI_PROFILE_CAPACITY];
     bool wifi_scan_supported;
     bool wifi_stack_active;
     bool wifi_connected;
@@ -334,6 +339,10 @@ esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text);
 esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
                                                      char *out_token,
                                                      size_t out_token_size);
+void d1l_app_model_contact_telemetry_snapshot(
+    const char *fingerprint,
+    d1l_meshcore_contact_telemetry_snapshot_t *out_snapshot);
+esp_err_t d1l_app_model_reset_contact_route(const char *fingerprint);
 esp_err_t d1l_app_model_send_trace_contact(const char *fingerprint);
 size_t d1l_app_model_query_dm_thread_page(const char *fingerprint,
                                           d1l_dm_entry_t *out_entries,
@@ -377,6 +386,8 @@ esp_err_t d1l_app_model_wifi_scan(d1l_wifi_scan_result_t *out_result);
 esp_err_t d1l_app_model_wifi_connect(void);
 esp_err_t d1l_app_model_wifi_disconnect(void);
 esp_err_t d1l_app_model_save_wifi_profile(const char *ssid, const char *password);
+esp_err_t d1l_app_model_select_wifi_profile(uint8_t profile_index);
+esp_err_t d1l_app_model_delete_wifi_profile(uint8_t profile_index);
 esp_err_t d1l_app_model_clear_wifi_profile(void);
 esp_err_t d1l_app_model_set_ble_enabled(bool enabled);
 esp_err_t d1l_app_model_ble_begin_pairing(void);

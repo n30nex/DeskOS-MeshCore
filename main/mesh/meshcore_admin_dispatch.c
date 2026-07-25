@@ -1,6 +1,8 @@
 #include "meshcore_admin_dispatch.h"
 
 #include <limits.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 static uint16_t read_le16(const uint8_t *src)
@@ -17,6 +19,38 @@ static uint32_t read_le32(const uint8_t *src)
 {
     return (uint32_t)src[0] | ((uint32_t)src[1] << 8U) |
            ((uint32_t)src[2] << 16U) | ((uint32_t)src[3] << 24U);
+}
+
+static uint16_t read_be16(const uint8_t *src)
+{
+    return ((uint16_t)src[0] << 8U) | (uint16_t)src[1];
+}
+
+static int16_t read_be_i16(const uint8_t *src)
+{
+    return (int16_t)read_be16(src);
+}
+
+static uint32_t read_be32(const uint8_t *src)
+{
+    return ((uint32_t)src[0] << 24U) | ((uint32_t)src[1] << 16U) |
+           ((uint32_t)src[2] << 8U) | (uint32_t)src[3];
+}
+
+static int32_t read_be_i24(const uint8_t *src)
+{
+    uint32_t value = ((uint32_t)src[0] << 16U) |
+                     ((uint32_t)src[1] << 8U) | (uint32_t)src[2];
+    if ((value & UINT32_C(0x00800000)) != 0U) {
+        value |= UINT32_C(0xFF000000);
+    }
+    return (int32_t)value;
+}
+
+static void write_le16(uint8_t *dest, uint16_t value)
+{
+    dest[0] = (uint8_t)value;
+    dest[1] = (uint8_t)(value >> 8U);
 }
 
 static void write_le32(uint8_t *dest, uint32_t value)
@@ -101,6 +135,96 @@ bool d1l_meshcore_admin_encode_status_request(
     write_le32(out, tag);
     out[4] = D1L_MESHCORE_ADMIN_REQUEST_GET_STATUS;
     write_le32(&out[9], uniqueness);
+    return true;
+}
+
+const char *d1l_meshcore_admin_query_name(
+    d1l_meshcore_admin_query_t query)
+{
+    switch (query) {
+    case D1L_MESHCORE_ADMIN_QUERY_TELEMETRY:
+        return "telemetry";
+    case D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST:
+        return "access_list";
+    case D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS:
+        return "neighbours";
+    case D1L_MESHCORE_ADMIN_QUERY_NONE:
+    default:
+        return "none";
+    }
+}
+
+bool d1l_meshcore_admin_query_allowed(
+    d1l_meshcore_admin_role_t role, uint8_t permissions,
+    d1l_meshcore_admin_query_t query)
+{
+    if (role != D1L_MESHCORE_ADMIN_ROLE_REPEATER &&
+        role != D1L_MESHCORE_ADMIN_ROLE_ROOM) {
+        return false;
+    }
+    const uint8_t permission_role =
+        permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
+    switch (query) {
+    case D1L_MESHCORE_ADMIN_QUERY_TELEMETRY:
+        return true;
+    case D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST:
+        return permission_role == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN;
+    case D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS:
+        return role == D1L_MESHCORE_ADMIN_ROLE_REPEATER;
+    case D1L_MESHCORE_ADMIN_QUERY_NONE:
+    default:
+        return false;
+    }
+}
+
+bool d1l_meshcore_admin_encode_query_request(
+    d1l_meshcore_admin_query_t query, uint32_t tag, uint16_t offset,
+    uint32_t uniqueness, uint8_t *out, size_t out_size, size_t *out_len)
+{
+    if (!out || !out_len || tag == 0U ||
+        (query != D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS && offset != 0U)) {
+        return false;
+    }
+    size_t logical_len = 0U;
+    switch (query) {
+    case D1L_MESHCORE_ADMIN_QUERY_TELEMETRY:
+        logical_len = D1L_MESHCORE_ADMIN_REQUEST_BYTES;
+        break;
+    case D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST:
+        logical_len = 11U;
+        break;
+    case D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS:
+        logical_len = D1L_MESHCORE_ADMIN_MAX_QUERY_REQUEST_BYTES;
+        break;
+    case D1L_MESHCORE_ADMIN_QUERY_NONE:
+    default:
+        return false;
+    }
+    if (out_size < logical_len) {
+        return false;
+    }
+    memset(out, 0, logical_len);
+    write_le32(out, tag);
+    if (query == D1L_MESHCORE_ADMIN_QUERY_TELEMETRY) {
+        out[4] = D1L_MESHCORE_ADMIN_REQUEST_GET_TELEMETRY;
+        /* An inverse zero mask requests every field permitted by the
+         * authenticated session. A guest server still limits this to base
+         * telemetry. */
+        out[5] = 0U;
+        write_le32(&out[9], uniqueness);
+    } else if (query == D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST) {
+        out[4] = D1L_MESHCORE_ADMIN_REQUEST_GET_ACCESS_LIST;
+        write_le32(&out[7], uniqueness);
+    } else {
+        out[4] = D1L_MESHCORE_ADMIN_REQUEST_GET_NEIGHBOURS;
+        out[5] = 0U;
+        out[6] = D1L_MESHCORE_ADMIN_NEIGHBOUR_PAGE_COUNT;
+        write_le16(&out[7], offset);
+        out[9] = 0U;
+        out[10] = D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES;
+        write_le32(&out[11], uniqueness);
+    }
+    *out_len = logical_len;
     return true;
 }
 
@@ -294,6 +418,25 @@ static void refresh_idle_deadline(d1l_meshcore_admin_session_t *session,
     session->idle_deadline_us = refreshed;
 }
 
+bool d1l_meshcore_admin_note_authenticated_activity(
+    d1l_meshcore_admin_session_t *session, uint64_t now_us)
+{
+    if (!session ||
+        (session->state != D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+         session->state != D1L_MESHCORE_ADMIN_STATUS_PENDING &&
+         session->state != D1L_MESHCORE_ADMIN_MUTATION_PENDING &&
+         session->state != D1L_MESHCORE_ADMIN_CLI_PENDING &&
+         session->state != D1L_MESHCORE_ADMIN_QUERY_PENDING)) {
+        return false;
+    }
+    if (authenticated_deadline_due(session, now_us)) {
+        d1l_meshcore_admin_timeout(session);
+        return false;
+    }
+    refresh_idle_deadline(session, now_us);
+    return true;
+}
+
 bool d1l_meshcore_admin_canonical_span(const uint8_t *data, size_t data_len,
                                        size_t logical_len)
 {
@@ -332,11 +475,16 @@ d1l_meshcore_admin_accept_login_response(
     }
 
     const uint8_t permissions = plaintext[7];
+    const uint8_t permission_role =
+        permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
     const uint8_t expected_firmware =
         session->role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ? 2U : 1U;
-    if (plaintext[4] != 0U || plaintext[5] != 0U || plaintext[6] != 1U ||
-        (permissions & D1L_MESHCORE_ADMIN_PERMISSION_ADMIN) !=
-            D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ||
+    const uint8_t expected_legacy_role =
+        permission_role == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ? 1U :
+        (session->role == D1L_MESHCORE_ADMIN_ROLE_ROOM &&
+         permission_role == D1L_MESHCORE_ADMIN_PERMISSION_GUEST ? 2U : 0U);
+    if (plaintext[4] != 0U || plaintext[5] != 0U ||
+        plaintext[6] != expected_legacy_role ||
         plaintext[12] != expected_firmware) {
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
@@ -386,6 +534,49 @@ bool d1l_meshcore_admin_cancel_status_request(
         return false;
     }
     session->pending_tag = 0U;
+    session->request_deadline_us = 0U;
+    session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
+    session->generation = next_generation(session->generation);
+    return true;
+}
+
+bool d1l_meshcore_admin_begin_query_request(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_query_t query, uint16_t offset, uint32_t tag,
+    uint64_t now_us, uint64_t request_deadline_us)
+{
+    if (!session || session->state != D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+        !d1l_meshcore_admin_query_allowed(
+            session->role, session->permissions, query) ||
+        (query != D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS && offset != 0U) ||
+        tag == 0U || request_deadline_us == 0U ||
+        tag == session->last_completed_tag) {
+        return false;
+    }
+    if (authenticated_deadline_due(session, now_us)) {
+        d1l_meshcore_admin_timeout(session);
+        return false;
+    }
+    session->pending_tag = tag;
+    session->pending_query = query;
+    session->pending_query_offset = offset;
+    session->request_deadline_us = request_deadline_us;
+    session->state = D1L_MESHCORE_ADMIN_QUERY_PENDING;
+    session->generation = next_generation(session->generation);
+    return true;
+}
+
+bool d1l_meshcore_admin_cancel_query_request(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_query_t query, uint32_t tag)
+{
+    if (!session || session->state != D1L_MESHCORE_ADMIN_QUERY_PENDING ||
+        session->pending_query != query || session->pending_tag != tag) {
+        return false;
+    }
+    session->pending_tag = 0U;
+    session->pending_query = D1L_MESHCORE_ADMIN_QUERY_NONE;
+    session->pending_query_offset = 0U;
     session->request_deadline_us = 0U;
     session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
     session->generation = next_generation(session->generation);
@@ -480,6 +671,238 @@ bool d1l_meshcore_admin_cancel_mutation(
     session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
     session->generation = next_generation(session->generation);
     return true;
+}
+
+static uint8_t cli_ascii_lower(uint8_t value)
+{
+    return value >= (uint8_t)'A' && value <= (uint8_t)'Z' ?
+        (uint8_t)(value + ((uint8_t)'a' - (uint8_t)'A')) : value;
+}
+
+static bool cli_starts_with_case_insensitive(
+    const char *command, const char *prefix)
+{
+    if (!command || !prefix || prefix[0] == '\0') {
+        return false;
+    }
+    for (size_t i = 0U; prefix[i] != '\0'; ++i) {
+        if (command[i] == '\0' ||
+            cli_ascii_lower((uint8_t)command[i]) !=
+                cli_ascii_lower((uint8_t)prefix[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool cli_equals_case_insensitive(
+    const char *command, const char *expected)
+{
+    return cli_starts_with_case_insensitive(command, expected) &&
+           command[strlen(expected)] == '\0';
+}
+
+static bool cli_contains_case_insensitive(
+    const char *command, const char *needle)
+{
+    if (!command || !needle || needle[0] == '\0') {
+        return false;
+    }
+    for (size_t offset = 0U; command[offset] != '\0'; ++offset) {
+        if (cli_starts_with_case_insensitive(&command[offset], needle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool d1l_meshcore_admin_cli_command_valid(const char *command)
+{
+    if (!command) {
+        return false;
+    }
+    size_t command_len = 0U;
+    while (command_len <= D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES &&
+           command[command_len] != '\0') {
+        command_len++;
+    }
+    if (command_len == 0U ||
+        command_len > D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES ||
+        command[0] == ' ' || command[command_len - 1U] == ' ') {
+        return false;
+    }
+    for (size_t i = 0U; i < command_len; ++i) {
+        const uint8_t value = (uint8_t)command[i];
+        if (value < 0x20U || value > 0x7EU) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool d1l_meshcore_admin_cli_command_sensitive(const char *command)
+{
+    if (!d1l_meshcore_admin_cli_command_valid(command)) {
+        return false;
+    }
+    return cli_contains_case_insensitive(command, "password") ||
+           cli_contains_case_insensitive(command, "secret") ||
+           cli_contains_case_insensitive(command, "prv.key") ||
+           cli_contains_case_insensitive(command, "private.key");
+}
+
+bool d1l_meshcore_admin_cli_command_read_only(const char *command)
+{
+    if (!d1l_meshcore_admin_cli_command_valid(command) ||
+        d1l_meshcore_admin_cli_command_sensitive(command)) {
+        return false;
+    }
+    return cli_equals_case_insensitive(command, "ver") ||
+           cli_equals_case_insensitive(command, "board") ||
+           cli_equals_case_insensitive(command, "clock") ||
+           cli_equals_case_insensitive(command, "neighbors") ||
+           cli_equals_case_insensitive(command, "help") ||
+           cli_equals_case_insensitive(command, "gps") ||
+           cli_equals_case_insensitive(command, "region") ||
+           cli_equals_case_insensitive(command, "region home") ||
+           cli_equals_case_insensitive(command, "region default") ||
+           cli_starts_with_case_insensitive(command, "region get ") ||
+           cli_starts_with_case_insensitive(command, "region list ") ||
+           cli_equals_case_insensitive(command, "sensor list") ||
+           cli_starts_with_case_insensitive(command, "sensor list ") ||
+           cli_starts_with_case_insensitive(command, "sensor get ") ||
+           cli_starts_with_case_insensitive(command, "get ");
+}
+
+bool d1l_meshcore_admin_begin_cli_command(
+    d1l_meshcore_admin_session_t *session, uint32_t tag,
+    bool sensitive, uint64_t now_us, uint64_t request_deadline_us)
+{
+    const uint8_t expected_firmware =
+        session && session->role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ? 2U :
+        session && session->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ? 1U : 0U;
+    if (!session || session->state != D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+        tag == 0U || request_deadline_us == 0U ||
+        tag == session->last_completed_tag ||
+        (session->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ADMIN) !=
+            D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ||
+        expected_firmware == 0U ||
+        session->firmware_level != expected_firmware) {
+        return false;
+    }
+    if (authenticated_deadline_due(session, now_us)) {
+        d1l_meshcore_admin_timeout(session);
+        return false;
+    }
+    session->pending_tag = tag;
+    session->pending_cli_sensitive = sensitive;
+    session->request_deadline_us = request_deadline_us;
+    session->cli_reply_valid = false;
+    session->cli_reply_redacted = false;
+    session->cli_reply_success = false;
+    d1l_meshcore_admin_secure_zero(
+        session->cli_reply, sizeof(session->cli_reply));
+    session->state = D1L_MESHCORE_ADMIN_CLI_PENDING;
+    session->generation = next_generation(session->generation);
+    return true;
+}
+
+bool d1l_meshcore_admin_cancel_cli_command(
+    d1l_meshcore_admin_session_t *session, uint32_t tag)
+{
+    if (!session || session->state != D1L_MESHCORE_ADMIN_CLI_PENDING ||
+        session->pending_tag != tag) {
+        return false;
+    }
+    session->pending_tag = 0U;
+    session->pending_cli_sensitive = false;
+    session->request_deadline_us = 0U;
+    session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
+    session->generation = next_generation(session->generation);
+    return true;
+}
+
+static bool cli_reply_byte_valid(uint8_t value)
+{
+    return value == '\n' || value == '\r' || value == '\t' ||
+           (value >= 0x20U && value <= 0x7EU);
+}
+
+static bool cli_reply_is_error(const uint8_t *text, size_t text_len)
+{
+    if (!text || text_len == 0U) {
+        return false;
+    }
+    if (text_len >= 3U &&
+        cli_ascii_lower(text[0]) == (uint8_t)'e' &&
+        cli_ascii_lower(text[1]) == (uint8_t)'r' &&
+        cli_ascii_lower(text[2]) == (uint8_t)'r') {
+        return true;
+    }
+    static const char unknown[] = "unknown";
+    if (text_len < sizeof(unknown) - 1U) {
+        return false;
+    }
+    for (size_t i = 0U; i < sizeof(unknown) - 1U; ++i) {
+        if (cli_ascii_lower(text[i]) != (uint8_t)unknown[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_accept_cli_response(
+    d1l_meshcore_admin_session_t *session,
+    const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
+    uint32_t response_timestamp, const uint8_t *text, size_t text_len,
+    uint64_t now_us)
+{
+    if (!session || session->state != D1L_MESHCORE_ADMIN_CLI_PENDING ||
+        !d1l_meshcore_admin_peer_matches(session, peer_public_key)) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+    }
+    if (authenticated_deadline_due(session, now_us) ||
+        deadline_due(session->request_deadline_us, now_us)) {
+        d1l_meshcore_admin_timeout(session);
+        return D1L_MESHCORE_ADMIN_RESPONSE_EXPIRED;
+    }
+    if (!text || text_len == 0U ||
+        text_len > D1L_MESHCORE_ADMIN_MAX_CLI_REPLY_BYTES ||
+        response_timestamp == 0U ||
+        response_timestamp <= session->server_timestamp) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+    }
+    for (size_t i = 0U; i < text_len; ++i) {
+        if (!cli_reply_byte_valid(text[i])) {
+            return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+        }
+    }
+
+    const bool rejected = cli_reply_is_error(text, text_len);
+    d1l_meshcore_admin_secure_zero(
+        session->cli_reply, sizeof(session->cli_reply));
+    if (session->pending_cli_sensitive) {
+        static const char redacted[] = "[sensitive response hidden]";
+        memcpy(session->cli_reply, redacted, sizeof(redacted));
+        session->cli_reply_redacted = true;
+    } else {
+        memcpy(session->cli_reply, text, text_len);
+        session->cli_reply[text_len] = '\0';
+        session->cli_reply_redacted = false;
+    }
+    session->cli_reply_valid = true;
+    session->cli_reply_success = !rejected;
+    session->server_timestamp = response_timestamp;
+    session->last_completed_tag = session->pending_tag;
+    session->pending_tag = 0U;
+    session->pending_cli_sensitive = false;
+    session->request_deadline_us = 0U;
+    refresh_idle_deadline(session, now_us);
+    session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
+    session->generation = next_generation(session->generation);
+    return rejected ? D1L_MESHCORE_ADMIN_RESPONSE_REJECTED :
+                      D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED;
 }
 
 static bool mutation_error_reply(const uint8_t *text, size_t text_len)
@@ -641,6 +1064,510 @@ d1l_meshcore_admin_accept_status_response(
     return D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED;
 }
 
+static bool bytes_all_zero(const uint8_t *data, size_t data_len)
+{
+    if (!data) {
+        return false;
+    }
+    for (size_t i = 0U; i < data_len; ++i) {
+        if (data[i] != 0U) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void query_append(d1l_meshcore_admin_query_result_t *result,
+                         size_t *used, const char *format, ...)
+{
+    if (!result || !used || !format ||
+        *used >= D1L_MESHCORE_ADMIN_MAX_QUERY_TEXT_BYTES) {
+        if (result) {
+            result->truncated = true;
+        }
+        return;
+    }
+    const size_t available =
+        D1L_MESHCORE_ADMIN_MAX_QUERY_TEXT_BYTES + 1U - *used;
+    va_list arguments;
+    va_start(arguments, format);
+    const int written = vsnprintf(
+        &result->text[*used], available, format, arguments);
+    va_end(arguments);
+    if (written < 0) {
+        result->truncated = true;
+        return;
+    }
+    if ((size_t)written >= available) {
+        *used = D1L_MESHCORE_ADMIN_MAX_QUERY_TEXT_BYTES;
+        result->text[*used] = '\0';
+        result->truncated = true;
+        return;
+    }
+    *used += (size_t)written;
+}
+
+static void format_scaled(char *out, size_t out_size, int32_t value,
+                          uint32_t divisor, unsigned decimals)
+{
+    if (!out || out_size == 0U || divisor == 0U || decimals > 4U) {
+        return;
+    }
+    const int64_t wide = (int64_t)value;
+    const bool negative = wide < 0;
+    const uint64_t magnitude =
+        negative ? (uint64_t)(-wide) : (uint64_t)wide;
+    const uint64_t whole = magnitude / divisor;
+    const uint64_t fraction = magnitude % divisor;
+    (void)snprintf(out, out_size, "%s%llu.%0*llu",
+                   negative ? "-" : "",
+                   (unsigned long long)whole, (int)decimals,
+                   (unsigned long long)fraction);
+}
+
+static void format_scaled_unsigned(char *out, size_t out_size,
+                                   uint32_t value, uint32_t divisor,
+                                   unsigned decimals)
+{
+    if (!out || out_size == 0U || divisor == 0U || decimals > 4U) {
+        return;
+    }
+    (void)snprintf(out, out_size, "%lu.%0*lu",
+                   (unsigned long)(value / divisor), (int)decimals,
+                   (unsigned long)(value % divisor));
+}
+
+static const char *permission_name(uint8_t permissions)
+{
+    switch (permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) {
+    case D1L_MESHCORE_ADMIN_PERMISSION_GUEST:
+        return "guest";
+    case D1L_MESHCORE_ADMIN_PERMISSION_READ_ONLY:
+        return "read-only";
+    case D1L_MESHCORE_ADMIN_PERMISSION_WRITE:
+        return "read-write";
+    case D1L_MESHCORE_ADMIN_PERMISSION_ADMIN:
+        return "admin";
+    default:
+        return "invalid";
+    }
+}
+
+static bool parse_telemetry_query(
+    const uint8_t *data, size_t data_len,
+    d1l_meshcore_admin_query_result_t *result)
+{
+    size_t offset = 4U;
+    size_t used = 0U;
+    query_append(result, &used, "Telemetry\n");
+    while (offset < data_len) {
+        const size_t remaining = data_len - offset;
+        if (remaining <= D1L_MESHCORE_ADMIN_MAX_PADDING_BYTES &&
+            bytes_all_zero(&data[offset], remaining)) {
+            break;
+        }
+        if (remaining < 3U || data[offset] == 0U) {
+            return false;
+        }
+        const uint8_t channel = data[offset];
+        const uint8_t type = data[offset + 1U];
+        const uint8_t *value = &data[offset + 2U];
+        size_t value_len = 0U;
+        switch (type) {
+        case 0U:
+        case 1U:
+        case 102U:
+        case 104U:
+        case 120U:
+        case 142U:
+            value_len = 1U;
+            break;
+        case 2U:
+        case 3U:
+        case 101U:
+        case 103U:
+        case 115U:
+        case 116U:
+        case 117U:
+        case 121U:
+        case 125U:
+        case 128U:
+        case 132U:
+            value_len = 2U;
+            break;
+        case 135U:
+            value_len = 3U;
+            break;
+        case 100U:
+        case 118U:
+        case 130U:
+        case 131U:
+        case 133U:
+            value_len = 4U;
+            break;
+        case 113U:
+        case 134U:
+            value_len = 6U;
+            break;
+        case 136U:
+            value_len = 9U;
+            break;
+        case 240U:
+            if (remaining < 3U || value[0] < 8U) {
+                return false;
+            }
+            value_len = value[0];
+            break;
+        default:
+            query_append(
+                result, &used,
+                "ch %u unsupported type %u (remaining data hidden)\n",
+                (unsigned)channel, (unsigned)type);
+            result->count++;
+            result->truncated = true;
+            return true;
+        }
+        if (remaining < 2U + value_len) {
+            return false;
+        }
+
+        char first[32] = {0};
+        char second[32] = {0};
+        char third[32] = {0};
+        switch (type) {
+        case 0U:
+            query_append(result, &used, "ch %u digital-in %u\n",
+                         (unsigned)channel, (unsigned)value[0]);
+            break;
+        case 1U:
+            query_append(result, &used, "ch %u digital-out %u\n",
+                         (unsigned)channel, (unsigned)value[0]);
+            break;
+        case 2U:
+        case 3U:
+            format_scaled(first, sizeof(first), read_be_i16(value), 100U, 2U);
+            query_append(result, &used, "ch %u %s %s\n",
+                         (unsigned)channel,
+                         type == 2U ? "analog-in" : "analog-out", first);
+            break;
+        case 100U:
+            query_append(result, &used, "ch %u generic %lu\n",
+                         (unsigned)channel,
+                         (unsigned long)read_be32(value));
+            break;
+        case 101U:
+            query_append(result, &used, "ch %u luminosity %u lux\n",
+                         (unsigned)channel,
+                         (unsigned)read_be16(value));
+            break;
+        case 102U:
+            query_append(result, &used, "ch %u presence %u\n",
+                         (unsigned)channel, (unsigned)value[0]);
+            break;
+        case 103U:
+            format_scaled(first, sizeof(first), read_be_i16(value), 10U, 1U);
+            query_append(result, &used, "ch %u temperature %s C\n",
+                         (unsigned)channel, first);
+            break;
+        case 104U:
+            (void)snprintf(
+                first, sizeof(first), "%u.%u",
+                (unsigned)(value[0] / 2U),
+                (unsigned)((value[0] % 2U) * 5U));
+            query_append(result, &used, "ch %u humidity %s %%\n",
+                         (unsigned)channel, first);
+            break;
+        case 113U:
+        case 134U:
+            format_scaled(
+                first, sizeof(first), read_be_i16(value),
+                type == 113U ? 1000U : 100U,
+                type == 113U ? 3U : 2U);
+            format_scaled(
+                second, sizeof(second), read_be_i16(&value[2]),
+                type == 113U ? 1000U : 100U,
+                type == 113U ? 3U : 2U);
+            format_scaled(
+                third, sizeof(third), read_be_i16(&value[4]),
+                type == 113U ? 1000U : 100U,
+                type == 113U ? 3U : 2U);
+            query_append(result, &used, "ch %u %s %s,%s,%s\n",
+                         (unsigned)channel,
+                         type == 113U ? "accel" : "gyro",
+                         first, second, third);
+            break;
+        case 115U:
+            format_scaled_unsigned(
+                first, sizeof(first), read_be16(value), 10U, 1U);
+            query_append(result, &used, "ch %u pressure %s hPa\n",
+                         (unsigned)channel, first);
+            break;
+        case 116U:
+            format_scaled_unsigned(
+                first, sizeof(first), read_be16(value), 100U, 2U);
+            query_append(result, &used, "ch %u voltage %s V\n",
+                         (unsigned)channel, first);
+            break;
+        case 117U:
+            format_scaled(
+                first, sizeof(first), read_be_i16(value), 1000U, 3U);
+            query_append(result, &used, "ch %u current %s A\n",
+                         (unsigned)channel, first);
+            break;
+        case 118U:
+            query_append(result, &used, "ch %u frequency %lu Hz\n",
+                         (unsigned)channel,
+                         (unsigned long)read_be32(value));
+            break;
+        case 120U:
+            query_append(result, &used, "ch %u percentage %u %%\n",
+                         (unsigned)channel, (unsigned)value[0]);
+            break;
+        case 121U:
+            query_append(result, &used, "ch %u altitude %d m\n",
+                         (unsigned)channel, (int)read_be_i16(value));
+            break;
+        case 125U:
+            query_append(result, &used, "ch %u concentration %u ppm\n",
+                         (unsigned)channel,
+                         (unsigned)read_be16(value));
+            break;
+        case 128U:
+            query_append(result, &used, "ch %u power %u W\n",
+                         (unsigned)channel,
+                         (unsigned)read_be16(value));
+            break;
+        case 130U:
+        case 131U:
+            format_scaled_unsigned(
+                first, sizeof(first), read_be32(value), 1000U, 3U);
+            query_append(result, &used, "ch %u %s %s %s\n",
+                         (unsigned)channel,
+                         type == 130U ? "distance" : "energy", first,
+                         type == 130U ? "m" : "kWh");
+            break;
+        case 132U:
+            query_append(result, &used, "ch %u direction %u deg\n",
+                         (unsigned)channel,
+                         (unsigned)read_be16(value));
+            break;
+        case 133U:
+            query_append(result, &used, "ch %u unix-time %lu\n",
+                         (unsigned)channel,
+                         (unsigned long)read_be32(value));
+            break;
+        case 135U:
+            query_append(result, &used, "ch %u RGB #%02X%02X%02X\n",
+                         (unsigned)channel, (unsigned)value[0],
+                         (unsigned)value[1], (unsigned)value[2]);
+            break;
+        case 136U:
+            format_scaled(
+                first, sizeof(first), read_be_i24(value), 10000U, 4U);
+            format_scaled(
+                second, sizeof(second), read_be_i24(&value[3]), 10000U, 4U);
+            format_scaled(
+                third, sizeof(third), read_be_i24(&value[6]), 100U, 2U);
+            query_append(result, &used, "ch %u GPS %s,%s alt %s m\n",
+                         (unsigned)channel, first, second, third);
+            break;
+        case 142U:
+            query_append(result, &used, "ch %u switch %u\n",
+                         (unsigned)channel, (unsigned)value[0]);
+            break;
+        case 240U:
+            query_append(result, &used, "ch %u polyline %u bytes\n",
+                         (unsigned)channel, (unsigned)value_len);
+            break;
+        default:
+            return false;
+        }
+        result->count++;
+        offset += 2U + value_len;
+    }
+    if (result->count == 0U) {
+        query_append(result, &used, "No telemetry fields returned.\n");
+    }
+    result->total = result->count;
+    return true;
+}
+
+bool d1l_meshcore_telemetry_decode(
+    const uint8_t *plaintext, size_t plaintext_len,
+    d1l_meshcore_admin_query_result_t *out_result)
+{
+    if (!plaintext || plaintext_len < 4U || !out_result) {
+        return false;
+    }
+    d1l_meshcore_admin_query_result_t parsed = {
+        .kind = D1L_MESHCORE_ADMIN_QUERY_TELEMETRY,
+        .valid = true,
+    };
+    if (!parse_telemetry_query(plaintext, plaintext_len, &parsed)) {
+        d1l_meshcore_admin_secure_zero(&parsed, sizeof(parsed));
+        return false;
+    }
+    *out_result = parsed;
+    d1l_meshcore_admin_secure_zero(&parsed, sizeof(parsed));
+    return true;
+}
+
+static bool parse_access_list_query(
+    const uint8_t *data, size_t data_len,
+    d1l_meshcore_admin_query_result_t *result)
+{
+    size_t offset = 4U;
+    size_t used = 0U;
+    query_append(result, &used, "Access list\n");
+    while (offset < data_len) {
+        const size_t remaining = data_len - offset;
+        if (remaining <= D1L_MESHCORE_ADMIN_MAX_PADDING_BYTES &&
+            bytes_all_zero(&data[offset], remaining)) {
+            break;
+        }
+        if (remaining < 7U) {
+            return false;
+        }
+        const uint8_t *entry = &data[offset];
+        query_append(
+            result, &used,
+            "%02X%02X%02X%02X%02X%02X  %s (0x%02X)\n",
+            (unsigned)entry[0], (unsigned)entry[1], (unsigned)entry[2],
+            (unsigned)entry[3], (unsigned)entry[4], (unsigned)entry[5],
+            permission_name(entry[6]), (unsigned)entry[6]);
+        result->count++;
+        offset += 7U;
+    }
+    if (result->count == 0U) {
+        query_append(result, &used, "No access-list entries returned.\n");
+    }
+    result->total = result->count;
+    return true;
+}
+
+static bool parse_neighbours_query(
+    const uint8_t *data, size_t data_len, uint16_t requested_offset,
+    d1l_meshcore_admin_query_result_t *result)
+{
+    if (data_len < 8U) {
+        return false;
+    }
+    const uint16_t total = read_le16(&data[4]);
+    const uint16_t count = read_le16(&data[6]);
+    if (count > D1L_MESHCORE_ADMIN_NEIGHBOUR_PAGE_COUNT ||
+        count > total ||
+        requested_offset > total ||
+        count > (uint16_t)(total - requested_offset)) {
+        return false;
+    }
+    const size_t entry_size =
+        D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES + 4U + 1U;
+    const size_t logical_len = 8U + (size_t)count * entry_size;
+    if (!d1l_meshcore_admin_canonical_span(
+            data, data_len, logical_len)) {
+        return false;
+    }
+
+    result->offset = requested_offset;
+    result->total = total;
+    result->count = count;
+    size_t used = 0U;
+    query_append(result, &used, "Neighbours %u-%u of %u\n",
+                 (unsigned)(count == 0U ? requested_offset :
+                            requested_offset + 1U),
+                 (unsigned)(requested_offset + count),
+                 (unsigned)total);
+    size_t offset = 8U;
+    for (uint16_t index = 0U; index < count; ++index) {
+        const uint8_t *entry = &data[offset];
+        const uint32_t seconds_ago =
+            read_le32(&entry[D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES]);
+        const int8_t snr_quarter_db =
+            (int8_t)entry[D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES + 4U];
+        const int snr_magnitude =
+            snr_quarter_db < 0 ? -(int)snr_quarter_db :
+                                 (int)snr_quarter_db;
+        const int snr_whole = snr_magnitude / 4;
+        const int snr_fraction = snr_magnitude % 4;
+        query_append(
+            result, &used, "%02X%02X%02X%02X  %lus ago  %s%d.%02d dB\n",
+            (unsigned)entry[0], (unsigned)entry[1],
+            (unsigned)entry[2], (unsigned)entry[3],
+            (unsigned long)seconds_ago,
+            snr_quarter_db < 0 ? "-" : "", snr_whole,
+            snr_fraction * 25);
+        offset += entry_size;
+    }
+    if (count == 0U) {
+        query_append(result, &used, "No neighbours on this page.\n");
+    }
+    return true;
+}
+
+d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_accept_query_response(
+    d1l_meshcore_admin_session_t *session,
+    const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
+    const uint8_t *plaintext, size_t plaintext_len, uint64_t now_us)
+{
+    if (!session || session->state != D1L_MESHCORE_ADMIN_QUERY_PENDING ||
+        !d1l_meshcore_admin_peer_matches(session, peer_public_key)) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+    }
+    if (authenticated_deadline_due(session, now_us) ||
+        deadline_due(session->request_deadline_us, now_us)) {
+        d1l_meshcore_admin_timeout(session);
+        return D1L_MESHCORE_ADMIN_RESPONSE_EXPIRED;
+    }
+    if (!plaintext || plaintext_len < 4U) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+    }
+    const uint32_t tag = read_le32(plaintext);
+    if (tag != session->pending_tag || tag == session->last_completed_tag) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+    }
+
+    d1l_meshcore_admin_query_result_t parsed = {
+        .kind = session->pending_query,
+        .valid = true,
+        .offset = session->pending_query_offset,
+    };
+    bool valid = false;
+    switch (session->pending_query) {
+    case D1L_MESHCORE_ADMIN_QUERY_TELEMETRY:
+        valid = d1l_meshcore_telemetry_decode(
+            plaintext, plaintext_len, &parsed);
+        break;
+    case D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST:
+        valid = parse_access_list_query(plaintext, plaintext_len, &parsed);
+        break;
+    case D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS:
+        valid = parse_neighbours_query(
+            plaintext, plaintext_len, session->pending_query_offset,
+            &parsed);
+        break;
+    case D1L_MESHCORE_ADMIN_QUERY_NONE:
+    default:
+        break;
+    }
+    if (!valid) {
+        d1l_meshcore_admin_secure_zero(&parsed, sizeof(parsed));
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+    }
+
+    session->query_result = parsed;
+    session->last_completed_tag = tag;
+    session->pending_tag = 0U;
+    session->pending_query = D1L_MESHCORE_ADMIN_QUERY_NONE;
+    session->pending_query_offset = 0U;
+    session->request_deadline_us = 0U;
+    refresh_idle_deadline(session, now_us);
+    session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
+    session->generation = next_generation(session->generation);
+    d1l_meshcore_admin_secure_zero(&parsed, sizeof(parsed));
+    return D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED;
+}
+
 bool d1l_meshcore_admin_expire_if_due(
     d1l_meshcore_admin_session_t *session, uint64_t now_us)
 {
@@ -653,7 +1580,9 @@ bool d1l_meshcore_admin_expire_if_due(
     } else if (session->state == D1L_MESHCORE_ADMIN_AUTHENTICATED) {
         due = authenticated_deadline_due(session, now_us);
     } else if (session->state == D1L_MESHCORE_ADMIN_STATUS_PENDING ||
-               session->state == D1L_MESHCORE_ADMIN_MUTATION_PENDING) {
+               session->state == D1L_MESHCORE_ADMIN_MUTATION_PENDING ||
+               session->state == D1L_MESHCORE_ADMIN_CLI_PENDING ||
+               session->state == D1L_MESHCORE_ADMIN_QUERY_PENDING) {
         due = authenticated_deadline_due(session, now_us) ||
               deadline_due(session->request_deadline_us, now_us);
     }
