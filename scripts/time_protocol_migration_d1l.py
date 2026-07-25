@@ -863,7 +863,7 @@ def before_status_ok(
         and result.get("wall_time_inferred") is False
         and result.get("protocol_tx_ready") is False
     )
-    if state == "required":
+    if state == "confirmation_required":
         legacy = result.get("legacy")
         return (
             common

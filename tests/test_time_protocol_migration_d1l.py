@@ -95,7 +95,7 @@ def before_status():
         "cmd": "time migration status",
         "automatic": False,
         "wall_time_inferred": False,
-        "state": "required",
+        "state": "confirmation_required",
         "stage": "awaiting_operator_confirmation",
         "legacy": {
             "present": True,
