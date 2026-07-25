@@ -85,7 +85,6 @@ def write_fake_build(build: Path) -> None:
     (build / "partition_table").mkdir(parents=True)
     (build / "bootloader" / "bootloader.bin").write_bytes(b"BOOT")
     (build / "partition_table" / "partition-table.bin").write_bytes(b"PART")
-    (build / "ota_data_initial.bin").write_bytes(b"OTA-DATA")
     (build / "meshcore_deskos_d1l.bin").write_bytes(b"APP")
     (build / "meshcore_deskos_d1l.elf").write_bytes(b"ELF")
     (build / "meshcore_deskos_d1l.map").write_text("MAP", encoding="ascii")
@@ -99,7 +98,6 @@ def write_fake_build(build: Path) -> None:
                 },
                 "flash_files": {
                     "0x0": "bootloader/bootloader.bin",
-                    "0xf000": "ota_data_initial.bin",
                     "0x10000": "meshcore_deskos_d1l.bin",
                     "0x8000": "partition_table/partition-table.bin",
                 },
@@ -387,6 +385,11 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     build = root / "build"
     out = root / "artifacts" / "release"
     write_fake_build(build)
+    (build / "ota_data_initial.bin").write_bytes(b"OTA-DATA")
+    flasher_args_path = build / "flasher_args.json"
+    flasher_args = json.loads(flasher_args_path.read_text(encoding="ascii"))
+    flasher_args["flash_files"]["0xf000"] = "ota_data_initial.bin"
+    flasher_args_path.write_text(json.dumps(flasher_args), encoding="ascii")
     write_fake_notices(root)
     write_fake_config(root)
     rp2040_artifacts = write_fake_rp2040_artifacts(root)
