@@ -881,6 +881,60 @@ def test_run_preflight_classifies_raw_present_mount_failed_card(monkeypatch):
     assert report["classification"]["sd_mount_data"] == 8
 
 
+def test_posix_preflight_waits_for_console_before_bridge_commands(monkeypatch):
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n',
+            rp2040_ping_line(),
+            ready_storage_line(),
+            storage_mount_noop_line(),
+            ready_storage_line(),
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    startup_health = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "health",
+        "boot_nonce": 123,
+    }
+    waits = []
+    monkeypatch.setitem(sys.modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        preflight,
+        "wait_for_console_ready",
+        lambda handle, timeout, attempts: waits.append(
+            (handle, timeout, attempts)
+        ) or startup_health,
+    )
+    monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
+    monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
+
+    report = preflight.run_preflight(
+        port=preflight.POSIX_D1L_TARGET,
+        baud=115200,
+        timeout=1.0,
+        artifact_dir="artifact",
+        expected_sha256=None,
+    )
+
+    assert report["ok"] is True
+    assert report["serial_startup_health"] == startup_health
+    assert waits == [
+        (
+            ser,
+            preflight.POSIX_SERIAL_READY_TIMEOUT_SECONDS,
+            3,
+        )
+    ]
+    assert ser.writes[0] == "rp2040 status\n"
+
+
 def test_run_preflight_polls_safe_status_while_mount_pending(monkeypatch):
     ser = CommandAwareSerial(
         {
