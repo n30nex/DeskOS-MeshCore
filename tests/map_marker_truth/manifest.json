@@ -109,7 +109,7 @@
   "production_source_pins": {
     "main/app/app_model.c": "6b1f4310efd29c1a540661b9d0474a3156867f624db895d225a70803cced5b02",
     "main/app/app_model.h": "8ad54aa8180d342b74bac7b2bc1fd27c8f86945fc38471d7e66147c5c6cfc02d",
-    "main/app/settings_model.c": "58abeec8731062df9f8473d68d3ff14700d95ac4be694f40b855850ad245ed3f",
+    "main/app/settings_model.c": "c61099b8475719e21e51dee3c2216014f7687a03fc8ddf4faf83fa5cf1509a38",
     "main/app/settings_model.h": "1d56b09a11cb0ccfec0a0a60018955915512248e8b41189e1b8a05804c28f63c",
     "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
     "main/map/map_marker_truth.h": "0aa1723d730016c870e1f6cb93e892803ab6bda589672e4bb99b3abe518466cc",
