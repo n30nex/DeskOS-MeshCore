@@ -10,6 +10,7 @@
 #include "comms/ble_companion_queue.h"
 #include "comms/companion_3byte.h"
 #include "d1l_config.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
@@ -93,19 +94,25 @@ static d1l_ble_companion_protocol_status_t s_status;
 /* The protocol task is the sole owner of all buffers and iterator state. Keep
  * them static so the worker's bounded stack does not scale with retained-store
  * capacities. */
-static uint8_t s_rx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX];
-static uint8_t s_tx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX];
-static uint8_t s_pending_payload[D1L_COMPANION3_MAX_FRAME_SIZE];
+static uint8_t
+    s_rx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX] EXT_RAM_BSS_ATTR;
+static uint8_t
+    s_tx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX] EXT_RAM_BSS_ATTR;
+static uint8_t
+    s_pending_payload[D1L_COMPANION3_MAX_FRAME_SIZE] EXT_RAM_BSS_ATTR;
 static size_t s_pending_len;
-static d1l_contact_entry_t s_contacts[D1L_CONTACT_STORE_CAPACITY];
+static d1l_contact_entry_t
+    s_contacts[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_contact_count;
 static size_t s_contact_index;
 static uint32_t s_contact_since;
 static uint32_t s_contact_most_recent;
 static bool s_contact_iterator_active;
-static d1l_channel_info_t s_channels[D1L_CHANNEL_STORE_CAPACITY];
-static d1l_dm_entry_t s_dms[D1L_DM_STORE_CAPACITY];
-static d1l_message_entry_t s_messages[D1L_MESSAGE_STORE_CAPACITY];
+static d1l_channel_info_t
+    s_channels[D1L_CHANNEL_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_dm_entry_t s_dms[D1L_DM_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_message_entry_t
+    s_messages[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static uint32_t s_last_synced_dm_seq;
 static uint32_t s_last_synced_message_seq;
 static uint32_t s_seen_dm_revision;

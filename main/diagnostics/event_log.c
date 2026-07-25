@@ -3,12 +3,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 
 static portMUX_TYPE s_event_log_lock = portMUX_INITIALIZER_UNLOCKED;
-static d1l_event_log_entry_t s_entries[D1L_EVENT_LOG_CAPACITY];
+static d1l_event_log_entry_t
+    s_entries[D1L_EVENT_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_head;
 static size_t s_count;
 static uint32_t s_next_sequence = 1U;

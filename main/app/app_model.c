@@ -8,6 +8,7 @@
 #include "comms/connectivity_manager.h"
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
+#include "esp_attr.h"
 #include "hal/display_preferences.h"
 #include "mesh/channel_message_coordinator.h"
 #include "mesh/meshcore_service.h"
@@ -27,13 +28,17 @@ static d1l_app_model_t s_model = {
 /* Snapshot publication is serialized by the UI task.  Keep the bounded
  * retained projection out of that task's stack. */
 static d1l_dm_entry_t
-    s_dm_conversation_source[D1L_DM_CONVERSATION_SOURCE_CAPACITY];
+    s_dm_conversation_source[D1L_DM_CONVERSATION_SOURCE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
 static bool
-    s_dm_conversation_source_unread[D1L_DM_CONVERSATION_SOURCE_CAPACITY];
+    s_dm_conversation_source_unread[D1L_DM_CONVERSATION_SOURCE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
 static d1l_dm_conversation_summary_t
-    s_dm_conversation_summaries[D1L_APP_SNAPSHOT_DM_PREVIEW];
+    s_dm_conversation_summaries[D1L_APP_SNAPSHOT_DM_PREVIEW]
+    EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t
-    s_dm_capable_contact_source[D1L_CONTACT_STORE_CAPACITY];
+    s_dm_capable_contact_source[D1L_CONTACT_STORE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
 
 static size_t count_dm_capable_contacts(void)
 {

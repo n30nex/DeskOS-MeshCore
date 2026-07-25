@@ -185,6 +185,12 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
 
 def test_console_command_snapshots_leave_internal_heap_for_late_wifi_start():
     console = read("main/comms/usb_console.c")
+    app_model = read("main/app/app_model.c")
+    ble_protocol = read("main/comms/ble_companion_protocol.c")
+    contact_store = read("main/mesh/contact_store.c")
+    event_log = read("main/diagnostics/event_log.c")
+    read_state = read("main/mesh/read_state.c")
+    ui = read("main/ui/ui_phase1.c")
 
     assert '#include "esp_attr.h"' in console
     assert "s_console_storage_diag EXT_RAM_BSS_ATTR" in console
@@ -204,6 +210,56 @@ def test_console_command_snapshots_leave_internal_heap_for_late_wifi_start():
         "entries[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR",
     ]:
         assert declaration in console
+    for source, declarations in [
+        (
+            app_model,
+            [
+                "s_dm_conversation_source[D1L_DM_CONVERSATION_SOURCE_CAPACITY]",
+                "s_dm_capable_contact_source[D1L_CONTACT_STORE_CAPACITY]",
+            ],
+        ),
+        (
+            ble_protocol,
+            [
+                "s_rx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX]",
+                "s_contacts[D1L_CONTACT_STORE_CAPACITY]",
+                "s_messages[D1L_MESSAGE_STORE_CAPACITY]",
+            ],
+        ),
+        (
+            contact_store,
+            [
+                "s_entries[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR",
+                "s_blob_scratch EXT_RAM_BSS_ATTR",
+                "s_persist_snapshot EXT_RAM_BSS_ATTR",
+            ],
+        ),
+        (
+            event_log,
+            ["s_entries[D1L_EVENT_LOG_CAPACITY] EXT_RAM_BSS_ATTR"],
+        ),
+        (
+            read_state,
+            [
+                "s_message_scratch[D1L_MESSAGE_STORE_CAPACITY]",
+                "s_dm_scratch[D1L_READ_STATE_VISIBLE_DM_CAPACITY]",
+            ],
+        ),
+        (
+            ui,
+            [
+                "s_snapshot EXT_RAM_BSS_ATTR",
+                "s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY]",
+                "s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]",
+            ],
+        ),
+    ]:
+        assert '#include "esp_attr.h"' in source
+        for declaration in declarations:
+            start = source.index(declaration)
+            assert "EXT_RAM_BSS_ATTR" in source[
+                start:start + len(declaration) + 40
+            ]
 
 
 def test_connectivity_boot_guard_is_scoped_checksummed_and_not_written_from_events():

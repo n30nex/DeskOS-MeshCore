@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "nvs.h"
 
@@ -237,15 +238,16 @@ typedef struct {
     d1l_contact_entry_t entries[D1L_CONTACT_STORE_CAPACITY];
 } d1l_contact_store_blob_t;
 
-static d1l_contact_entry_t s_entries[D1L_CONTACT_STORE_CAPACITY];
+static d1l_contact_entry_t
+    s_entries[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
 static bool s_loaded;
-static d1l_contact_store_blob_t s_blob_scratch;
-static d1l_contact_store_blob_t s_rollback_scratch;
-static d1l_contact_store_blob_t s_persist_snapshot;
+static d1l_contact_store_blob_t s_blob_scratch EXT_RAM_BSS_ATTR;
+static d1l_contact_store_blob_t s_rollback_scratch EXT_RAM_BSS_ATTR;
+static d1l_contact_store_blob_t s_persist_snapshot EXT_RAM_BSS_ATTR;
 static uint32_t s_persistence_revision;
 static uint32_t s_persistence_commit_count;
 static uint32_t s_persistence_coalesced_count;
