@@ -61,6 +61,7 @@ AUDIT_EVIDENCE_ARGUMENTS = {
     "actions_run": "--actions-run-receipt",
     "core_smoke": "--core-smoke",
     "core_ui": "--core-ui",
+    "core_scroll": "--core-scroll",
     "manual_review": "--manual-review",
     "reboot_receipt": "--reboot-receipt",
     "protocol_migration": "--protocol-migration-receipt",

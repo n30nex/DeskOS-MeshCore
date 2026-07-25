@@ -1,7 +1,7 @@
 import hashlib
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -234,16 +234,27 @@ def audit_payload(*, package_ok: bool = True) -> dict:
     }
 
 
-def test_core_audit_recompute_routes_protocol_migration_receipt(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    ("evidence_name", "argument", "receipt"),
+    [
+        (
+            "protocol_migration",
+            "--protocol-migration-receipt",
+            "artifacts/hardware/com12/time_protocol_migration_candidate.json",
+        ),
+        (
+            "core_scroll",
+            "--core-scroll",
+            "artifacts/hardware/com12/core_ui_scroll_candidate.json",
+        ),
+    ],
+)
+def test_core_audit_recompute_routes_required_receipts(
+    tmp_path, monkeypatch, evidence_name, argument, receipt
 ):
     audit = audit_payload()
-    receipt = (
-        "artifacts/hardware/com12/"
-        "time_protocol_migration_candidate.json"
-    )
     audit["evidence_paths"] = {
-        "protocol_migration": receipt,
+        evidence_name: receipt,
     }
     captured = {}
 
@@ -266,7 +277,7 @@ def test_core_audit_recompute_routes_protocol_migration_receipt(
     result = defects._recompute_core_audit(tmp_path, audit)
 
     argv = captured["argv"]
-    index = argv.index("--protocol-migration-receipt")
+    index = argv.index(argument)
     assert argv[index + 1] == receipt
     assert result == {"argv": argv}
 
