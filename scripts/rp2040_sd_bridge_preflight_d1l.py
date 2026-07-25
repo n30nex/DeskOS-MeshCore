@@ -12,18 +12,24 @@ from pathlib import Path
 
 try:
     from artifact_metadata import stamp_report
+    from d1l_serial_target import POSIX_D1L_TARGET
     from flash_rp2040_sd_bridge_uf2 import FlashGuardError, candidate_volumes, verify_artifact
     from sd_file_canary_d1l import storage_status_fresh
-    from smoke_d1l import open_d1l_serial, send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command, wait_for_console_ready
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
+    from scripts.d1l_serial_target import POSIX_D1L_TARGET
     from scripts.flash_rp2040_sd_bridge_uf2 import (
         FlashGuardError,
         candidate_volumes,
         verify_artifact,
     )
     from scripts.sd_file_canary_d1l import storage_status_fresh
-    from scripts.smoke_d1l import open_d1l_serial, send_console_command
+    from scripts.smoke_d1l import (
+        open_d1l_serial,
+        send_console_command,
+        wait_for_console_ready,
+    )
 
 
 PREFLIGHT_COMMANDS = [
@@ -37,6 +43,8 @@ PREFLIGHT_COMMANDS = [
 ]
 MOUNT_POLL_ATTEMPTS = 30
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
+POSIX_SERIAL_STARTUP_SETTLE_SECONDS = 10.0
+POSIX_SERIAL_READY_TIMEOUT_SECONDS = 12.0
 TRANSITIONAL_MANAGER_STATES = {"BRIDGE_WAIT", "PING", "STATUS", "MOUNT"}
 
 
@@ -302,8 +310,17 @@ def run_preflight(
         results.append(result)
         return result
 
+    startup_health: dict = {}
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
-        time.sleep(1.0)
+        if port == POSIX_D1L_TARGET:
+            time.sleep(POSIX_SERIAL_STARTUP_SETTLE_SECONDS)
+            startup_health = wait_for_console_ready(
+                ser,
+                POSIX_SERIAL_READY_TIMEOUT_SECONDS,
+                attempts=3,
+            )
+        else:
+            time.sleep(1.0)
         ser.reset_input_buffer()
         rp2040_status = send_command(ser, "rp2040 status", timeout)
         rp2040_ping = send_command(ser, "rp2040 ping", timeout)
@@ -371,7 +388,18 @@ def run_preflight(
     rp2040_status_ok = rp2040_status.get("ok") is True
     rp2040_ping_ok = rp2040_ping.get("ok") is True
     rp2040_status_optional_ok = rp2040_status_ok or classification["rp2040_uart_ready"]
-    command_ok = rp2040_status_optional_ok and rp2040_ping_ok and storage_ok and health_ok
+    startup_ready = (
+        startup_health.get("ok") is True
+        if port == POSIX_D1L_TARGET
+        else True
+    )
+    command_ok = (
+        startup_ready
+        and rp2040_status_optional_ok
+        and rp2040_ping_ok
+        and storage_ok
+        and health_ok
+    )
     artifact_ok = artifact.get("ok") is not False
     storage_status_settle_exhausted = storage_status_transitional(storage_status)
     return {
@@ -422,6 +450,7 @@ def run_preflight(
         "storage_status_settle_exhausted": storage_status_settle_exhausted,
         "storage_diag": storage_diag,
         "health": health,
+        "serial_startup_health": startup_health,
         "results": results,
     }
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import json
 import os
 import re
@@ -13,6 +14,7 @@ from pathlib import Path
 
 try:
     from artifact_metadata import stamp_report
+    from d1l_serial_target import POSIX_D1L_TARGET
     from smoke_d1l import (
         boot_transition_proven,
         exact_commit,
@@ -22,6 +24,7 @@ try:
         reboot_command_passed,
         send_console_command,
         timeout_for_reboot_command,
+        wait_for_console_ready,
     )
     from sd_retained_history_acceptance_d1l import (
         EXPECTED_REBOOT_BOOT_HELP_FIELD,
@@ -39,6 +42,7 @@ try:
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
+    from scripts.d1l_serial_target import POSIX_D1L_TARGET
     from scripts.smoke_d1l import (
         boot_transition_proven,
         exact_commit,
@@ -48,6 +52,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         reboot_command_passed,
         send_console_command,
         timeout_for_reboot_command,
+        wait_for_console_ready,
     )
     from scripts.sd_retained_history_acceptance_d1l import (
         EXPECTED_REBOOT_BOOT_HELP_FIELD,
@@ -73,6 +78,59 @@ RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 180.0
 REMOUNT_COMMAND_MIN_TIMEOUT_SECONDS = 75.0
 PERSISTENCE_POLL_ATTEMPTS = 30
 PERSISTENCE_POLL_INTERVAL_SECONDS = 1.0
+POSIX_SERIAL_STARTUP_SETTLE_SECONDS = 10.0
+POSIX_SERIAL_READY_TIMEOUT_SECONDS = 12.0
+
+
+class SerialContextProvider:
+    """Reuse one Pi serial handle across the commanded reboot."""
+
+    def __init__(
+        self,
+        serial_module,
+        *,
+        port: str,
+        baud: int,
+        timeout: float,
+    ) -> None:
+        self.serial_module = serial_module
+        self.port = port
+        self.baud = baud
+        self.timeout = timeout
+        self.reuse = port == POSIX_D1L_TARGET
+        self.serial_handle = None
+        self.physical_open_count = 0
+        self.startup_health: dict = {}
+
+    def context(self):
+        if not self.reuse:
+            self.physical_open_count += 1
+            return open_d1l_serial(
+                self.serial_module,
+                port=self.port,
+                baudrate=self.baud,
+                timeout=self.timeout,
+            )
+        if self.serial_handle is None:
+            self.serial_handle = open_d1l_serial(
+                self.serial_module,
+                port=self.port,
+                baudrate=self.baud,
+                timeout=self.timeout,
+            )
+            self.physical_open_count += 1
+            time.sleep(POSIX_SERIAL_STARTUP_SETTLE_SECONDS)
+            self.startup_health = wait_for_console_ready(
+                self.serial_handle,
+                POSIX_SERIAL_READY_TIMEOUT_SECONDS,
+                attempts=3,
+            )
+        return nullcontext(self.serial_handle)
+
+    def close(self) -> None:
+        if self.serial_handle is not None:
+            self.serial_handle.close()
+            self.serial_handle = None
 
 
 def persistence_readback_commands(token: str) -> list[str]:
@@ -677,6 +735,12 @@ def run_acceptance(
     except ImportError as exc:
         raise SystemExit("pyserial is required: python -m pip install pyserial") from exc
 
+    serial_provider = SerialContextProvider(
+        serial,
+        port=port,
+        baud=baud,
+        timeout=timeout,
+    )
     fingerprint = fingerprint_for_token(token)
     strict_evidence = expected_firmware_commit is not None
     results: list[dict] = []
@@ -693,7 +757,7 @@ def run_acceptance(
     pre_mount_commands: list[str] = []
     pre_mount_results: list[dict] = []
     pre_storage: dict = {}
-    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
+    with serial_provider.context() as ser:
         ser.reset_input_buffer()
         if strict_evidence:
             preflight_plan = ["version", "crashlog"]
@@ -866,6 +930,7 @@ def run_acceptance(
     reboot_result: dict | None = None
     reboot_ok = not include_reboot
     reboot_attempted = False
+    post_reboot_serial_health: dict = {}
 
     pre_readbacks_ok = readbacks_pass(
         pre_by_command, token, fingerprint, retained_result
@@ -913,14 +978,20 @@ def run_acceptance(
 
     if include_reboot and pre_reboot_gate_passed:
         reboot_attempted = True
-        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
+        with serial_provider.context() as ser:
             commands.append("reboot")
             reboot_result = run_command(ser, "reboot", timeout)
             results.append(reboot_result)
         reboot_ok = reboot_command_passed(reboot_result)
         if reboot_ok:
             time.sleep(reboot_settle_sec)
-            with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
+            with serial_provider.context() as ser:
+                if serial_provider.reuse:
+                    post_reboot_serial_health = wait_for_console_ready(
+                        ser,
+                        POSIX_SERIAL_READY_TIMEOUT_SECONDS,
+                        attempts=3,
+                    )
                 ser.reset_input_buffer()
                 post_mount_commands, post_mount_results, post_storage = run_mount_sequence(
                     ser,
@@ -1002,7 +1073,7 @@ def run_acceptance(
                 post_map_tile = post_by_command.get(f"storage map-tile-check {token}", {})
                 health = post_by_command.get("health", {})
     elif not include_reboot and pre_sequence_complete and not unexpected_restart_before_reboot:
-        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
+        with serial_provider.context() as ser:
             ser.reset_input_buffer()
             health_commands, health_results = run_commands_until_terminal(
                 ser, ["health"], timeout
@@ -1090,7 +1161,7 @@ def run_acceptance(
         and persistence_poll_snapshot_checked(post_persistence_by_command, token)
     )
 
-    return {
+    report = {
         "schema": 1,
         "mode": "hardware",
         "port": port,
@@ -1214,6 +1285,10 @@ def run_acceptance(
         "storage_after_reboot": semantic_storage_copy(post_storage),
         "health": health,
         "results": results,
+        "serial_session_reused": serial_provider.reuse,
+        "serial_physical_open_count": serial_provider.physical_open_count,
+        "serial_startup_health": serial_provider.startup_health,
+        "post_reboot_serial_health": post_reboot_serial_health,
         "ok": (
             not public_rf_tx
             and not formats_sd
@@ -1236,12 +1311,24 @@ def run_acceptance(
             and pre_map_tile_ok
             and post_map_tile_ok
             and health_ok
+            and (
+                serial_provider.startup_health.get("ok") is True
+                if serial_provider.reuse
+                else True
+            )
+            and (
+                post_reboot_serial_health.get("ok") is True
+                if serial_provider.reuse and include_reboot
+                else True
+            )
             and (firmware_identity_ok is not False)
             and (pre_persistence_clean if strict_evidence and include_reboot else True)
             and (post_persistence_clean if strict_evidence and include_reboot else True)
             and (crashlog_transition_ok is True if strict_evidence and include_reboot else True)
         ),
     }
+    serial_provider.close()
+    return report
 
 
 def write_report(report: dict, out_path: Path | None) -> Path:

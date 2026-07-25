@@ -1451,6 +1451,60 @@ def test_pre_canary_timeout_stops_before_later_commands(monkeypatch, include_reb
     assert report["ok"] is False
 
 
+def test_posix_serial_provider_reuses_one_handle_and_waits_for_console(monkeypatch):
+    class CloseTrackingSerial(FakeSerial):
+        def __init__(self):
+            super().__init__([])
+            self.close_count = 0
+
+        def close(self):
+            self.close_count += 1
+
+    ser = CloseTrackingSerial()
+    opens = []
+    waits = []
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        remount_accept,
+        "open_d1l_serial",
+        lambda serial_module, **kwargs: opens.append(
+            (serial_module, kwargs)
+        ) or ser,
+    )
+    monkeypatch.setattr(
+        remount_accept,
+        "wait_for_console_ready",
+        lambda handle, timeout, attempts: waits.append(
+            (handle, timeout, attempts)
+        ) or {"schema": 1, "ok": True, "cmd": "health"},
+    )
+
+    provider = remount_accept.SerialContextProvider(
+        object(),
+        port=remount_accept.POSIX_D1L_TARGET,
+        baud=115200,
+        timeout=5.0,
+    )
+    with provider.context() as first:
+        pass
+    with provider.context() as second:
+        pass
+    with provider.context() as third:
+        pass
+
+    assert first is ser
+    assert second is ser
+    assert third is ser
+    assert len(opens) == 1
+    assert len(waits) == 1
+    assert provider.physical_open_count == 1
+    assert provider.startup_health["ok"] is True
+    assert ser.close_count == 0
+
+    provider.close()
+    assert ser.close_count == 1
+
+
 def test_post_reboot_mount_timeout_stops_before_readbacks(monkeypatch):
     token = "remount1"
     pre = [
