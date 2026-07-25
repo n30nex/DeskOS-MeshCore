@@ -451,7 +451,7 @@ static void test_inventory_and_complete_reset(void)
     assert(status.keys_erased == D1L_FACTORY_RESET_CLEAR_DOMAIN_COUNT);
     assert(status.keys_already_absent == 0U);
     assert(status.sd_lineage_generation == 1U);
-    assert(status.sd_lineage_active_mask == 0x0fU);
+    assert(status.sd_lineage_active_mask == 0x1fU);
     assert(!status.global_atomic);
     assert(!status.physical_flash_scrubbed);
     assert(!status.sd_touched);

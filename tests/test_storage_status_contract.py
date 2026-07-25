@@ -1047,7 +1047,10 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_map_tile_store_write_canary" in store_header
     assert "d1l_map_tile_store_check_canary" in store_header
     assert "z > D1L_MAP_TILE_ZOOM_MAX" in store_source
-    assert "build_tile_url(D1L_MAP_TILE_SOURCE_URL_TEMPLATE" in store_source
+    assert '#include "map/map_tile_provider.h"' in store_source
+    assert "build_tile_url(provider.url_template" in store_source
+    assert "d1l_map_tile_provider_path(" in store_source
+    assert "d1l_map_tile_provider_attribution_path(" in store_source
     assert '#include "esp_http_client.h"' in store_source
     assert '#include "esp_crt_bundle.h"' in store_source
     assert ".crt_bundle_attach = esp_crt_bundle_attach" in store_source
@@ -1061,9 +1064,8 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U" in store_source
     assert "3000U" not in store_source
     assert "D1L_MAP_TILE_USER_AGENT" in store_source
-    assert "map/tiles/attribution.json" in store_source
     assert '"map/tiles/openstreetmap/z%u/x%lu/y%lu.png"' in store_source
-    assert '"map/tiles/openstreetmap/z%u/x%lu/y%lu.tmp"' in store_source
+    assert 'memcpy(&result->tmp_path[path_length - 4U], ".tmp", 5U)' in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tmp" in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tile" in store_source
     assert "map_tile_cache_canary" in store_source

@@ -143,7 +143,7 @@ static void test_fail_closed_card_truth(void)
     input.sd_state = "bridge_reported";
     input.setup_action = "inspect_rp2040_sd_mount_error_firmware_path";
     assert(d1l_ui_storage_view(&input, &view));
-    assert(strcmp(view.hero.state, "Card needs attention") == 0);
+    assert(strcmp(view.hero.state, "Live mesh only") == 0);
     assert(strcmp(view.card.readiness, "Needs attention") == 0);
     assert(view.needs_attention);
 }

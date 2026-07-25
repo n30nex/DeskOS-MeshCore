@@ -55,6 +55,9 @@ the official SD smoke proof and once to restore the DeskOS SD bridge.
   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with USB identity
   `1a86:7523`; never guess a raw `/dev/ttyUSB*` path or probe another serial
   device.
+- Do not use `COM8`, `COM11`, or `COM29` when reviewing an older Windows
+  receipt. That route is retired; `COM12` was the D1L and `COM16` was the
+  maintenance-only RP2040 route.
 - Do not format the SD card from the device, script, serial console, or UI.
 - Do not send Public RF.
 
@@ -89,7 +92,7 @@ The script will:
 6. Poll the isolated raw diagnostic only until its bounded deadline.
 7. Restore that exact bridge UF2 again and reflash the checksum-verified ESP32
    project image to establish a clean post-diagnostic boot boundary.
-8. Run a fresh preflight and require `READY_SD`, non-stale SD status, all four
+8. Run a fresh preflight and require `READY_SD`, non-stale SD status, all five
    retained stores on SD, zero retained failure counters, and no degradation
    latch.
 9. Only after that clean gate, run file/export/map/retained/reboot canaries.

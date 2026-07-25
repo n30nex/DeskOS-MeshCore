@@ -27,7 +27,7 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         re.S,
     )
     entries = [match.groupdict() for match in pattern.finditer(table)]
-    assert len(entries) == 30
+    assert len(entries) == 32
 
     def label(entry):
         value = entry["label"]
