@@ -79,6 +79,7 @@ typedef struct {
 } d1l_ui_compose_probe_result_t;
 
 esp_err_t d1l_ui_phase1_start(void);
+bool d1l_ui_phase1_started(void);
 esp_err_t d1l_ui_phase1_show_home(void);
 esp_err_t d1l_ui_phase1_request_tab(const char *name);
 esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,

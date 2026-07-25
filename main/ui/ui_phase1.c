@@ -7000,6 +7000,12 @@ const char *d1l_ui_phase1_active_tab_name(void)
     return tab_name(d1l_ui_navigation_active());
 }
 
+bool d1l_ui_phase1_started(void)
+{
+    return s_started && s_ui_task_handle != NULL &&
+           s_touch_task_handle != NULL;
+}
+
 const char *d1l_ui_phase1_pending_tab_name(void)
 {
     return tab_name(d1l_ui_navigation_pending());
@@ -8954,15 +8960,16 @@ esp_err_t d1l_ui_phase1_start(void)
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 5000));
 
     ESP_RETURN_ON_ERROR(d1l_ui_phase1_show_home(), TAG, "home screen failed");
-    if (xTaskCreatePinnedToCore(
+    if (xTaskCreatePinnedToCoreWithCaps(
             touch_poll_task, "d1l_touch", D1L_TOUCH_TASK_STACK_BYTES,
-            NULL, 4, &s_touch_task_handle, D1L_UI_TASK_CORE) != pdPASS) {
+            NULL, 4, &s_touch_task_handle, D1L_UI_TASK_CORE,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         s_touch_task_handle = NULL;
         return ESP_ERR_NO_MEM;
     }
-    /* The fully featured LVGL tree leaves too little internal RAM for the
-     * hardened UI stack. This task does not perform flash writes; allocate
-     * only its stack in configured external RAM while its TCB stays internal. */
+    /* The fully featured LVGL tree leaves too little internal RAM for these
+     * UI-owned stacks. Neither task performs flash writes; allocate only their
+     * stacks in configured external RAM while both TCBs stay internal. */
     if (xTaskCreatePinnedToCoreWithCaps(
             ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES, NULL, 5,
             &s_ui_task_handle, D1L_UI_TASK_CORE,

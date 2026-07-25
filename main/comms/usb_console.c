@@ -1802,7 +1802,8 @@ static void cmd_ui_status(void)
 {
     ok_begin("ui status");
     print_release_profile_fields();
-    printf(",\"started\":true,\"active_tab\":");
+    printf(",\"started\":%s,\"active_tab\":",
+           bool_json(d1l_ui_phase1_started()));
     print_json_string(d1l_ui_phase1_active_tab_name());
     printf(",\"pending\":%s,\"pending_tab\":",
            bool_json(d1l_ui_phase1_tab_switch_pending()));

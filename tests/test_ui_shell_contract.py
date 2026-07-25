@@ -922,6 +922,8 @@ def test_ui_allocation_wrappers_and_stack_budget_are_hardened():
     assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in source
     assert ") != pdPASS" in source
     assert "s_ui_task_handle = NULL" in source
+    assert "s_touch_task_handle = NULL" in source
+    assert "bool d1l_ui_phase1_started(void)" in source
     assert "ui_task_stack_free_words" in device_sheets
     assert "create_screen_object" in source
     assert "create_object" in source
