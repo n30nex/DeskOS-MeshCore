@@ -4,7 +4,9 @@
 The runner is deliberately limited to the configured D1L ESP32 console. It never
 accepts a Wi-Fi password, never rewrites or clears the saved profile, never
 opens the RP2040, never formats storage, and never sends Mesh RF traffic.
-Provision credentials separately before using this acceptance runner.
+Provision credentials separately before using this acceptance runner. On
+``neopi5`` it opens only the stable D1L by-id selector after binding its USB
+identity; the resolved ``/dev/ttyUSB*`` path is evidence and is never opened.
 """
 
 from __future__ import annotations
@@ -23,15 +25,24 @@ from typing import Callable
 
 try:
     from artifact_metadata import stamp_report
+    from core_smoke_d1l import enforce_core_port, resolve_core_target
+    from d1l_serial_target import POSIX_D1L_TARGET, safe_slug, validate_snapshot
     from smoke_d1l import exact_commit, open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
+    from scripts.core_smoke_d1l import enforce_core_port, resolve_core_target
+    from scripts.d1l_serial_target import (
+        POSIX_D1L_TARGET,
+        safe_slug,
+        validate_snapshot,
+    )
     from scripts.smoke_d1l import exact_commit, open_d1l_serial, send_console_command
 
 
 ROOT = Path(__file__).resolve().parents[1]
 D1L_PORT_NUMBER = 12
 D1L_PORT = f"COM{D1L_PORT_NUMBER}"
+D1L_POSIX_PORT = POSIX_D1L_TARGET
 D1L_CONSOLE_BAUD = 115200
 FORBIDDEN_PORTS = {"COM" + number for number in ("8", "11", "15", "29")}
 SAFE_COMMANDS = frozenset(
@@ -80,18 +91,21 @@ def utc_now() -> str:
 
 
 def normalize_port(value: str) -> str:
-    return str(value or "").strip().upper()
+    port = str(value or "").strip()
+    return D1L_POSIX_PORT if port == D1L_POSIX_PORT else port.upper()
 
 
 def enforce_port_guard(value: str) -> str:
     port = normalize_port(value)
-    if not re.fullmatch(r"COM[1-9][0-9]*", port):
-        raise ValueError("an explicit Windows COM port is required")
     if port in FORBIDDEN_PORTS:
         raise ValueError(f"refusing forbidden port {port}")
-    if port != D1L_PORT:
-        raise ValueError(f"this D1L acceptance runner is pinned to {D1L_PORT}")
-    return port
+    try:
+        return enforce_core_port(port)
+    except ValueError as exc:
+        raise ValueError(
+            f"this D1L acceptance runner requires {D1L_PORT} or the exact "
+            f"{D1L_POSIX_PORT} by-id target"
+        ) from exc
 
 
 def enforce_safe_command(command: str) -> None:
@@ -598,6 +612,8 @@ def _base_report(
         "dry_run": mode == "dry-run",
         "hardware_required": True,
         "hardware_transport": None,
+        "d1l_target": None,
+        "d1l_target_after": None,
         "public_rf_tx": False,
         "dm_rf_tx": False,
         "formats_sd": False,
@@ -684,6 +700,8 @@ def run_acceptance(
     command_sender: Callable[[str, float], dict] | None = None,
     serial_module=None,
     sleep: Callable[[float], None] = time.sleep,
+    port_lister: Callable[[], object] | None = None,
+    platform_name: str | None = None,
 ) -> dict:
     mode = (
         "dry-run"
@@ -706,6 +724,9 @@ def run_acceptance(
         return report
 
     hardware_transport: dict | None = None
+    d1l_target: dict | None = None
+    d1l_target_after: dict | None = None
+    resolved_port_lister: Callable[[], object] | None = port_lister
     if command_sender is None:
         if serial_module is None:
             try:
@@ -718,6 +739,36 @@ def run_acceptance(
                 }
                 report["ended_at"] = utc_now()
                 return report
+        if resolved_port_lister is None:
+            try:
+                from serial.tools import list_ports
+            except ImportError as exc:  # pragma: no cover - dependency dependent
+                report["classification"] = "serial_target_dependency_missing"
+                report["failure"] = {
+                    "code": "serial_target_dependency_missing",
+                    "message": type(exc).__name__,
+                }
+                report["ended_at"] = utc_now()
+                return report
+
+            resolved_port_lister = lambda: list_ports.comports(include_links=True)
+        try:
+            d1l_target = resolve_core_target(
+                port,
+                port_lister=resolved_port_lister,
+                platform_name=platform_name,
+            )
+            port = d1l_target["requested_path"]
+            report["port"] = port
+            report["d1l_target"] = d1l_target
+        except (OSError, ValueError) as exc:
+            report["classification"] = "serial_target_rejected"
+            report["failure"] = {
+                "code": "serial_target_rejected",
+                "message": type(exc).__name__,
+            }
+            report["ended_at"] = utc_now()
+            return report
         serial_handle = None
         try:
             serial_handle = open_d1l_serial(
@@ -958,6 +1009,30 @@ def run_acceptance(
                     hardware_transport["closed_by_runner"] = True
             except Exception:
                 pass
+        if d1l_target is not None and resolved_port_lister is not None:
+            try:
+                d1l_target_after = resolve_core_target(
+                    port,
+                    port_lister=resolved_port_lister,
+                    platform_name=platform_name,
+                )
+                if (
+                    d1l_target_after["stable_identity_sha256"]
+                    != d1l_target["stable_identity_sha256"]
+                ):
+                    raise ValueError(
+                        "D1L serial target identity changed during acceptance"
+                    )
+            except (OSError, ValueError) as target_exc:
+                if failure is None:
+                    failure = AcceptanceFailure(
+                        "serial_target_changed",
+                        "D1L serial target identity did not remain stable",
+                    )
+                report["target_failure"] = {
+                    "code": "serial_target_changed",
+                    "message": type(target_exc).__name__,
+                }
 
     health = _health_summary(health_samples)
     if failure is None and not health["ok"]:
@@ -994,6 +1069,8 @@ def run_acceptance(
             "simulated": mode == "simulation",
             "dry_run": False,
             "hardware_transport": hardware_transport,
+            "d1l_target": d1l_target,
+            "d1l_target_after": d1l_target_after,
         }
     )
     report["checks"] = {
@@ -1287,6 +1364,18 @@ def validate_completed_report(report: object) -> bool:
     git = report.get("git")
     transport = report.get("hardware_transport")
     expected_commit = exact_commit(report.get("expected_firmware_commit"))
+    try:
+        port = enforce_port_guard(report.get("port"))
+        target_before = report.get("d1l_target")
+        target_after = report.get("d1l_target_after")
+        validate_snapshot(target_before, port)
+        validate_snapshot(target_after, port)
+        target_stable = (
+            target_before["stable_identity_sha256"]
+            == target_after["stable_identity_sha256"]
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
     return (
         report.get("schema") == 1
         and report.get("kind") == "wifi_saved_profile_resilience"
@@ -1298,13 +1387,14 @@ def validate_completed_report(report: object) -> bool:
         and report.get("ok") is True
         and report.get("acceptance_passed") is True
         and report.get("release_gate_eligible") is False
-        and report.get("port") == D1L_PORT
+        and report.get("port") == port
+        and target_stable
         and expected_commit is not None
         and exact_commit(report.get("commit")) == expected_commit
         and transport
         == {
             "opened_by_runner": True,
-            "port": D1L_PORT,
+            "port": port,
             "baud": D1L_CONSOLE_BAUD,
             "closed_by_runner": True,
         }
@@ -1346,10 +1436,12 @@ def validate_completed_report(report: object) -> bool:
 
 def default_out_path(report: dict) -> Path:
     commit = exact_commit(report.get("expected_firmware_commit")) or "unknown"
-    port = str(report.get("port") or D1L_PORT).upper()
-    filename = f"wifi_saved_profile_resilience_{commit}_{port}.json"
+    port = enforce_port_guard(str(report.get("port") or D1L_PORT))
+    port_slug = safe_slug(port)
+    port_label = D1L_PORT if port == D1L_PORT else port_slug
+    filename = f"wifi_saved_profile_resilience_{commit}_{port_label}.json"
     if report.get("mode") == "hardware":
-        return ROOT / "artifacts" / "hardware" / port.lower() / filename
+        return ROOT / "artifacts" / "hardware" / port_slug / filename
     return ROOT / "artifacts" / str(report.get("mode") or "dry-run") / filename
 
 

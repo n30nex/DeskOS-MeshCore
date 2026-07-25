@@ -13,6 +13,23 @@ SECRET_SENTINEL = "never-store-this-password"
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def windows_target_snapshot():
+    return wifi.resolve_core_target(
+        "COM12",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": "D1L-TEST",
+                "hwid": "USB VID:PID=1A86:7523",
+                "location": "1-1",
+            }
+        ],
+        platform_name="nt",
+    )
+
+
 def make_args(*extra: str):
     return wifi.parse_args(
         [
@@ -210,10 +227,13 @@ def test_forbidden_ports_are_rejected(number):
         wifi.enforce_port_guard("COM" + number)
 
 
-def test_runner_is_strictly_pinned_to_com12():
+def test_runner_accepts_only_the_two_authorized_d1l_targets():
     assert wifi.enforce_port_guard(" com12 ") == "COM12"
-    with pytest.raises(ValueError, match="pinned to COM12"):
+    assert wifi.enforce_port_guard(wifi.D1L_POSIX_PORT) == wifi.D1L_POSIX_PORT
+    with pytest.raises(ValueError, match="requires COM12"):
         wifi.enforce_port_guard("COM7")
+    with pytest.raises(ValueError, match="requires COM12"):
+        wifi.enforce_port_guard("/dev/ttyUSB2")
 
 
 @pytest.mark.parametrize(
@@ -397,6 +417,17 @@ def test_serial_open_failure_returns_a_redacted_receipt_without_commands():
         make_args(),
         serial_module=BrokenSerialModule(),
         sleep=lambda _seconds: None,
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": "D1L-TEST",
+                "hwid": "USB VID:PID=1A86:7523",
+                "location": "1-1",
+            }
+        ],
+        platform_name="nt",
     )
 
     assert report["ok"] is False
@@ -430,6 +461,8 @@ def test_completed_validator_rejects_simulation_and_derives_physical_fixture():
         "baud": 115200,
         "closed_by_runner": True,
     }
+    physical["d1l_target"] = windows_target_snapshot()
+    physical["d1l_target_after"] = windows_target_snapshot()
     assert wifi.validate_completed_report(physical) is True
 
     for missing_label in (
@@ -508,6 +541,8 @@ def test_feature_receipt_can_never_be_promoted_to_full_wp13_release_gate(
         "baud": 115200,
         "closed_by_runner": True,
     }
+    report["d1l_target"] = windows_target_snapshot()
+    report["d1l_target_after"] = windows_target_snapshot()
 
     def exact_stamp(payload, _root):
         payload["commit"] = COMMIT
