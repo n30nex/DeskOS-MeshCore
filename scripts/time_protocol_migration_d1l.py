@@ -120,6 +120,7 @@ PROTOCOL_POLICY_SOURCE_BLOBS = (
     ),
 )
 MAX_PREDECESSOR_ALLOCATIONS_PER_SECOND = 1000
+SERIAL_OPEN_SETTLE_SECONDS = 2.0
 CONFIRMATION = "CONFIRM-EXACT-DEVICE-PROTOCOL-UPPER-BOUND"
 MAX_RAW_LINE_BYTES = 131072
 REJECTED_RECEIPT_TRUE_FLAGS = (
@@ -1951,6 +1952,11 @@ def _execute_migration_reserved(
         timeout=timeout,
     )
     try:
+        # The CH340-backed console can discard the first command while the
+        # already-open device settles after a new host handle is attached.
+        # Wait before clearing boot chatter and beginning the identity-bound
+        # preflight; no persistent mutation is possible before this completes.
+        time.sleep(SERIAL_OPEN_SETTLE_SECONDS)
         if hasattr(ser, "reset_input_buffer"):
             ser.reset_input_buffer()
         transactions.append(

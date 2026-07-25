@@ -673,7 +673,10 @@ def run_scroll_probe(
                 tab_active, statuses = wait_for_tab(ser, tab, max(timeout, 15.0), poll_sec)
                 probe = send_console_command(ser, f"ui scroll-probe {screen}", max(timeout, 15.0))
             if manual_touch:
-                print(f"Manual check: scroll the {label} surface, then press Enter.")
+                print(
+                    f"Manual check: inspect the {label} surface and scroll "
+                    "if content permits, then press Enter."
+                )
                 input()
             status = send_console_command(ser, "ui status", timeout)
             health = send_console_command(ser, "health", timeout)

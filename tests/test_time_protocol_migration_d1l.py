@@ -1144,6 +1144,8 @@ def test_receipt_rejects_changed_bound_actions_metadata(tmp_path):
 
 
 def test_execute_migration_writes_one_immutable_valid_receipt(tmp_path, monkeypatch):
+    settle_delays = []
+    monkeypatch.setattr(migration.time, "sleep", settle_delays.append)
     fake = FakeSerial(
         [
             identity_status(),
@@ -1183,6 +1185,7 @@ def test_execute_migration_writes_one_immutable_valid_receipt(tmp_path, monkeypa
         now=lambda: "2026-07-23T21:00:00Z",
     )
     assert row["ok"] is True
+    assert settle_delays == [migration.SERIAL_OPEN_SETTLE_SECONDS]
     persisted = json.loads(out.read_text(encoding="ascii"))
     assert migration.CONFIRMATION not in json.dumps(persisted)
     ok, errors = migration.validate_receipt(persisted, root=tmp_path)
