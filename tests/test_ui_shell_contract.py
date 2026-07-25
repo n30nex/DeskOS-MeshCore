@@ -916,7 +916,12 @@ def test_ui_allocation_wrappers_and_stack_budget_are_hardened():
     contact_sheets = read("main/ui/ui_contact_sheets.c")
     assert "#define D1L_UI_TASK_STACK_BYTES 12288U" in source
     assert "#define D1L_TOUCH_TASK_STACK_BYTES 4096U" in source
-    assert 'xTaskCreatePinnedToCore(ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES' in source
+    assert '#include "freertos/idf_additions.h"' in source
+    assert "xTaskCreatePinnedToCoreWithCaps(" in source
+    assert 'ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES' in source
+    assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in source
+    assert ") != pdPASS" in source
+    assert "s_ui_task_handle = NULL" in source
     assert "ui_task_stack_free_words" in device_sheets
     assert "create_screen_object" in source
     assert "create_object" in source

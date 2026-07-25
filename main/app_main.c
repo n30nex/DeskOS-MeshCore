@@ -272,9 +272,17 @@ void app_main(void)
                  esp_err_to_name(update_ret));
     }
 
+    esp_err_t ui_ret = ESP_ERR_INVALID_STATE;
     if (board_ret == ESP_OK) {
         ESP_LOGI(TAG, "D1L board initialized");
-        d1l_ui_phase1_start();
+        ui_ret = d1l_ui_phase1_start();
+        if (ui_ret != ESP_OK) {
+            ESP_LOGE(TAG, "D1L UI startup failed: %s",
+                     esp_err_to_name(ui_ret));
+            printf("{\"schema\":%d,\"event\":\"ui_init\",\"ok\":false,"
+                   "\"code\":\"%s\",\"hint\":\"UI task allocation failed\"}\n",
+                   D1L_CONSOLE_SCHEMA, esp_err_to_name(ui_ret));
+        }
     } else {
         ESP_LOGE(TAG, "D1L board init failed: %s", esp_err_to_name(board_ret));
         printf("{\"schema\":%d,\"event\":\"board_init\",\"ok\":false,\"code\":\"%s\",\"hint\":\"verify D1L hardware, I2C expander, and display power\"}\n",
@@ -282,7 +290,8 @@ void app_main(void)
     }
 
     const esp_err_t update_boot_health =
-        nvs_ret == ESP_OK && settings_ret == ESP_OK && board_ret == ESP_OK ?
+        nvs_ret == ESP_OK && settings_ret == ESP_OK &&
+                board_ret == ESP_OK && ui_ret == ESP_OK ?
             ESP_OK : ESP_FAIL;
     esp_err_t update_confirm_ret =
         d1l_update_boot_confirm(update_boot_health);

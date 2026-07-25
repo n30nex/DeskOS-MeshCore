@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lvgl.h"
@@ -8953,10 +8954,24 @@ esp_err_t d1l_ui_phase1_start(void)
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 5000));
 
     ESP_RETURN_ON_ERROR(d1l_ui_phase1_show_home(), TAG, "home screen failed");
-    xTaskCreatePinnedToCore(touch_poll_task, "d1l_touch", D1L_TOUCH_TASK_STACK_BYTES, NULL, 4,
-                            &s_touch_task_handle, D1L_UI_TASK_CORE);
-    xTaskCreatePinnedToCore(ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES, NULL, 5,
-                            &s_ui_task_handle, D1L_UI_TASK_CORE);
+    if (xTaskCreatePinnedToCore(
+            touch_poll_task, "d1l_touch", D1L_TOUCH_TASK_STACK_BYTES,
+            NULL, 4, &s_touch_task_handle, D1L_UI_TASK_CORE) != pdPASS) {
+        s_touch_task_handle = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    /* The fully featured LVGL tree leaves too little internal RAM for the
+     * hardened UI stack. This task does not perform flash writes; allocate
+     * only its stack in configured external RAM while its TCB stays internal. */
+    if (xTaskCreatePinnedToCoreWithCaps(
+            ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES, NULL, 5,
+            &s_ui_task_handle, D1L_UI_TASK_CORE,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        s_ui_task_handle = NULL;
+        vTaskDelete(s_touch_task_handle);
+        s_touch_task_handle = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     d1l_health_monitor_register_ui_task(s_ui_task_handle);
     d1l_app_model_get()->ui_ready = true;
     s_started = true;
