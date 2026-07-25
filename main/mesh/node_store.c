@@ -11,15 +11,20 @@
 #include "mesh/contact_store.h"
 #include "mesh/meshcore_lifetime.h"
 #include "mesh/store_lock.h"
+#include "storage/retained_blob_store.h"
 
 #define D1L_NODE_STORE_NAMESPACE "d1l_nodes"
 #define D1L_NODE_STORE_KEY "heard"
+#define D1L_NODE_STORE_EPOCH_KEY "marker_epoch"
+#define D1L_NODE_STORE_SD_KEY "nodes_v1"
+#define D1L_NODE_STORE_ID D1L_RETAINED_BLOB_STORE_NODES
 #define D1L_NODE_STORE_LEGACY_CAPACITY D1L_NODE_NVS_FALLBACK_CAPACITY
 #define D1L_NODE_STORE_LEGACY_TYPE_LEN 8U
 #define D1L_NODE_STORE_SCHEMA_V1 1U
 #define D1L_NODE_STORE_SCHEMA_V2 2U
 #define D1L_NODE_STORE_SCHEMA_V3 3U
-#define D1L_NODE_STORE_SCHEMA 4U
+#define D1L_NODE_STORE_SCHEMA_V4 4U
+#define D1L_NODE_STORE_SD_SCHEMA 5U
 
 typedef struct {
     uint32_t seq;
@@ -96,23 +101,51 @@ typedef struct {
     uint32_t dropped_oldest;
     uint32_t count;
     d1l_node_entry_t entries[D1L_NODE_NVS_FALLBACK_CAPACITY];
-} d1l_node_store_blob_t;
+} d1l_node_store_blob_v4_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t epoch;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_node_entry_t entries[D1L_NODE_SD_HISTORY_CAPACITY];
+} d1l_node_store_sd_blob_t;
 
 static d1l_node_entry_t s_entries[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 /* Monotonic uptime is meaningful only within one boot.  Retain the historical
  * entry timestamps for display/audit, but derive live reachability solely from
  * this boot-local observation set. */
-static uint32_t s_live_last_heard_ms[D1L_NODE_STORE_CAPACITY];
-static bool s_live_heard_valid[D1L_NODE_STORE_CAPACITY];
+static uint32_t s_live_last_heard_ms[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static bool s_live_heard_valid[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
 static uint32_t s_marker_generation = 1U;
+static uint32_t s_epoch = 1U;
 static bool s_loaded;
-static d1l_node_store_blob_t s_blob_scratch;
+static d1l_node_store_blob_v4_t s_legacy_blob_scratch EXT_RAM_BSS_ATTR;
+static d1l_node_store_sd_blob_t s_sd_blob_scratch EXT_RAM_BSS_ATTR;
+static d1l_node_store_sd_blob_t s_persist_snapshot EXT_RAM_BSS_ATTR;
 static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static bool s_persistence_dirty;
+static bool s_sd_reconcile_pending;
+static bool s_dirty_timing_started;
+static bool s_persistence_immediate_due;
+static bool s_retry_pending;
+static bool s_legacy_cleanup_pending;
+static uint32_t s_dirty_since_ms;
+static uint32_t s_last_persist_attempt_ms;
+static uint32_t s_last_sd_backend_generation;
+static uint32_t s_persistence_commit_count;
+static uint32_t s_persistence_coalesced_count;
+static uint32_t s_persistence_fail_count;
+static esp_err_t s_sd_primary_last_error;
+static uint64_t s_revision;
 static d1l_store_lock_t s_store_lock = D1L_STORE_LOCK_INITIALIZER;
+static d1l_store_lock_t s_persist_io_lock = D1L_STORE_LOCK_INITIALIZER;
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -231,44 +264,95 @@ static bool marker_material_changed(const d1l_node_entry_t *before,
            strncmp(before->type, after->type, D1L_NODE_TYPE_LEN) != 0;
 }
 
-static void fill_blob(d1l_node_store_blob_t *blob)
+static uint32_t monotonic_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000ULL);
+}
+
+static void reset_persistence_state(uint32_t backend_generation)
+{
+    s_persistence_dirty = false;
+    s_sd_reconcile_pending = false;
+    s_dirty_timing_started = false;
+    s_persistence_immediate_due = false;
+    s_retry_pending = false;
+    s_legacy_cleanup_pending = false;
+    s_dirty_since_ms = 0U;
+    s_last_persist_attempt_ms = 0U;
+    s_last_sd_backend_generation = backend_generation;
+    s_persistence_commit_count = 0U;
+    s_persistence_coalesced_count = 0U;
+    s_persistence_fail_count = 0U;
+    s_sd_primary_last_error = ESP_OK;
+    s_revision = 1U;
+}
+
+static void note_persistence_dirty_locked(bool immediate, uint32_t now_ms)
+{
+    if (!s_dirty_timing_started) {
+        s_dirty_timing_started = true;
+        s_dirty_since_ms = now_ms;
+    }
+    s_persistence_dirty = true;
+    s_persistence_immediate_due = s_persistence_immediate_due || immediate;
+}
+
+static void fill_sd_blob(d1l_node_store_sd_blob_t *blob)
 {
     memset(blob, 0, sizeof(*blob));
-    blob->schema = D1L_NODE_STORE_SCHEMA;
+    blob->schema = D1L_NODE_STORE_SD_SCHEMA;
+    blob->epoch = s_epoch;
     blob->next_seq = s_next_seq;
     blob->total_written = s_total_written;
     blob->dropped_oldest = s_dropped_oldest;
-    const size_t n = s_count < D1L_NODE_NVS_FALLBACK_CAPACITY ?
-        s_count : D1L_NODE_NVS_FALLBACK_CAPACITY;
-    blob->count = (uint32_t)n;
-    bool used[D1L_NODE_STORE_CAPACITY] = {0};
-    for (size_t out = 0; out < n; ++out) {
-        size_t best = 0;
-        bool best_set = false;
-        for (size_t i = 0; i < s_count; ++i) {
-            if (!used[i] && (!best_set || s_entries[i].seq > s_entries[best].seq)) {
-                best = i;
-                best_set = true;
-            }
-        }
-        if (!best_set) {
-            break;
-        }
-        used[best] = true;
-        blob->entries[out] = s_entries[best];
+    blob->count = (uint32_t)s_count;
+    if (s_count > 0U) {
+        memcpy(blob->entries, s_entries,
+               s_count * sizeof(blob->entries[0]));
     }
 }
 
-static esp_err_t persist_store(void)
+static esp_err_t load_clear_epoch(uint32_t *out_epoch)
 {
+    if (!out_epoch) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_epoch = 1U;
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READONLY, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    uint32_t epoch = 0U;
+    ret = nvs_get_u32(handle, D1L_NODE_STORE_EPOCH_KEY, &epoch);
+    nvs_close(handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (epoch == 0U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    *out_epoch = epoch;
+    return ESP_OK;
+}
+
+static esp_err_t store_clear_epoch(uint32_t epoch)
+{
+    if (epoch == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
         return ret;
     }
-
-    fill_blob(&s_blob_scratch);
-    ret = nvs_set_blob(handle, D1L_NODE_STORE_KEY, &s_blob_scratch, sizeof(s_blob_scratch));
+    ret = nvs_set_u32(handle, D1L_NODE_STORE_EPOCH_KEY, epoch);
     if (ret == ESP_OK) {
         ret = nvs_commit(handle);
     }
@@ -276,10 +360,36 @@ static esp_err_t persist_store(void)
     return ret;
 }
 
-static bool blob_is_valid(const d1l_node_store_blob_t *blob, size_t len)
+static esp_err_t erase_legacy_node_blob(void)
+{
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = nvs_erase_key(handle, D1L_NODE_STORE_KEY);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ret = ESP_OK;
+    } else if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return ret;
+}
+
+static bool sd_blob_is_valid(const d1l_node_store_sd_blob_t *blob, size_t len)
 {
     return blob && len == sizeof(*blob) &&
-           blob->schema == D1L_NODE_STORE_SCHEMA &&
+           blob->schema == D1L_NODE_STORE_SD_SCHEMA &&
+           blob->epoch > 0U &&
+           blob->count <= D1L_NODE_SD_HISTORY_CAPACITY &&
+           blob->next_seq > 0U;
+}
+
+static bool blob_v4_is_valid(const d1l_node_store_blob_v4_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_NODE_STORE_SCHEMA_V4 &&
            blob->count <= D1L_NODE_NVS_FALLBACK_CAPACITY &&
            blob->next_seq > 0;
 }
@@ -395,6 +505,169 @@ static size_t oldest_index(void)
         }
     }
     return oldest;
+}
+
+static bool bounded_text_terminated(const char *text, size_t capacity)
+{
+    return text && capacity > 0U && memchr(text, '\0', capacity) != NULL;
+}
+
+static bool persisted_entry_is_valid(const d1l_node_entry_t *entry)
+{
+    return entry &&
+           bounded_text_terminated(entry->fingerprint,
+                                   sizeof(entry->fingerprint)) &&
+           bounded_text_terminated(entry->public_key_hex,
+                                   sizeof(entry->public_key_hex)) &&
+           bounded_text_terminated(entry->name, sizeof(entry->name)) &&
+           bounded_text_terminated(entry->type, sizeof(entry->type)) &&
+           entry->fingerprint[0] != '\0' &&
+           (!entry->location_valid ||
+            location_in_bounds(entry->lat_e6, entry->lon_e6));
+}
+
+static size_t least_recent_advert_index(void)
+{
+    size_t oldest = 0U;
+    for (size_t i = 1U; i < s_count; ++i) {
+        if (s_entries[i].advert_timestamp <
+                s_entries[oldest].advert_timestamp ||
+            (s_entries[i].advert_timestamp ==
+                 s_entries[oldest].advert_timestamp &&
+             s_entries[i].seq < s_entries[oldest].seq)) {
+            oldest = i;
+        }
+    }
+    return oldest;
+}
+
+static bool merge_persisted_entry_locked(const d1l_node_entry_t *incoming,
+                                         bool *out_marker_changed)
+{
+    if (!persisted_entry_is_valid(incoming)) {
+        return false;
+    }
+    if (out_marker_changed) {
+        *out_marker_changed = false;
+    }
+
+    int existing = find_by_fingerprint(incoming->fingerprint);
+    if (existing < 0) {
+        size_t index = 0U;
+        if (s_count < D1L_NODE_STORE_CAPACITY) {
+            index = s_count++;
+        } else {
+            index = least_recent_advert_index();
+            if (incoming->advert_timestamp <
+                    s_entries[index].advert_timestamp ||
+                (incoming->advert_timestamp ==
+                     s_entries[index].advert_timestamp &&
+                 incoming->seq <= s_entries[index].seq)) {
+                return false;
+            }
+            s_dropped_oldest++;
+        }
+        const d1l_node_entry_t before = s_entries[index];
+        s_entries[index] = *incoming;
+        s_live_last_heard_ms[index] = 0U;
+        s_live_heard_valid[index] = false;
+        if (out_marker_changed) {
+            *out_marker_changed = marker_material_changed(&before,
+                                                          &s_entries[index]);
+        }
+        return true;
+    }
+
+    const size_t index = (size_t)existing;
+    d1l_node_entry_t *current = &s_entries[index];
+    const d1l_node_entry_t before = *current;
+    bool changed = false;
+    if (incoming->advert_timestamp > current->advert_timestamp) {
+        const bool preserve_location =
+            current->location_valid &&
+            (!incoming->location_valid ||
+             current->location_advert_timestamp >
+                 incoming->location_advert_timestamp);
+        const int32_t lat_e6 = current->lat_e6;
+        const int32_t lon_e6 = current->lon_e6;
+        const uint32_t location_timestamp =
+            current->location_advert_timestamp;
+        const uint32_t location_seq = current->location_seq;
+        *current = *incoming;
+        if (preserve_location) {
+            current->location_valid = true;
+            current->lat_e6 = lat_e6;
+            current->lon_e6 = lon_e6;
+            current->location_advert_timestamp = location_timestamp;
+            current->location_seq = location_seq;
+        }
+        changed = true;
+    } else if (incoming->advert_timestamp == current->advert_timestamp) {
+        if (incoming->location_valid &&
+            (!current->location_valid ||
+             incoming->location_advert_timestamp >
+                 current->location_advert_timestamp)) {
+            current->location_valid = true;
+            current->lat_e6 = incoming->lat_e6;
+            current->lon_e6 = incoming->lon_e6;
+            current->location_advert_timestamp =
+                incoming->location_advert_timestamp;
+            current->location_seq = incoming->location_seq;
+            changed = true;
+        }
+        if (current->public_key_hex[0] == '\0' &&
+            incoming->public_key_hex[0] != '\0') {
+            memcpy(current->public_key_hex, incoming->public_key_hex,
+                   sizeof(current->public_key_hex));
+            changed = true;
+        }
+        if (current->name[0] == '\0' && incoming->name[0] != '\0') {
+            memcpy(current->name, incoming->name, sizeof(current->name));
+            changed = true;
+        }
+    }
+    if (changed && out_marker_changed) {
+        *out_marker_changed = marker_material_changed(&before, current);
+    }
+    return changed;
+}
+
+static bool merge_sd_blob_locked(const d1l_node_store_sd_blob_t *blob)
+{
+    if (!blob || blob->epoch != s_epoch) {
+        return false;
+    }
+    bool changed = false;
+    bool markers_changed = false;
+    for (size_t i = 0U; i < blob->count; ++i) {
+        bool marker_changed = false;
+        if (merge_persisted_entry_locked(&blob->entries[i],
+                                         &marker_changed)) {
+            changed = true;
+            markers_changed = markers_changed || marker_changed;
+        }
+    }
+    if (blob->next_seq > s_next_seq) {
+        s_next_seq = blob->next_seq;
+    }
+    if (blob->total_written > s_total_written) {
+        s_total_written = blob->total_written;
+    }
+    if (blob->dropped_oldest > s_dropped_oldest) {
+        s_dropped_oldest = blob->dropped_oldest;
+    }
+    for (size_t i = 0U; i < s_count; ++i) {
+        if (s_entries[i].seq >= s_next_seq && s_entries[i].seq < UINT32_MAX) {
+            s_next_seq = s_entries[i].seq + 1U;
+        }
+    }
+    if (s_next_seq == 0U) {
+        s_next_seq = 1U;
+    }
+    if (markers_changed) {
+        bump_marker_generation();
+    }
+    return changed;
 }
 
 static char ascii_lower(char c)
@@ -613,87 +886,413 @@ static bool node_view_better(const d1l_node_view_t *candidate, const d1l_node_vi
 
 esp_err_t d1l_node_store_init(void)
 {
-    s_marker_generation = 1U;
-    clear_ram();
-    bool migrated = false;
+    d1l_store_lock_take(&s_persist_io_lock);
 
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
+    d1l_retained_blob_store_backend_state_t backend = {0};
+    if (!d1l_retained_blob_store_backend_state(D1L_NODE_STORE_ID,
+                                               &backend)) {
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint32_t epoch = 1U;
+    esp_err_t ret = load_clear_epoch(&epoch);
     if (ret != ESP_OK) {
-        s_loaded = false;
+        d1l_store_lock_give(&s_persist_io_lock);
         return ret;
     }
 
-    size_t len = sizeof(s_blob_scratch);
-    ret = nvs_get_blob(handle, D1L_NODE_STORE_KEY, &s_blob_scratch, &len);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        ret = ESP_OK;
-    } else if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
-        memcpy(s_entries, s_blob_scratch.entries,
-               s_blob_scratch.count * sizeof(s_entries[0]));
-        s_count = s_blob_scratch.count;
-        s_next_seq = s_blob_scratch.next_seq;
-        s_total_written = s_blob_scratch.total_written;
-        s_dropped_oldest = s_blob_scratch.dropped_oldest;
-    } else if (ret == ESP_OK &&
-               blob_v3_is_valid((const d1l_node_store_blob_v3_t *)&s_blob_scratch, len)) {
-        migrate_v3_blob((const d1l_node_store_blob_v3_t *)&s_blob_scratch);
-        migrated = true;
-    } else if (ret == ESP_OK &&
-               blob_v2_is_valid((const d1l_node_store_blob_v2_t *)&s_blob_scratch, len)) {
-        migrate_v2_blob((const d1l_node_store_blob_v2_t *)&s_blob_scratch);
-        migrated = true;
-    } else if (ret == ESP_OK &&
-               blob_v1_is_valid((const d1l_node_store_blob_v1_t *)&s_blob_scratch, len)) {
-        migrate_v1_blob((const d1l_node_store_blob_v1_t *)&s_blob_scratch);
-        migrated = true;
-    } else if (ret == ESP_OK) {
-        clear_ram();
-        ret = nvs_erase_key(handle, D1L_NODE_STORE_KEY);
+    d1l_store_lock_take(&s_store_lock);
+    s_marker_generation = 1U;
+    clear_ram();
+    s_epoch = epoch;
+    reset_persistence_state(backend.generation);
+    s_loaded = false;
+    d1l_store_lock_give(&s_store_lock);
+
+    bool legacy_found = false;
+    nvs_handle_t handle;
+    ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READONLY, &handle);
+    if (ret == ESP_OK) {
+        size_t len = sizeof(s_legacy_blob_scratch);
+        ret = nvs_get_blob(handle, D1L_NODE_STORE_KEY,
+                           &s_legacy_blob_scratch, &len);
+        nvs_close(handle);
         if (ret == ESP_ERR_NVS_NOT_FOUND) {
             ret = ESP_OK;
+        } else if (ret == ESP_OK) {
+            d1l_store_lock_take(&s_store_lock);
+            if (blob_v4_is_valid(&s_legacy_blob_scratch, len)) {
+                memcpy(s_entries, s_legacy_blob_scratch.entries,
+                       s_legacy_blob_scratch.count * sizeof(s_entries[0]));
+                s_count = s_legacy_blob_scratch.count;
+                s_next_seq = s_legacy_blob_scratch.next_seq;
+                s_total_written = s_legacy_blob_scratch.total_written;
+                s_dropped_oldest = s_legacy_blob_scratch.dropped_oldest;
+                legacy_found = true;
+            } else if (blob_v3_is_valid(
+                           (const d1l_node_store_blob_v3_t *)
+                               &s_legacy_blob_scratch, len)) {
+                migrate_v3_blob((const d1l_node_store_blob_v3_t *)
+                                    &s_legacy_blob_scratch);
+                legacy_found = true;
+            } else if (blob_v2_is_valid(
+                           (const d1l_node_store_blob_v2_t *)
+                               &s_legacy_blob_scratch, len)) {
+                migrate_v2_blob((const d1l_node_store_blob_v2_t *)
+                                    &s_legacy_blob_scratch);
+                legacy_found = true;
+            } else if (blob_v1_is_valid(
+                           (const d1l_node_store_blob_v1_t *)
+                               &s_legacy_blob_scratch, len)) {
+                migrate_v1_blob((const d1l_node_store_blob_v1_t *)
+                                    &s_legacy_blob_scratch);
+                legacy_found = true;
+            } else {
+                ret = ESP_ERR_INVALID_STATE;
+            }
+            d1l_store_lock_give(&s_store_lock);
         }
-        if (ret == ESP_OK) {
-            ret = nvs_commit(handle);
+    } else if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ret = ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        d1l_store_lock_take(&s_store_lock);
+        s_persistence_fail_count++;
+        s_sd_primary_last_error = ret;
+        s_loaded = true;
+        d1l_store_lock_give(&s_store_lock);
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ret;
+    }
+
+    bool sd_valid = false;
+    if (backend.enabled) {
+        size_t sd_len = sizeof(s_sd_blob_scratch);
+        const esp_err_t sd_ret = d1l_retained_blob_store_read_sd_primary(
+            D1L_NODE_STORE_ID, D1L_NODE_STORE_SD_KEY,
+            &s_sd_blob_scratch, &sd_len);
+        sd_valid = sd_ret == ESP_OK &&
+            sd_blob_is_valid(&s_sd_blob_scratch, sd_len);
+        d1l_store_lock_take(&s_store_lock);
+        if (sd_valid && s_sd_blob_scratch.epoch == s_epoch) {
+            (void)merge_sd_blob_locked(&s_sd_blob_scratch);
+            s_sd_reconcile_pending = false;
+            s_sd_primary_last_error = ESP_OK;
+        } else if (sd_ret == ESP_ERR_NOT_FOUND ||
+                   (sd_valid && s_sd_blob_scratch.epoch != s_epoch)) {
+            s_sd_reconcile_pending = false;
+            if (s_count > 0U || s_epoch > 1U) {
+                note_persistence_dirty_locked(true, monotonic_ms());
+            }
+        } else {
+            s_sd_reconcile_pending = true;
+            s_persistence_fail_count++;
+            s_sd_primary_last_error =
+                sd_ret == ESP_OK ? ESP_ERR_INVALID_STATE : sd_ret;
         }
+        d1l_store_lock_give(&s_store_lock);
+    } else {
+        d1l_store_lock_take(&s_store_lock);
+        s_sd_reconcile_pending = true;
+        if (legacy_found) {
+            note_persistence_dirty_locked(false, monotonic_ms());
+        }
+        d1l_store_lock_give(&s_store_lock);
     }
-    nvs_close(handle);
-    if (ret == ESP_OK && migrated) {
-        ret = persist_store();
+
+    d1l_store_lock_take(&s_store_lock);
+    s_legacy_cleanup_pending = legacy_found;
+    if (legacy_found) {
+        note_persistence_dirty_locked(true, monotonic_ms());
     }
-    s_loaded = (ret == ESP_OK);
-    return ret;
+    s_loaded = true;
+    d1l_store_lock_give(&s_store_lock);
+    d1l_store_lock_give(&s_persist_io_lock);
+    return ESP_OK;
 }
 
 esp_err_t d1l_node_store_clear(void)
 {
+    if (!s_loaded) {
+        const esp_err_t init_ret = d1l_node_store_init();
+        if (init_ret != ESP_OK) {
+            return init_ret;
+        }
+    }
+    d1l_store_lock_take(&s_persist_io_lock);
+    d1l_retained_blob_store_backend_state_t backend = {0};
+    if (!d1l_retained_blob_store_backend_state(D1L_NODE_STORE_ID,
+                                               &backend)) {
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_store_lock_take(&s_store_lock);
+    uint32_t clear_epoch = s_epoch + 1U;
+    if (clear_epoch == 0U) {
+        clear_epoch = 1U;
+    }
+    d1l_store_lock_give(&s_store_lock);
+    esp_err_t ret = store_clear_epoch(clear_epoch);
+    if (ret != ESP_OK) {
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ret;
+    }
+
     d1l_store_lock_take(&s_store_lock);
     bool had_markers = false;
     for (size_t i = 0; i < s_count; ++i) {
         had_markers = had_markers || s_entries[i].location_valid;
     }
     clear_ram();
+    s_epoch = clear_epoch;
+    s_revision++;
+    s_sd_reconcile_pending = !backend.enabled;
+    note_persistence_dirty_locked(true, monotonic_ms());
     if (had_markers) {
         bump_marker_generation();
     }
     s_loaded = true;
+    fill_sd_blob(&s_persist_snapshot);
+    d1l_store_lock_give(&s_store_lock);
 
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        d1l_store_lock_give(&s_store_lock);
+    esp_err_t sd_ret = ESP_OK;
+    if (backend.enabled) {
+        sd_ret = d1l_retained_blob_store_write_sd_primary_guarded(
+            D1L_NODE_STORE_ID, D1L_NODE_STORE_SD_KEY,
+            &s_persist_snapshot, sizeof(s_persist_snapshot),
+            backend.generation);
+    }
+    const esp_err_t legacy_ret = erase_legacy_node_blob();
+
+    d1l_store_lock_take(&s_store_lock);
+    s_legacy_cleanup_pending = legacy_ret != ESP_OK;
+    if (backend.enabled && sd_ret == ESP_OK) {
+        s_persistence_dirty = false;
+        s_sd_reconcile_pending = false;
+        s_dirty_timing_started = false;
+        s_persistence_immediate_due = false;
+        s_retry_pending = false;
+        s_persistence_commit_count++;
+        s_sd_primary_last_error = ESP_OK;
+    } else if (backend.enabled) {
+        s_persistence_fail_count++;
+        s_sd_primary_last_error = sd_ret;
+        s_retry_pending = true;
+    }
+    d1l_store_lock_give(&s_store_lock);
+    d1l_store_lock_give(&s_persist_io_lock);
+    /* The committed epoch makes the clear durable even when SD is absent or
+     * temporarily unavailable. The worker replaces that card's old snapshot
+     * only after the same epoch is observed again. */
+    return legacy_ret;
+}
+
+static bool node_sd_backend_generation_matches(uint32_t expected_generation)
+{
+    d1l_retained_blob_store_backend_state_t backend = {0};
+    return d1l_retained_blob_store_backend_state(D1L_NODE_STORE_ID,
+                                                 &backend) &&
+           backend.enabled && backend.generation == expected_generation;
+}
+
+static esp_err_t note_sd_failure(esp_err_t failure)
+{
+    d1l_store_lock_take(&s_store_lock);
+    s_persistence_fail_count++;
+    s_sd_primary_last_error = failure;
+    s_retry_pending = true;
+    s_sd_reconcile_pending = true;
+    d1l_store_lock_give(&s_store_lock);
+    return failure;
+}
+
+static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
+{
+    size_t len = sizeof(s_sd_blob_scratch);
+    esp_err_t ret = d1l_retained_blob_store_read_sd_primary(
+        D1L_NODE_STORE_ID, D1L_NODE_STORE_SD_KEY,
+        &s_sd_blob_scratch, &len);
+    if (ret == ESP_ERR_NOT_FINISHED) {
         return ret;
     }
-    ret = nvs_erase_key(handle, D1L_NODE_STORE_KEY);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        ret = ESP_OK;
+    if (ret == ESP_ERR_NOT_FOUND) {
+        d1l_store_lock_take(&s_store_lock);
+        s_sd_reconcile_pending = false;
+        s_sd_primary_last_error = ESP_OK;
+        if (s_count > 0U || s_epoch > 1U) {
+            note_persistence_dirty_locked(true, monotonic_ms());
+        }
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_OK;
     }
-    if (ret == ESP_OK) {
-        ret = nvs_commit(handle);
+    if (ret != ESP_OK) {
+        return note_sd_failure(ret);
     }
-    nvs_close(handle);
+    if (!sd_blob_is_valid(&s_sd_blob_scratch, len)) {
+        return note_sd_failure(ESP_ERR_INVALID_STATE);
+    }
+    if (!node_sd_backend_generation_matches(expected_generation)) {
+        return note_sd_failure(ESP_ERR_INVALID_STATE);
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    if (s_sd_blob_scratch.epoch != s_epoch) {
+        /* The tiny onboard epoch is the authority for an explicit clear.
+         * Never merge a card from an older or unexplained newer epoch. */
+        s_sd_reconcile_pending = false;
+        s_sd_primary_last_error = ESP_OK;
+        note_persistence_dirty_locked(true, monotonic_ms());
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_OK;
+    }
+    if (merge_sd_blob_locked(&s_sd_blob_scratch)) {
+        s_revision++;
+    }
+    s_sd_reconcile_pending = false;
+    s_sd_primary_last_error = ESP_OK;
     d1l_store_lock_give(&s_store_lock);
+    return ESP_OK;
+}
+
+static esp_err_t persist_node_snapshot(bool force)
+{
+    d1l_store_lock_take(&s_persist_io_lock);
+    d1l_retained_blob_store_backend_state_t backend = {0};
+    if (!d1l_retained_blob_store_backend_state(D1L_NODE_STORE_ID,
+                                               &backend)) {
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    const uint32_t now_ms = monotonic_ms();
+
+    d1l_store_lock_take(&s_store_lock);
+    if (!s_loaded) {
+        d1l_store_lock_give(&s_store_lock);
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (backend.generation != s_last_sd_backend_generation) {
+        s_last_sd_backend_generation = backend.generation;
+        s_sd_reconcile_pending = true;
+        s_persistence_immediate_due = true;
+    }
+    if (!backend.enabled) {
+        s_sd_reconcile_pending = true;
+        if (s_persistence_dirty || s_legacy_cleanup_pending) {
+            s_persistence_coalesced_count++;
+        }
+        d1l_store_lock_give(&s_store_lock);
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ESP_OK;
+    }
+
+    const bool pending = s_persistence_dirty ||
+        s_sd_reconcile_pending || s_legacy_cleanup_pending;
+    if (!pending) {
+        d1l_store_lock_give(&s_store_lock);
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ESP_OK;
+    }
+    const uint32_t elapsed_since_attempt =
+        now_ms - s_last_persist_attempt_ms;
+    const bool retry_ready = !s_retry_pending ||
+        elapsed_since_attempt >= D1L_NODE_STORE_PERSIST_MIN_INTERVAL_MS;
+    const bool min_due = s_dirty_timing_started &&
+        now_ms - s_dirty_since_ms >=
+            D1L_NODE_STORE_PERSIST_MIN_INTERVAL_MS;
+    const bool max_due = s_dirty_timing_started &&
+        now_ms - s_dirty_since_ms >=
+            D1L_NODE_STORE_PERSIST_MAX_INTERVAL_MS;
+    if (!force && !s_persistence_immediate_due && !min_due && !max_due) {
+        d1l_store_lock_give(&s_store_lock);
+        d1l_store_lock_give(&s_persist_io_lock);
+        return ESP_OK;
+    }
+    if (!retry_ready) {
+        const esp_err_t retry_error = s_sd_primary_last_error == ESP_OK ?
+            ESP_ERR_INVALID_STATE : s_sd_primary_last_error;
+        d1l_store_lock_give(&s_store_lock);
+        d1l_store_lock_give(&s_persist_io_lock);
+        return force ? retry_error : ESP_OK;
+    }
+    const bool reconcile = s_sd_reconcile_pending;
+    s_last_persist_attempt_ms = now_ms;
+    s_persistence_immediate_due = false;
+    d1l_store_lock_give(&s_store_lock);
+
+    if (reconcile) {
+        const esp_err_t reconcile_ret =
+            reconcile_sd_primary(backend.generation);
+        if (reconcile_ret != ESP_OK) {
+            d1l_store_lock_give(&s_persist_io_lock);
+            return reconcile_ret;
+        }
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    const bool write_needed = s_persistence_dirty;
+    const bool cleanup_needed = s_legacy_cleanup_pending;
+    const uint64_t snapshot_revision = s_revision;
+    if (write_needed) {
+        fill_sd_blob(&s_persist_snapshot);
+    }
+    d1l_store_lock_give(&s_store_lock);
+
+    esp_err_t ret = ESP_OK;
+    if (write_needed) {
+        ret = d1l_retained_blob_store_write_sd_primary_guarded(
+            D1L_NODE_STORE_ID, D1L_NODE_STORE_SD_KEY,
+            &s_persist_snapshot, sizeof(s_persist_snapshot),
+            backend.generation);
+        if (ret == ESP_OK &&
+            !node_sd_backend_generation_matches(backend.generation)) {
+            ret = ESP_ERR_INVALID_STATE;
+        }
+    }
+    if (ret == ESP_OK && (write_needed || cleanup_needed)) {
+        ret = erase_legacy_node_blob();
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    const bool same_revision = s_revision == snapshot_revision;
+    if (ret == ESP_OK) {
+        if (write_needed) {
+            s_persistence_commit_count++;
+        }
+        s_legacy_cleanup_pending = false;
+        s_sd_primary_last_error = ESP_OK;
+        s_retry_pending = false;
+        if (write_needed && same_revision) {
+            s_persistence_dirty = false;
+            s_dirty_timing_started = false;
+            s_dirty_since_ms = 0U;
+        } else if (write_needed) {
+            s_persistence_coalesced_count++;
+        }
+    } else if (ret != ESP_ERR_NOT_FINISHED) {
+        s_persistence_fail_count++;
+        s_sd_primary_last_error = ret;
+        s_retry_pending = true;
+        if (write_needed) {
+            s_persistence_dirty = true;
+        }
+        if (cleanup_needed) {
+            s_legacy_cleanup_pending = true;
+        }
+    }
+    d1l_store_lock_give(&s_store_lock);
+    d1l_store_lock_give(&s_persist_io_lock);
     return ret;
+}
+
+esp_err_t d1l_node_store_flush(void)
+{
+    return persist_node_snapshot(true);
+}
+
+esp_err_t d1l_node_store_flush_if_due(void)
+{
+    return persist_node_snapshot(false);
 }
 
 esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *public_key_hex,
@@ -718,11 +1317,6 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
     }
 
     d1l_store_lock_take(&s_store_lock);
-    const size_t count_before = s_count;
-    const uint32_t next_seq_before = s_next_seq;
-    const uint32_t total_written_before = s_total_written;
-    const uint32_t dropped_oldest_before = s_dropped_oldest;
-    const uint32_t marker_generation_before = s_marker_generation;
     int existing = find_by_fingerprint(fingerprint);
     if (existing >= 0 && public_key_hex && public_key_hex[0] != '\0' &&
         s_entries[existing].public_key_hex[0] != '\0' &&
@@ -752,11 +1346,9 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
 
     d1l_node_entry_t *entry = &s_entries[index];
     const d1l_node_entry_t entry_before = *entry;
-    const uint32_t live_last_heard_before = s_live_last_heard_ms[index];
-    const bool live_heard_valid_before = s_live_heard_valid[index];
     const d1l_node_entry_t marker_before =
         (!is_new || replacing_oldest) ? entry_before : (d1l_node_entry_t){0};
-    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    const uint32_t now_ms = monotonic_ms();
     if (is_new) {
         memset(entry, 0, sizeof(*entry));
         entry->first_heard_ms = now_ms;
@@ -794,19 +1386,10 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
         bump_marker_generation();
     }
     s_total_written++;
-    esp_err_t ret = persist_store();
-    if (ret != ESP_OK) {
-        *entry = entry_before;
-        s_live_last_heard_ms[index] = live_last_heard_before;
-        s_live_heard_valid[index] = live_heard_valid_before;
-        s_count = count_before;
-        s_next_seq = next_seq_before;
-        s_total_written = total_written_before;
-        s_dropped_oldest = dropped_oldest_before;
-        s_marker_generation = marker_generation_before;
-    }
+    s_revision++;
+    note_persistence_dirty_locked(false, now_ms);
     d1l_store_lock_give(&s_store_lock);
-    return ret;
+    return ESP_OK;
 }
 
 d1l_node_store_stats_t d1l_node_store_stats(void)
@@ -816,8 +1399,17 @@ d1l_node_store_stats_t d1l_node_store_stats(void)
         .next_seq = s_next_seq,
         .total_written = s_total_written,
         .dropped_oldest = s_dropped_oldest,
+        .persistence_commit_count = s_persistence_commit_count,
+        .persistence_coalesced_count = s_persistence_coalesced_count,
+        .persistence_fail_count = s_persistence_fail_count,
+        .sd_backend_generation = s_last_sd_backend_generation,
+        .sd_primary_last_error = s_sd_primary_last_error,
+        .persistence_revision = s_revision,
         .count = s_count,
         .capacity = D1L_NODE_STORE_CAPACITY,
+        .persistence_dirty =
+            s_persistence_dirty || s_legacy_cleanup_pending,
+        .sd_primary_reconcile_pending = s_sd_reconcile_pending,
     };
     d1l_store_lock_give(&s_store_lock);
     return stats;

@@ -29,6 +29,7 @@
 #define D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"
 #define D1L_RETAINED_ROUTE_SD_DIR "stores/routes"
 #define D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"
+#define D1L_RETAINED_NODE_SD_DIR "stores/nodes"
 #define D1L_RETAINED_SD_LINEAGE_MARKER_KEY "reset_lineage_v1"
 #define D1L_RETAINED_SD_WRITE_TIMEOUT_MS 750U
 #define D1L_RETAINED_SD_READ_TIMEOUT_MS 750U
@@ -39,6 +40,7 @@ typedef struct {
     const char *name;
     const char *nvs_namespace;
     const char *sd_directory;
+    bool nvs_fallback_allowed;
 } d1l_retained_blob_store_config_t;
 
 typedef struct {
@@ -63,24 +65,35 @@ static const d1l_retained_blob_store_config_t s_store_configs[] = {
         .name = "public_messages",
         .nvs_namespace = D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE,
         .sd_directory = D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR,
+        .nvs_fallback_allowed = true,
     },
     {
         .id = D1L_RETAINED_BLOB_STORE_DM_MESSAGES,
         .name = "dm_messages",
         .nvs_namespace = D1L_RETAINED_DM_MESSAGE_NAMESPACE,
         .sd_directory = D1L_RETAINED_DM_MESSAGE_SD_DIR,
+        .nvs_fallback_allowed = true,
     },
     {
         .id = D1L_RETAINED_BLOB_STORE_ROUTES,
         .name = "routes",
         .nvs_namespace = D1L_RETAINED_ROUTE_NAMESPACE,
         .sd_directory = D1L_RETAINED_ROUTE_SD_DIR,
+        .nvs_fallback_allowed = true,
     },
     {
         .id = D1L_RETAINED_BLOB_STORE_PACKET_LOG,
         .name = "packet_log",
         .nvs_namespace = D1L_RETAINED_PACKET_LOG_NAMESPACE,
         .sd_directory = D1L_RETAINED_PACKET_LOG_SD_DIR,
+        .nvs_fallback_allowed = true,
+    },
+    {
+        .id = D1L_RETAINED_BLOB_STORE_NODES,
+        .name = "nodes",
+        .nvs_namespace = NULL,
+        .sd_directory = D1L_RETAINED_NODE_SD_DIR,
+        .nvs_fallback_allowed = false,
     },
 };
 
@@ -90,6 +103,9 @@ _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_COUNT ==
 _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_PACKET_LOG ==
                    (uint32_t)D1L_FACTORY_RESET_SD_STORE_PACKET_LOG,
                "retained and reset SD store identifiers must match");
+_Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_NODES ==
+                   (uint32_t)D1L_FACTORY_RESET_SD_STORE_NODES,
+               "retained and reset node-store identifiers must match");
 
 static bool s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT];
 static uint32_t s_store_backend_generation[D1L_RETAINED_BLOB_STORE_COUNT];
@@ -427,7 +443,8 @@ static esp_err_t nvs_open_store(const d1l_retained_blob_store_config_t *config,
                                 bool dedicated, nvs_open_mode_t open_mode,
                                 nvs_handle_t *out_handle)
 {
-    if (!config || !out_handle) {
+    if (!config || !out_handle || !config->nvs_fallback_allowed ||
+        !config->nvs_namespace) {
         return ESP_ERR_INVALID_ARG;
     }
     return dedicated ?
@@ -1407,6 +1424,8 @@ static bool sd_lineage_key_allowed(
         return strcmp(key, "routes_v2") == 0 || strcmp(key, "routes") == 0;
     case D1L_RETAINED_BLOB_STORE_PACKET_LOG:
         return strcmp(key, "ring") == 0;
+    case D1L_RETAINED_BLOB_STORE_NODES:
+        return strcmp(key, "nodes_v1") == 0;
     default:
         return false;
     }
@@ -1420,6 +1439,7 @@ static esp_err_t sd_purge_store_for_generation(
     static const char *const dm_keys[] = {"threads"};
     static const char *const route_keys[] = {"routes_v2", "routes"};
     static const char *const packet_keys[] = {"ring"};
+    static const char *const node_keys[] = {"nodes_v1"};
     const char *const *keys = NULL;
     size_t key_count = 0U;
     if (!config) {
@@ -1441,6 +1461,10 @@ static esp_err_t sd_purge_store_for_generation(
     case D1L_RETAINED_BLOB_STORE_PACKET_LOG:
         keys = packet_keys;
         key_count = sizeof(packet_keys) / sizeof(packet_keys[0]);
+        break;
+    case D1L_RETAINED_BLOB_STORE_NODES:
+        keys = node_keys;
+        key_count = sizeof(node_keys) / sizeof(node_keys[0]);
         break;
     default:
         return ESP_ERR_INVALID_ARG;
@@ -1598,13 +1622,15 @@ const char *d1l_retained_blob_store_backend_name(d1l_retained_blob_store_id_t st
     if (store_sd_enabled(config)) {
         return "sd";
     }
-    return s_retained_nvs_ready ? "nvs" : "unavailable";
+    return config->nvs_fallback_allowed && s_retained_nvs_ready ?
+        "nvs" : "unavailable";
 }
 
 bool d1l_retained_blob_store_is_available(d1l_retained_blob_store_id_t store_id)
 {
     const d1l_retained_blob_store_config_t *config = find_store(store_id);
-    return config && (store_sd_enabled(config) || s_retained_nvs_ready);
+    return config && (store_sd_enabled(config) ||
+        (config->nvs_fallback_allowed && s_retained_nvs_ready));
 }
 
 bool d1l_retained_blob_store_uses_sd(d1l_retained_blob_store_id_t store_id)

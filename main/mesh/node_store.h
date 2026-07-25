@@ -6,10 +6,12 @@
 
 #include "esp_err.h"
 
-#define D1L_NODE_RAM_ACTIVE_CAPACITY 64U
+#define D1L_NODE_RAM_ACTIVE_CAPACITY 512U
 #define D1L_NODE_NVS_FALLBACK_CAPACITY 16U
 #define D1L_NODE_SD_HISTORY_CAPACITY 512U
-#define D1L_NODE_STORE_CAPACITY D1L_NODE_RAM_ACTIVE_CAPACITY
+#define D1L_NODE_STORE_CAPACITY D1L_NODE_SD_HISTORY_CAPACITY
+#define D1L_NODE_STORE_PERSIST_MIN_INTERVAL_MS 5000U
+#define D1L_NODE_STORE_PERSIST_MAX_INTERVAL_MS 30000U
 #define D1L_NODE_FINGERPRINT_LEN 17U
 #define D1L_NODE_PUBLIC_KEY_HEX_LEN 65U
 #define D1L_HEARD_NODE_NAME_LEN 24U
@@ -92,12 +94,22 @@ typedef struct {
     uint32_t next_seq;
     uint32_t total_written;
     uint32_t dropped_oldest;
+    uint32_t persistence_commit_count;
+    uint32_t persistence_coalesced_count;
+    uint32_t persistence_fail_count;
+    uint32_t sd_backend_generation;
+    esp_err_t sd_primary_last_error;
+    uint64_t persistence_revision;
     size_t count;
     size_t capacity;
+    bool persistence_dirty;
+    bool sd_primary_reconcile_pending;
 } d1l_node_store_stats_t;
 
 esp_err_t d1l_node_store_init(void);
 esp_err_t d1l_node_store_clear(void);
+esp_err_t d1l_node_store_flush(void);
+esp_err_t d1l_node_store_flush_if_due(void);
 /*
  * Accepts only a node's first or strictly newer signed advert timestamp.
  * Once a fingerprint has a full public key, a different full key sharing that

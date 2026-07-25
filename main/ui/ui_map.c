@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "map/map_marker_truth.h"
@@ -34,8 +35,8 @@
 #define MAP_DRAG_THRESHOLD_PIXELS 24
 #define MAP_DRAG_MAX_X_PIXELS ((int32_t)MAP_VIEWPORT_WIDTH / 3)
 #define MAP_DRAG_MAX_Y_PIXELS ((int32_t)MAP_VIEWPORT_HEIGHT / 3)
-#define MAP_MARKER_QUERY_LIMIT 32U
-#define MAP_MARKER_DISPLAY_LIMIT 8U
+#define MAP_MARKER_QUERY_LIMIT D1L_NODE_SD_HISTORY_CAPACITY
+#define MAP_MARKER_LABEL_LIMIT 8U
 #define MAP_MARKER_DOT_DIAMETER 14
 #define MAP_MARKER_HIT_RADIUS 22
 #define MAP_MARKER_LABEL_WIDTH 112
@@ -87,10 +88,14 @@ static lv_obj_t *s_viewport_center_button;
 static lv_obj_t *s_viewport_center_source_label;
 static lv_obj_t *s_viewport_pin_truth_label;
 static d1l_ui_map_open_node_detail_cb_t s_viewport_open_node_detail;
-static d1l_node_marker_t s_viewport_marker_candidates[MAP_MARKER_QUERY_LIMIT];
-static d1l_ui_map_marker_hit_t s_viewport_marker_hits[MAP_MARKER_DISPLAY_LIMIT];
-static d1l_ui_map_marker_rect_t s_viewport_marker_bounds[MAP_MARKER_DISPLAY_LIMIT];
+static d1l_node_marker_t
+    s_viewport_marker_candidates[MAP_MARKER_QUERY_LIMIT] EXT_RAM_BSS_ATTR;
+static d1l_ui_map_marker_hit_t
+    s_viewport_marker_hits[MAP_MARKER_QUERY_LIMIT] EXT_RAM_BSS_ATTR;
+static d1l_ui_map_marker_rect_t
+    s_viewport_marker_bounds[MAP_MARKER_LABEL_LIMIT];
 static size_t s_viewport_marker_count;
+static size_t s_viewport_marker_label_count;
 static uint32_t s_viewport_marker_store_generation;
 static uint32_t s_viewport_marker_frame_generation;
 static uint32_t s_viewport_marker_context_generation;
@@ -471,6 +476,7 @@ static void map_viewport_foreground_overlays(void)
 static void map_viewport_reset_marker_state(void)
 {
     s_viewport_marker_count = 0U;
+    s_viewport_marker_label_count = 0U;
     s_viewport_marker_store_generation = 0U;
     s_viewport_marker_frame_generation = 0U;
     s_viewport_marker_rendered_context_generation = 0U;
@@ -660,7 +666,7 @@ static bool map_marker_placement_allowed(const d1l_ui_map_marker_rect_t *bounds)
             return false;
         }
     }
-    for (size_t i = 0; i < s_viewport_marker_count; ++i) {
+    for (size_t i = 0; i < s_viewport_marker_label_count; ++i) {
         if (map_marker_rects_intersect(bounds, &s_viewport_marker_bounds[i])) {
             return false;
         }
@@ -692,6 +698,7 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
 
     lv_obj_clean(s_viewport_marker_layer);
     s_viewport_marker_count = 0U;
+    s_viewport_marker_label_count = 0U;
     memset(s_viewport_marker_hits, 0, sizeof(s_viewport_marker_hits));
     memset(s_viewport_marker_bounds, 0, sizeof(s_viewport_marker_bounds));
 
@@ -706,8 +713,7 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         .pan_x_pixels = 0,
         .pan_y_pixels = 0,
     };
-    for (size_t i = 0; i < candidate_count &&
-         s_viewport_marker_count < MAP_MARKER_DISPLAY_LIMIT; ++i) {
+    for (size_t i = 0; i < candidate_count; ++i) {
         d1l_map_marker_truth_t truth = {0};
         if (!d1l_map_marker_truth_evaluate(
                 &s_viewport_marker_candidates[i],
@@ -731,11 +737,9 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
             .x2 = label_x + MAP_MARKER_LABEL_WIDTH,
             .y2 = label_y + MAP_MARKER_LABEL_HEIGHT,
         };
-        /* A marker is never shown without its below-marker name. Newest
-         * advert locations win deterministic collisions and exclusions. */
-        if (!map_marker_placement_allowed(&bounds)) {
-            continue;
-        }
+        const bool label_allowed =
+            s_viewport_marker_label_count < MAP_MARKER_LABEL_LIMIT &&
+            map_marker_placement_allowed(&bounds);
 
         lv_obj_t *dot = lv_obj_create(s_viewport_marker_layer);
         if (!dot) {
@@ -752,6 +756,16 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         lv_obj_set_style_pad_all(dot, 0, 0);
         lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
+        const size_t shown = s_viewport_marker_count++;
+        s_viewport_marker_hits[shown].screen_x = point.screen_x;
+        s_viewport_marker_hits[shown].screen_y = point.screen_y;
+        map_copy_bounded_text(s_viewport_marker_hits[shown].fingerprint,
+                              sizeof(s_viewport_marker_hits[shown].fingerprint),
+                              s_viewport_marker_candidates[i].fingerprint);
+        if (!label_allowed) {
+            continue;
+        }
+
         char display_name[MAP_MARKER_NAME_MAX_CHARS + 1U];
         map_marker_display_name(&s_viewport_marker_candidates[i], display_name,
                                 sizeof(display_name));
@@ -763,7 +777,6 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         lv_obj_t *name = map_label(s_viewport_marker_layer, marker_label,
                                    MAP_COLOR_TEXT);
         if (!name) {
-            lv_obj_del(dot);
             continue;
         }
         lv_label_set_long_mode(name, LV_LABEL_LONG_WRAP);
@@ -777,13 +790,7 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         lv_obj_set_style_pad_ver(name, 1, 0);
         lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-        const size_t shown = s_viewport_marker_count++;
-        s_viewport_marker_bounds[shown] = bounds;
-        s_viewport_marker_hits[shown].screen_x = point.screen_x;
-        s_viewport_marker_hits[shown].screen_y = point.screen_y;
-        map_copy_bounded_text(s_viewport_marker_hits[shown].fingerprint,
-                              sizeof(s_viewport_marker_hits[shown].fingerprint),
-                              s_viewport_marker_candidates[i].fingerprint);
+        s_viewport_marker_bounds[s_viewport_marker_label_count++] = bounds;
     }
 
     s_viewport_marker_store_generation = marker_generation;

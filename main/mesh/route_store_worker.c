@@ -12,6 +12,7 @@
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
+#include "mesh/node_store.h"
 #include "mesh/packet_log.h"
 #include "mesh/route_store.h"
 #include "platform/time_service.h"
@@ -205,6 +206,32 @@ static void observe_time_checkpoint(
     };
 }
 
+static esp_err_t flush_nodes(void *context)
+{
+    (void)context;
+    return d1l_node_store_flush();
+}
+
+static esp_err_t flush_nodes_if_due(void *context)
+{
+    (void)context;
+    return d1l_node_store_flush_if_due();
+}
+
+static void observe_nodes(
+    void *context, d1l_retained_store_observation_t *out_observation)
+{
+    (void)context;
+    const d1l_node_store_stats_t stats = d1l_node_store_stats();
+    *out_observation = (d1l_retained_store_observation_t) {
+        .revision = stats.persistence_revision,
+        .commit_count = stats.persistence_commit_count,
+        .failure_count = stats.persistence_fail_count,
+        .dirty = stats.persistence_dirty,
+        .reconcile_pending = stats.sd_primary_reconcile_pending,
+    };
+}
+
 static const d1l_retained_store_descriptor_t s_retained_stores[] = {
     {
         .kind = D1L_RETAINED_STORE_MESSAGES,
@@ -247,6 +274,13 @@ static const d1l_retained_store_descriptor_t s_retained_stores[] = {
         .flush = flush_time_checkpoint,
         .flush_if_due = flush_time_checkpoint_if_due,
         .observe = observe_time_checkpoint,
+    },
+    {
+        .kind = D1L_RETAINED_STORE_NODES,
+        .name = "nodes",
+        .flush = flush_nodes,
+        .flush_if_due = flush_nodes_if_due,
+        .observe = observe_nodes,
     },
 };
 

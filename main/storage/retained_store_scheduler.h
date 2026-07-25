@@ -16,6 +16,7 @@ typedef enum {
     D1L_RETAINED_STORE_ROUTES,
     D1L_RETAINED_STORE_CONTACTS,
     D1L_RETAINED_STORE_TIME_CHECKPOINT,
+    D1L_RETAINED_STORE_NODES,
 } d1l_retained_store_kind_t;
 
 typedef enum {

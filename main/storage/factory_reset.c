@@ -58,6 +58,7 @@ static const char *const s_sd_lineage_keys[D1L_FACTORY_RESET_SD_STORE_COUNT] = {
     "sd_dm_v1",
     "sd_routes_v1",
     "sd_packets_v1",
+    "sd_nodes_v1",
 };
 
 typedef struct {
@@ -95,7 +96,11 @@ static const d1l_factory_reset_inventory_entry_t s_inventory[] = {
      "user contact book", D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
     {"heard_nodes", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
      "d1l_nodes", "heard", D1L_FACTORY_RESET_DISPOSITION_CLEAR, false,
-     "device-local heard-node history",
+     "legacy device-local heard-node history",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"heard_nodes_epoch", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
+     "d1l_nodes", "marker_epoch", D1L_FACTORY_RESET_DISPOSITION_CLEAR, false,
+     "small anti-resurrection marker for explicit node-list clear",
      D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
     {"read_state", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
      "d1l_read", "state", D1L_FACTORY_RESET_DISPOSITION_CLEAR, false,
@@ -218,6 +223,11 @@ static const d1l_factory_reset_inventory_entry_t s_inventory[] = {
      D1L_FACTORY_RESET_JOURNAL_NAMESPACE, "sd_packets_v1",
      D1L_FACTORY_RESET_DISPOSITION_INTERNAL_JOURNAL, false,
      "durable post-reset packet primary and segment lineage fence",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"sd_node_lineage", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
+     D1L_FACTORY_RESET_JOURNAL_NAMESPACE, "sd_nodes_v1",
+     D1L_FACTORY_RESET_DISPOSITION_INTERNAL_JOURNAL, false,
+     "durable post-reset node-history removable-SD lineage fence",
      D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
 };
 

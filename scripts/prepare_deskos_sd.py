@@ -26,6 +26,15 @@ from typing import Iterable
 MIN_CARD_BYTES = 28_000_000_000
 BUNDLE_ROOT = Path(__file__).resolve().parents[1] / "sdcard"
 DESKOS_ROOT_NAME = "deskos"
+RUNTIME_DIRECTORIES = (
+    "stores/messages/public",
+    "stores/messages/dm",
+    "stores/nodes",
+    "stores/routes",
+    "stores/packet_log",
+    "exports",
+    "map/tiles",
+)
 PROVIDER_MANIFEST_NAME = "offline-tile-provider.json"
 RECEIPT_NAME = "card-preparation-receipt.json"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -328,6 +337,20 @@ def apply_items(target: Path, planned: list[dict]) -> None:
             raise PreparationError(f"copy verification failed: {destination}")
 
 
+def prepare_runtime_directories(target: Path) -> list[str]:
+    prepared: list[str] = []
+    root = target / DESKOS_ROOT_NAME
+    for relative in RUNTIME_DIRECTORIES:
+        destination = root / Path(relative)
+        destination.mkdir(parents=True, exist_ok=True)
+        if not destination.is_dir():
+            raise PreparationError(
+                f"runtime directory verification failed: {destination}"
+            )
+        prepared.append(Path(DESKOS_ROOT_NAME, relative).as_posix())
+    return prepared
+
+
 def write_receipt(target: Path, payload: dict) -> Path:
     destination = target / DESKOS_ROOT_NAME / RECEIPT_NAME
     encoded = (
@@ -408,6 +431,10 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 if provider else None
             ),
+            "directories": [
+                Path(DESKOS_ROOT_NAME, relative).as_posix()
+                for relative in RUNTIME_DIRECTORIES
+            ],
             "files": [
                 {
                     key: entry[key]
@@ -425,6 +452,9 @@ def main(argv: list[str] | None = None) -> int:
         ]}
         if args.apply:
             apply_items(Path(target_info["target"]), planned)
+            receipt["directories"] = prepare_runtime_directories(
+                Path(target_info["target"])
+            )
             if provider:
                 provider_entry = write_provider_metadata(
                     Path(target_info["target"]), provider, True
