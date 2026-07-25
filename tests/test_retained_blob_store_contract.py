@@ -8,7 +8,7 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_retained_blob_store_has_sd_history_stores_and_nodes_forbid_nvs_fallback():
+def test_retained_blob_store_keeps_history_sd_first_and_retires_legacy_nvs():
     header = read("main/storage/retained_blob_store.h")
     source = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
@@ -89,6 +89,22 @@ def test_retained_blob_store_has_sd_history_stores_and_nodes_forbid_nvs_fallback
     )[1].split("},", 1)[0]
     assert ".nvs_namespace = NULL" in node_config
     assert ".nvs_fallback_allowed = false" in node_config
+    for store_id in (
+        "D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES",
+        "D1L_RETAINED_BLOB_STORE_DM_MESSAGES",
+        "D1L_RETAINED_BLOB_STORE_ROUTES",
+        "D1L_RETAINED_BLOB_STORE_PACKET_LOG",
+    ):
+        store_config = source.split(f".id = {store_id}", 1)[1].split("},", 1)[0]
+        assert ".nvs_fallback_allowed = false" in store_config
+        assert ".legacy_retired_key =" in store_config
+    for retirement_key in (
+        '"sd_pub_v1"',
+        '"sd_dm_v1"',
+        '"sd_route_v1"',
+        '"sd_pkt_v1"',
+    ):
+        assert retirement_key in source
     assert (
         "config->nvs_fallback_allowed && s_retained_nvs_ready"
         in source
@@ -196,7 +212,13 @@ def test_retained_blob_store_has_sd_history_stores_and_nodes_forbid_nvs_fallback
     assert "nvs_erase_key(handle, key)" in source
     assert "nvs_commit(handle)" in source
     assert "ESP_ERR_NVS_NOT_FOUND" in source
-    assert "note_nvs_mirror_failure(config, nvs_write_blob(config, key, src, len))" in source
+    assert "retire_legacy_blob_after_sd_commit(config, key)" in source
+    assert "mark_legacy_blob_retired(config)" in source
+    assert "load_legacy_retired_state(&s_store_configs[i])" in source
+    assert (
+        'return config->nvs_fallback_allowed && s_retained_nvs_ready ?\n'
+        '        "nvs" : "volatile";'
+    ) in source
     assert "d1l_retained_blob_store_write_split" in source
     assert "const bool has_primary = primary_src && primary_len > 0" in source
     assert "const bool has_fallback = fallback_src && fallback_len > 0" in source
@@ -204,7 +226,10 @@ def test_retained_blob_store_has_sd_history_stores_and_nodes_forbid_nvs_fallback
     assert "nvs_write_blob(config, key, nvs_src, nvs_len)" in source
     assert "note_nvs_mirror_failure(config, nvs_ret)" in source
     assert "return ESP_OK;" in source
-    assert "return nvs_ret == ESP_OK ? ESP_OK : sd_ret;" in source
+    assert (
+        "return config->nvs_fallback_allowed && nvs_ret == ESP_OK ?\n"
+        "        ESP_OK : sd_ret;"
+    ) in source
     assert "return sd_ret == ESP_ERR_NOT_FOUND ? nvs_ret : sd_ret;" in source
 
 
@@ -225,7 +250,7 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_NODES)" in storage_status
-    assert 'status->data_backend = any_retained_sd ? "mixed" :' in storage_status
+    assert 'status->data_backend = any_retained_sd ? "sd" : "volatile";' in storage_status
     assert '"retained_history_sd_enabled"' in storage_status
     assert 'status->message_store_backend = "nvs"' not in storage_status
     assert 'status->dm_store_backend = "nvs"' not in storage_status

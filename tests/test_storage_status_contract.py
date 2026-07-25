@@ -10,7 +10,7 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_storage_status_service_is_boot_safe_and_nvs_fallback():
+def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     header = read("main/storage/storage_status.h")
     source = read("main/storage/storage_status.c")
     console = read("main/comms/usb_console.c")
@@ -76,7 +76,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
         "STATUS",
         "MOUNT",
         "READY_SD",
-        "READY_NVS",
+        "READY_VOLATILE",
         "NEEDS_FAT32",
         "NO_CARD",
         "ERROR_BACKOFF",
@@ -161,7 +161,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_retained_blob_store_note_sd_backend(sd->data_ready" in source
     assert "sd->file_ops_supported" in source
     assert "sd->atomic_rename_supported" in source
-    assert 'status->data_backend = any_retained_sd ? "mixed" :' in source
+    assert 'status->data_backend = any_retained_sd ? "sd" : "volatile";' in source
+    assert 's_status.setup_action = "forced_volatile";' in source
+    assert "live RF and chat continue without saved history" in source
     assert '#include "storage/map_tile_store.h"' in source
     assert "d1l_map_tile_store_sd_ready(status)" in source
     assert '"sd_map_tiles_ready" : "unavailable"' in source

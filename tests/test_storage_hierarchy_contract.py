@@ -147,11 +147,11 @@ def test_storage_touch_ui_prioritizes_all_attention_states():
     )
     assert 'state = "Card reader reconnecting";' in hero
     assert '"Last confirmed SD remains active briefly."' in hero
-    assert '"Internal fallback takes over if status retries fail."' in hero
+    assert '"History becomes live-only if status retries fail."' in hero
     assert "accent = COLOR_RED;" in hero
 
 
-def test_storage_hero_distinguishes_retained_fallback_from_card_errors():
+def test_storage_hero_distinguishes_live_only_mode_from_card_errors():
     source = read("main/ui/ui_storage_view.c")
     hero = function_slice(
         source,
@@ -169,16 +169,18 @@ def test_storage_hero_distinguishes_retained_fallback_from_card_errors():
     assert backup < retained < general_attention < ready
 
     backup_branch = hero[backup:retained]
-    assert 'guidance = "Internal backup needs attention.";' in backup_branch
-    assert 'detail = "Internal saved-data storage is unavailable.";' in backup_branch
+    assert 'state = "Saved storage needs attention";' in backup_branch
+    assert 'detail = "SD saved-data access reported an error.";' in backup_branch
+    assert 'guidance = "See USB diagnostics before relying on saved history.";' in backup_branch
 
     retained_branch = hero[retained:general_attention]
     assert 'state = "SD needs attention";' in retained_branch
-    assert 'guidance = "Saved data remains available.";' in retained_branch
+    assert 'detail = "History is live only until SD recovers.";' in retained_branch
+    assert 'guidance = "RF transmit, receive, and chat remain available.";' in retained_branch
 
     media_branch = hero[general_attention:hero.index('if (text_equals(input->setup_action, "bridge_unavailable"))')]
     assert 'state = "Card needs attention";' in media_branch
-    assert 'detail = "Internal storage is active.";' in media_branch
+    assert 'detail = "History is live only.";' in media_branch
     assert 'guidance = "Technical details are available over USB.";' in media_branch
 
 
@@ -203,9 +205,9 @@ def test_storage_backup_degradation_redraws_and_avoids_false_internal_claims():
 
     assert "snapshot->storage_retained_backup_degraded" in generation
     assert "storage_retained_backup_degraded" in equality
-    assert '"SD; backup degraded"' in friendly
-    assert '"Internal issue"' in friendly
-    assert '"Unavailable"' in friendly
+    assert '"SD issue"' in friendly
+    assert '"Live only - not saved"' in friendly
+    assert '"Legacy internal"' in friendly
 
 
 def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():
@@ -232,7 +234,8 @@ def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():
     ):
         assert f"input->{backend}" in summary
     assert summary.count("backend_uses_sd(") == 7
-    assert 'uses_sd ? "SD + internal" : "Internal"' in summary
+    assert 'return uses_sd ? "SD card" : "Live only";' in summary
+    assert '"Live only; history not saved"' in summary
     assert "sd_pending_store_migration" not in uses_sd
 
 
