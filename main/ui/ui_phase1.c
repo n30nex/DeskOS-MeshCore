@@ -212,7 +212,7 @@ static d1l_ui_compose_probe_result_t s_compose_probe_result;
 #endif
 
 #define D1L_TOUCH_TASK_STACK_BYTES 4096U
-#define D1L_UI_TASK_STACK_BYTES 6144U
+#define D1L_UI_TASK_STACK_BYTES 12288U
 
 static void render_active_tab(void);
 static bool show_contact_detail_sheet(void);

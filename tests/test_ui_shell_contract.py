@@ -914,7 +914,7 @@ def test_ui_allocation_wrappers_and_stack_budget_are_hardened():
     source = read("main/ui/ui_phase1.c")
     device_sheets = read("main/ui/ui_device_sheets.c")
     contact_sheets = read("main/ui/ui_contact_sheets.c")
-    assert "#define D1L_UI_TASK_STACK_BYTES 6144U" in source
+    assert "#define D1L_UI_TASK_STACK_BYTES 12288U" in source
     assert "#define D1L_TOUCH_TASK_STACK_BYTES 4096U" in source
     assert 'xTaskCreatePinnedToCore(ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES' in source
     assert "ui_task_stack_free_words" in device_sheets

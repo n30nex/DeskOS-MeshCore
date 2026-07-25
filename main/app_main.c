@@ -243,6 +243,18 @@ void app_main(void)
         esp_err_t mesh_rx_ret = d1l_meshcore_service_start_rx_async();
         if (mesh_rx_ret != ESP_OK) {
             ESP_LOGW(TAG, "MeshCore RX start queue failed: %s", esp_err_to_name(mesh_rx_ret));
+        } else {
+            /*
+             * Public channel packets do not carry a sender name. Announce the
+             * retained signed identity once after RX starts so nearby clients
+             * can attribute subsequent messages to this D1L.
+             */
+            esp_err_t boot_advert_ret =
+                d1l_meshcore_service_request_advert(true);
+            if (boot_advert_ret != ESP_OK) {
+                ESP_LOGW(TAG, "MeshCore boot advert failed: %s",
+                         esp_err_to_name(boot_advert_ret));
+            }
         }
     }
     esp_err_t connectivity_ret = d1l_connectivity_init();

@@ -77,6 +77,16 @@ def test_advert_is_a_bounded_mesh_runtime_command():
         assert forbidden not in adapter
 
 
+def test_boot_announces_signed_identity_after_rx_is_queued():
+    source = read("main/app_main.c")
+    rx = source.index("d1l_meshcore_service_start_rx_async()")
+    success = source.index("if (mesh_rx_ret != ESP_OK)", rx)
+    advert = source.index("d1l_meshcore_service_request_advert(true)", success)
+
+    assert rx < success < advert
+    assert "MeshCore boot advert failed" in source[advert:]
+
+
 def test_deferred_packet_log_admission_never_waits_on_storage_owner():
     header = read("main/mesh/packet_log.h")
     packet_log = read("main/mesh/packet_log.c")
