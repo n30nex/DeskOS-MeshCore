@@ -129,6 +129,7 @@ idf_component_register(
         bt
         bootloader_support
         driver
+        esp_app_format
         esp_timer
         esp_system
         esp_event

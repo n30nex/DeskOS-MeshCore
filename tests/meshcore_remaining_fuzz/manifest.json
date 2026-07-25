@@ -42,7 +42,7 @@
   },
   "source_pins": {
     ".github/workflows/d1l-ci.yml": "ae26bb5fb48e87be5a356db171e7475cd06cdab8e30dad0db9ba5c67dc20711e",
-    "main/CMakeLists.txt": "76eb2596db59165b73bbdf52132f5e0b1a34462042e24331a880c188215de393",
+    "main/CMakeLists.txt": "54090160407d47db10acc33e3beb0daa525056923dda887a58d5c9c47358328d",
     "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
     "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",
     "main/mesh/dm_delivery_state.c": "a3ff6903299b70ed68727284de8c2b6e81b2f9db69a80902db75983ee91aee94",
