@@ -170,10 +170,10 @@ static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
 static char s_admin_target_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static d1l_node_view_t s_map_node_rows[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
-static d1l_route_entry_t
-    s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
-static d1l_message_entry_t
-    s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
+static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
 static uint64_t s_public_history_channel_id;
 static char s_public_history_channel_name[D1L_CHANNEL_NAME_LEN];

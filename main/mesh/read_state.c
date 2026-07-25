@@ -42,10 +42,10 @@ typedef struct {
 
 static d1l_read_state_v2_blob_t s_state;
 static bool s_loaded;
-static d1l_message_entry_t
-    s_message_scratch[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
-static d1l_dm_entry_t
-    s_dm_scratch[D1L_READ_STATE_VISIBLE_DM_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_message_entry_t s_message_scratch[D1L_MESSAGE_STORE_CAPACITY]
+    EXT_RAM_BSS_ATTR;
+static d1l_dm_entry_t s_dm_scratch[D1L_READ_STATE_VISIBLE_DM_CAPACITY]
+    EXT_RAM_BSS_ATTR;
 static d1l_read_state_dm_thread_t
     s_thread_scratch[D1L_READ_STATE_VISIBLE_DM_CAPACITY] EXT_RAM_BSS_ATTR;
 
