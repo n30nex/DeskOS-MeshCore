@@ -21,6 +21,41 @@
 #define SETTINGS_KEY "settings"
 #define TEST_BLOB_MAX 4096U
 
+typedef struct {
+    uint32_t schema_version;
+    char node_name[D1L_NODE_NAME_LEN];
+    uint8_t role;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool high_contrast;
+    bool night_mode;
+    bool onboarding_complete;
+    bool wifi_profile_saved;
+    uint8_t path_hash_bytes;
+    char wifi_ssid[D1L_WIFI_SSID_LEN];
+    char wifi_password[D1L_WIFI_PASSWORD_LEN];
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+    uint8_t tcxo_mode;
+    bool map_location_set;
+    int32_t map_lat_e7;
+    int32_t map_lon_e7;
+    uint8_t map_tile_zoom;
+    uint16_t timezone_schema_version;
+    int16_t timezone_offset_minutes;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
+} legacy_v8_t;
+
+_Static_assert(sizeof(legacy_v8_t) == sizeof(d1l_settings_t),
+               "schema 8 and 9 must exercise equal-size migration");
+
 static bool bytes_all_zero(const void *data, size_t length)
 {
     const uint8_t *bytes = data;
@@ -344,6 +379,73 @@ static void test_v7_envelope_migrates_revision_and_recovers_text(void)
                stored, stored_length, sizeof(d1l_settings_t),
                &header, NULL) == D1L_SETTINGS_ENVELOPE_VALID);
     assert(header.revision == 42U);
+}
+
+static void test_equal_size_v8_envelope_migrates_and_preserves_identity(void)
+{
+    legacy_v8_t legacy = {
+        .schema_version = 8U,
+        .path_hash_bytes = 1U,
+        .map_location_set = true,
+        .map_lat_e7 = 436532000,
+        .map_lon_e7 = -793832000,
+        .map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM,
+        .timezone_schema_version = D1L_TIMEZONE_SETTING_SCHEMA_VERSION,
+        .timezone_offset_minutes = -240,
+    };
+    (void)snprintf(legacy.node_name, sizeof(legacy.node_name), "D1L Desk");
+    set_common_radio(&legacy.frequency_hz, &legacy.bandwidth_tenths_khz,
+                     &legacy.spreading_factor, &legacy.coding_rate,
+                     &legacy.tx_power_dbm);
+    uint8_t seed[D1L_IDENTITY_PUBLIC_KEY_LEN] = {0};
+    for (size_t i = 0; i < sizeof(seed); ++i) {
+        seed[i] = (uint8_t)(i + 31U);
+    }
+    ed25519_create_keypair(legacy.identity_public_key,
+                           legacy.identity_private_key, seed);
+    legacy.identity_ready = true;
+
+    uint8_t blob[TEST_BLOB_MAX] = {0};
+    size_t length = 0U;
+    assert(d1l_settings_envelope_build(
+        blob, sizeof(blob), &legacy, sizeof(legacy), 21U, &length));
+    mock_nvs_reset();
+    assert(mock_nvs_seed_blob(SETTINGS_NAMESPACE, SETTINGS_KEY, blob, length));
+    assert(d1l_settings_load() == ESP_OK);
+    assert(d1l_settings_persistence_state() ==
+           D1L_SETTINGS_PERSISTENCE_MIGRATED_LEGACY);
+    assert(d1l_settings_persistence_revision() == 22U);
+
+    d1l_settings_t current = {0};
+    assert(d1l_settings_public_snapshot(&current) == ESP_OK);
+    assert(current.schema_version == D1L_SETTINGS_SCHEMA_VERSION);
+    assert(strcmp(current.node_name, "D1L Desk") == 0);
+    assert(current.map_location_source == D1L_MAP_LOCATION_SOURCE_MANUAL);
+    assert(current.timezone_offset_minutes == -240);
+    assert(current.identity_ready);
+    assert(memcmp(current.identity_public_key, legacy.identity_public_key,
+                  sizeof(current.identity_public_key)) == 0);
+    assert(bytes_all_zero(current.identity_private_key,
+                          sizeof(current.identity_private_key)));
+
+    d1l_settings_identity_secret_t identity = {0};
+    assert(d1l_settings_identity_secret_snapshot(&identity) == ESP_OK);
+    assert(memcmp(identity.identity_private_key, legacy.identity_private_key,
+                  sizeof(identity.identity_private_key)) == 0);
+    d1l_settings_identity_secret_wipe(&identity);
+
+    uint8_t stored[TEST_BLOB_MAX] = {0};
+    const size_t stored_length = mock_nvs_copy_blob(
+        SETTINGS_NAMESPACE, SETTINGS_KEY, stored, sizeof(stored));
+    d1l_settings_envelope_header_t header = {0};
+    const uint8_t *payload = NULL;
+    assert(d1l_settings_envelope_validate(
+               stored, stored_length, sizeof(d1l_settings_t),
+               &header, &payload) == D1L_SETTINGS_ENVELOPE_VALID);
+    assert(header.revision == 22U);
+    uint32_t stored_schema = 0U;
+    memcpy(&stored_schema, payload, sizeof(stored_schema));
+    assert(stored_schema == D1L_SETTINGS_SCHEMA_VERSION);
 }
 
 static void test_invalid_timezone_recovers_to_utc_without_boot_loop(void)
@@ -1138,6 +1240,7 @@ int main(void)
 {
     test_all_recognized_raw_legacy_versions_migrate();
     test_v7_envelope_migrates_revision_and_recovers_text();
+    test_equal_size_v8_envelope_migrates_and_preserves_identity();
     test_invalid_timezone_recovers_to_utc_without_boot_loop();
     test_failed_legacy_rewrite_leaves_raw_blob_intact();
     test_unknown_newer_envelope_is_preserved_and_write_blocked();

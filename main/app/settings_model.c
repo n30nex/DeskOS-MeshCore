@@ -1021,25 +1021,55 @@ static esp_err_t settings_load_locked(void)
                     d1l_settings_envelope_validate(
                         blob, len, sizeof(d1l_settings_t), &header, &payload);
                 if (validation == D1L_SETTINGS_ENVELOPE_VALID) {
-                    d1l_settings_t loaded = {0};
-                    memcpy(&loaded, payload, sizeof(loaded));
-                    if (loaded.schema_version > D1L_SETTINGS_SCHEMA_VERSION) {
-                        ret = quarantine_settings(
-                            D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA,
-                            ESP_ERR_NOT_SUPPORTED);
-                    } else if (loaded.schema_version !=
-                               D1L_SETTINGS_SCHEMA_VERSION) {
-                        ret = quarantine_settings(
-                            D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED,
-                            ESP_ERR_INVALID_SIZE);
-                    } else {
+                    uint32_t payload_schema_version = 0U;
+                    memcpy(&payload_schema_version, payload,
+                           sizeof(payload_schema_version));
+                    if (payload_schema_version ==
+                        D1L_SETTINGS_SCHEMA_VERSION) {
+                        d1l_settings_t loaded = {0};
+                        memcpy(&loaded, payload, sizeof(loaded));
                         s_current = loaded;
                         d1l_settings_sanitize(&s_current);
                         s_persistence_revision = header.revision;
                         s_persistence_state =
                             D1L_SETTINGS_PERSISTENCE_READY;
+                        wipe_sensitive_bytes(&loaded, sizeof(loaded));
+                    } else {
+                        /* Adjacent schemas can have the same ABI size. The
+                         * envelope length is therefore insufficient to prove
+                         * that its payload uses the current field layout. */
+                        bool schema_newer = false;
+                        d1l_settings_t migrated = {0};
+                        if (migrate_legacy_settings_blob(
+                                &migrated, payload, header.payload_length,
+                                &schema_newer)) {
+                            uint32_t next_revision = 0U;
+                            if (!d1l_settings_envelope_next_revision(
+                                    header.revision, &next_revision)) {
+                                ret = quarantine_settings(
+                                    D1L_SETTINGS_PERSISTENCE_REVISION_SATURATED,
+                                    ESP_ERR_INVALID_STATE);
+                            } else {
+                                ret = persist_settings_envelope(
+                                    handle, &migrated, next_revision);
+                                if (ret == ESP_OK) {
+                                    s_current = migrated;
+                                    s_persistence_revision = next_revision;
+                                    s_persistence_state =
+                                        D1L_SETTINGS_PERSISTENCE_MIGRATED_LEGACY;
+                                }
+                            }
+                        } else if (schema_newer) {
+                            ret = quarantine_settings(
+                                D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA,
+                                ESP_ERR_NOT_SUPPORTED);
+                        } else {
+                            ret = quarantine_settings(
+                                D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED,
+                                ESP_ERR_INVALID_SIZE);
+                        }
+                        wipe_sensitive_bytes(&migrated, sizeof(migrated));
                     }
-                    wipe_sensitive_bytes(&loaded, sizeof(loaded));
                 } else if (validation ==
                            D1L_SETTINGS_ENVELOPE_SCHEMA_NEWER) {
                     ret = quarantine_settings(
