@@ -65,6 +65,10 @@ MAX_HEAP_LOSS_BYTES = 65536
 MAX_INTERNAL_HEAP_LOSS_BYTES = 32768
 MAX_DMA_HEAP_LOSS_BYTES = 32768
 MAX_PSRAM_LOSS_BYTES = 262144
+MIN_HEAP_FREE_BYTES = 262144
+MIN_INTERNAL_HEAP_FREE_BYTES = 16384
+MIN_DMA_HEAP_FREE_BYTES = 16384
+MIN_PSRAM_FREE_BYTES = 262144
 FEATURE_CLAIM_SCOPE = "saved_profile_scan_connect_toggle_subset"
 FULL_WP13_UNCOVERED_SCENARIOS = (
     "credential_at_rest_threat_model_and_nvs_encryption_decision",
@@ -553,19 +557,43 @@ def _health_summary(samples: list[dict]) -> dict:
         "dma_heap_free": MAX_DMA_HEAP_LOSS_BYTES,
         "psram_free": MAX_PSRAM_LOSS_BYTES,
     }
-    losses = {
+    peak_losses = {
         field: max(max(0, first[field] - sample[field]) for sample in samples)
         for field in loss_limits
+    }
+    recovered_losses = {
+        field: max(0, first[field] - samples[-1][field])
+        for field in loss_limits
+    }
+    minimum_free_limits = {
+        "heap_free": MIN_HEAP_FREE_BYTES,
+        "internal_heap_free": MIN_INTERNAL_HEAP_FREE_BYTES,
+        "dma_heap_free": MIN_DMA_HEAP_FREE_BYTES,
+        "psram_free": MIN_PSRAM_FREE_BYTES,
+    }
+    minimum_free = {
+        field: min(sample[field] for sample in samples)
+        for field in minimum_free_limits
     }
     nonces = {sample["boot_nonce"] for sample in samples}
     return {
         "ok": len(nonces) == 1
-        and all(losses[field] <= limit for field, limit in loss_limits.items()),
+        and all(
+            recovered_losses[field] <= limit
+            for field, limit in loss_limits.items()
+        )
+        and all(
+            minimum_free[field] >= limit
+            for field, limit in minimum_free_limits.items()
+        ),
         "sample_count": len(samples),
         "boot_nonce": first["boot_nonce"] if len(nonces) == 1 else None,
         "boot_nonce_stable": len(nonces) == 1,
-        "heap_loss_bytes": losses,
+        "heap_loss_bytes": recovered_losses,
+        "peak_heap_loss_bytes": peak_losses,
         "heap_loss_limits_bytes": loss_limits,
+        "minimum_free_bytes": minimum_free,
+        "minimum_free_limits_bytes": minimum_free_limits,
         "current_task_stack_free_words_floor": min(
             sample["current_task_stack_free_words"] for sample in samples
         ),

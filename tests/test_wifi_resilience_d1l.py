@@ -568,7 +568,7 @@ def test_connected_status_requires_one_kib_retry_stack_margin():
     assert wifi.connected_status_ok(wifi.wifi_status_snapshot(exact), TARGET) is True
 
 
-def test_health_summary_measures_peak_loss_not_only_final_recovery():
+def test_health_summary_allows_expected_active_allocation_after_recovery():
     first = wifi.health_snapshot(FakeWifiDevice().health())
     transient = copy.deepcopy(first)
     transient["heap_free"] -= wifi.MAX_HEAP_LOSS_BYTES + 1
@@ -576,7 +576,38 @@ def test_health_summary_measures_peak_loss_not_only_final_recovery():
 
     summary = wifi._health_summary([first, transient, recovered])
 
-    assert summary["heap_loss_bytes"]["heap_free"] == wifi.MAX_HEAP_LOSS_BYTES + 1
+    assert (
+        summary["peak_heap_loss_bytes"]["heap_free"]
+        == wifi.MAX_HEAP_LOSS_BYTES + 1
+    )
+    assert summary["heap_loss_bytes"]["heap_free"] == 0
+    assert summary["ok"] is True
+
+
+def test_health_summary_rejects_unrecovered_heap_loss():
+    first = wifi.health_snapshot(FakeWifiDevice().health())
+    leaked = copy.deepcopy(first)
+    leaked["heap_free"] -= wifi.MAX_HEAP_LOSS_BYTES + 1
+
+    summary = wifi._health_summary([first, leaked])
+
+    assert summary["heap_loss_bytes"]["heap_free"] == (
+        wifi.MAX_HEAP_LOSS_BYTES + 1
+    )
+    assert summary["ok"] is False
+
+
+def test_health_summary_rejects_transient_internal_heap_exhaustion():
+    first = wifi.health_snapshot(FakeWifiDevice().health())
+    transient = copy.deepcopy(first)
+    transient["internal_heap_free"] = wifi.MIN_INTERNAL_HEAP_FREE_BYTES - 1
+    recovered = copy.deepcopy(first)
+
+    summary = wifi._health_summary([first, transient, recovered])
+
+    assert summary["minimum_free_bytes"]["internal_heap_free"] == (
+        wifi.MIN_INTERNAL_HEAP_FREE_BYTES - 1
+    )
     assert summary["ok"] is False
 
 
