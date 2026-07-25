@@ -3181,12 +3181,9 @@ esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash,
     return ret;
 }
 
-d1l_dm_store_stats_t d1l_dm_store_stats(void)
+static d1l_dm_store_stats_t dm_store_stats_locked(
+    d1l_retained_blob_store_backend_state_t backend_state)
 {
-    d1l_retained_blob_store_backend_state_t backend_state = {0};
-    (void)d1l_retained_blob_store_backend_state(D1L_DM_STORE_ID,
-                                                &backend_state);
-    d1l_store_lock_take(&s_store_lock);
     d1l_dm_store_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
@@ -3215,6 +3212,16 @@ d1l_dm_store_stats_t d1l_dm_store_stats(void)
         .sd_primary_reconcile_pending = s_sd_reconcile_pending,
         .nvs_fallback_dirty = s_nvs_fallback_dirty,
     };
+    return stats;
+}
+
+d1l_dm_store_stats_t d1l_dm_store_stats(void)
+{
+    d1l_retained_blob_store_backend_state_t backend_state = {0};
+    (void)d1l_retained_blob_store_backend_state(D1L_DM_STORE_ID,
+                                                &backend_state);
+    d1l_store_lock_take(&s_store_lock);
+    const d1l_dm_store_stats_t stats = dm_store_stats_locked(backend_state);
     d1l_store_lock_give(&s_store_lock);
     return stats;
 }
@@ -3264,6 +3271,58 @@ size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries,
                                 size_t max_entries)
 {
     return d1l_dm_store_copy_recent_page(out_entries, max_entries, 0U, NULL);
+}
+
+size_t d1l_dm_store_copy_recent_page_snapshot(
+    d1l_dm_entry_t *out_entries, size_t max_entries, size_t skip_newest,
+    size_t *out_total_matches, d1l_dm_store_stats_t *out_stats,
+    uint32_t *out_volatile_seq)
+{
+    if (out_total_matches) {
+        *out_total_matches = 0U;
+    }
+    if (out_stats) {
+        memset(out_stats, 0, sizeof(*out_stats));
+    }
+    if (out_volatile_seq) {
+        *out_volatile_seq = 0U;
+    }
+    if (!out_entries || max_entries == 0U || !out_stats ||
+        !out_volatile_seq) {
+        return 0U;
+    }
+
+    d1l_retained_blob_store_backend_state_t backend_state = {0};
+    (void)d1l_retained_blob_store_backend_state(D1L_DM_STORE_ID,
+                                                &backend_state);
+    d1l_store_lock_take(&s_store_lock);
+    const size_t visible_count = s_count + (s_volatile_valid ? 1U : 0U);
+    if (out_total_matches) {
+        *out_total_matches = visible_count;
+    }
+    if (s_volatile_valid) {
+        *out_volatile_seq = s_volatile_entry.seq;
+    }
+    size_t copied = 0U;
+    if (skip_newest < visible_count) {
+        const size_t available = visible_count - skip_newest;
+        copied = available < max_entries ? available : max_entries;
+        const size_t first = visible_count - skip_newest - copied;
+        const size_t oldest = s_count == 0U ? 0U :
+            (s_head + D1L_DM_STORE_CAPACITY - s_count) %
+                D1L_DM_STORE_CAPACITY;
+        for (size_t i = 0U; i < copied; ++i) {
+            const size_t visible_index = first + i;
+            out_entries[i] = visible_index < s_count ?
+                s_entries[(oldest + visible_index) %
+                          D1L_DM_STORE_CAPACITY] :
+                s_volatile_entry;
+            project_ack_persistence_truth_locked(&out_entries[i]);
+        }
+    }
+    *out_stats = dm_store_stats_locked(backend_state);
+    d1l_store_lock_give(&s_store_lock);
+    return copied;
 }
 
 size_t d1l_dm_store_query_thread_page(const char *contact_fingerprint,
@@ -3353,6 +3412,88 @@ size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
     return d1l_dm_store_query_thread_page(
         contact_fingerprint, out_entries, max_entries, skip_newest, NULL,
         out_total_matches);
+}
+
+size_t d1l_dm_store_copy_thread_page_snapshot(
+    const char *contact_fingerprint, d1l_dm_entry_t *out_entries,
+    size_t max_entries, size_t skip_newest, size_t *out_total_matches,
+    d1l_dm_store_stats_t *out_stats, uint32_t *out_volatile_seq)
+{
+    if (out_total_matches) {
+        *out_total_matches = 0U;
+    }
+    if (out_stats) {
+        memset(out_stats, 0, sizeof(*out_stats));
+    }
+    if (out_volatile_seq) {
+        *out_volatile_seq = 0U;
+    }
+    if (!contact_fingerprint || contact_fingerprint[0] == '\0' ||
+        !out_entries || max_entries == 0U || !out_stats ||
+        !out_volatile_seq) {
+        return 0U;
+    }
+
+    d1l_retained_blob_store_backend_state_t backend_state = {0};
+    (void)d1l_retained_blob_store_backend_state(D1L_DM_STORE_ID,
+                                                &backend_state);
+    d1l_store_lock_take(&s_store_lock);
+    const size_t oldest = s_count == 0U ? 0U :
+        (s_head + D1L_DM_STORE_CAPACITY - s_count) %
+            D1L_DM_STORE_CAPACITY;
+    size_t total_matches = 0U;
+    for (size_t i = 0U; i < s_count; ++i) {
+        const d1l_dm_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        if (strncmp(entry->contact_fingerprint, contact_fingerprint,
+                    sizeof(entry->contact_fingerprint)) == 0) {
+            total_matches++;
+        }
+    }
+    const bool volatile_matches =
+        s_volatile_valid &&
+        strncmp(s_volatile_entry.contact_fingerprint, contact_fingerprint,
+                sizeof(s_volatile_entry.contact_fingerprint)) == 0;
+    if (volatile_matches) {
+        total_matches++;
+        *out_volatile_seq = s_volatile_entry.seq;
+    }
+    if (out_total_matches) {
+        *out_total_matches = total_matches;
+    }
+
+    size_t copied = 0U;
+    if (skip_newest < total_matches) {
+        const size_t available = total_matches - skip_newest;
+        copied = available < max_entries ? available : max_entries;
+        const size_t first_match =
+            total_matches - skip_newest - copied;
+        const size_t last_match = first_match + copied;
+        size_t match_index = 0U;
+        for (size_t i = 0U; i < s_count; ++i) {
+            const d1l_dm_entry_t *entry =
+                &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+            if (strncmp(entry->contact_fingerprint, contact_fingerprint,
+                        sizeof(entry->contact_fingerprint)) != 0) {
+                continue;
+            }
+            if (match_index >= first_match && match_index < last_match) {
+                out_entries[match_index - first_match] = *entry;
+                project_ack_persistence_truth_locked(
+                    &out_entries[match_index - first_match]);
+            }
+            match_index++;
+        }
+        if (volatile_matches && match_index >= first_match &&
+            match_index < last_match) {
+            out_entries[match_index - first_match] = s_volatile_entry;
+            project_ack_persistence_truth_locked(
+                &out_entries[match_index - first_match]);
+        }
+    }
+    *out_stats = dm_store_stats_locked(backend_state);
+    d1l_store_lock_give(&s_store_lock);
+    return copied;
 }
 
 size_t d1l_dm_store_copy_thread(const char *contact_fingerprint,

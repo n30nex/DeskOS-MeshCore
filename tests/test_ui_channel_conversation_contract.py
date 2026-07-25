@@ -27,7 +27,8 @@ def test_active_channel_view_uses_exact_runtime_identity_and_rows() -> None:
         "static void handle_messages_action",
     )
     assert "snapshot->active_channel_id" in projection
-    assert "snapshot_find_channel(snapshot, snapshot->active_channel_id" in projection
+    assert "d1l_ui_messages_projected_channel_id(" in projection
+    assert "snapshot, view_model->active_channel_id, &active_channel" in projection
     assert "active_channel.unread_count" in projection
     assert "snapshot_channel_read_seq(" in projection
     assert "d1l_app_model_query_channel_messages_page(" in projection

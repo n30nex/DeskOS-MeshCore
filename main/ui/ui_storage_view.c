@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
+
 enum {
     COLOR_GREEN = 0xA7F3D0,
     COLOR_AMBER = 0xFBBF24,
@@ -341,6 +343,17 @@ static void set_location(d1l_ui_storage_location_view_t *location,
     copy_text(location->name, sizeof(location->name), name);
     copy_text(location->value, sizeof(location->value), value);
     location->accent = accent;
+}
+
+bool d1l_ui_storage_location_available(
+    d1l_ui_storage_location_t location)
+{
+    if (location < D1L_UI_STORAGE_LOCATION_MESSAGES ||
+        location > D1L_UI_STORAGE_LOCATION_EXPORTS) {
+        return false;
+    }
+    return location != D1L_UI_STORAGE_LOCATION_MAP_TILES ||
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
 }
 
 bool d1l_ui_storage_view_model_is_valid(

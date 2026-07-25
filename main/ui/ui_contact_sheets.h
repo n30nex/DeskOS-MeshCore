@@ -73,6 +73,7 @@ typedef struct d1l_ui_contact_sheets_controller {
     uint32_t generation;
 } d1l_ui_contact_sheets_controller_t;
 
+bool d1l_ui_contact_action_available(d1l_ui_contact_action_t action);
 bool d1l_ui_contact_sheets_create(
     d1l_ui_contact_sheets_controller_t *controller,
     lv_obj_t *parent);

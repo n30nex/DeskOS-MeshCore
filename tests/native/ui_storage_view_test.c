@@ -156,6 +156,24 @@ static void test_validation_rejects_corruption(void)
     assert(!d1l_ui_storage_view_model_is_valid(&view));
 }
 
+static void test_release_profile_filters_only_unavailable_map_location(void)
+{
+    assert(d1l_ui_storage_location_available(
+        D1L_UI_STORAGE_LOCATION_MESSAGES));
+    assert(d1l_ui_storage_location_available(
+        D1L_UI_STORAGE_LOCATION_DIRECT_MESSAGES));
+    assert(d1l_ui_storage_location_available(
+        D1L_UI_STORAGE_LOCATION_PACKETS));
+    assert(d1l_ui_storage_location_available(
+        D1L_UI_STORAGE_LOCATION_ROUTES));
+    assert(d1l_ui_storage_location_available(
+        D1L_UI_STORAGE_LOCATION_EXPORTS));
+    assert(d1l_ui_storage_location_available(
+               D1L_UI_STORAGE_LOCATION_MAP_TILES) == !EXPECT_CORE);
+    assert(!d1l_ui_storage_location_available(
+        (d1l_ui_storage_location_t)D1L_UI_STORAGE_LOCATION_COUNT));
+}
+
 int main(void)
 {
     test_no_card_truth();
@@ -163,6 +181,7 @@ int main(void)
     test_reconnect_and_degraded_truth();
     test_fail_closed_card_truth();
     test_validation_rejects_corruption();
+    test_release_profile_filters_only_unavailable_map_location();
     puts("native UI Storage view model: ok");
     return 0;
 }

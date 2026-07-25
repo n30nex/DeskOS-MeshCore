@@ -83,8 +83,8 @@ def test_invalid_identity_taps_explain_without_compose_or_rf_and_controls_are_to
     assert '"Why no DM?", 174, 0, 120, 44' in render_node
     assert '"DM", 208, 0, 54, 44' in render_node
     assert '"Close", 316, 0, 76, 44' in render_node
-    assert '"Manage locked"' in render_node
-    assert '"Authenticated admin session required."' in render_node
+    assert '"Admin", 8, 352, 104, 40' in render_node
+    assert '"Verified server; local authenticated login required."' in render_node
 
     render_message = ui.split("static void render_message_detail_sheet(void)", 1)[1].split(
         "static void show_message_detail_for", 1
@@ -106,9 +106,10 @@ def test_node_detail_geometry_contains_all_reason_and_management_copy() -> None:
     assert "lv_obj_set_size(controller->sheet, 448, 416);" in create
     assert "lv_obj_set_pos(controller->sheet, 16, 60);" in create
     assert "lv_obj_set_style_pad_all(controller->sheet, 12, 0);" in create
-    assert "lv_obj_set_pos(managed_reason, 8, 376);" in render
-    # 12 px top padding + local y 376 + h 20 stays inside 416 px.
-    assert 12 + 376 + 20 <= 416
+    assert "lv_obj_set_pos(managed_reason, 120, 360);" in render
+    assert "lv_obj_set_size(managed_reason, 276, 40);" in render
+    # 12 px top padding + local y 360 + h 40 stays inside 416 px.
+    assert 12 + 360 + 40 <= 416
     assert 60 + 416 <= 480
 
 

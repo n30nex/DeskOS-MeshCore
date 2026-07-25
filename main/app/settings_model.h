@@ -9,7 +9,7 @@
 #include "platform/time_display.h"
 #include "storage/map_tile_store.h"
 
-#define D1L_SETTINGS_SCHEMA_VERSION 8U
+#define D1L_SETTINGS_SCHEMA_VERSION 9U
 #define D1L_NODE_NAME_LEN 32U
 #define D1L_WIFI_SSID_LEN 33U
 #define D1L_WIFI_PASSWORD_LEN 65U
@@ -20,6 +20,12 @@
 #define D1L_MAP_LOCATION_LON_E7_MIN (-1800000000L)
 #define D1L_MAP_LOCATION_LON_E7_MAX 1800000000L
 #define D1L_MAP_TILE_DEFAULT_ZOOM 10U
+
+typedef enum {
+    D1L_MAP_LOCATION_SOURCE_UNKNOWN = 0,
+    D1L_MAP_LOCATION_SOURCE_MANUAL = 1,
+    D1L_MAP_LOCATION_SOURCE_AUTHENTICATED_COMPANION = 2,
+} d1l_map_location_source_t;
 
 typedef enum {
     D1L_ROLE_DESK_COMPANION = 0,
@@ -103,6 +109,7 @@ typedef struct {
     bool map_location_set;
     int32_t map_lat_e7;
     int32_t map_lon_e7;
+    uint8_t map_location_source;
     uint8_t map_tile_zoom;
     uint16_t timezone_schema_version;
     int16_t timezone_offset_minutes;

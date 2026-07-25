@@ -1,5 +1,33 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(D1L_RELEASE_PROFILE "full_feature" CACHE STRING
+    "Immutable DeskOS release profile")
+set_property(CACHE D1L_RELEASE_PROFILE PROPERTY STRINGS
+    development
+    core_1_0
+    full_feature
+)
+if(NOT D1L_RELEASE_PROFILE STREQUAL "development" AND
+   NOT D1L_RELEASE_PROFILE STREQUAL "core_1_0" AND
+   NOT D1L_RELEASE_PROFILE STREQUAL "full_feature")
+    message(FATAL_ERROR
+        "D1L_RELEASE_PROFILE must be development, core_1_0, or full_feature")
+endif()
+
+set(D1L_SD_HISTORY_MODE "conditional" CACHE STRING
+    "Immutable release-package SD history claim")
+set_property(CACHE D1L_SD_HISTORY_MODE PROPERTY STRINGS
+    disabled
+    conditional
+    supported_optional
+)
+if(NOT D1L_SD_HISTORY_MODE STREQUAL "disabled" AND
+   NOT D1L_SD_HISTORY_MODE STREQUAL "conditional" AND
+   NOT D1L_SD_HISTORY_MODE STREQUAL "supported_optional")
+    message(FATAL_ERROR
+        "D1L_SD_HISTORY_MODE must be disabled, conditional, or supported_optional")
+endif()
+
 # Resolve provenance before applying the reviewed BSP patches below.  This
 # keeps the release-cleanliness check bound to the exact source checkout while
 # allowing the deterministic submodule patch step to proceed afterwards.
@@ -9,6 +37,8 @@ d1l_resolve_source_provenance(
     D1L_BUILD_GIT_COMMIT
     D1L_BUILD_EPOCH_SEC
 )
+file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/partitions_d1l.csv"
+     D1L_PARTITION_TABLE_SHA256)
 
 if(NOT DEFINED PROJECT_VER)
     execute_process(

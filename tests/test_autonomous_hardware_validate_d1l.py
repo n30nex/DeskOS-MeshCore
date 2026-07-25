@@ -10,6 +10,35 @@ from scripts import autonomous_hardware_validate_d1l as runner
 COMMIT = "1600d649223d8f5cbf35cf587d44bd94c0f21293"
 
 
+def test_cli_rejects_hardware_before_any_orchestration(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        runner,
+        "run_validation",
+        lambda _args: pytest.fail(
+            "disabled hardware CLI must not enter orchestration"
+        ),
+    )
+
+    result = runner.main(
+        [
+            "--github-run-id",
+            "123",
+            "--commit",
+            COMMIT,
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert output["classification"] == "hardware_execution_disabled"
+    assert output["ok"] is False
+    assert output["public_rf_tx"] is False
+    assert output["formats_sd"] is False
+    assert "narrow Core" in output["error"]
+
+
 def patch_sd_evidence_runners(monkeypatch, ok_step):
     monkeypatch.setattr(runner, "run_sd_raw_diag", lambda ctx, dry_run: ok_step("sd_raw_diag"))
     monkeypatch.setattr(

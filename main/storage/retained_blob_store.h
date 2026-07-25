@@ -32,7 +32,9 @@ typedef struct {
 } d1l_retained_blob_store_backend_state_t;
 
 /* Boot-local API telemetry. These counters measure retained-store NVS write
- * requests and successful commits, not physical flash program/erase cycles. */
+ * requests and successful commits, not physical flash program/erase cycles.
+ * A successful unchanged-write suppression increments write_attempt_count but
+ * neither write_commit_count nor write_fail_count. */
 typedef struct {
     uint64_t write_attempt_count;
     uint64_t write_commit_count;

@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 
+#include "app/release_profile.h"
 #include "esp_attr.h"
 #include "mesh/channel_store.h"
 #include "mesh/message_store.h"
@@ -36,8 +37,14 @@ esp_err_t d1l_channel_message_reconcile(void)
         if (ret != ESP_OK) {
             break;
         }
+        size_t admitted_row_count = 0U;
         for (size_t i = 0U; i < row_count; ++i) {
-            s_channel_rows[i] = (d1l_channel_retained_row_t){
+            if (d1l_release_profile_is_core() &&
+                s_message_rows[i].channel_id != D1L_CHANNEL_PUBLIC_ID) {
+                continue;
+            }
+            s_channel_rows[admitted_row_count++] =
+                (d1l_channel_retained_row_t){
                 .channel_id = s_message_rows[i].channel_id,
                 .message_seq = s_message_rows[i].seq,
                 .received = s_message_rows[i].direction[0] == 'r',
@@ -49,7 +56,7 @@ esp_err_t d1l_channel_message_reconcile(void)
             .clear_lineage = message_snapshot.clear_lineage,
         };
         ret = d1l_channel_store_reconcile_retained_rows(
-            s_channel_rows, row_count, &message_generation);
+            s_channel_rows, admitted_row_count, &message_generation);
         if (ret != ESP_OK) {
             break;
         }

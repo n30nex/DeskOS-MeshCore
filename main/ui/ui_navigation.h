@@ -14,10 +14,13 @@ typedef enum {
 
 const char *d1l_ui_screen_name(d1l_ui_screen_t screen);
 bool d1l_ui_screen_from_name(const char *name, d1l_ui_screen_t *out_screen);
+bool d1l_ui_screen_available(d1l_ui_screen_t screen);
 bool d1l_ui_scroll_surface_from_name(const char *name,
                                      char *out_surface,
                                      size_t out_surface_len,
                                      d1l_ui_screen_t *out_screen);
+bool d1l_ui_scroll_surface_available(const char *surface,
+                                     d1l_ui_screen_t screen);
 
 void d1l_ui_navigation_request(d1l_ui_screen_t screen);
 bool d1l_ui_navigation_begin_pending(d1l_ui_screen_t *out_screen);

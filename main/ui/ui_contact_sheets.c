@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "lvgl.h"
 #include "ui_keyboard.h"
 #include "ui_modal.h"
@@ -31,6 +32,38 @@ enum {
 _Static_assert(sizeof(d1l_ui_contact_sheets_controller_t) <=
                    D1L_UI_CONTACT_SHEETS_CONTROLLER_MAX_BYTES,
                "Contact sheets controller exceeded its persistent-owner size budget");
+
+bool d1l_ui_contact_action_available(d1l_ui_contact_action_t action)
+{
+    switch (action) {
+    case D1L_UI_CONTACT_ACTION_MESSAGE:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_DIRECT_MESSAGES);
+    case D1L_UI_CONTACT_ACTION_ROUTE_TRACE:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_USER_TRACE);
+    case D1L_UI_CONTACT_ACTION_EXPORT:
+    case D1L_UI_CONTACT_ACTION_CLOSE_EXPORT:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
+    case D1L_UI_CONTACT_ACTION_CLOSE_DETAIL:
+    case D1L_UI_CONTACT_ACTION_OPEN_OPTIONS:
+    case D1L_UI_CONTACT_ACTION_CLOSE_OPTIONS:
+    case D1L_UI_CONTACT_ACTION_RENAME:
+    case D1L_UI_CONTACT_ACTION_TOGGLE_FAVORITE:
+    case D1L_UI_CONTACT_ACTION_TOGGLE_MUTE:
+    case D1L_UI_CONTACT_ACTION_OPEN_FORGET:
+    case D1L_UI_CONTACT_ACTION_CANCEL_FORGET:
+    case D1L_UI_CONTACT_ACTION_CONFIRM_FORGET:
+    case D1L_UI_CONTACT_ACTION_SAVE_EDIT:
+    case D1L_UI_CONTACT_ACTION_CANCEL_EDIT:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_BASIC_CONTACTS);
+    case D1L_UI_CONTACT_ACTION_NONE:
+    default:
+        return false;
+    }
+}
 
 static bool object_is_valid(const lv_obj_t *object)
 {
@@ -143,10 +176,13 @@ bool d1l_ui_contact_sheets_create(
         destroy_sheets(controller);
         return false;
     }
-    controller->export_sheet = create_sheet(parent);
-    if (!controller->export_sheet) {
-        destroy_sheets(controller);
-        return false;
+    if (d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI)) {
+        controller->export_sheet = create_sheet(parent);
+        if (!controller->export_sheet) {
+            destroy_sheets(controller);
+            return false;
+        }
     }
     return true;
 }
@@ -166,7 +202,9 @@ bool d1l_ui_contact_sheets_set_contact(
     controller->rendered.dm_identity_reason = dm_identity_reason;
     controller->rendered.can_dm =
         dm_identity_reason == D1L_UI_DM_IDENTITY_READY;
-    controller->rendered.can_export = can_export;
+    controller->rendered.can_export = can_export &&
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
     controller->rendered.meshcore_type_id = meshcore_type_id;
     return true;
 }
@@ -175,7 +213,9 @@ bool d1l_ui_contact_sheets_set_export_uri(
     d1l_ui_contact_sheets_controller_t *controller,
     const char *uri)
 {
-    if (!controller || !uri || !controller->rendered.can_export) {
+    if (!controller || !uri || !controller->rendered.can_export ||
+        !d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI)) {
         return false;
     }
     const char *end = memchr(uri, '\0', sizeof(controller->rendered.export_uri));
@@ -234,7 +274,8 @@ static void dispatch_action(d1l_ui_contact_binding_t *binding,
     if (!binding_is_current(binding) ||
         !binding->controller->action_handler ||
         action <= D1L_UI_CONTACT_ACTION_NONE ||
-        action > D1L_UI_CONTACT_ACTION_CANCEL_EDIT) {
+        action > D1L_UI_CONTACT_ACTION_CANCEL_EDIT ||
+        !d1l_ui_contact_action_available(action)) {
         return;
     }
     d1l_ui_contact_action_event_t event = {
@@ -476,7 +517,7 @@ bool d1l_ui_contact_sheets_render_detail(
     snprintf(line, sizeof(line), "%s  %s  %s",
              entry->type[0] ? entry->type : "node",
              entry->favorite ? "favorite" : "normal",
-             entry->muted ? "muted" : "audible");
+             entry->muted ? "unread excluded" : "unread counted");
     lv_obj_t *flags = create_label(sheet, line, 0x8EA0AE);
     if (flags) {
         lv_obj_set_pos(flags, 16, 64);
@@ -587,10 +628,15 @@ bool d1l_ui_contact_sheets_render_options(
         complete = false;
     }
 
-    lv_obj_t *button = create_button(
-        controller, sheet, "Route trace", 16, 64, 448, 48,
-        BINDING_OPTIONS_ROUTE, D1L_UI_CONTACT_ACTION_ROUTE_TRACE);
-    complete = style_option_button(button, 0x93C5FD, "Trace path  >") && complete;
+    lv_obj_t *button = NULL;
+    if (d1l_ui_contact_action_available(
+            D1L_UI_CONTACT_ACTION_ROUTE_TRACE)) {
+        button = create_button(
+            controller, sheet, "Route trace", 16, 64, 448, 48,
+            BINDING_OPTIONS_ROUTE, D1L_UI_CONTACT_ACTION_ROUTE_TRACE);
+        complete = style_option_button(button, 0x93C5FD, "Trace path  >") &&
+            complete;
+    }
     button = create_button(
         controller, sheet, "Rename", 16, 118, 448, 48,
         BINDING_OPTIONS_RENAME, D1L_UI_CONTACT_ACTION_RENAME);
@@ -604,29 +650,35 @@ bool d1l_ui_contact_sheets_render_options(
         button, 0xFBBF24, entry->favorite ? "On  >" : "Off  >") && complete;
     button = create_button(
         controller, sheet,
-        entry->muted ? "Unmute notifications" : "Mute notifications",
+        entry->muted ? "Include in unread count" : "Exclude from unread count",
         16, 226, 448, 48, BINDING_OPTIONS_MUTE,
         D1L_UI_CONTACT_ACTION_TOGGLE_MUTE);
     complete = style_option_button(
-        button, 0xC4B5FD, entry->muted ? "On  >" : "Off  >") && complete;
-    if (controller->rendered.can_export) {
-        button = create_button(
-            controller, sheet, "Export QR", 16, 280, 448, 48,
-            BINDING_OPTIONS_EXPORT, D1L_UI_CONTACT_ACTION_EXPORT);
-        complete = style_option_button(button, 0xA7F3D0, "Share QR  >") && complete;
-    } else {
-        lv_obj_t *panel = create_panel(sheet, 16, 280, 448, 48);
-        if (!panel) {
-            complete = false;
+        button, 0xC4B5FD,
+        entry->muted ? "Excluded  >" : "Included  >") && complete;
+    if (d1l_ui_contact_action_available(D1L_UI_CONTACT_ACTION_EXPORT)) {
+        if (controller->rendered.can_export) {
+            button = create_button(
+                controller, sheet, "Export QR", 16, 280, 448, 48,
+                BINDING_OPTIONS_EXPORT, D1L_UI_CONTACT_ACTION_EXPORT);
+            complete = style_option_button(
+                button, 0xA7F3D0, "Share QR  >") && complete;
         } else {
-            lv_obj_set_style_pad_all(panel, 0, 0);
-            lv_obj_t *title = create_label(panel, "Export unavailable", 0x8EA0AE);
-            lv_obj_t *reason = create_label(panel, "Missing key or role", 0x8EA0AE);
-            if (title && reason) {
-                lv_obj_align(title, LV_ALIGN_LEFT_MID, 12, 0);
-                lv_obj_align(reason, LV_ALIGN_RIGHT_MID, -12, 0);
-            } else {
+            lv_obj_t *panel = create_panel(sheet, 16, 280, 448, 48);
+            if (!panel) {
                 complete = false;
+            } else {
+                lv_obj_set_style_pad_all(panel, 0, 0);
+                lv_obj_t *title = create_label(
+                    panel, "Export unavailable", 0x8EA0AE);
+                lv_obj_t *reason = create_label(
+                    panel, "Missing key or role", 0x8EA0AE);
+                if (title && reason) {
+                    lv_obj_align(title, LV_ALIGN_LEFT_MID, 12, 0);
+                    lv_obj_align(reason, LV_ALIGN_RIGHT_MID, -12, 0);
+                } else {
+                    complete = false;
+                }
             }
         }
     }
@@ -703,6 +755,9 @@ bool d1l_ui_contact_sheets_render_export(
     d1l_ui_contact_action_handler_t action_handler,
     void *action_context)
 {
+    if (!d1l_ui_contact_action_available(D1L_UI_CONTACT_ACTION_EXPORT)) {
+        return false;
+    }
     if (!begin_render(controller, controller ? controller->export_sheet : NULL,
                       action_handler, action_context)) {
         invalidate_render(controller, controller ? controller->export_sheet : NULL);

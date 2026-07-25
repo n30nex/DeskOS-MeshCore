@@ -1,5 +1,50 @@
 # Known Limitations
 
+## Current Full Feature candidate boundary (2026-07-25)
+
+The `full_feature` implementation is complete in the active
+`release/24h-core` worktree. This means the intended user-facing feature
+surface is present; it does not mean a public release has been authorized.
+`full_feature_release_ready` remains false until one exact new commit passes
+GitHub Actions, its signed package is downloaded and checksum-verified, that
+same package is flashed to the current D1L, and exact-candidate acceptance is
+complete.
+
+Current intentional boundaries:
+
+- The D1L has no onboard GPS. Its center is explicit local input or an
+  authenticated bonded companion location. Peer pins use only signed
+  peer-advert coordinates with valid time/age evidence.
+- BLE implements the official core initial-sync, contact/channel, messaging,
+  time, advert, radio and battery/storage surface. Remote reboot, factory
+  reset, and private-key import/export are disabled. Optional channel
+  datagrams are not advertised.
+- Server administration is limited to authenticated repeater/room
+  login/status plus `clear stats` and `advert.zerohop`. Each mutation requires
+  a second local confirmation within five seconds. Arbitrary raw remote
+  commands are unavailable.
+- Observer is opt-in `mqtts://` TLS only, uses QoS 1 and a bounded queue, and
+  never includes message text, contacts, keys or forwarding traffic.
+- SD history is conditional on the RP2040 bridge and user-provided FAT32
+  media. Users prepare FAT32 SD cards on a computer; there is no device-side
+  SD formatting path. NVS fallback remains available where declared.
+- Signed local update requires the production Ed25519 signer, exact image
+  hash, source binding and a strictly increasing anti-rollback sequence.
+  Network-fetched update discovery is not provided.
+- Map networking is limited to the visible current-view cache policy. There
+  is no background prefetch or area download.
+- Fixed UTC offsets are supported; automatic timezone/DST rules are not.
+
+The current device is on Pi 5 host `neopi5` (`192.168.0.24`) and may be
+targeted only through
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after verifying
+`VID:PID 1a86:7523`. Raw `/dev/ttyUSB*` names and stale Windows COM
+assignments are not release identity.
+
+Everything below this section is retained historical checkpoint detail. Its
+old percentages, commits, Actions runs and COM routing are not current
+candidate claims.
+
 As of the 2026-07-18 live-main checkpoint:
 
 - Live main is `bd6ea0e685442d8a820766f4686395e50ca5397f` through PR #198; exact-main Actions `29651963484` passed. The last downloaded/checksum-verified strict bank remains `d24894268d877c09644d41bb45f23a795af8b93d` / Actions `29645992569`, with verification-receipt SHA-256 `6142a4cc372186e269e6b9d9d9bca5372136303779db2bf308c6cf793569129d`. Neither current main nor the strict-bank image has current frozen-candidate physical closure.

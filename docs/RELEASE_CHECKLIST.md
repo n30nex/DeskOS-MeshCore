@@ -1,5 +1,26 @@
 # Release Checklist
 
+## Current Full Feature production candidate (2026-07-25)
+
+- [x] All declared user-facing Full Feature domains are implemented.
+- [x] The candidate defaults are `full_feature` and `conditional` SD history.
+- [x] Release builds use pinned ESP-IDF 5.5.4 and GitHub Actions.
+- [x] The current D1L route is Pi 5 `neopi5` using only
+  `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with `1A86:7523`.
+- [ ] Freeze the final source commit and download its exact Actions package.
+- [ ] Verify the complete package checksum tree and signed update bundle.
+- [ ] Flash that exact package non-erasing and retain the target-bound receipt.
+- [ ] Pass automated Full Feature smoke, UI, reboot/persistence, conditional-SD,
+  and controlled DM/RF acceptance on the same installed candidate.
+- [ ] Pass the 12-hour idle/listening soak on the same boot lineage.
+- [ ] Complete one consolidated physical display/touch review.
+- [ ] Run the final fail-closed audit and require
+  `full_feature_release_ready=true`.
+
+No release tag should be cut until the final exact-candidate audit passes.
+Historical Core and predecessor receipts are supporting history only and
+cannot close any item above.
+
 ## Phase 1
 
 - [ ] Live `main` is `bd6ea0e685442d8a820766f4686395e50ca5397f` through PR #198; exact-main Actions `29651963484` passed. The last downloaded/checksum-verified strict bank remains `d24894268d877c09644d41bb45f23a795af8b93d` / Actions `29645992569`, with verification-receipt SHA-256 `6142a4cc372186e269e6b9d9d9bca5372136303779db2bf308c6cf793569129d`. Current-main artifacts and all frozen-candidate RF/SD/UI/update/soak gates remain open.

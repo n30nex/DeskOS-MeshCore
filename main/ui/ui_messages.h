@@ -149,6 +149,8 @@ typedef struct d1l_ui_messages_controller {
     bool expanded_row_valid;
 } d1l_ui_messages_controller_t;
 
+uint64_t d1l_ui_messages_projected_channel_id(uint64_t active_channel_id);
+
 static inline bool d1l_ui_messages_thread_row_index_valid(
     const d1l_ui_messages_controller_t *controller,
     size_t index)
@@ -190,6 +192,7 @@ static inline bool d1l_ui_messages_delivery_failure_latched(
         state == D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT;
 }
 
+bool d1l_ui_messages_action_available(d1l_ui_messages_action_t action);
 bool d1l_ui_messages_create(d1l_ui_messages_controller_t *controller,
                             lv_obj_t *parent);
 void d1l_ui_messages_render(d1l_ui_messages_controller_t *controller,

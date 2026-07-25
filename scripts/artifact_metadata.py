@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 
+GIT_STATUS_UNAVAILABLE = "! git-status-unavailable"
+
+
 def git_value(root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
@@ -18,19 +21,44 @@ def git_value(root: Path, *args: str) -> str | None:
             stderr=subprocess.DEVNULL,
             text=True,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError):
         return None
     return result.stdout.strip() or None
 
 
+def git_status(root: Path) -> tuple[bool, list[str]]:
+    """Return an exact porcelain status, treating query failure as dirty."""
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignore-submodules=none",
+            ],
+            cwd=root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False, [GIT_STATUS_UNAVAILABLE]
+    return True, [
+        line for line in result.stdout.splitlines() if line.strip()
+    ]
+
+
 def git_metadata(root: Path) -> dict[str, Any]:
-    status = git_value(root, "status", "--porcelain") or ""
-    dirty_entries = [line for line in status.splitlines() if line.strip()]
+    status_ok, dirty_entries = git_status(root)
     return {
         "commit": git_value(root, "rev-parse", "HEAD"),
         "short_commit": git_value(root, "rev-parse", "--short", "HEAD"),
         "branch": git_value(root, "branch", "--show-current"),
-        "dirty": bool(dirty_entries),
+        "status_ok": status_ok,
+        "status_error": None if status_ok else "git_status_unavailable",
+        "dirty": not status_ok or bool(dirty_entries),
         "dirty_entries": dirty_entries,
     }
 

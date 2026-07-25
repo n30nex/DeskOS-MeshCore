@@ -27,6 +27,7 @@ def test_production_channel_store_native_behavior(tmp_path):
         str(ROOT / "tests/native"),
         "-I",
         str(ROOT / "main"),
+        str(ROOT / "main/app/release_profile.c"),
         str(ROOT / "main/mesh/channel_store.c"),
         str(ROOT / "tests/native/esp_nvs_stubs.c"),
         str(ROOT / "tests/native/mbedtls_md_stub.c"),

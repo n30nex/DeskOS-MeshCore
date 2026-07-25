@@ -20,6 +20,11 @@ typedef enum {
     D1L_UI_SETTINGS_ACTION_DIAGNOSTICS,
     D1L_UI_SETTINGS_ACTION_ADVANCED,
     D1L_UI_SETTINGS_ACTION_PACKETS,
+    D1L_UI_SETTINGS_ACTION_TERMINAL,
+    D1L_UI_SETTINGS_ACTION_OBSERVER,
+    D1L_UI_SETTINGS_ACTION_UPDATE,
+    D1L_UI_SETTINGS_ACTION_NOTIFICATIONS,
+    D1L_UI_SETTINGS_ACTION_ADMIN,
     D1L_UI_SETTINGS_ACTION_COUNT,
 } d1l_ui_settings_action_t;
 
@@ -57,6 +62,11 @@ typedef struct {
     bool map_tile_cache_ready;
     bool map_tile_render_supported;
     bool identity_ready;
+    uint32_t terminal_event_count;
+    uint32_t notification_unread_count;
+    const char *observer_state;
+    const char *update_state;
+    const char *admin_state;
     bool time_available;
     bool time_approximate;
     bool timezone_settings_ready;
@@ -95,4 +105,6 @@ typedef struct {
 
 bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
                       d1l_ui_more_view_model_t *out_view);
+void d1l_ui_more_view_apply_release_profile(
+    d1l_ui_more_view_input_t *input);
 bool d1l_ui_more_view_model_is_valid(const d1l_ui_more_view_model_t *view_model);

@@ -79,6 +79,7 @@ def write_package_inputs(root: Path, commit: str = COMMIT) -> tuple[Path, dict]:
             "sha": commit,
             "ref": "refs/tags/v1.0.0-test",
             "repository": "n30nex/SIGUI",
+            "workflow": "d1l-ci",
             "run_id": "123456",
             "run_attempt": "1",
             "run_url": "https://github.com/n30nex/SIGUI/actions/runs/123456",
@@ -94,6 +95,34 @@ def write_package_inputs(root: Path, commit: str = COMMIT) -> tuple[Path, dict]:
         expected_source_sha=commit,
     )
     return package_dir, manifest
+
+
+def as_core_manifest(
+    manifest: dict,
+    *,
+    run_id: str = "123456",
+    run_attempt: str = "1",
+) -> dict:
+    core = copy.deepcopy(manifest)
+    core.update(
+        {
+            "release_profile": "core_1_0",
+            "firmware_commit": COMMIT,
+            "actions_run": run_id,
+            "actions_run_attempt": run_attempt,
+        }
+    )
+    core["workflow"].update(
+        {
+            "workflow": "d1l-ci",
+            "run_id": run_id,
+            "run_attempt": run_attempt,
+            "run_url": (
+                "https://github.com/n30nex/SIGUI/actions/runs/" + run_id
+            ),
+        }
+    )
+    return core
 
 
 def test_statement_is_deterministic_and_binds_subjects_materials_and_builder(tmp_path):
@@ -266,3 +295,128 @@ def test_local_package_context_uses_allowlisted_self_asserted_builder(tmp_path):
     assert statement["predicate"]["runDetails"]["builder"]["id"] == (
         provenance_d1l.LOCAL_BUILDER
     )
+
+
+def test_core_statement_binds_exact_canonical_actions_invocation(tmp_path):
+    write_source_inputs(tmp_path)
+    package_dir, manifest = write_package_inputs(tmp_path)
+    manifest = as_core_manifest(manifest)
+
+    statement = provenance_d1l.build_statement(
+        tmp_path, package_dir, manifest, source_identity()
+    )
+
+    assert statement["predicate"]["buildDefinition"]["externalParameters"] == {
+        "sourceRepository": sbom_d1l.PROJECT_REPOSITORY,
+        "sourceRevision": COMMIT,
+        "releaseProfile": "core_1_0",
+        "workflowRepository": "n30nex/SIGUI",
+        "workflowName": "d1l-ci",
+        "workflowPath": ".github/workflows/d1l-ci.yml",
+        "workflowRunId": "123456",
+        "workflowRunAttempt": "1",
+    }
+    assert statement["predicate"]["runDetails"] == {
+        "builder": {"id": provenance_d1l.GITHUB_HOSTED_BUILDER}
+    }
+    assert provenance_d1l.validate_core_actions_binding(
+        statement, COMMIT, "123456", "1"
+    ) == []
+
+    metadata = provenance_d1l.write_package_provenance(
+        tmp_path,
+        package_dir,
+        manifest,
+        source_identity=source_identity(),
+        expected_source_sha=COMMIT,
+    )
+    assert metadata["release_profile"] == "core_1_0"
+    assert metadata["workflow_repository"] == "n30nex/SIGUI"
+    assert metadata["workflow_name"] == "d1l-ci"
+    assert metadata["workflow_path"] == ".github/workflows/d1l-ci.yml"
+    assert metadata["workflow_run_id"] == "123456"
+    assert metadata["workflow_run_attempt"] == "1"
+
+
+@pytest.mark.parametrize(
+    ("other_run_id", "other_run_attempt"),
+    (("654321", "1"), ("123456", "2")),
+)
+def test_core_validator_rejects_same_commit_other_actions_invocation(
+    tmp_path, other_run_id, other_run_attempt
+):
+    write_source_inputs(tmp_path)
+    package_dir, manifest = write_package_inputs(tmp_path)
+    expected_manifest = as_core_manifest(manifest)
+    other_manifest = as_core_manifest(
+        manifest,
+        run_id=other_run_id,
+        run_attempt=other_run_attempt,
+    )
+    transplanted = provenance_d1l.build_statement(
+        tmp_path, package_dir, other_manifest, source_identity()
+    )
+
+    assert provenance_d1l.validate_profile(transplanted, COMMIT) == []
+    assert provenance_d1l.validate_core_actions_binding(
+        transplanted, COMMIT, "123456", "1"
+    ) == [
+        "provenance is not bound to the exact Core Actions workflow invocation"
+    ]
+    assert (
+        "provenance does not match deterministic source and package inputs"
+        in provenance_d1l.validate_against_inputs(
+            transplanted,
+            tmp_path,
+            package_dir,
+            expected_manifest,
+            source_identity(),
+        )
+    )
+
+
+def test_core_validator_rejects_valid_default_profile_statement(tmp_path):
+    write_source_inputs(tmp_path)
+    package_dir, manifest = write_package_inputs(tmp_path)
+    default_statement = provenance_d1l.build_statement(
+        tmp_path, package_dir, manifest, source_identity()
+    )
+
+    assert provenance_d1l.validate_profile(default_statement, COMMIT) == []
+    errors = provenance_d1l.validate_core_actions_binding(
+        default_statement, COMMIT, "123456", "1"
+    )
+    assert (
+        "provenance is not bound to the exact Core Actions workflow invocation"
+        in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    (
+        ("repository", "fork/SIGUI", "canonical source repository"),
+        ("workflow", "other-workflow", "workflow name"),
+        ("run_id", "0", "run ID"),
+        ("run_attempt", "0", "run attempt"),
+    ),
+)
+def test_core_generator_rejects_incomplete_or_noncanonical_actions_identity(
+    tmp_path, field, value, match
+):
+    write_source_inputs(tmp_path)
+    package_dir, manifest = write_package_inputs(tmp_path)
+    manifest = as_core_manifest(manifest)
+    manifest["workflow"][field] = value
+    if field == "run_id":
+        manifest["actions_run"] = value
+        manifest["workflow"]["run_url"] = (
+            f"https://github.com/n30nex/SIGUI/actions/runs/{value}"
+        )
+    elif field == "run_attempt":
+        manifest["actions_run_attempt"] = value
+
+    with pytest.raises(ValueError, match=match):
+        provenance_d1l.build_statement(
+            tmp_path, package_dir, manifest, source_identity()
+        )

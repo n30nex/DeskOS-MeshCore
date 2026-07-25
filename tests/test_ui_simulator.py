@@ -526,7 +526,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Tools", "Connections", "Wi-Fi", "Bluetooth", "Radio"} <= labels_by_view["settings_connections_expanded"]
     assert {"Tools", "Storage & maps", "SD Card", "Map options"} <= labels_by_view["settings_storage_maps_expanded"]
     assert {"Tools", "Device", "Display", "Identity"} <= labels_by_view["settings_device_expanded"]
-    assert {"Tools", "Support", "About", "Version 1.0.0-rc1"} <= labels_by_view["settings_support_expanded"]
+    assert {"Tools", "Support", "About", "Version 1.0.0"} <= labels_by_view["settings_support_expanded"]
     assert {"Tools", "Advanced", "Mesh advertise", "Broadcast presence"} <= labels_by_view["settings_advanced_expanded"]
     assert {
         "Wi-Fi Setup",
@@ -645,8 +645,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Why no DM?",
         "DM unavailable [role_not_dm_capable]",
         "This verified role does not support direct chat.",
-        "Manage locked",
-        "Authenticated admin session required.",
+        "Admin",
+        "Verified server; local authenticated login required.",
     } <= labels_by_view["managed_node_detail_sheet"]
     assert {
         "Contact Options",
@@ -773,7 +773,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert views["node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
     assert views["heard_only_node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
     assert views["managed_node_detail_sheet"]["metrics"]["node_detail_frame"] == [16, 60, 464, 476]
-    assert views["managed_node_detail_sheet"]["metrics"]["node_detail_content_bottom"] == 468
+    assert views["managed_node_detail_sheet"]["metrics"]["node_detail_content_bottom"] == 460
     assert views["managed_node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
     assert views["managed_node_detail_sheet"]["metrics"]["node_detail_management_gated"] is True
     assert views["nodes"]["metrics"]["contact_dm_shortcut_min_height"] >= ui_simulator.MIN_TOUCH_TARGET

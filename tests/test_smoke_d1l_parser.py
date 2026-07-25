@@ -512,3 +512,33 @@ def test_boot_nonce_parser_rejects_missing_zero_and_bool_values():
     assert smoke_d1l.health_boot_nonce({"ok": True, "boot_nonce": 0}) is None
     assert smoke_d1l.health_boot_nonce({"ok": True, "boot_nonce": True}) is None
     assert smoke_d1l.health_boot_nonce({"ok": True, "boot_nonce": 7}) == 7
+
+
+def test_new_crash_like_entries_only_returns_post_baseline_crashes():
+    before = {"ok": True, "total_written": 24}
+    after = {
+        "ok": True,
+        "total_written": 27,
+        "entries": [
+            {"seq": 23, "crash_like": True},
+            {"seq": 25, "crash_like": False},
+            {"seq": 26, "crash_like": True, "reset_reason": "PANIC"},
+            {"seq": 27, "crash_like": True, "reset_reason": "WDT"},
+        ],
+    }
+
+    assert smoke_d1l.new_crash_like_entries(before, after) == after["entries"][2:]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        {},
+        {"ok": False, "total_written": 2},
+        {"ok": True, "total_written": -1},
+        {"ok": True, "total_written": True},
+    ],
+)
+def test_crashlog_total_written_rejects_unusable_values(result):
+    assert smoke_d1l.crashlog_total_written(result) is None

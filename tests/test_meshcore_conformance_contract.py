@@ -574,16 +574,16 @@ def test_production_service_uses_the_codec_exercised_by_the_harness():
     ack_builder = service.split("static esp_err_t build_dm_ack_response", 1)[1].split(
         "static bool dispatch_bounded_dm_ack", 1
     )[0]
-    # Existing packet builders plus admin ANON_REQ and regular REQ both use
-    # the single production prefix encoder exercised by conformance vectors.
+    # Existing packet builders plus admin ANON_REQ, status REQ, and the exact
+    # allowlisted mutation REQ use the same production prefix encoder.
     assert service.count("d1l_meshcore_wire_write_prefix(") == 7
-    assert admin_runtime.count("d1l_meshcore_wire_write_prefix(") == 2
+    assert admin_runtime.count("d1l_meshcore_wire_write_prefix(") == 3
     assert ack_builder.count("d1l_meshcore_wire_write_prefix(") == 3
     assert (
         service.count("d1l_meshcore_wire_write_prefix(")
         + admin_runtime.count("d1l_meshcore_wire_write_prefix(")
         - ack_builder.count("d1l_meshcore_wire_write_prefix(")
-        == 6
+        == 7
     )
     assert "parse_wire_packet" not in service
     for legacy_helper in [

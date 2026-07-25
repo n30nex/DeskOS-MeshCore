@@ -43,7 +43,59 @@ def test_admin_protocol_and_runtime_are_separate_production_modules() -> None:
     assert "entry->next_response" in dispatch_c
     assert "d1l_meshcore_admin_timeout(session);" in dispatch_c
     assert "role != D1L_MESHCORE_ADMIN_ROLE_REPEATER" in dispatch_c
-    assert "no-history" in runtime
+    assert "role != D1L_MESHCORE_ADMIN_ROLE_ROOM" in dispatch_c
+    assert "D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR" in dispatch_h
+    assert "D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR" in runtime
+    assert "role == D1L_MESHCORE_ADMIN_ROLE_ROOM && password_len == 0U" in \
+        runtime
+
+
+def test_admin_mutations_are_exactly_allowlisted_and_locally_confirmed() -> None:
+    dispatch = read("main/mesh/meshcore_admin_dispatch.c")
+    runtime = read("main/mesh/meshcore_admin_runtime.c")
+    service = read("main/mesh/meshcore_service.c")
+    ui = read("main/ui/ui_phase1.c")
+
+    mutation_command = body(
+        dispatch,
+        "const char *d1l_meshcore_admin_mutation_command",
+        "static const char *mutation_success_reply",
+    )
+    assert 'return "clear stats";' in mutation_command
+    assert 'return "advert.zerohop";' in mutation_command
+    assert "default:\n        return NULL;" in mutation_command
+
+    mutation_reply = body(
+        dispatch,
+        "static const char *mutation_success_reply",
+        "bool d1l_meshcore_admin_begin_mutation",
+    )
+    assert 'return "(OK - stats reset)";' in mutation_reply
+    assert 'return "OK - zerohop advert sent";' in mutation_reply
+
+    builder = body(
+        runtime,
+        "esp_err_t d1l_meshcore_admin_build_mutation_packet",
+        "static void clear_session_locked",
+    )
+    assert "D1L_MESHCORE_TXT_TYPE_CLI_DATA << 2U" in builder
+    assert "d1l_meshcore_admin_mutation_command(mutation)" in builder
+    assert "d1l_meshcore_admin_secure_zero(plaintext" in builder
+
+    public_request = body(
+        service,
+        "esp_err_t d1l_meshcore_service_admin_request_mutation",
+        "esp_err_t d1l_meshcore_service_request_advert",
+    )
+    assert "if (!local_confirmed)" in public_request
+    assert "d1l_meshcore_admin_mutation_command(mutation)" in public_request
+    assert "meshcore_service_send_command(" in public_request
+    assert "&cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS" in public_request
+
+    assert "D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS = 5000U" in ui
+    assert "s_admin_mutation_armed" in ui
+    assert "d1l_meshcore_service_admin_request_mutation(mutation,true)" in \
+        "".join(ui.split())
 
 
 def test_runtime_snapshot_redacts_all_authority_material() -> None:

@@ -130,7 +130,7 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert '\\"write_amplification\\"' in console
     assert '\\"capacity\\"' in console
     assert "bool d1l_retained_blob_store_backend_state(" in source
-    assert "out_state->enabled = s_store_sd_enabled[config->id]" in source
+    assert "profile_allows_sd && s_store_sd_enabled[config->id]" in source
     assert "out_state->generation = s_store_backend_generation[config->id]" in source
     assert "s_store_sd_enabled[i] != can_use_retained_sd" in source
     assert "s_store_backend_generation[i]++" in source

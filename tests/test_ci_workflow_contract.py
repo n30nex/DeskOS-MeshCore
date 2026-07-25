@@ -68,7 +68,13 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python -m pip install --upgrade" not in host
     assert "python -m pip check" in host
     assert "artifacts/build-inputs/ci-host-windows-installed.json" in host
+    assert "artifacts/build-inputs/d1l-candidate-scope.json" in host
     assert "artifacts/build-inputs/SHA256SUMS.txt" in host
+    assert (
+        host.index("name: Record exact candidate scope")
+        < host.index("name: Checksum exact host build inputs")
+        < host.index("name: Host tests")
+    )
     assert "python -m pytest tests -q" in host
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in host
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in host
@@ -93,6 +99,7 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python -m pytest -q tests/test_checksum_manifest.py tests/test_package_release_d1l.py" in host
     assert "python ./scripts/verify_checksums.py artifacts" not in host
     assert "python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json" in host
+    assert "core_release_gate_audit_d1l.py" not in host
 
 
 def test_ci_detects_when_sd_bridge_scope_is_required():
@@ -100,10 +107,18 @@ def test_ci_detects_when_sd_bridge_scope_is_required():
     job = job_block("change-filter")
 
     assert "include_sd_bridge:" in text
-    assert "default: false" in text
+    assert "default: true" in text
     assert "include_sd_bridge=true" in job
+    assert "reason=full_feature_candidate" in job
     assert "reason=manual_dispatch" in job
-    assert "reason=sd_bridge_paths" in job
+    assert "reason=full_feature_sd_paths" in job
+    assert "core_sd_disabled" not in job
+    dispatch = job.split(
+        'if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]', 1
+    )[1].split("else", 1)[0]
+    assert 'if [[ "${{ inputs.include_sd_bridge }}" == "true" ]]' in dispatch
+    assert "reason=manual_dispatch" in dispatch
+    assert "changed-files.txt" not in dispatch
     assert "firmware/rp2040_sd_bridge/" in job
     assert "firmware/rp2040_sd_smoke/" in job
     assert "tools/rp2040_sd_protocol.py" in job
@@ -277,6 +292,7 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "path: artifacts/rp2040-release-inputs" in job
     assert "merge-multiple: false" in job
     assert "package_args=(--build-dir build --out-dir artifacts/release" in job
+    assert "--release-profile full_feature --sd-history-mode conditional" in job
     assert '--meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON"' in job
     assert 'python scripts/package_release_d1l.py "${package_args[@]}"' in job
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job

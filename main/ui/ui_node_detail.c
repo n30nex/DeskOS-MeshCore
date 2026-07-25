@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "lvgl.h"
 #include "ui_modal.h"
 
@@ -11,6 +12,7 @@ enum {
     BINDING_CLOSE = 0,
     BINDING_OPEN_DM,
     BINDING_EXPLAIN_DM,
+    BINDING_OPEN_ADMIN,
 };
 
 _Static_assert(sizeof(d1l_ui_node_detail_controller_t) <=
@@ -133,7 +135,7 @@ static void action_event_cb(lv_event_t *event)
     if (!binding_is_current(binding) ||
         !binding->controller->action_handler ||
         binding->action <= D1L_UI_NODE_DETAIL_ACTION_NONE ||
-        binding->action > D1L_UI_NODE_DETAIL_ACTION_EXPLAIN_DM) {
+        binding->action > D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN) {
         return;
     }
     d1l_ui_node_detail_controller_t *controller = binding->controller;
@@ -152,7 +154,7 @@ static d1l_ui_node_detail_binding_t *set_binding(
 {
     if (!controller || slot >= D1L_UI_NODE_DETAIL_BINDING_COUNT ||
         action <= D1L_UI_NODE_DETAIL_ACTION_NONE ||
-        action > D1L_UI_NODE_DETAIL_ACTION_EXPLAIN_DM) {
+        action > D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN) {
         return NULL;
     }
     d1l_ui_node_detail_binding_t *binding = &controller->bindings[slot];
@@ -423,7 +425,7 @@ bool d1l_ui_node_detail_render(
     snprintf(line, sizeof(line), "Public key %s  %s  %s",
              view->keyed ? "retained" : "missing",
              view->favorite ? "favorite" : "normal",
-             view->muted ? "muted" : "audible");
+             view->muted ? "unread excluded" : "unread counted");
     lv_obj_t *key = create_label(controller->sheet, line, 0x8EA0AE);
     configure_dot_label(key, 392, 8, 150);
     complete = key != NULL && complete;
@@ -445,19 +447,21 @@ bool d1l_ui_node_detail_render(
     configure_dot_label(path, 392, 8, 218);
     complete = path != NULL && complete;
 
-    if (entry->location_valid) {
-        char latitude[16];
-        char longitude[16];
-        format_advert_coordinate(latitude, sizeof(latitude), entry->lat_e6);
-        format_advert_coordinate(longitude, sizeof(longitude), entry->lon_e6);
-        snprintf(line, sizeof(line), "Advert location %s, %s", latitude,
-                 longitude);
-    } else {
-        snprintf(line, sizeof(line), "Advert location not provided");
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        if (entry->location_valid) {
+            char latitude[16];
+            char longitude[16];
+            format_advert_coordinate(latitude, sizeof(latitude), entry->lat_e6);
+            format_advert_coordinate(longitude, sizeof(longitude), entry->lon_e6);
+            snprintf(line, sizeof(line), "Advert location %s, %s", latitude,
+                     longitude);
+        } else {
+            snprintf(line, sizeof(line), "Advert location not provided");
+        }
+        lv_obj_t *location = create_label(controller->sheet, line, 0x93C5FD);
+        configure_dot_label(location, 392, 8, 242);
+        complete = location != NULL && complete;
     }
-    lv_obj_t *location = create_label(controller->sheet, line, 0x93C5FD);
-    configure_dot_label(location, 392, 8, 242);
-    complete = location != NULL && complete;
 
     snprintf(line, sizeof(line), "Last heard %lums  first %lums  count %lu",
              (unsigned long)entry->last_heard_ms,
@@ -481,23 +485,19 @@ bool d1l_ui_node_detail_render(
     } else {
         complete = false;
     }
-    if (controller->rendered.management_gated) {
-        lv_obj_t *managed = create_label(controller->sheet, "Manage locked",
-                                         0x8EA0AE);
-        if (managed) {
-            lv_label_set_long_mode(managed, LV_LABEL_LONG_DOT);
-            lv_obj_set_size(managed, 392, 20);
-            lv_obj_set_pos(managed, 8, 354);
-        } else {
-            complete = false;
-        }
+    if (controller->rendered.management_gated &&
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        complete = create_button(
+            controller, "Admin", 8, 352, 104, 40,
+            BINDING_OPEN_ADMIN,
+            D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN) != NULL && complete;
         lv_obj_t *managed_reason = create_label(
-            controller->sheet, "Authenticated admin session required.",
+            controller->sheet, "Verified server; local authenticated login required.",
             0x8EA0AE);
         if (managed_reason) {
             lv_label_set_long_mode(managed_reason, LV_LABEL_LONG_DOT);
-            lv_obj_set_size(managed_reason, 392, 20);
-            lv_obj_set_pos(managed_reason, 8, 376);
+            lv_obj_set_size(managed_reason, 276, 40);
+            lv_obj_set_pos(managed_reason, 120, 360);
         } else {
             complete = false;
         }

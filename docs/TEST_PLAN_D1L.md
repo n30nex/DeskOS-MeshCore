@@ -1,6 +1,77 @@
 # D1L Test Plan
 
+## Exact Full Feature candidate plan (2026-07-25)
+
+The active candidate is `release_profile=full_feature` with
+`sd_history_mode=conditional`. Feature implementation is complete. Validation
+is intentionally limited to the release-critical gates below; historical
+edge-case campaigns are not being repeated unless the exact candidate fails a
+required gate.
+
+Required sequence:
+
+1. Run the repository host suite, completion-ledger validation, generated-pack
+   validation and `git diff --check`.
+2. Push one immutable commit and require exact-SHA `d1l-ci` success.
+3. Download the exact package; verify all checksums, provenance, SBOM, Actions
+   identity, release profile, signed update signer and security sequence.
+4. On Pi 5 host `neopi5`, prove the target symlink is
+   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`, prove
+   `ID_VENDOR_ID=1a86` and `ID_MODEL_ID=7523`, then flash that exact package.
+   Never enumerate or probe another Pi serial device.
+5. Run automated version/health/board/settings/radio/identity/storage/BLE/
+   Observer/Admin/update/terminal probes, required UI navigation/scroll
+   probes, message/store checks, controlled reboot and persistence checks.
+6. Run conditional SD/RP2040 checks without formatting. If the required media
+   path is absent or unsafe, report the exact blocked gate; do not erase it.
+7. Use only a narrowly authorized controlled peer for DM/RF/admin acceptance.
+   Never automate a default Public transmission.
+8. Ask for one final consolidated physical confirmation covering display,
+   touch, keyboard, brightness/timeout wake behavior and the five dock roots.
+
+Pass requires receipts bound to the exact firmware commit and Actions run.
+Predecessor artifacts, simulator images, dry runs, a reachable serial port or
+a green source test alone do not pass.
+
+The current device has moved permanently for this development cycle. Raw
+`/dev/ttyUSB*` names and stale Windows COM assignments are not valid target
+identity.
+
+The remaining content is retained historical test rationale and prior exact
+candidate evidence.
+
 Last strict-verified exact-main software/artifact checkpoint: PR #182 at `de0bb75bd91146f0dc9896540d12c71889d7766b` / Actions `29548300732` passes 1,263 host and 33 checksum-contract tests plus 1,008 wire vectors, 931 oracle checks, existing wire/advert fuzzing, and 100,000 native plus 100,000 Clang 18 semantic-packet cases with zero findings. Five downloaded artifacts / 46 entries verify across 341 files with exact-source provenance and SPDX 2.3. The canonical strict receipt SHA-256 is `8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9`; canonical PR Actions `29547584817` and exact main share the reviewed tree. PRs #177-#182 cover replay/hash authority, bounded USB parsing, ACK/lifetime behavior, configured-channel admission, and semantic-packet parsing/fuzzing. A non-erasing exact-main COM12 flash passed, but retained-DM compatibility/migration must be fixed before reboot persistence can pass. Full WP-05, WP-06, official-peer RF, exact-candidate physical acceptance, and release gates remain open.
+
+## Current Core hardware target (2026-07-24)
+
+The release-closing D1L is now attached to Raspberry Pi 5 host `neopi5`.
+Hardware tests run from the unprivileged, key-only account `siguidev` and use
+only `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after proving USB
+VID:PID `1A86:7523`, symlink resolution, and read/write access. The current
+`/dev/ttyUSB2` resolution is observational only and is never a release target.
+The old `COM12` assignment is historical and is not a current alternative.
+The legacy COM restrictions below remain preserved only for interpreting old
+receipts; current work never routes through them.
+
+On `neopi5`, begin every hardware evidence session with:
+
+```bash
+export D1L_PORT='/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0'
+test -L "$D1L_PORT" && test -r "$D1L_PORT" && test -w "$D1L_PORT"
+D1L_DEVICE_PROPERTIES="$(udevadm info --query=property --name="$D1L_PORT")"
+grep -qx 'ID_VENDOR_ID=1a86' <<<"$D1L_DEVICE_PROPERTIES"
+grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
+```
+
+All literal COM12 receipts and checkpoint statements retained below are
+historical evidence for the exact candidates they name, or Windows-alternative
+examples; they are not current Pi evidence and must not be relabeled. The Pi
+move, login, discovery, and serial permissions close no gate. Exact-SHA
+Actions/package identity, non-erasing flash, UI/manual review, software and
+cold reboots, retained state, protocol-time migration, controlled RF/DM,
+60-minute active plus 30-minute idle soak, install review, and final Core audit
+remain fail-closed. Do not start RF or active soak until `siguidev` has
+narrowly scoped, verified access to the exact peer status/control resources.
 
 ## Host Tests
 
@@ -159,7 +230,7 @@ Coverage:
 - Radio/runtime ownership contract: SX1262 callbacks may only copy a bounded payload, capture the monotonic timestamp, enqueue without blocking, latch terminal recovery when necessary, wake the runtime owner, and return. The runtime owner must provide a bounded priority lane, admit a normal command after at most four radio and two priority dispatches, give exact terminal events precedence, preserve a command dequeued before a terminal win, hold TX-producing commands while TX is active, defer RX recovery during TX, and expose saturating depth/high-water/drop/fairness/maintenance/recovery telemetry. PR #106 banks the callback slice, PR #109 banks runtime-owned advert admission, PR #171 banks bounded Admin command ownership, and PR #173 banks the bounded fairness/terminal-lane slice. Run the PR #173 focused contract/native set; the canonical gate must report 27 strict focused passes, while the independent review set reports 75 passes and a native `-Wall -Wextra -Werror` compile. This does not prove every remaining owner path, watchdog/stack margins, reboot/power-loss recovery, remote mutation semantics, RF, physical behavior, or WP-06 closure.
 - Persisted DM delivery-state contract: schema-v6 records use immutable session IDs and state-plus-revision compare-and-swap, migrate legacy records deterministically, preserve retry attempts, mark reboot-interrupted in-flight sends truthfully, and never infer delivered state without the required ACK transition. PR #111 exact-main Actions `29355712370` and downloaded receipt `93f9717801ac7ca01a48d66d9a7c3de7acfe0cb86b0f1f5cfe78e738ed339f49` bank this storage/state slice only; runtime scheduling, timeout/retry integration, official-peer RF/DM acceptance, UI integration, and WP-07 closure remain open.
 - Canonical contact-lifecycle contract: strict bounded MeshCore URI import/export validates scheme, length, UTF-8 names, role, and full key; heard-only rows cannot fabricate canonical contacts; collision/capacity errors reject before mutation; favourite/alias preferences are preserved; all DM entry points call canonical provenance authorization before identity/radio side effects; USB JSON remains parseable for quote/backslash aliases. PR #112 exact-main Actions `29359402515` and downloaded receipt `53e07c470b01a46ffcc2414c4e5b9867da9932b11203259a3d0e4e48cd3f78dc` bank this slice only; BLE/on-device QR, official-client bidirectional proof, retained reboot/refresh acceptance, physical/RF evidence, downstream channel integration, and WP-08 closure remain open.
-- Autonomous hardware validation contract: `scripts/autonomous_hardware_validate_d1l.py` must provide a no-user-input orchestration path for the current D1L hardware route. It mutates only COM12 for the ESP32 console and configured COM16 for intentional RP2040 smoke/USB/UF2 work; other discovered RP2040-looking ports remain read-only inventory and are never selected or touched. The production bridge must be built with Arduino-Pico's `usbstack=nousb` option so routine host serial discovery cannot activate the core's 1200-baud/DTR UF2 trigger. After production restore, absent COM16 is expected and is accepted only when COM12 proves the RP2040 bridge protocol plus its explicit `rp2040 bootloader` path; otherwise autonomous access fails closed. It must refuse COM8, COM11, and COM29, bind the downloaded host-success marker, release manifest, packaged files, and standalone firmware hashes to an explicitly supplied numeric Actions run plus canonical 40-hex resolved commit, and preserve `public_rf_tx=false` and `formats_sd=false`. A pre-existing UF2 disk is ineligible for automatic selection unless `--uf2-volume` authorizes it; otherwise the copied target must be exactly one newly appeared UF2 volume correlated with the commanded D1L transition. A bundled SD suite must install the exact ESP32 and production bridge artifacts before evidence, require a fresh clean `READY_SD` zero-counter preflight before raw diagnostics, run diagnostics as an isolated bounded maintenance phase, then best-effort restore the exact bridge, reflash the exact ESP32 image, and repeat that strict clean gate before any canary. Any failed diagnostic, later SD stage, or post-SD smoke must preserve the failed receipt, run the release audit, attempt bounded exact-artifact recovery, and stop all subsequent canaries or UI probes. `--refresh-rp2040-smoke` adds official Seeed smoke and RP2040-unavailable evidence; it does not control the mandatory pre/post-diagnostic production-bridge restores. `--skip-esp32-flash` is valid only with `--skip-sd-suite`. The bundled path is a deliberate multi-surface sweep, not the default proof for every UI P0; issue work should call the narrow acceptance script and reserve this runner for SD/RP2040 issues or final production sweeps.
+- Autonomous-runner safety override: `scripts/autonomous_hardware_validate_d1l.py` is planning-only and rejects hardware execution before orchestration. Its legacy direct-flash and post-flash mutation paths do not yet bind the exact full D1L key or the current Pi stable target. Use only `--dry-run`; hardware evidence must use the narrow exact-candidate flash, smoke, UI, reboot, RF, and soak runners.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus schema-v2 `ui-sim-report.json`, cover the main touch surfaces and nested pages, fail on missing labels or measured overflow, emit 44x44 touch targets, flag RF/destructive/format-capable actions, and keep `formats_sd=false`. Storage retains its proven hierarchy. Map renders the actual current view plus `Map -> Map options -> Set location or Cache status`; its canvas fills the content region without a map-local title row, and sparse edge overlays show one-finger pan plus direct 48x48-or-larger `-`/`+`/`Center` controls, default zoom 10, the 8-through-14 range, `(c) OpenStreetMap contributors`, the visible-tile limit of 9, one zoom per visible generation, completed same-view frame reuse, and cache reuse while exposing no provider/source editor, background/prefetch, off-screen batch, or area-download action. The `map-ready` fixture must show bright, non-red, role-aware signed-advert markers with readable names below them and no ambiguous saved-center pin; `map-downloading` must visibly show determinate `Downloading n/N` progress.
 - P0 UI hardware-script contract: `scripts/ui_corruption_probe_d1l.py --dry-run --rounds 20`, `scripts/ui_capture_d1l.py --dry-run`, `scripts/ui_compose_keyboard_capture_d1l.py --dry-run --targets all`, and `scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache` stay host-only and require an explicit port for hardware mode. All-tab and Map probes must enter Map through the network-suppressed `ui scroll-probe` path, never an unsuppressed `ui tab map`. Hardware artifacts must include successful `map tiles status` rows before and after Map automation, prove that `network_requests` did not change, and report `network_tx=false`, `map_network_requests=false`, `background_download=false`, `area_download=false`, `visible_tile_limit=9`, and `zoom_batch_limit=1`; probes never request map tiles or mutate Wi-Fi/RF/storage.
 - First-boot onboarding contract: current settings must persist `onboarding_complete`, optional manual map center, and saved Wi-Fi profile metadata while migrating older settings without dropping identity. No provider URL, API key, attribution editor, or user-selected tile source is part of onboarding or settings.
@@ -197,9 +268,12 @@ Do not run a local firmware build and do not hand-edit `dependencies.lock`.
    without changing the committed lock or silently changing generated config.
 4. Retain the commit, run ID, selected tag, resolved image identity when
    available, lock, checksums, and downloaded firmware/package metadata.
-5. Flash only that verified Actions artifact to exact COM12. The hardware flash
-   receipt must match the selected full commit and numeric Actions run, record
-   COM12, prove successful non-erasing `esptool write-flash`, and bind the exact
+5. Flash only that verified Actions artifact to the qualified D1L target. On
+   the current route, the hardware flash receipt must bind `neopi5`, the exact
+   stable by-id selector, and USB VID:PID `1A86:7523`; on the Windows
+   alternative it must bind `COM12`. It must match the selected full commit and
+   numeric Actions run, prove successful non-erasing `esptool write-flash`, and
+   bind the exact
    command offset/file set to the complete checksummed artifact. It must include
    the D1L bootloader at `0x0`, partition table at `0x8000`, and application at
    `0x10000`, with no extra pair. Run `version` and require an OK JSON response
@@ -207,9 +281,10 @@ Do not run a local firmware build and do not hand-edit `dependencies.lock`.
    selected 40-hex commit.
 6. On the same artifact, repeat issue #63 board, display/touch, Wi-Fi, RF,
    RP2040/SD, Map, health, reboot, and post-power-cycle smoke. Use COM16 only
-   when an RP2040-specific proof requires it; do not substitute another ESP32
-   port for COM12.
-7. Refresh all relevant commit-matched release-gate evidence. COM12 smoke must
+   when an RP2040-specific proof requires it; do not substitute any other
+   serial device or a raw `/dev/ttyUSB*` path for the qualified D1L target.
+7. Refresh all relevant commit-matched release-gate evidence. Qualified-target
+   smoke must
    record the same full commit in `expected_firmware_commit`,
    `device_build_commit`, and the `version` result. A run using
    `--skip-esp32-flash` intentionally leaves `exact_actions_esp32_flash` failed.
@@ -247,12 +322,24 @@ Downloaded release-package verification is recursive and fail-closed. The top `S
 
 ## Hardware Smoke
 
-Run only when the D1L port is known. For issue work, do not run this whole
-block. Pick the one proof that closes the selected P0, attach that artifact to
-the issue/PR, and move on to the next blocker.
+Run only after the target checks above pass. For issue work, do not run this
+whole block. Pick the one proof that closes the selected P0, attach that
+artifact to the issue/PR, and move on to the next blocker.
+
+For the current Pi route, flash only from the extracted checksum-verified
+exact Actions package:
+
+```bash
+cd /path/to/checksum-verified-actions-package
+./flash_project.sh
+cd /path/to/repository-checkout
+python ./scripts/smoke_d1l.py --port "$D1L_PORT" --manual-touch
+```
+
+For the Windows alternative only:
 
 ```powershell
-$env:D1L_PORT = "COMx"
+$env:D1L_PORT = "COM12"
 & <checksum-verified-actions-package>\flash_project.ps1 -Port $env:D1L_PORT
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 ```
@@ -261,7 +348,9 @@ This release run does not create a flash backup. The backup helper is an
 optional recovery tool for a separately authorized session, not a production
 flash prerequisite.
 
-Issue-specific COM12 proof:
+Historical/Windows-alternative COM12 proof templates follow. For current Pi
+evidence, pass the stable `$D1L_PORT`, write under an explicit `neopi5`
+evidence directory, and never use `COM12` in the filename or identity fields:
 
 ```powershell
 # Split/stale redraw proof.
@@ -299,11 +388,11 @@ python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens <screen-or-s
 # The Clear flag is rejected for every Map surface; use the network-suppressed Map command above.
 ```
 
-For a deliberate COM12 UI sweep after the matching GitHub Actions artifacts are
+For a deliberate current-target UI sweep after the matching GitHub Actions artifacts are
 downloaded:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes --dry-run
 ```
 
 That sweep requires no manual touch confirmation, does not open COM8, COM11, or
@@ -311,7 +400,7 @@ COM29, does not copy RP2040 UF2 files, reuses the already-validated production
 bridge, skips the SD suite, and writes the final release-gate audit under
 `artifacts\release-gate`. Unless `--skip-esp32-flash` is explicitly supplied,
 it first verifies and flashes the selected Actions artifact and writes the
-commit/run/COM12 receipt required by the P0 audit; smoke then rejects any device
+commit/run/qualified-target receipt required by the P0 audit; smoke then rejects any device
 whose reported full build commit differs. It can still take time because it
 cycles multiple UI surfaces; do not use it as the default proof for a
 one-surface P0.
@@ -320,7 +409,7 @@ Only when RP2040 bridge firmware, SD smoke firmware, or SD electrical evidence
 actually needs refreshing, opt into the UF2 path:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke --dry-run
 ```
 
 That refresh path copies only Actions-built RP2040 UF2 artifacts, captures the
@@ -329,7 +418,7 @@ production bridge, then checksum-verifies and non-erasingly reflashes the exact
 ESP32 image before the strict pre-diagnostic clean gate. This fresh boot clears
 failure latches intentionally observed while the smoke firmware made the bridge
 unavailable; a failed reflash stops before preflight. The runner then executes
-the COM12 SD canary suite.
+the qualified-target SD canary suite.
 
 Expected commands:
 
@@ -375,7 +464,14 @@ Expected commands:
 - `crashlog`
 - `health`
 
-Hardware success must include a current COM12 `ui_capture_d1l.py` PNG for display pixels with a passing `ui_capture_simulator_diff` against the matching simulator/reference view, a current COM12 `ui_compose_keyboard_capture_d1l.py --targets all` artifact with every release-blocking compose/input keyboard PNG/RGB565 capture, plus manual touch confirmation until touch automation is expanded.
+Hardware success must include a current qualified-target `ui_capture_d1l.py`
+PNG for display pixels with a passing `ui_capture_simulator_diff` against the
+matching simulator/reference view, a current qualified-target
+`ui_compose_keyboard_capture_d1l.py --targets all` artifact with every
+release-blocking compose/input keyboard PNG/RGB565 capture, plus manual touch
+confirmation until touch automation is expanded. For the current route, every
+receipt must bind `neopi5`, the stable by-id selector, and `1A86:7523`; a raw
+`/dev/ttyUSB*` value is non-qualifying.
 
 RF automation policy: transmit only through a controlled direct-message peer or
 the dedicated `#test` channel. Any later step that names `mesh send public`
@@ -386,7 +482,11 @@ controlled peer.
 
 ## Hardware Soak
 
-Use the soak runner for Phase 7 stability evidence after smoke passes. The runner writes a JSON artifact under `artifacts/soak` unless `--out` is supplied.
+Use the soak runner for Phase 7 stability evidence after smoke passes. The
+runner writes a JSON artifact under `artifacts/soak` unless `--out` is
+supplied. On `neopi5`, retain the stable `$D1L_PORT` established above; do not
+replace it with the observed raw tty. Active RF soak remains blocked until the
+narrow local controlled-peer access prerequisite is proven.
 
 Short active RF probe through a promoted controlled DM peer. Automated traffic
 must use DM or the dedicated `#test` channel, never the default Public channel:
@@ -399,10 +499,30 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 
 Full idle/listening acceptance window:
 
-```powershell
-$env:D1L_PORT = "COMx"
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 43200 --sample-interval-sec 300 --out artifacts\soak\d1l-soak-idle-12h-COMx.json
+```bash
+export D1L_PORT='/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0'
+export D1L_COMMIT='<exact-40-hex-Actions-candidate>'
+export D1L_ACTIONS_RUN='<numeric-run-id>'
+export D1L_ACTIONS_ATTEMPT='<numeric-run-attempt>'
+export D1L_PUBLIC_KEY='<exact-64-hex-retained-D1L-public-key>'
+python ./scripts/soak_d1l.py \
+  --port "$D1L_PORT" \
+  --expected-firmware-commit "$D1L_COMMIT" \
+  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --github-run-id "$D1L_ACTIONS_RUN" \
+  --github-run-attempt "$D1L_ACTIONS_ATTEMPT" \
+  --expected-release-profile full_feature \
+  --expected-sd-history-mode conditional \
+  --duration-sec 43200 \
+  --sample-interval-sec 300 \
+  --out "artifacts/soak/full-feature-idle-12h-${D1L_COMMIT}-neopi5-by-id.json"
 ```
+
+This invocation is release-bound. The runner rejects raw ttys, validates the
+stable `1A86:7523` target before and after the run, binds the exact retained
+D1L public key, and requires a clean checkout of the exact firmware commit.
+The idle soak does not run an SD file canary; conditional-SD acceptance is a
+separate bounded gate and is not repeated for 12 hours.
 
 Full active messaging acceptance window through that controlled DM peer:
 
@@ -492,7 +612,8 @@ Operator note: the other local MeshCore bot may be used as the controlled DM RF 
 10. Reboot.
 11. Verify `messages dm` and `messages dm <fingerprint>` retain the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
 
-Repeatable local controlled-peer DM proof:
+Windows-alternative controlled-peer DM template (historical for the current Pi
+route):
 
 ```powershell
 $env:D1L_PORT = "COM12"
@@ -503,7 +624,8 @@ python .\scripts\probe_d1l_dm.py --port $env:D1L_PORT --peer-status $env:MESH_PE
 
 Success requires schema 2, exact clean-commit metadata, `mode=hardware-dm-probe`, `physical_observed=true`, `dry_run=false`, `simulated=false`, `dm_rf_tx=true`, `public_rf_tx=false`, `public_rf_transmit=false`, `formats_sd=false`, no command beginning with `mesh send public`, `mesh send dm` returning `ok=true`, `messages dm <fingerprint>` and `packets search <token>` retaining the token, `routes trace <fingerprint>` matching the target, `health` ready, and the explicitly allowed controlled-peer status showing at least `rx_contact_total +1`.
 
-Repeatable full controlled-peer RF acceptance:
+Windows-alternative full controlled-peer RF template (historical for the
+current Pi route):
 
 ```powershell
 $env:D1L_PORT = "COM12"
@@ -677,7 +799,7 @@ Use `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the RP2040 UF2 flash and post-flash
 4. Verify Settings opens a full-height read-only Storage root with only Card status and Data locations destinations. Card status must use plain-language media guidance, Data locations must scroll within its bounded panel, Back must return one level at a time, and the fixed footer must state that DeskOS never formats cards. No page may render a raw setup-action slug or attach mount, remount, delete, format, or other mutating callback.
 5. Boot with no card and verify firmware continues with onboard storage defaults.
 6. After the RP2040 SD bridge firmware is flashed through a documented RP2040 path, boot with a valid DeskOS-formatted card and verify serial/UI status reports card/root readiness. If boot prepare reaches the ready file gate before store init, verify `message_store_backend="sd"`, `dm_store_backend="sd"`, `route_store_backend="sd"`, `packet_log_backend="sd"`, `data_backend="mixed"`, and `setup_action="retained_history_sd_enabled"` while settings/identity/contacts/read-state/crashlog remain onboard-backed. `export_backend` may report `sd_diagnostic_exports_ready`, and map tiles may report `sd_map_tiles_ready` when the map-tile file-operation gate is ready. If boot prepare times out or remains `mount_pending`, fallback must remain NVS while `storage status.manager.state` reports the retry state; run `storage remount` or the acceptance runner to prove later convergence without ESP32 reboot.
-7. Run `python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario correct-structure`, `python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario missing-structure`, and `python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario existing-data` to prove correct DeskOS cards, valid filesystems with missing `/deskos`, and existing DeskOS data are preserved/prepared without formatting. Only an explicit manager-busy remount receipt (`ESP_ERR_INVALID_STATE` with `manager.running=true`) may trigger bounded fresh-status polling and exactly one retry. A cached `READY_SD` sample from the same `manager.attempt` is insufficient: require a later attempt when that counter is present, or otherwise observe a transitional/non-running manager state before a fresh clean `READY_SD` sample. The final retry must report `ok=true` and `retained_worker_quiesce_acquired=true` before any file canary, setup, or health command. `python .\scripts\autonomous_hardware_validate_d1l.py ... --refresh-rp2040-smoke` captures `rp2040-unavailable` between official smoke and bridge restore; actual `no-card` and `unformatted` still require the physical card state.
+7. Run `python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario correct-structure`, `python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario missing-structure`, and `python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario existing-data` to prove correct DeskOS cards, valid filesystems with missing `/deskos`, and existing DeskOS data are preserved/prepared without formatting. Only an explicit manager-busy remount receipt (`ESP_ERR_INVALID_STATE` with `manager.running=true`) may trigger bounded fresh-status polling and exactly one retry. A cached `READY_SD` sample from the same `manager.attempt` is insufficient: require a later attempt when that counter is present, or otherwise observe a transitional/non-running manager state before a fresh clean `READY_SD` sample. The final retry must report `ok=true` and `retained_worker_quiesce_acquired=true` before any file canary, setup, or health command. The autonomous `--refresh-rp2040-smoke --dry-run` output is planning-only and cannot capture `rp2040-unavailable`; actual `no-card`, `unformatted`, and bridge-unavailable states require the narrow physical acceptance paths.
 8. With a non-FAT32 or unmountable card inserted, run `python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario unformatted` and verify it records `formats_sd=false`, does not send a setup-confirm command, keeps NVS fallback active, and tells the user to prepare FAT32 on a computer.
 9. With the RP2040 bridge file protocol flashed, run `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` to perform the serial-only file-operation canary under `/deskos`: temp write, read-back compare, `rename replace=1`, stat, final read, delete, and deleted-stat verification. Then run `storage export-canary <token>` or `python .\scripts\sd_export_canary_d1l.py --port COM12 --token export1` to prove the diagnostic export path writes `exports/diagnostics/export-canary-<token>.json` by temp write/read plus atomic rename and leaves the final file present. Then run `storage export-diagnostics <token>` or `python .\scripts\sd_diagnostic_export_d1l.py --port COM12 --token diag1` to prove a chunked diagnostic export JSON bundle writes to `exports/diagnostics/diagnostic-export-<token>.json`, verifies temp and final readback, and reports map tile cache readiness without bundling actual tiles. Then run `storage export-data <token>` or `python .\scripts\sd_data_export_d1l.py --port COM12 --token data1` to prove a sampled user-data JSON bundle writes to `exports/data/data-export-<token>.json`, verifies temp and final readback, and reports `private_identity_exported=false`. Then run `storage map-tile-canary <token>` or `python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1` to prove the map-tile cache path writes `map/tiles/z12/x1/y2-<token>.tile` through temp write/read plus atomic rename and leaves the final synthetic tile present. Then run `python .\scripts\sd_retained_history_acceptance_d1l.py --port COM12` to append synthetic retained Public, DM, route, and packet rows through `storage retained-canary <token>`. Require the command's four positive sequence IDs, four `sd` backends, `storage_manager_quiesced=true`, `retained_worker_quiesced=true`, and explicit `public_rf_tx=false`/`formats_sd=false`. Before reboot, require a bounded full persistence poll to prove Public, DM, route, packet, and storage snapshots are all clean, with zero retained SD/NVS failure counters, `ESP_OK` errors, no degradation latches, and `manager.state=READY_SD`; a transient `STATUS` / `wait_for_retained_worker` sample may be retried but is never itself passing evidence. Poll exhaustion, timeout, or an unexpected boot must report `pre_reboot_gate_passed=false`, `reboot_attempted=false`, and a precise `reboot_skipped_reason`; it must not issue `reboot`. A failed canary may still collect its bounded read-only token/fingerprint readbacks, status, and health for partial-write diagnosis under the same fail-closed boundary. `sd_reboot_remount_acceptance_d1l.py` must enforce this boundary and additionally require successful pre-remount and map-tile canary receipts. Before and after the nonce-changing `route_flush="ESP_OK"` reboot, each readback must contain a non-empty row with its exact sequence and canary fields, with consistent page/total/route counters. Echoed search or fingerprint fields are not retention evidence. Follow with `python .\scripts\soak_d1l.py --port COM12 --duration-sec 300 --sample-interval-sec 60 --sample-storage --sd-file-canary` so the file canary is repeated during a passive stability window. Do not send Public RF for this validation.
 10. Boot with a present but unrelated existing-data card and verify firmware offers NVS fallback or clear backup/reformat-on-computer guidance without silently wiping data.

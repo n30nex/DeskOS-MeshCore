@@ -2,11 +2,79 @@
 
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "lvgl.h"
 
 _Static_assert(sizeof(d1l_ui_settings_controller_t) <=
                    D1L_UI_SETTINGS_CONTROLLER_MAX_BYTES,
                "More controller exceeded its persistent-owner size budget");
+
+bool d1l_ui_settings_action_available(d1l_ui_settings_action_t action)
+{
+    switch (action) {
+    case D1L_UI_SETTINGS_ACTION_PACKETS:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_PACKETS);
+    case D1L_UI_SETTINGS_ACTION_TERMINAL:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MUTABLE_TERMINAL);
+    case D1L_UI_SETTINGS_ACTION_OBSERVER:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_OBSERVER_MQTT);
+    case D1L_UI_SETTINGS_ACTION_UPDATE:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_SIGNED_UPDATE);
+    case D1L_UI_SETTINGS_ACTION_NOTIFICATIONS:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
+    case D1L_UI_SETTINGS_ACTION_ADMIN:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN);
+    case D1L_UI_SETTINGS_ACTION_STORAGE:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_RETAINED_NVS);
+    case D1L_UI_SETTINGS_ACTION_WIFI:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL);
+    case D1L_UI_SETTINGS_ACTION_BLE:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
+    case D1L_UI_SETTINGS_ACTION_RADIO:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_RADIO_SETTINGS);
+    case D1L_UI_SETTINGS_ACTION_MAP_TILES:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
+    case D1L_UI_SETTINGS_ACTION_DIAGNOSTICS:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_DIAGNOSTICS);
+    case D1L_UI_SETTINGS_ACTION_ADVANCED:
+        return d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI) ||
+               d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_MUTABLE_TERMINAL) ||
+               d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_USER_TRACE);
+    case D1L_UI_SETTINGS_ACTION_DISPLAY:
+        return true;
+    case D1L_UI_SETTINGS_ACTION_NONE:
+    case D1L_UI_SETTINGS_ACTION_COUNT:
+    default:
+        return false;
+    }
+}
+
+static bool settings_category_has_available_items(
+    const d1l_ui_more_category_view_t *category)
+{
+    if (!category) {
+        return false;
+    }
+    for (size_t index = 0U; index < category->item_count; ++index) {
+        const d1l_ui_more_item_view_t *item = &category->items[index];
+        if (!item->actionable ||
+            d1l_ui_settings_action_available(item->action)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static lv_obj_t *settings_create_label(lv_obj_t *parent, const char *text, uint32_t color)
 {
@@ -98,7 +166,8 @@ static bool settings_binding_action_is_current(
         return false;
     }
     const d1l_ui_more_item_view_t *item = &category->items[binding->item_index];
-    return item->actionable && item->action == binding->action;
+    return item->actionable && item->action == binding->action &&
+        d1l_ui_settings_action_available(binding->action);
 }
 
 static void settings_action_event_cb(lv_event_t *event)
@@ -125,7 +194,8 @@ static void settings_bind_action(lv_obj_t *object,
     if (!object || !binding || !controller || !item || !controller->active ||
         !controller->action_handler || !item->actionable ||
         item->action <= D1L_UI_SETTINGS_ACTION_NONE ||
-        item->action >= D1L_UI_SETTINGS_ACTION_COUNT) {
+        item->action >= D1L_UI_SETTINGS_ACTION_COUNT ||
+        !d1l_ui_settings_action_available(item->action)) {
         return;
     }
     binding->controller = controller;
@@ -205,19 +275,26 @@ static lv_obj_t *render_menu_item(lv_obj_t *parent,
     if (!parent || !item || !binding || !controller) {
         return NULL;
     }
+    const bool internal_storage =
+        item->action == D1L_UI_SETTINGS_ACTION_STORAGE &&
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY);
+    const char *title_text = internal_storage ? "Storage" : item->title;
+    const char *status_text = internal_storage ?
+        (item->warning ? "Internal NVS issue" : "Internal NVS") :
+        item->status;
     lv_obj_t *row = settings_create_row(parent, 444, 54, item->warning);
     if (!row) {
         return NULL;
     }
     settings_bind_action(row, binding, controller, item, category, item_index);
 
-    lv_obj_t *title = settings_create_label(row, item->title, item->accent);
+    lv_obj_t *title = settings_create_label(row, title_text, item->accent);
     settings_set_dot_width(title, 190);
     if (title) {
         lv_obj_set_pos(title, 28, 17);
     }
 
-    lv_obj_t *status = settings_create_label(row, item->status,
+    lv_obj_t *status = settings_create_label(row, status_text,
                                               item->warning ? 0xFCA5A5 : 0xAAB8C4);
     settings_set_dot_width(status, item->actionable ? 176 : 202);
     if (status) {
@@ -245,6 +322,9 @@ static bool render_category(d1l_ui_settings_controller_t *controller,
     }
     const d1l_ui_more_category_view_t *category =
         &controller->rendered.categories[category_index];
+    if (!settings_category_has_available_items(category)) {
+        return true;
+    }
     lv_obj_t *group = settings_create_container(controller->menu, 444);
     if (!group) {
         return false;
@@ -267,13 +347,24 @@ static bool render_category(d1l_ui_settings_controller_t *controller,
     lv_obj_add_event_cb(category_row, settings_category_event_cb, LV_EVENT_CLICKED,
                         category_binding);
 
-    lv_obj_t *title_label = settings_create_label(category_row, category->title,
+    const bool radio_only =
+        category->category == D1L_UI_MORE_CATEGORY_CONNECTIONS &&
+        !d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
+    const bool storage_only =
+        category->category == D1L_UI_MORE_CATEGORY_STORAGE_MAPS &&
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
+    const char *category_title = storage_only ? "Storage" : category->title;
+    const char *category_summary = radio_only ? "Radio profile" :
+        (storage_only ? "Retained internal storage" : category->summary);
+    lv_obj_t *title_label = settings_create_label(category_row, category_title,
                                                    category->warning ? 0xFCA5A5 : 0xF4F7FB);
     settings_set_dot_width(title_label, 360);
     if (title_label) {
         lv_obj_set_pos(title_label, 16, 4);
     }
-    lv_obj_t *summary_label = settings_create_label(category_row, category->summary,
+    lv_obj_t *summary_label = settings_create_label(category_row, category_summary,
                                                      category->warning ? 0xD98993 : 0x8EA0AE);
     settings_set_dot_width(summary_label, 376);
     if (summary_label) {
@@ -295,6 +386,11 @@ static bool render_category(d1l_ui_settings_controller_t *controller,
                           LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(children, 4, 0);
     for (size_t item_index = 0U; item_index < category->item_count; ++item_index) {
+        const d1l_ui_more_item_view_t *item = &category->items[item_index];
+        if (item->actionable &&
+            !d1l_ui_settings_action_available(item->action)) {
+            continue;
+        }
         if (!render_menu_item(children, &category->items[item_index],
                               &controller->action_bindings[category_index][item_index],
                               controller, category->category, item_index)) {

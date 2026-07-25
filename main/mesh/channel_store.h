@@ -141,6 +141,13 @@ esp_err_t d1l_channel_store_copy_protocol_key(
 size_t d1l_channel_store_copy_hash_matches(
     uint8_t channel_hash, d1l_channel_protocol_key_t *out_keys,
     size_t max_keys);
+/* RX-facing secret lookup is release-profile aware. Core 1.0 exposes only
+ * the built-in Public key even when retained predecessor data still contains
+ * enabled private channels. Development/full-feature profiles preserve the
+ * all-match collision scan. */
+size_t d1l_channel_store_copy_rx_hash_matches(
+    uint8_t channel_hash, d1l_channel_protocol_key_t *out_keys,
+    size_t max_keys);
 /* Fails closed with ESP_ERR_INVALID_STATE when a one-byte protocol hash maps
  * to more than one enabled secret. */
 esp_err_t d1l_channel_store_find_unique_hash(

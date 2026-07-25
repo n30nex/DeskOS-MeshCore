@@ -23,14 +23,14 @@
     "main/comms/usb_command_parser.h"
   ],
   "source_pins": {
-    ".github/workflows/d1l-ci.yml": "4079db38cfb2e1baacd59b0e9e35130230aa788739588efffaf124799c0cfeb3",
-    "main/CMakeLists.txt": "a71403d0365da4101343088679b8b34ba3ae44adf03882a6190ec4d17785b24c",
-    "main/comms/usb_console.c": "86af197df21f91d2b1ef8b800c8634ce2206c8880479bde8623af28102285ccf",
+    ".github/workflows/d1l-ci.yml": "ae26bb5fb48e87be5a356db171e7475cd06cdab8e30dad0db9ba5c67dc20711e",
+    "main/CMakeLists.txt": "be79d22e3d58231e24b417ebc6b63bcdf8cde2b4d5f98f125b6eb389df195f76",
+    "main/comms/usb_console.c": "0cdc68a47699d35cc17833ad58a123a381d5c617c4e6e78a1988def59cee1120",
     "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
     "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
     "scripts/usb_command_parser_fuzz_d1l.py": "0c138efd789d8e73ad126624f4491bfcd5924ec01c0fa18f1ff2c88197dfe85a",
     "tests/fuzz/usb_command_parser_fuzz.c": "f90b5deb72ce0f723995d1a8b0a6fc947bad468baf337161d3fd976148ac698f",
-    "tests/native/usb_command_parser_test.c": "74ff93eaed93e832455c2e7c150cc60dcdd645a1d3f38575caf27c96145b72a5"
+    "tests/native/usb_command_parser_test.c": "06f553cf2742d5e24c228a1e5ecd2e7d0f1ab85619dbd720dd67d1596ee75501"
   },
   "rejection_contract": [
     "embedded_nul",

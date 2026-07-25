@@ -214,14 +214,64 @@ static void test_muted_unread_stays_separate_from_attention_count(void)
     };
     d1l_ui_home_view_model_t view;
     d1l_ui_home_view(&input, &view);
-    assert(strcmp(view.messages_status, "3 unread + 4 muted") == 0);
+    assert(strcmp(view.messages_status, "3 unread + 4 excluded") == 0);
     assert(view.messages_status_color == 0xFBBF24U);
 
     input.public_unread_count = 0U;
     input.dm_unread_count = 0U;
     d1l_ui_home_view(&input, &view);
-    assert(strcmp(view.messages_status, "4 muted") == 0);
+    assert(strcmp(view.messages_status, "4 excluded") == 0);
     assert(view.messages_status_color == 0x8EA0AEU);
+}
+
+static void test_release_profile_strips_hidden_sd_failures(void)
+{
+    d1l_ui_home_view_input_t input = {
+        .map_location_set = true,
+        .map_tile_cache_ready = true,
+        .wifi_connected = true,
+        .wifi_enabled = true,
+        .wifi_connecting = true,
+        .ble_build_enabled = true,
+        .ble_transport_supported = true,
+        .ble_companion_enabled = true,
+        .storage_retained_sd_degraded = true,
+        .storage_sd_data_root_ready = true,
+        .storage_setup_required = true,
+        .storage_sd_needs_fat32 = true,
+        .storage_sd_state = "error",
+        .storage_setup_action =
+            "inspect_rp2040_sd_mount_error_firmware_path",
+    };
+    d1l_ui_home_view_apply_release_profile(&input);
+    d1l_ui_home_view_model_t view;
+    d1l_ui_home_view(&input, &view);
+#if EXPECT_CORE
+    assert(!input.wifi_connected);
+    assert(!input.wifi_connecting);
+    assert(!input.ble_build_enabled);
+    assert(!input.map_location_set);
+    assert(!input.storage_retained_sd_degraded);
+    assert(!input.storage_sd_data_root_ready);
+    assert(strcmp(view.sd_value, "internal") == 0);
+    assert(strcmp(view.sd_compact_value, "Internal") == 0);
+    assert(view.sd_value_color == 0x8EA0AEU);
+    assert(!view.storage_needs_attention);
+    assert(strcmp(view.attention_value, "OK") == 0);
+#else
+    assert(input.wifi_connected);
+    assert(input.ble_build_enabled);
+    assert(input.map_location_set);
+    assert(input.storage_retained_sd_degraded);
+    assert(strcmp(view.sd_compact_value, "Check") == 0);
+    assert(view.sd_value_color == 0xF87171U);
+    assert(view.storage_needs_attention);
+#endif
+
+    input.storage_retained_backup_degraded = true;
+    d1l_ui_home_view(&input, &view);
+    assert(view.sd_value_color == 0xFBBF24U ||
+           view.sd_value_color == 0xF87171U);
 }
 
 int main(void)
@@ -231,6 +281,7 @@ int main(void)
     test_storage_and_map_fail_closed_states();
     test_unread_count_saturates_instead_of_wrapping();
     test_muted_unread_stays_separate_from_attention_count();
+    test_release_profile_strips_hidden_sd_failures();
     test_connecting_unavailable_and_mesh_error_states_are_explicit();
     test_unknown_mesh_and_storage_reconnect_fail_closed();
     test_tx_busy_requires_ready_radio_and_stays_healthy();

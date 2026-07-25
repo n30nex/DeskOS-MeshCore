@@ -3,8 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "app/settings_model.h"
 #include "bsp_sx126x.h"
+#include "diagnostics/event_log.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -55,14 +57,19 @@
     (D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_SIGNATURE_SIZE)
 #define D1L_MESHCORE_MAX_ADVERT_DATA D1L_ADVERT_DATA_MAX_LEN
 #define D1L_MESHCORE_CIPHER_MAC_SIZE D1L_MESHCORE_CRYPTO_MAC_SIZE
-#define D1L_MESHCORE_MAX_TEXT_BYTES 160U
 #define D1L_MESHCORE_USER_TEXT_MAX D1L_MESSAGE_MAX_CHARS
+#define D1L_MESHCORE_CHANNEL_TEXT_PREFIX_MAX \
+    ((D1L_NODE_NAME_LEN - 1U) + 2U)
+#define D1L_MESHCORE_MAX_TEXT_BYTES \
+    (5U + D1L_MESHCORE_CHANNEL_TEXT_PREFIX_MAX + \
+     D1L_MESHCORE_USER_TEXT_MAX)
 #define D1L_MESHCORE_BW_INDEX_62K5 3U
 #define D1L_MESHCORE_PREAMBLE_LOW_SF 32U
 #define D1L_MESHCORE_TX_TIMEOUT_MS 5000U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 0x01U
 #define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
 #define D1L_MESHCORE_TXT_TYPE_PLAIN 0U
+#define D1L_MESHCORE_TXT_TYPE_CLI_DATA 1U
 #define D1L_MESHCORE_REQUEST_TYPE 0x00U
 #define D1L_MESHCORE_RESPONSE_TYPE 0x01U
 #define D1L_MESHCORE_ANON_REQUEST_TYPE 0x07U
@@ -83,8 +90,9 @@
 #define D1L_MESHCORE_RECIPROCAL_PATH_DELAY_MS 500U
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ bytes");
-_Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
-               "MeshCore plaintext buffer must fit the user text limit");
+_Static_assert(
+    D1L_MESHCORE_MAX_TEXT_BYTES == 176U,
+    "MeshCore plaintext must fit timestamp, sender prefix, and user text");
 _Static_assert(D1L_CHANNEL_STORE_CAPACITY ==
                    D1L_MESHCORE_CHANNEL_CANDIDATE_CAPACITY,
                "channel RX must execute every configured candidate");
@@ -270,6 +278,7 @@ typedef enum {
     D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS,
+    D1L_MESHCORE_SERVICE_CMD_ADMIN_MUTATION,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGOUT,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_RESPONSE,
     D1L_MESHCORE_SERVICE_EVENT_TX_DONE,
@@ -295,6 +304,7 @@ typedef struct {
     bool dm_path_probe;
     char trace_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char admin_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    d1l_meshcore_admin_mutation_t admin_mutation;
     int16_t rssi;
     int8_t snr;
     uint64_t monotonic_us;
@@ -1129,6 +1139,13 @@ static bool channel_protocol_keys_equal(
         lhs->secret_len == rhs->secret_len &&
         lhs->secret_len <= sizeof(lhs->secret) &&
         secure_bytes_equal(lhs->secret, rhs->secret, lhs->secret_len);
+}
+
+static bool channel_available_in_release_profile(uint64_t channel_id)
+{
+    return channel_id == D1L_CHANNEL_PUBLIC_ID ||
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
 }
 
 static esp_err_t derive_local_identity_shared_secret(
@@ -2256,14 +2273,14 @@ static size_t meshcore_decrypt_after_mac(const uint8_t *secret, uint8_t *dest, s
 }
 
 static esp_err_t build_channel_text_packet(
-    const d1l_channel_protocol_key_t *channel, const char *text,
-    uint8_t path_hash_bytes, uint32_t tx_timestamp, uint8_t *raw,
-    size_t raw_size, uint8_t *out_len)
+    const d1l_channel_protocol_key_t *channel, const char *sender_name,
+    const char *text, uint8_t path_hash_bytes, uint32_t tx_timestamp,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len)
 {
     if (!channel || channel->channel_id == 0U ||
         (channel->secret_len != D1L_CHANNEL_SECRET_128_LEN &&
          channel->secret_len != D1L_CHANNEL_SECRET_256_LEN) ||
-        !raw || !out_len) {
+        !sender_name || !raw || !out_len) {
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t text_ret = validate_user_text(text);
@@ -2277,9 +2294,21 @@ static esp_err_t build_channel_text_packet(
     uint8_t plain[D1L_MESHCORE_MAX_TEXT_BYTES] = {0};
     write_le32(plain, tx_timestamp);
     plain[4] = 0;
+    const size_t sender_name_len =
+        strnlen(sender_name, D1L_NODE_NAME_LEN);
     const size_t message_len = strlen(text);
-    memcpy(&plain[5], text, message_len);
-    const size_t plain_len = 5U + message_len;
+    if (sender_name_len == 0U || sender_name_len >= D1L_NODE_NAME_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t message_offset = 5U + sender_name_len + 2U;
+    if (message_offset + message_len > sizeof(plain)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    memcpy(&plain[5], sender_name, sender_name_len);
+    plain[5U + sender_name_len] = ':';
+    plain[6U + sender_name_len] = ' ';
+    memcpy(&plain[message_offset], text, message_len);
+    const size_t plain_len = message_offset + message_len;
 
     size_t i = 0;
     if (!d1l_meshcore_wire_write_prefix(
@@ -3005,7 +3034,7 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     }
     d1l_channel_protocol_key_t
         candidates[D1L_CHANNEL_STORE_CAPACITY] = {0};
-    const size_t candidate_count = d1l_channel_store_copy_hash_matches(
+    const size_t candidate_count = d1l_channel_store_copy_rx_hash_matches(
         packet.payload[0], candidates, D1L_CHANNEL_STORE_CAPACITY);
     d1l_meshcore_channel_dispatch_t dispatch = {0};
     if (!d1l_meshcore_channel_dispatch_begin(&dispatch, candidate_count)) {
@@ -3068,7 +3097,8 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     const uint64_t channel_id = selected_key.channel_id;
     secure_zero_channel_key(&current_key);
     secure_zero_channel_key(&selected_key);
-    if (!selected_current) {
+    if (!selected_current ||
+        !channel_available_in_release_profile(channel_id)) {
         secure_zero_bytes(plain, sizeof(plain));
         s_status.channel_rx_decrypt_failed++;
         return;
@@ -3187,6 +3217,89 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         }
 
         const uint8_t txt_type = plain[4] >> 2;
+        if (txt_type == D1L_MESHCORE_TXT_TYPE_CLI_DATA) {
+            d1l_meshcore_text_plaintext_view_t text_view = {0};
+            d1l_meshcore_admin_context_t mutation_context = {0};
+            const bool mutation_pending =
+                (plain[4] & 0x03U) == 0U &&
+                d1l_meshcore_text_plaintext_view(
+                    &plain[5], plain_len - 5U, false, 0U, &text_view) &&
+                d1l_meshcore_admin_runtime_capture_mutation_pending(
+                    &mutation_context) &&
+                strcmp(mutation_context.binding.fingerprint,
+                       contact->fingerprint) == 0;
+            if (!mutation_pending) {
+                d1l_meshcore_admin_context_wipe(&mutation_context);
+                secure_zero_bytes(secret, sizeof(secret));
+                secure_zero_bytes(plain, sizeof(plain));
+                continue;
+            }
+
+            uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+            const bool packet_hash_ready =
+                d1l_meshcore_packet_hash_calculate(
+                    &packet, packet_hash) == ESP_OK;
+            if (packet_hash_ready &&
+                d1l_meshcore_packet_hash_cache_contains(
+                    &s_rx_packet_hash_cache, packet_hash)) {
+                d1l_meshcore_admin_context_wipe(&mutation_context);
+                secure_zero_bytes(secret, sizeof(secret));
+                secure_zero_bytes(plain, sizeof(plain));
+                return false;
+            }
+
+            d1l_meshcore_admin_binding_t current = {0};
+            snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
+                     contact->fingerprint);
+            current.role = d1l_meshcore_admin_role_for_contact(contact);
+            memcpy(current.peer_public_key, sender_pub,
+                   sizeof(current.peer_public_key));
+            memcpy(current.local_public_key,
+                   settings->identity_public_key,
+                   sizeof(current.local_public_key));
+            memcpy(current.session_secret, secret,
+                   sizeof(current.session_secret));
+            bool considered = false;
+            const d1l_meshcore_admin_response_result_t mutation_result =
+                d1l_meshcore_admin_runtime_dispatch_mutation_response(
+                    &current, mutation_context.generation,
+                    read_le32(plain), text_view.text,
+                    text_view.text_length,
+                    (uint64_t)esp_timer_get_time(), &considered);
+            if (considered) {
+                s_status.rx_packets++;
+                if ((mutation_result ==
+                         D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED ||
+                     mutation_result ==
+                         D1L_MESHCORE_ADMIN_RESPONSE_REJECTED) &&
+                    packet_hash_ready) {
+                    (void)d1l_meshcore_packet_hash_cache_remember(
+                        &s_rx_packet_hash_cache, packet_hash);
+                }
+                if (mutation_result !=
+                        D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED) {
+                    const bool applied =
+                        mutation_result ==
+                        D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED;
+                    d1l_event_log_append(
+                        applied ? D1L_EVENT_LOG_LEVEL_INFO :
+                                  D1L_EVENT_LOG_LEVEL_WARN,
+                        "admin",
+                        applied ? "mutation_applied" :
+                                  "mutation_not_applied",
+                        d1l_meshcore_admin_mutation_name(
+                            mutation_context.pending_mutation));
+                }
+            }
+            d1l_meshcore_admin_binding_wipe(&current);
+            d1l_meshcore_admin_context_wipe(&mutation_context);
+            secure_zero_bytes(secret, sizeof(secret));
+            secure_zero_bytes(plain, sizeof(plain));
+            if (considered) {
+                return false;
+            }
+            continue;
+        }
         if (txt_type != D1L_MESHCORE_TXT_TYPE_PLAIN) {
             secure_zero_bytes(secret, sizeof(secret));
             continue;
@@ -5565,6 +5678,104 @@ admin_status_cleanup:
     return ret;
 }
 
+static esp_err_t meshcore_service_handle_admin_mutation(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    d1l_meshcore_admin_context_t context = {0};
+    d1l_meshcore_admin_binding_t current = {0};
+    d1l_settings_t settings_snapshot = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_meshcore_route_selection_t selection = {0};
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
+    uint8_t raw_len = 0U;
+    d1l_meshcore_service_cmd_t raw_cmd = {0};
+    esp_err_t ret = ESP_ERR_INVALID_STATE;
+
+    if (!cmd ||
+        !d1l_meshcore_admin_mutation_command(cmd->admin_mutation) ||
+        !s_service_initialized ||
+        !d1l_meshcore_admin_runtime_capture_authenticated(&context)) {
+        goto admin_mutation_cleanup;
+    }
+
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
+    ret = prepare_admin_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
+        &selection);
+    snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
+             context.binding.fingerprint);
+    if (ret == ESP_OK) {
+        current.role = d1l_meshcore_admin_role_for_contact(&contact);
+        memcpy(current.local_public_key,
+               settings_snapshot.identity_public_key,
+               sizeof(current.local_public_key));
+        const esp_err_t derive_ret = hex_to_bytes(
+                current.peer_public_key, sizeof(current.peer_public_key),
+                contact.public_key_hex) ?
+            derive_local_identity_shared_secret(
+                current.peer_public_key, current.local_public_key,
+                current.session_secret) : ESP_ERR_INVALID_STATE;
+        if (derive_ret != ESP_OK ||
+            !d1l_meshcore_admin_runtime_validate_binding(
+                &current, context.generation)) {
+            ret = ESP_ERR_INVALID_STATE;
+        }
+    }
+    if (ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_invalidate(ret);
+        goto admin_mutation_cleanup;
+    }
+
+    uint32_t tag = 0U;
+    ret = d1l_settings_next_mesh_timestamp(&tag);
+    if (ret == ESP_OK) {
+        ret = d1l_meshcore_admin_build_mutation_packet(
+            &settings_snapshot, &current, &selection, cmd->admin_mutation,
+            tag, meshcore_encrypt_then_mac, raw, sizeof(raw), &raw_len);
+    }
+    if (ret != ESP_OK) {
+        goto admin_mutation_cleanup;
+    }
+
+    uint32_t request_generation = 0U;
+    if (!d1l_meshcore_admin_runtime_begin_mutation(
+            &current, context.generation, cmd->admin_mutation, tag, now_us,
+            &request_generation)) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto admin_mutation_cleanup;
+    }
+    d1l_meshcore_admin_binding_wipe(&current);
+    d1l_meshcore_admin_context_wipe(&context);
+
+    raw_cmd.type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW;
+    raw_cmd.requested_tx_kind = D1L_MESH_TX_OPERATION_GENERIC;
+    raw_cmd.raw_len = raw_len;
+    memcpy(raw_cmd.raw, raw, raw_len);
+    ret = meshcore_service_handle_send_raw(&raw_cmd);
+    d1l_meshcore_admin_runtime_note_mutation_tx(
+        request_generation, cmd->admin_mutation, tag, ret);
+    if (ret != ESP_OK) {
+        goto admin_mutation_cleanup;
+    }
+
+    (void)d1l_route_store_upsert_observation(
+        contact.fingerprint, contact.alias, "admin_mutation",
+        route_name(selection.route), "tx", 0, 0,
+        selection.path_hash_bytes, selection.path_hops, raw_len);
+    d1l_event_log_append(
+        D1L_EVENT_LOG_LEVEL_WARN, "admin", "mutation_queued",
+        d1l_meshcore_admin_mutation_name(cmd->admin_mutation));
+
+admin_mutation_cleanup:
+    d1l_meshcore_admin_binding_wipe(&current);
+    d1l_meshcore_admin_context_wipe(&context);
+    secure_zero_bytes(&raw_cmd, sizeof(raw_cmd));
+    secure_zero_bytes(raw, sizeof(raw));
+    return ret;
+}
+
 static esp_err_t meshcore_service_handle_admin_logout(void)
 {
     d1l_meshcore_admin_runtime_logout();
@@ -5926,6 +6137,12 @@ static void meshcore_service_task(void *arg)
             break;
         case D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS:
             ret = meshcore_service_handle_admin_request_status();
+            if (ret != ESP_OK) {
+                s_status.rejected_commands++;
+            }
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_ADMIN_MUTATION:
+            ret = meshcore_service_handle_admin_mutation(&cmd);
             if (ret != ESP_OK) {
                 s_status.rejected_commands++;
             }
@@ -6597,6 +6814,31 @@ esp_err_t d1l_meshcore_service_admin_request_status(void)
     return ret;
 }
 
+esp_err_t d1l_meshcore_service_admin_request_mutation(
+    d1l_meshcore_admin_mutation_t mutation, bool local_confirmed)
+{
+    if (!local_confirmed) {
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    if (!d1l_meshcore_admin_mutation_command(mutation)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!s_service_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_ADMIN_MUTATION,
+        .admin_mutation = mutation,
+    };
+    const esp_err_t ret = meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    meshcore_service_command_wipe(&cmd);
+    return ret;
+}
+
 esp_err_t d1l_meshcore_service_admin_logout(void)
 {
     d1l_meshcore_service_cmd_t cmd = {
@@ -6624,6 +6866,10 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
 {
     if (channel_id == 0U) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!channel_available_in_release_profile(channel_id)) {
+        s_status.rejected_commands++;
+        return ESP_ERR_NOT_SUPPORTED;
     }
     if (!channel_message_generation_ready()) {
         s_status.rejected_commands++;
@@ -6681,8 +6927,9 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         return ret;
     }
     ret = build_channel_text_packet(
-        &channel_key, text, settings->path_hash_bytes, tx_timestamp, raw,
-        sizeof(raw), &raw_len);
+        &channel_key, settings->node_name, text,
+        settings->path_hash_bytes, tx_timestamp, raw, sizeof(raw),
+        &raw_len);
     secure_zero_channel_key(&channel_key);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
@@ -6748,6 +6995,10 @@ esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
 
 esp_err_t d1l_meshcore_service_send_active_channel(const char *text)
 {
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
+        return d1l_meshcore_service_send_public(text);
+    }
     d1l_channel_info_t active = {0};
     if (!d1l_channel_store_find_default(&active)) {
         s_status.rejected_commands++;

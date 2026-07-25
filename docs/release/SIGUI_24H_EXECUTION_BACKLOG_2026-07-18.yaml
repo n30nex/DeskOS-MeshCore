@@ -1,0 +1,460 @@
+schema_version: 1
+generated_at: '2026-07-18'
+last_execution_target_update: '2026-07-24'
+repository: n30nex/SIGUI
+starting_main_observed: 846f728dd3faded85451c6d39ba6a07cb8ca7f44
+code_baseline_observed: bd6ea0e685442d8a820766f4686395e50ca5397f
+release:
+  name: MeshCore DeskOS D1L Core 1.0
+  tag: v1.0.0
+  profile: core_1_0
+  hard_elapsed_hour_cap: 24
+  target_branch: release/24h-core
+  full_feature_release_ready_expected: false
+constraints:
+  actions_only_firmware_build: true
+  current_d1l_target:
+    platform: linux
+    host: neopi5
+    account: siguidev
+    authentication: key_only
+    selector: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+    expected_usb_vid_pid: '1A86:7523'
+    observed_resolved_tty: /dev/ttyUSB2
+    observed_resolved_tty_authoritative: false
+    require_symlink: true
+    require_read_write_access: true
+  windows_alternative_d1l_port: COM12
+  controlled_peer_narrow_access_ready: false
+  target_move_closes_release_gate: false
+  remaining_fail_closed_gates:
+  - exact_sha_actions_package
+  - non_erasing_flash
+  - ui_and_manual_review
+  - software_and_cold_reboots
+  - retained_state
+  - protocol_time_migration
+  - controlled_rf_dm
+  - active_and_idle_soak
+  - install_review
+  - final_core_audit
+  rp2040_port_when_sd_only: COM16
+  rp2040_port_is_core_d1l_target: false
+  forbidden_ports:
+  - COM8
+  - COM11
+  - COM29
+  format_sd: false
+  erase_settings_for_normal_flash: false
+  automated_default_public_rf: false
+  single_integration_pr: true
+  one_owner_per_hotspot: true
+  predecessor_hardware_evidence_closes_candidate: false
+supported_capabilities:
+- board_display_touch_backlight
+- home_core_navigation
+- default_public_messages
+- direct_messages
+- basic_verified_contacts
+- nodes
+- packets
+- read_only_route_signal
+- usa_canada_radio_profile
+- identity_signed_adverts
+- retained_nvs
+- diagnostics_crashlog_health
+- usb_install_recovery
+- fixed_utc_offset_truth
+conditional_capabilities:
+  sd_history:
+    default: conditional
+    pass_value: supported_optional
+    failure_value: disabled
+unavailable_capabilities:
+- map
+- wifi_user_control
+- ble
+- multi_channel_management
+- repeater_room_admin
+- observer_mqtt
+- signed_sd_update_ota
+- gps_location
+- mutable_terminal
+- advanced_qr_emoji
+- user_trace_path
+agents:
+  lead:
+    role: integrator_release_owner
+    owns:
+    - release/24h-core
+    - main/app/release_profile.c
+    - main/app/release_profile.h
+    - candidate_freeze
+    - final_actions_run
+    - release_decision
+  agent_a:
+    role: core_ui
+    owns:
+    - main/ui/**
+    - main/ui/ui_phase1.c
+  agent_b:
+    role: storage_persistence
+    owns:
+    - main/storage/retained_blob_store.c
+    - main/storage/retained_blob_store.h
+  agent_c:
+    role: core_mesh_rf
+    owns:
+    - main/mesh/**
+    hotspot: main/mesh/meshcore_service.c
+  agent_d:
+    role: profile_command_admission
+    owns:
+    - main/comms/usb_command_parser.*
+    - main/comms/usb_console.*
+  agent_e:
+    role: qa_package_audit
+    owns:
+    - scripts/core_smoke_d1l.py
+    - scripts/core_ui_corruption_probe_d1l.py
+    - scripts/core_release_gate_audit_d1l.py
+    - scripts/package_release_d1l.py
+    - tests/test_core_*
+  agent_f:
+    role: independent_review_evidence
+    owns:
+    - review_notes
+    - operator_command_sheet
+    - receipt_validation
+work_packages:
+- id: R0
+  title: Freeze Core 1.0 product contract and sprint ledger
+  owner: lead
+  elapsed_window: H0.0-H0.5
+  depends_on: []
+  outputs:
+  - release/24h-core branch
+  - docs/release/24H_STATUS.md
+  - exact starting SHA
+  - file ownership table
+  acceptance:
+  - Core contract committed
+  - PR199 explicitly deferred
+  - SD marked conditional
+  - no feature ambiguity
+  hard_blocker: true
+- id: R1
+  title: Central immutable release profile
+  owner: lead
+  elapsed_window: H0.5-H3.0
+  depends_on:
+  - R0
+  outputs:
+  - main/app/release_profile.h
+  - main/app/release_profile.c
+  - version/health/profile fields
+  - app snapshot capability binding
+  tests:
+  - release profile native/source contract tests
+  acceptance:
+  - profile deterministic
+  - profile package-visible
+  - runtime setting cannot change profile
+  hard_blocker: true
+- id: R2
+  title: Core UI surface
+  owner: agent_a
+  elapsed_window: H0.5-H3.0
+  depends_on:
+  - R0
+  outputs:
+  - supported dock/home/settings routes
+  - unavailable routes hidden
+  - deep-link rejection
+  - simulator references
+  tests:
+  - core navigation
+  - unsupported route rejection
+  - UI lifecycle focused tests
+  acceptance:
+  - only Home Messages Nodes Packets Settings reachable
+  - no background work from unavailable screens
+  hard_blocker: true
+- id: R3
+  title: Command and background-task admission
+  owner: agent_d
+  elapsed_window: H0.5-H3.0
+  depends_on:
+  - R1
+  outputs:
+  - profile-aware command allow/deny table
+  - ESP_ERR_NOT_SUPPORTED contract
+  - unavailable task startup disabled
+  tests:
+  - unsupported commands have no side effects
+  - read-only status truth
+  acceptance:
+  - all deferred mutations rejected before side effects
+  - response includes profile and feature IDs
+  hard_blocker: true
+- id: R4
+  title: Rebase PR197 NVS duplicate-write suppression
+  owner: agent_b
+  elapsed_window: H0.5-H2.0
+  depends_on:
+  - R0
+  outputs:
+  - bounded retained NVS patch
+  - updated manifests
+  - native test
+  tests:
+  - duplicate writes do not add commits
+  - changed payload still commits
+  acceptance:
+  - clean rebase/cherry-pick
+  - focused tests green
+  hard_blocker: false
+- id: R5
+  title: Conditional SD mode and NVS fallback
+  owner: agent_b
+  elapsed_window: H1.0-H3.0
+  depends_on:
+  - R1
+  outputs:
+  - sd_history_mode profile field
+  - UI/package truth
+  - NVS fallback
+  tests:
+  - SD supported/disabled profile cases
+  - no-format policy
+  acceptance:
+  - SD can be disabled without core failure
+  - no partial claim
+  hard_blocker: true
+- id: R6
+  title: Core DM and contact-path review/fixes
+  owner: agent_c
+  elapsed_window: H0.5-H3.0
+  depends_on:
+  - R0
+  outputs:
+  - focused DM test report
+  - small fixes only if failures proven
+  tests:
+  - ACK/retry/failure state
+  - duplicate/replay
+  - contact-to-DM
+  - route/PATH authority
+  acceptance:
+  - no known core software P0
+  - runner ready for controlled peer
+  hard_blocker: true
+- id: R7
+  title: Core smoke, package, and release audit
+  owner: agent_e
+  elapsed_window: H0.5-H3.5
+  depends_on:
+  - R1
+  - R2
+  - R3
+  - R5
+  outputs:
+  - scripts/core_smoke_d1l.py
+  - scripts/core_ui_corruption_probe_d1l.py
+  - scripts/core_release_gate_audit_d1l.py
+  - profile-bound package manifest
+  - SUPPORTED_FEATURES.md
+  tests:
+  - core smoke contract
+  - core UI tab sequence excludes Map and unavailable destinations
+  - core audit pass/fail fixtures
+  - package capability truth
+  - full default audit unchanged
+  acceptance:
+  - core_release_ready separate from full feature
+  - default full audit remains strict
+  hard_blocker: true
+- id: R8
+  title: Independent review
+  owner: agent_f
+  elapsed_window: H2.0-H4.0
+  depends_on:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  outputs:
+  - review report
+  - port-policy review
+  - hardware command sheet
+  acceptance:
+  - no fabricated evidence
+  - no forbidden port
+  - no SD format
+  hard_blocker: true
+- id: R9
+  title: Integration and one full host suite
+  owner: lead
+  elapsed_window: H3.0-H5.0
+  depends_on:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  outputs:
+  - single integration commit
+  - full host test report
+  - clean diff
+  tests:
+  - all focused suites
+  - python -m pytest tests -q
+  - ledger/manifest validation
+  - git diff --check
+  acceptance:
+  - zero known core software P0
+  - candidate source frozen
+  hard_blocker: true
+- id: R10
+  title: Frozen candidate GitHub Actions
+  owner: lead
+  elapsed_window: H5.0-H7.0
+  depends_on:
+  - R9
+  outputs:
+  - green d1l-ci run
+  - downloaded artifacts
+  - verified checksums
+  - provenance
+  - SBOM
+  acceptance:
+  - exact SHA/run/package binding
+  - no changed dependency lock
+  hard_blocker: true
+- id: R11
+  title: Exact flash and physical core UI/boot/persistence
+  owner: lead
+  elapsed_window: H7.0-H9.0
+  depends_on:
+  - R10
+  outputs:
+  - flash receipt
+  - core smoke receipt
+  - UI receipts
+  - reboot/cold-boot receipt
+  acceptance:
+  - qualified D1L target exact SHA
+  - neopi5 evidence binds stable by-id selector and USB VID:PID 1A86:7523
+  - raw /dev/ttyUSB* is observational only
+  - COM12 remains the valid Windows alternative
+  - display/touch green
+  - 20 UI rounds
+  - 5 software reboots
+  - 3 cold boots
+  - retained state intact
+  hard_blocker: true
+- id: R12
+  title: Controlled RF/DM acceptance
+  owner: lead
+  elapsed_window: H9.0-H10.5
+  depends_on:
+  - R11
+  outputs:
+  - rf_full_acceptance exact receipt
+  acceptance:
+  - narrowly scoped local peer status/control access proven for siguidev
+  - outbound DM
+  - inbound DM
+  - ACK/PATH
+  - direct route
+  - retained thread
+  - health ready
+  - public_rf_tx false
+  hard_blocker: true
+- id: R13
+  title: Conditional SD decision
+  owner: lead
+  elapsed_window: H10.5-H12.0
+  depends_on:
+  - R11
+  outputs:
+  - sd supported_optional receipt or disabled decision
+  acceptance:
+  - supported only after paired artifact/card/remount/remove/reinsert/canary proof
+  - otherwise hidden and disabled
+  fallback: disable SD, omit RP2040 package, use NVS
+  hard_blocker: false
+- id: R14
+  title: Core 90-minute soak
+  owner: lead
+  elapsed_window: H12.0-H14.0
+  depends_on:
+  - R12
+  - R13
+  outputs:
+  - 60m active receipt
+  - 30m idle receipt
+  acceptance:
+  - no crash-like reset
+  - uptime monotonic
+  - no timeout/restart
+  - retained task stack >=4096 bytes
+  - memory bounded
+  - DM deltas
+  - backend stable
+  hard_blocker: true
+- id: R15
+  title: Bounded repair loop
+  owner: lead
+  elapsed_window: H14.0-H20.0
+  depends_on: []
+  activation: only when a core gate fails
+  acceptance:
+  - smallest fix
+  - focused tests
+  - one new full suite
+  - one new Actions candidate
+  - affected hardware gate plus 90m soak rerun for runtime changes
+  hard_blocker: false
+- id: R16
+  title: Final Core audit, tag, and release
+  owner: lead
+  elapsed_window: H20.0-H23.0
+  depends_on:
+  - R10
+  - R11
+  - R12
+  - R14
+  outputs:
+  - core audit
+  - release package
+  - v1.0.0 tag
+  - GitHub release
+  - hashes and release notes
+  acceptance:
+  - core_release_ready true
+  - full_feature_release_ready false
+  - zero core P0
+  - zero core crash/data-loss/security P1
+  hard_blocker: true
+hard_no_go:
+- stale_or_predecessor_hardware_evidence
+- candidate_sha_mismatch
+- checksum_or_provenance_failure
+- actions_failure
+- unexpected_reset_or_boot_loop
+- retained_data_loss
+- dm_interop_failure
+- unsupported_feature_reachable
+- heap_or_stack_failure
+- sd_claim_without_sd_gate
+- missing_usb_recovery
+- forbidden_port_use
+- on_device_sd_format
+- edited_or_fabricated_evidence

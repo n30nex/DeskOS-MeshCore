@@ -1,12 +1,12 @@
-# MeshCore DeskOS D1L 8 MB single-app layout.
-# Keep default NVS/PHY and the factory app offset aligned with ESP-IDF defaults
-# so project flashing preserves settings. Retained history mirrors use their
-# own NVS partition at the unused top of flash, avoiding default-NVS pressure.
-# A separate marker sector makes first-use initialization distinguishable from
-# later retained-partition corruption, which must fail closed without erasing.
+# MeshCore DeskOS D1L 8 MB dual-slot production layout.
+# A one-time USB project flash migrates the old single factory image to ota_0.
+# Default NVS and both retained partitions keep their exact offsets, preserving
+# settings, identity, and retained history. Firmware never replaces this table.
 # Name,     Type, SubType, Offset,   Size,     Flags
 nvs,        data, nvs,     0x9000,   0x6000,
-phy_init,   data, phy,     0xf000,   0x1000,
-factory,    app,  factory, 0x10000,  0x7D0000,
+otadata,    data, ota,     0xf000,   0x2000,
+phy_init,   data, phy,     0x11000,  0x1000,
+ota_0,      app,  ota_0,   0x20000,  0x3E0000,
+ota_1,      app,  ota_1,   0x400000, 0x3E0000,
 d1l_ret_meta,data, 0x40,    0x7E0000, 0x1000,
 d1l_retained,data, nvs,     0x7E1000, 0x1F000,

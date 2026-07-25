@@ -66,5 +66,7 @@ typedef struct {
 } d1l_ui_home_view_model_t;
 
 const char *d1l_ui_home_sd_state(const d1l_ui_home_view_input_t *input);
+void d1l_ui_home_view_apply_release_profile(
+    d1l_ui_home_view_input_t *input);
 void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
                       d1l_ui_home_view_model_t *out_view);

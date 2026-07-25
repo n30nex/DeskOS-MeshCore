@@ -75,3 +75,48 @@ def test_persistence_builders_do_not_use_content_sentinels_for_volatile_rows():
     ):
         source = read(path)
         assert "is_volatile_ui_canary" not in source
+
+
+def test_public_and_dm_console_snapshots_bind_rows_stats_and_preview_under_one_lock():
+    cases = [
+        (
+            "main/mesh/message_store.c",
+            "size_t d1l_message_store_query_page_snapshot(",
+            "size_t d1l_message_store_query(",
+            "message_store_stats_locked(backend_state)",
+        ),
+        (
+            "main/mesh/dm_store.c",
+            "size_t d1l_dm_store_copy_recent_page_snapshot(",
+            "size_t d1l_dm_store_query_thread_page(",
+            "dm_store_stats_locked(backend_state)",
+        ),
+        (
+            "main/mesh/dm_store.c",
+            "size_t d1l_dm_store_copy_thread_page_snapshot(",
+            "size_t d1l_dm_store_copy_thread(",
+            "dm_store_stats_locked(backend_state)",
+        ),
+    ]
+
+    for path, start, end, stats_call in cases:
+        source = read(path)
+        body = source.split(start, 1)[1].split(end, 1)[0]
+        assert body.count("d1l_store_lock_take(&s_store_lock);") == 1
+        assert body.count("d1l_store_lock_give(&s_store_lock);") == 1
+        assert "s_volatile_entry.seq" in body
+        assert stats_call in body
+        assert body.index(stats_call) < body.index(
+            "d1l_store_lock_give(&s_store_lock);"
+        )
+
+
+def test_release_only_append_if_space_apis_are_absent():
+    for path in (
+        "main/mesh/message_store.c",
+        "main/mesh/message_store.h",
+        "main/mesh/dm_store.c",
+        "main/mesh/dm_store.h",
+        "tests/native/retained_store_volatile_test.c",
+    ):
+        assert "append_if_space" not in read(path)

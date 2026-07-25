@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "hal/rp2040_bridge.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
@@ -122,6 +123,8 @@ static esp_err_t s_sentinel_commit_result = ESP_OK;
 static esp_err_t s_dedicated_commit_result = ESP_OK;
 static esp_err_t s_legacy_commit_result = ESP_OK;
 static esp_err_t s_nvs_stats_result = ESP_OK;
+static size_t s_nvs_get_attempt;
+static size_t s_nvs_get_fail_on_attempt;
 static size_t s_meta_write_attempt;
 static size_t s_meta_write_fail_on_attempt;
 static esp_err_t s_meta_erase_result = ESP_OK;
@@ -405,6 +408,8 @@ static void clear_nvs_case(void)
     s_sentinel_commit_result = ESP_OK;
     s_legacy_commit_result = ESP_OK;
     s_nvs_stats_result = ESP_OK;
+    s_nvs_get_attempt = 0U;
+    s_nvs_get_fail_on_attempt = 0U;
     s_partition_init_result = ESP_OK;
     s_meta_write_attempt = 0U;
     s_meta_write_fail_on_attempt = 0U;
@@ -650,6 +655,11 @@ esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out_value,
     assert(length);
     note_nvs_event(context->dedicated ? TEST_NVS_EVENT_GET_DEDICATED
                                       : TEST_NVS_EVENT_GET_LEGACY);
+    s_nvs_get_attempt++;
+    if (s_nvs_get_fail_on_attempt != 0U &&
+        s_nvs_get_attempt == s_nvs_get_fail_on_attempt) {
+        return ESP_ERR_INVALID_STATE;
+    }
     test_nvs_entry_t *entry = find_nvs_entry(
         context->dedicated, context->namespace_name, key);
     if (!entry) {
@@ -1026,6 +1036,112 @@ static void assert_all_states(bool enabled, uint32_t generation)
         assert(d1l_retained_blob_store_uses_sd(
                    (d1l_retained_blob_store_id_t)id) == enabled);
     }
+}
+
+static void test_release_profile_sd_admission(void)
+{
+#ifndef EXPECT_PROFILE_SD_ENABLED
+#error "EXPECT_PROFILE_SD_ENABLED must bind the retained-store profile case"
+#endif
+    static const uint8_t payload[] = "profile-bound retained state";
+    uint8_t readback[sizeof(payload)] = {0};
+    size_t readback_len = sizeof(readback);
+
+    s_nvs_enabled = true;
+    reset_sd_files();
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_ready());
+    assert(d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_RETAINED_NVS));
+    assert(d1l_retained_blob_store_is_available(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES));
+
+    static const struct {
+        bool data_ready;
+        bool file_ops_supported;
+        bool atomic_rename_supported;
+        uint32_t file_line_max;
+        uint32_t file_chunk_max;
+        uint32_t path_max;
+    } incomplete_prerequisites[] = {
+        {false, true, true, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX},
+        {true, false, true, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX},
+        {true, true, false, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX},
+        {true, true, true, D1L_RP2040_FILE_LINE_MAX - 1U,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX},
+        {true, true, true, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX - 1U, D1L_RP2040_FILE_PATH_MAX},
+        {true, true, true, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX - 1U},
+    };
+    for (size_t i = 0U;
+         i < sizeof(incomplete_prerequisites) /
+                 sizeof(incomplete_prerequisites[0]);
+         ++i) {
+        d1l_retained_blob_store_note_sd_backend(
+            incomplete_prerequisites[i].data_ready,
+            incomplete_prerequisites[i].file_ops_supported,
+            incomplete_prerequisites[i].atomic_rename_supported,
+            incomplete_prerequisites[i].file_line_max,
+            incomplete_prerequisites[i].file_chunk_max,
+            incomplete_prerequisites[i].path_max);
+        assert_all_states(false, 0U);
+    }
+
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+
+#if EXPECT_PROFILE_SD_ENABLED
+    assert(d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_SD_HISTORY));
+    assert_all_states(true, 1U);
+    assert(strcmp(d1l_retained_blob_store_backend_name(
+                      D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES),
+                  "sd") == 0);
+#else
+    assert(!d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_SD_HISTORY));
+    assert_all_states(false, 0U);
+    assert(strcmp(d1l_retained_blob_store_backend_name(
+                      D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES),
+                  "nvs") == 0);
+    assert(d1l_retained_blob_store_write_sd_primary(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               payload, sizeof(payload)) == ESP_ERR_INVALID_STATE);
+    assert(s_sd_event_count == 0U);
+#endif
+
+    assert(d1l_retained_blob_store_write(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               payload, sizeof(payload)) == ESP_OK);
+    assert_nvs_blob(true, "d1l_messages", "public",
+                    payload, sizeof(payload));
+#if EXPECT_PROFILE_SD_ENABLED
+    assert(s_rename_count > 0U);
+#else
+    assert(s_sd_event_count == 0U);
+#endif
+
+    assert(d1l_retained_blob_store_read(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               readback, &readback_len) == ESP_OK);
+    assert(readback_len == sizeof(payload));
+    assert(memcmp(readback, payload, sizeof(payload)) == 0);
+
+    assert(d1l_retained_blob_store_erase(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+               "public") == ESP_OK);
+#if EXPECT_PROFILE_SD_ENABLED
+    assert(s_delete_count > 0U);
+#else
+    assert(s_sd_event_count == 0U);
+#endif
 }
 
 static void test_retained_partition_init(void)
@@ -1778,6 +1894,108 @@ static void test_nvs_capacity_and_write_amplification_telemetry(void)
     s_nvs_stats_result = ESP_OK;
 }
 
+static void test_unchanged_nvs_fallback_write_skips_flash_commit(void)
+{
+    static const char original[] = "same retained snapshot";
+    static const char replacement[] = "new! retained snapshot";
+    static const uint32_t duplicate_requests = 64U;
+    d1l_retained_blob_store_nvs_telemetry_t telemetry = {0};
+
+    _Static_assert(sizeof(original) == sizeof(replacement),
+                   "same-length replacement must exercise byte comparison");
+
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               original, sizeof(original)) == ESP_OK);
+    const size_t sets_after_first =
+        count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED);
+    const size_t commits_after_first =
+        count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED);
+
+    for (uint32_t i = 0U; i < duplicate_requests; ++i) {
+        assert(d1l_retained_blob_store_write_nvs_fallback(
+                   D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+                   original, sizeof(original)) == ESP_OK);
+    }
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) ==
+           sets_after_first);
+    assert(count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) ==
+           commits_after_first);
+
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(telemetry.write_attempt_count == 1U + duplicate_requests);
+    assert(telemetry.write_commit_count == 1U);
+    assert(telemetry.write_fail_count == 0U);
+    assert(telemetry.write_bytes_attempted ==
+           sizeof(original) * (1U + duplicate_requests));
+    assert(telemetry.write_bytes_committed == sizeof(original));
+
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               replacement, sizeof(replacement)) == ESP_OK);
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) ==
+           sets_after_first + 1U);
+    assert(count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) ==
+           commits_after_first + 1U);
+
+    memset(&telemetry, 0, sizeof(telemetry));
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(telemetry.write_attempt_count == 2U + duplicate_requests);
+    assert(telemetry.write_commit_count == 2U);
+    assert(telemetry.write_fail_count == 0U);
+    assert(telemetry.write_bytes_attempted ==
+           sizeof(original) * (2U + duplicate_requests));
+    assert(telemetry.write_bytes_committed == sizeof(original) * 2U);
+}
+
+static void test_nvs_unchanged_compare_failure_fails_safe_to_write(void)
+{
+    static const char retained[] = "retained snapshot";
+    d1l_retained_blob_store_nvs_telemetry_t telemetry = {0};
+
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               retained, sizeof(retained)) == ESP_OK);
+
+    size_t expected_sets = count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED);
+    size_t expected_commits =
+        count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED);
+
+    s_nvs_get_fail_on_attempt = s_nvs_get_attempt + 1U;
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               retained, sizeof(retained)) == ESP_OK);
+    expected_sets++;
+    expected_commits++;
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) == expected_sets);
+    assert(count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) ==
+           expected_commits);
+
+    s_nvs_get_fail_on_attempt = s_nvs_get_attempt + 2U;
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               retained, sizeof(retained)) == ESP_OK);
+    expected_sets++;
+    expected_commits++;
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) == expected_sets);
+    assert(count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) ==
+           expected_commits);
+
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(telemetry.write_attempt_count == 3U);
+    assert(telemetry.write_commit_count == 3U);
+    assert(telemetry.write_fail_count == 0U);
+    assert(telemetry.write_bytes_attempted == sizeof(retained) * 3U);
+    assert(telemetry.write_bytes_committed == sizeof(retained) * 3U);
+}
+
 static void test_partition_init_failure_never_falls_back_or_resurrects(void)
 {
     static const char dedicated_blob[] = "dedicated current";
@@ -2120,8 +2338,14 @@ static void test_factory_reset_sd_recovery_end_to_end(void)
     assert(ready);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "profile-gate") == 0) {
+        test_release_profile_sd_admission();
+        puts("native retained SD profile admission: ok");
+        return 0;
+    }
+
     /* Production initializes default NVS before enabling any SD backend; the
      * lineage gate must be able to prove that no reset generation exists. */
     s_nvs_enabled = true;
@@ -2212,6 +2436,8 @@ int main(void)
     test_dedicated_write_reclaims_legacy_only_after_commit();
     test_erase_clears_dedicated_and_legacy_copies();
     test_nvs_capacity_and_write_amplification_telemetry();
+    test_unchanged_nvs_fallback_write_skips_flash_commit();
+    test_nvs_unchanged_compare_failure_fails_safe_to_write();
     test_partition_init_failure_never_falls_back_or_resurrects();
     test_factory_reset_sd_recovery_end_to_end();
 

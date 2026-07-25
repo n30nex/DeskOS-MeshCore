@@ -38,7 +38,7 @@ static void test_default_view_is_owned_bounded_and_truthful(void)
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_CONNECTIONS, 1)->status,
                   "Unavailable") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_CONNECTIONS, 2)->status,
-                  "Needs setup") == 0);
+                  "Not configured") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 0)->status,
                   "Internal storage") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 1)->status,
@@ -46,7 +46,11 @@ static void test_default_view_is_owned_bounded_and_truthful(void)
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 0)->status,
                   "Time setting unavailable") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
+                  "0 unread") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 2)->status,
                   "Not set") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_ADVANCED, 0)->status,
+                  "Needs setup") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_SUPPORT, 0)->status,
                   "Version 1.2.3") == 0);
     assert(!item(&view, D1L_UI_MORE_CATEGORY_SUPPORT, 0)->actionable);
@@ -62,6 +66,7 @@ static void test_connectivity_and_ready_storage_states(void)
         .ble_build_enabled = true,
         .ble_transport_supported = true,
         .ble_companion_enabled = true,
+        .observer_state = "connected",
         .radio_ready = true,
         .storage_sd_present = true,
         .storage_sd_data_root_ready = true,
@@ -70,6 +75,7 @@ static void test_connectivity_and_ready_storage_states(void)
         .map_tile_cache_ready = true,
         .map_tile_render_supported = true,
         .identity_ready = true,
+        .notification_unread_count = 4U,
         .time_available = true,
         .time_approximate = true,
         .timezone_settings_ready = true,
@@ -86,7 +92,7 @@ static void test_connectivity_and_ready_storage_states(void)
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_CONNECTIONS, 1)->status,
                   "On") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_CONNECTIONS, 2)->status,
-                  "Ready") == 0);
+                  "connected") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 0)->status,
                   "Ready") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 1)->status,
@@ -94,6 +100,10 @@ static void test_connectivity_and_ready_storage_states(void)
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 0)->status,
                   "UTC-04:00 / ~08:42") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
+                  "4 unread") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 2)->status,
+                  "Ready") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_ADVANCED, 0)->status,
                   "Ready") == 0);
 
     input.wifi_connected = false;
@@ -103,7 +113,7 @@ static void test_connectivity_and_ready_storage_states(void)
     assert(d1l_ui_more_view(&input, &view));
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_CONNECTIONS, 0)->status,
                   "Connecting") == 0);
-    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_CONNECTIONS, 2)->status,
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_ADVANCED, 0)->status,
                   "Applying") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 1)->status,
                   "Needs Wi-Fi") == 0);
@@ -181,6 +191,62 @@ static void test_unterminated_fixed_buffers_fail_closed(void)
     assert(!d1l_ui_more_view_model_is_valid(&view));
 }
 
+static void test_release_profile_strips_hidden_sd_failures(void)
+{
+    d1l_ui_more_view_input_t input = {
+        .wifi_build_enabled = true,
+        .wifi_enabled = true,
+        .wifi_connected = true,
+        .wifi_connecting = true,
+        .ble_build_enabled = true,
+        .ble_transport_supported = true,
+        .ble_companion_enabled = true,
+        .storage_sd_present = true,
+        .storage_sd_data_root_ready = true,
+        .storage_sd_needs_fat32 = true,
+        .storage_setup_required = true,
+        .storage_retained_sd_degraded = true,
+        .map_location_set = true,
+        .map_tile_cache_ready = true,
+        .map_tile_render_supported = true,
+        .storage_sd_state = "error",
+        .storage_setup_action =
+            "inspect_rp2040_sd_mount_error_firmware_path",
+        .firmware_version = "test",
+    };
+    d1l_ui_more_view_apply_release_profile(&input);
+    d1l_ui_more_view_model_t view;
+    assert(d1l_ui_more_view(&input, &view));
+    const d1l_ui_more_item_view_t *storage =
+        item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 0U);
+#if EXPECT_CORE
+    assert(!input.wifi_build_enabled);
+    assert(!input.ble_build_enabled);
+    assert(!input.map_location_set);
+    assert(!input.storage_sd_present);
+    assert(!input.storage_retained_sd_degraded);
+    assert(strcmp(storage->status, "Internal storage") == 0);
+    assert(storage->accent == 0xF4F7FBU);
+    assert(!storage->warning);
+
+    input.storage_retained_backup_degraded = true;
+    assert(d1l_ui_more_view(&input, &view));
+    storage = item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 0U);
+    assert(strcmp(storage->status, "Needs attention") == 0);
+    assert(storage->accent == 0xF87171U);
+    assert(storage->warning);
+#else
+    assert(input.wifi_build_enabled);
+    assert(input.ble_build_enabled);
+    assert(input.map_location_set);
+    assert(input.storage_sd_present);
+    assert(input.storage_retained_sd_degraded);
+    assert(strcmp(storage->status, "Needs attention") == 0);
+    assert(storage->accent == 0xF87171U);
+    assert(storage->warning);
+#endif
+}
+
 int main(void)
 {
     test_default_view_is_owned_bounded_and_truthful();
@@ -188,6 +254,7 @@ int main(void)
     test_storage_faults_override_stale_ready_flags();
     test_invalid_and_long_inputs_fail_closed_or_truncate();
     test_unterminated_fixed_buffers_fail_closed();
+    test_release_profile_strips_hidden_sd_failures();
     puts("native UI More view model: ok");
     return 0;
 }

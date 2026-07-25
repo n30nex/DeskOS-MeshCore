@@ -3,12 +3,56 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "lvgl.h"
+#include "ui_font_symbols_14.h"
 #include "ui_modal.h"
 
 _Static_assert(sizeof(d1l_ui_messages_controller_t) <=
                    D1L_UI_MESSAGES_CONTROLLER_MAX_BYTES,
                "Messages controller exceeded its persistent-owner size budget");
+
+uint64_t d1l_ui_messages_projected_channel_id(uint64_t active_channel_id)
+{
+    return d1l_release_feature_available(
+               D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT) ?
+        active_channel_id : D1L_CHANNEL_PUBLIC_ID;
+}
+
+bool d1l_ui_messages_action_available(d1l_ui_messages_action_t action)
+{
+    switch (action) {
+    case D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ:
+    case D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC:
+    case D1L_UI_MESSAGES_ACTION_OPEN_HISTORY:
+    case D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC:
+    case D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_PUBLIC_MESSAGES);
+    case D1L_UI_MESSAGES_ACTION_SHOW_DIRECT:
+    case D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD:
+    case D1L_UI_MESSAGES_ACTION_CLOSE_DM_THREAD:
+    case D1L_UI_MESSAGES_ACTION_LOAD_OLDER_DM_THREAD:
+    case D1L_UI_MESSAGES_ACTION_OPEN_DM_SEARCH:
+    case D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD:
+    case D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_DIRECT_MESSAGES);
+    case D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR:
+    case D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR:
+    case D1L_UI_MESSAGES_ACTION_CREATE_CHANNEL:
+    case D1L_UI_MESSAGES_ACTION_IMPORT_CHANNEL:
+    case D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL:
+    case D1L_UI_MESSAGES_ACTION_MANAGE_CHANNEL:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
+    case D1L_UI_MESSAGES_ACTION_SHOW_ROOT:
+        return true;
+    case D1L_UI_MESSAGES_ACTION_NONE:
+    default:
+        return false;
+    }
+}
 
 static bool messages_object_is_valid(const lv_obj_t *object)
 {
@@ -102,8 +146,14 @@ bool d1l_ui_messages_create(d1l_ui_messages_controller_t *controller,
     memset(controller, 0, sizeof(*controller));
     controller->thread_limit = D1L_UI_MESSAGES_THREAD_INITIAL_ROWS;
     controller->thread_sheet = messages_create_full_sheet(parent);
-    controller->channel_sheet = messages_create_full_sheet(parent);
-    if (!controller->thread_sheet || !controller->channel_sheet) {
+    const bool channel_management_available =
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
+    if (channel_management_available) {
+        controller->channel_sheet = messages_create_full_sheet(parent);
+    }
+    if (!controller->thread_sheet ||
+        (channel_management_available && !controller->channel_sheet)) {
         if (messages_object_is_valid(controller->thread_sheet)) {
             lv_obj_del(controller->thread_sheet);
         }
@@ -128,6 +178,7 @@ static lv_obj_t *messages_create_label(lv_obj_t *parent, const char *text, uint3
     }
     lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    lv_obj_set_style_text_font(label, &d1l_ui_font_symbols_14, 0);
     return label;
 }
 
@@ -168,7 +219,8 @@ static void messages_dispatch_event_cb(lv_event_t *event)
     d1l_ui_messages_action_binding_t *binding =
         (d1l_ui_messages_action_binding_t *)lv_event_get_user_data(event);
     if (!binding || !binding->controller || binding->generation == 0U ||
-        binding->generation != binding->controller->generation) {
+        binding->generation != binding->controller->generation ||
+        !d1l_ui_messages_action_available(binding->action)) {
         return;
     }
     d1l_ui_messages_controller_t *controller = binding->controller;
@@ -548,7 +600,8 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
     char state_text[96];
     if (unread) {
         snprintf(state_text, sizeof(state_text), "%lu unread%s | %s",
-                 (unsigned long)unread_count, muted ? " muted" : "",
+                 (unsigned long)unread_count,
+                 muted ? " (excluded from total)" : "",
                  latest_state);
     } else {
         snprintf(state_text, sizeof(state_text), "%s", latest_state);
@@ -619,7 +672,7 @@ static void messages_render_root_card(
         snprintf(status, sizeof(status), "%u %s | storage degraded",
                  (unsigned)total, unit ? unit : "retained");
     } else if (muted_unread > 0U) {
-        snprintf(status, sizeof(status), "%u %s | %lu unread + %lu muted",
+        snprintf(status, sizeof(status), "%u %s | %lu unread + %lu excluded",
                  (unsigned)total, unit ? unit : "retained",
                  (unsigned long)unread, (unsigned long)muted_unread);
     } else {
@@ -742,10 +795,14 @@ static void messages_render_public(d1l_ui_messages_controller_t *controller,
     if (meta) {
         lv_obj_set_pos(meta, 104, 36);
     }
-    messages_create_button(
-        parent, "Channels", 350, 8, 92, 44,
-        messages_bind_control(controller, 4U,
-                              D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR));
+    if (d1l_ui_messages_action_available(
+            D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR)) {
+        messages_create_button(
+            parent, "Channels", 350, 8, 92, 44,
+            messages_bind_control(
+                controller, 4U,
+                D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR));
+    }
     messages_create_button(
         parent, "Mark read", 18, 60, 96, 44,
         messages_bind_control(controller, 1U,
@@ -819,7 +876,7 @@ static void messages_render_direct(d1l_ui_messages_controller_t *controller,
     char summary[96];
     if (controller->rendered.muted_dm_unread > 0U) {
         snprintf(summary, sizeof(summary),
-                 "%u conversations | %lu unread + %lu muted",
+                 "%u conversations | %lu unread + %lu excluded",
                  (unsigned)controller->rendered.dm_total,
                  (unsigned long)controller->rendered.dm_unread,
                  (unsigned long)controller->rendered.muted_dm_unread);
@@ -955,7 +1012,9 @@ bool d1l_ui_messages_render_channel_selector(
     void *action_context)
 {
     if (!controller || !messages_object_is_valid(controller->channel_sheet) ||
-        !action_handler) {
+        !action_handler ||
+        !d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
         return false;
     }
     if (controller->rendered.channel_count > D1L_CHANNEL_STORE_CAPACITY) {

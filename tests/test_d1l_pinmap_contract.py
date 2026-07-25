@@ -106,7 +106,8 @@ def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
     assert "D1L_UI_TIMER_MIN_SLEEP_MS" in ui_source
     assert "uint32_t wait_ms = lv_timer_handler();" in ui_source
     assert "D1L_UI_TASK_CORE" in ui_source
-    assert "xTaskCreatePinnedToCore(ui_task" in ui_source
+    assert "xTaskCreatePinnedToCoreWithCaps(" in ui_source
+    assert 'ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES' in ui_source
     assert "d1l_ui_navigation_request(tab);" in ui_source
     assert "process_pending_tab_switch();" in ui_source
     assert '#include "ui_navigation.h"' in ui_source

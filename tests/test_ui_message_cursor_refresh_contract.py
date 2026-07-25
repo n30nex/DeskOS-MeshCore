@@ -104,8 +104,8 @@ def test_muted_unread_and_simulated_incoming_event_flows_remain_separate(tmp_pat
     phase1 = read("main/ui/ui_phase1.c")
 
     assert "size_t muted_dm_unread_count;" in home_header
-    assert '"%llu unread + %llu muted"' in home_view
-    assert '"%llu muted"' in home_view
+    assert '"%llu unread + %llu excluded"' in home_view
+    assert '"%llu excluded"' in home_view
     assert ".muted_dm_unread_count = snapshot->muted_dm_unread_count" in phase1
 
     assert len(ui_simulator.EXPECTED_INCOMING_EVENT_FLOWS) == 4

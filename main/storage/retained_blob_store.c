@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_partition.h"
 #include "hal/rp2040_bridge.h"
@@ -267,6 +268,12 @@ static const d1l_retained_blob_store_config_t *find_store(d1l_retained_blob_stor
     return NULL;
 }
 
+static bool release_profile_allows_sd_history(void)
+{
+    return d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_SD_HISTORY);
+}
+
 static bool key_is_safe(const char *key)
 {
     if (!key || key[0] == '\0') {
@@ -307,8 +314,10 @@ static bool copy_store_backend_state(
     if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT || !out_state) {
         return false;
     }
+    const bool profile_allows_sd = release_profile_allows_sd_history();
     portENTER_CRITICAL(&s_store_state_mux);
-    out_state->enabled = s_store_sd_enabled[config->id];
+    out_state->enabled =
+        profile_allows_sd && s_store_sd_enabled[config->id];
     out_state->generation = s_store_backend_generation[config->id];
     portEXIT_CRITICAL(&s_store_state_mux);
     return true;
@@ -460,6 +469,38 @@ static esp_err_t nvs_write_blob_to(const d1l_retained_blob_store_config_t *confi
         }
         return ret;
     }
+
+    /*
+     * NVS commits are a finite endurance budget. Store workers already
+     * coalesce dirty events, but a retry/reconcile pass can still present an
+     * identical fallback snapshot. Treat that as a successful no-op instead
+     * of issuing nvs_set_blob()/nvs_commit(). The existing telemetry keeps the
+     * request in write_attempt_count while write_commit_count remains stable,
+     * so callers can measure suppressed unchanged writes without pretending
+     * that a flash commit occurred.
+     *
+     * Comparison is best effort: an allocation/read failure preserves the
+     * prior write behavior instead of turning a recoverable commit into an
+     * error. The compare and possible write share one NVS handle, keeping the
+     * no-op decision inside the retained-store write boundary.
+     */
+    size_t existing_len = 0U;
+    ret = nvs_get_blob(handle, key, NULL, &existing_len);
+    if (ret == ESP_OK && existing_len == len) {
+        void *existing = malloc(existing_len);
+        if (existing) {
+            size_t read_len = existing_len;
+            ret = nvs_get_blob(handle, key, existing, &read_len);
+            const bool unchanged = ret == ESP_OK && read_len == len &&
+                memcmp(existing, src, len) == 0;
+            free(existing);
+            if (unchanged) {
+                nvs_close(handle);
+                return ESP_OK;
+            }
+        }
+    }
+
     ret = nvs_set_blob(handle, key, src, len);
     if (ret == ESP_OK) {
         ret = nvs_commit(handle);
@@ -1618,6 +1659,7 @@ void d1l_retained_blob_store_note_sd_backend(bool data_ready,
                                              uint32_t path_max)
 {
     const bool can_use_retained_sd =
+        release_profile_allows_sd_history() &&
         data_ready &&
         file_ops_supported &&
         atomic_rename_supported &&

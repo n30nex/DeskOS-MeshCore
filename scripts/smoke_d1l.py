@@ -49,6 +49,7 @@ SMOKE_COMMANDS = [
     "messages dm",
     "messages unread",
     "nodes",
+    "channels",
     "contacts",
     "contacts export",
     "routes",
@@ -56,6 +57,11 @@ SMOKE_COMMANDS = [
     "signal",
     "roomservers",
     "repeaters",
+    "admin status",
+    "logs",
+    "terminal status",
+    "observer status",
+    "update status",
     "crashlog",
     "health",
 ]
@@ -209,6 +215,7 @@ def expected_command_name(command: str) -> str:
         "storage export-diagnostics ",
         "storage export-data ",
         "storage retained-canary ",
+        "core retained-witness ",
         "backlight ",
         "mesh send public ",
         "mesh send dm ",
@@ -255,6 +262,37 @@ def health_boot_nonce(result: dict | None) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value == 0:
         return None
     return value
+
+
+def crashlog_total_written(result: dict | None) -> int | None:
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        return None
+    value = result.get("total_written")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def new_crash_like_entries(
+    before_crashlog: dict | None, after_crashlog: dict | None
+) -> list[dict]:
+    before_total = crashlog_total_written(before_crashlog)
+    if before_total is None or not isinstance(after_crashlog, dict):
+        return []
+    entries = after_crashlog.get("entries")
+    if not isinstance(entries, list):
+        return []
+    return [
+        entry
+        for entry in entries
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("seq"), int)
+            and not isinstance(entry.get("seq"), bool)
+            and entry["seq"] > before_total
+            and entry.get("crash_like") is True
+        )
+    ]
 
 
 def boot_transition_proven(before_health: dict | None, after_health: dict | None) -> bool:
@@ -659,6 +697,8 @@ def run_serial_smoke(
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
+        preflight_health = wait_for_console_ready(ser, timeout)
+        preflight_crashlog = send_console_command(ser, "crashlog", timeout)
         for command in SMOKE_COMMANDS:
             results.append(send_console_command(ser, command, timeout))
         persistence = run_persistence_check(ser, timeout) if persistence_test else None
@@ -672,6 +712,20 @@ def run_serial_smoke(
         if expected_firmware_commit is not None
         else None
     )
+    final_health = next(
+        (item for item in reversed(results) if item.get("cmd") == "health"), {}
+    )
+    final_crashlog = next(
+        (item for item in reversed(results) if item.get("cmd") == "crashlog"), {}
+    )
+    preflight_boot_nonce = health_boot_nonce(preflight_health)
+    final_boot_nonce = health_boot_nonce(final_health)
+    boot_stable = (
+        preflight_boot_nonce is not None
+        and final_boot_nonce is not None
+        and preflight_boot_nonce == final_boot_nonce
+    )
+    new_crashes = new_crash_like_entries(preflight_crashlog, final_crashlog)
     report = {
         "schema": 1,
         "mode": "hardware",
@@ -681,9 +735,23 @@ def run_serial_smoke(
         "device_build_commit": version_result.get("build_commit"),
         "firmware_identity_required": expected_firmware_commit is not None,
         "firmware_identity_ok": identity_ok,
+        "preflight_health": preflight_health,
+        "preflight_crashlog": preflight_crashlog,
+        "preflight_boot_nonce": preflight_boot_nonce,
+        "final_boot_nonce": final_boot_nonce,
+        "boot_stable": boot_stable,
+        "new_crash_like_entries": new_crashes,
         "ok": (
-            all(item.get("ok") for item in results if item.get("cmd") != "touch test")
+            preflight_health.get("ok") is True
+            and preflight_crashlog.get("ok") is True
+            and all(
+                item.get("ok")
+                for item in results
+                if item.get("cmd") != "touch test"
+            )
             and (identity_ok is not False)
+            and boot_stable
+            and not new_crashes
         ),
         "results": results,
     }

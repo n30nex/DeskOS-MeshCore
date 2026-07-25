@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts import (
     scroll_probe_d1l,
     smoke_d1l,
@@ -10,6 +12,7 @@ from scripts import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+PUBLIC_KEY = "ab" * 32
 
 
 class FakeSerial:
@@ -124,6 +127,8 @@ def test_scroll_probe_dry_run_and_screen_parser():
     assert report["mode"] == "dry-run"
     assert report["explicit_port_required"] is True
     assert report["manual_touch"] is True
+    assert "release_profile" not in report
+    assert "scroll_movement_policy" not in report
     assert {"screen": "storage", "tab": "settings", "label": "Storage overview"} in report["surface_plan"]
     assert {"screen": "storage_card", "tab": "settings", "label": "SD card status"} in report["surface_plan"]
     assert {"screen": "storage_data", "tab": "settings", "label": "Data locations"} in report["surface_plan"]
@@ -214,6 +219,448 @@ def test_scroll_probe_allows_static_home_and_storage_summary_but_requires_data_t
     moving_data = event("storage_data")
     moving_data["probe"]["moved"] = True
     assert scroll_probe_d1l.event_failed(moving_data) is False
+
+
+def test_scroll_probe_core_profile_recomputes_positive_overflow():
+    def event(screen: str, bottom: int = 0, after_y: int = 0) -> dict:
+        tab = scroll_probe_d1l.SCROLL_SURFACES[screen]["tab"]
+        moved = after_y != 0 or bottom > 0
+        return {
+            "screen": screen,
+            "tab": tab,
+            "request": {"ok": True},
+            "tab_active": True,
+            "probe": {
+                "schema": 1,
+                "ok": True,
+                "cmd": "ui scroll-probe",
+                "surface": screen,
+                "tab": tab,
+                "surface_supported": True,
+                "target_found": True,
+                "scrollable": True,
+                "movement_required": bottom > 0,
+                "moved": moved,
+                "before_y": 0,
+                "after_y": after_y,
+                "scroll_top_before": 0,
+                "scroll_bottom_before": bottom,
+                "scroll_top_after": after_y,
+                "scroll_bottom_after": 0 if bottom > 0 else bottom,
+            },
+            "status": {"active_tab": tab},
+            "health": {
+                "ok": True,
+                "cmd": "health",
+                "build_commit": "a" * 40,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+            },
+            "crashlog": {"entries": []},
+        }
+
+    for screen in ("home", "dm_thread", "settings"):
+        compact = event(screen)
+        assert scroll_probe_d1l.event_failed(
+            compact, "core_1_0", "a" * 40, "disabled"
+        ) is False
+    assert scroll_probe_d1l.event_failed(
+        event("dm_thread"), "full_feature"
+    ) is True
+
+    moving = event("public_messages", bottom=6, after_y=6)
+    assert scroll_probe_d1l.event_failed(
+        moving, "core_1_0", "a" * 40, "disabled"
+    ) is False
+
+    blocked = event("public_messages", bottom=6, after_y=0)
+    blocked["probe"]["moved"] = False
+    blocked["probe"]["scroll_top_after"] = 0
+    blocked["probe"]["scroll_bottom_after"] = 6
+    assert scroll_probe_d1l.event_failed(
+        blocked, "core_1_0", "a" * 40, "disabled"
+    ) is True
+
+    forged = event("settings")
+    forged["probe"]["movement_required"] = True
+    assert scroll_probe_d1l.event_failed(
+        forged, "core_1_0", "a" * 40, "disabled"
+    ) is True
+
+    wrong_profile = event("settings")
+    wrong_profile["health"]["release_profile"] = "full_feature"
+    assert scroll_probe_d1l.event_failed(
+        wrong_profile, "core_1_0", "a" * 40, "disabled"
+    ) is True
+
+    report = scroll_probe_d1l.dry_run_report(
+        list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+        dwell_sec=0.0,
+        manual_touch=False,
+        release_profile="core_1_0",
+    )
+    assert report["release_profile"] == "core_1_0"
+    assert report["scroll_movement_policy"] == "positive_raw_overflow"
+
+    try:
+        scroll_probe_d1l.validate_release_profile_screens(
+            ["home", "map"], "core_1_0"
+        )
+    except ValueError as exc:
+        assert "exact ordered surfaces" in str(exc)
+    else:
+        raise AssertionError("Core scroll accepted unavailable Map")
+
+    for invalid in (
+        [],
+        ["home"],
+        list(reversed(scroll_probe_d1l.CORE_SCROLL_SEQUENCE)),
+    ):
+        try:
+            scroll_probe_d1l.validate_release_profile_screens(
+                invalid, "core_1_0"
+            )
+        except ValueError as exc:
+            assert "exact ordered surfaces" in str(exc)
+        else:
+            raise AssertionError(
+                f"Core scroll accepted non-exact sequence: {invalid}"
+            )
+
+
+def test_scroll_probe_core_evidence_inputs_fail_closed(
+    monkeypatch, tmp_path
+):
+    clean = {
+        "commit": "a" * 40,
+        "short_commit": "a" * 7,
+        "branch": "release/24h-core",
+        "dirty": False,
+        "dirty_entries": [],
+    }
+    monkeypatch.setattr(
+        scroll_probe_d1l, "git_metadata", lambda root: clean
+    )
+    validated = scroll_probe_d1l.validate_core_evidence_inputs(
+        port="COM12",
+        expected_firmware_commit="a" * 40,
+        github_actions_run="123",
+        workflow_run_attempt="1",
+        expected_sd_history_mode="disabled",
+        root=tmp_path,
+    )
+    assert validated["port"] == "COM12"
+    assert validated["expected_firmware_commit"] == "a" * 40
+
+    for forbidden in ("COM8", "COM11", "COM29", "COM16"):
+        try:
+            scroll_probe_d1l.validate_core_evidence_inputs(
+                port=forbidden,
+                expected_firmware_commit="a" * 40,
+                github_actions_run="123",
+                workflow_run_attempt="1",
+                expected_sd_history_mode="disabled",
+                root=tmp_path,
+            )
+        except ValueError as exc:
+            assert "requires COM12" in str(exc)
+        else:
+            raise AssertionError(f"Core scroll accepted {forbidden}")
+
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "git_metadata",
+        lambda root: {**clean, "dirty": True, "dirty_entries": [" M x"]},
+    )
+    try:
+        scroll_probe_d1l.validate_core_evidence_inputs(
+            port="COM12",
+            expected_firmware_commit="a" * 40,
+            github_actions_run="123",
+            workflow_run_attempt="1",
+            expected_sd_history_mode="disabled",
+            root=tmp_path,
+        )
+    except ValueError as exc:
+        assert "clean exact candidate source" in str(exc)
+    else:
+        raise AssertionError("Core scroll accepted dirty source")
+
+
+def test_scroll_probe_core_identity_preflight_precedes_mutation(
+    monkeypatch
+):
+    class SerialContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def reset_input_buffer(self):
+            pass
+
+    clean = {
+        "commit": "a" * 40,
+        "short_commit": "a" * 7,
+        "branch": "release/24h-core",
+        "dirty": False,
+        "dirty_entries": [],
+    }
+    commands = []
+
+    def response(_ser, command, _timeout):
+        commands.append(command)
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": command,
+            "build_commit": "b" * 40,
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "idf": "v5.5.4",
+        }
+
+    monkeypatch.setattr(
+        scroll_probe_d1l, "git_metadata", lambda root: clean
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "open_d1l_serial",
+        lambda *args, **kwargs: SerialContext(),
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l, "send_console_command", response
+    )
+    monkeypatch.setattr(scroll_probe_d1l.time, "sleep", lambda _value: None)
+
+    report = scroll_probe_d1l.run_scroll_probe(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        screens=list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+        dwell_sec=0.0,
+        manual_touch=False,
+        clear_crashlog_before_start=True,
+        poll_sec=0.01,
+        release_profile="core_1_0",
+        expected_firmware_commit="a" * 40,
+        github_actions_run="123",
+        workflow_run_attempt="1",
+        expected_sd_history_mode="disabled",
+        expected_d1l_public_key=PUBLIC_KEY,
+        platform_name="nt",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+                "location": "1-2",
+            }
+        ],
+    )
+    assert commands == ["version"]
+    assert report["ok"] is False
+    assert report["closure_eligible"] is False
+    assert report["clear_crashlog_before_start"] is False
+    assert report["clear_crashlog_requested"] is True
+    assert report["firmware_identity_ok"] is False
+    assert report["events"] == []
+    assert report["schema"] == 2
+    assert report["d1l_target"]["requested_path"] == "COM12"
+
+
+def test_scroll_probe_invalid_core_target_fails_before_serial_open(
+    monkeypatch,
+):
+    clean = {
+        "commit": "a" * 40,
+        "short_commit": "a" * 7,
+        "branch": "release/24h-core",
+        "dirty": False,
+        "dirty_entries": [],
+    }
+    monkeypatch.setattr(
+        scroll_probe_d1l, "git_metadata", lambda _root: clean
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("invalid target must fail before serial open")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="VID"):
+        scroll_probe_d1l.run_scroll_probe(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            screens=list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+            dwell_sec=0.0,
+            manual_touch=False,
+            clear_crashlog_before_start=False,
+            poll_sec=0.01,
+            release_profile="core_1_0",
+            expected_firmware_commit="a" * 40,
+            github_actions_run="123",
+            workflow_run_attempt="1",
+            expected_sd_history_mode="disabled",
+            expected_d1l_public_key=PUBLIC_KEY,
+            platform_name="nt",
+            port_lister=lambda: [
+                {
+                    "device": "COM12",
+                    "vid": 0x10C4,
+                    "pid": 0xEA60,
+                    "serial_number": "wrong",
+                    "hwid": "wrong",
+                    "location": "1-9",
+                }
+            ],
+        )
+
+
+def test_scroll_probe_wrong_full_key_stops_before_health_or_mutation(
+    monkeypatch,
+):
+    class SerialContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def reset_input_buffer(self):
+            pass
+
+    commit = "a" * 40
+    wrong_key = PUBLIC_KEY[:16] + "cd" * 24
+    commands = []
+
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "short_commit": commit[:7],
+            "branch": "release/24h-core",
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: SerialContext(),
+    )
+
+    def response(_ser, command, _timeout):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": commit,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+                "idf": "v5.5.4",
+            }
+        if command == "identity status":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "identity status",
+                "public_key_ready": True,
+                "public_key": wrong_key,
+                "fingerprint": wrong_key[:16].upper(),
+                "role": "desk_companion",
+            }
+        pytest.fail(f"unexpected command after identity mismatch: {command}")
+
+    monkeypatch.setattr(
+        scroll_probe_d1l, "send_console_command", response
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l.time, "sleep", lambda _value: None
+    )
+
+    report = scroll_probe_d1l.run_scroll_probe(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        screens=list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+        dwell_sec=0.0,
+        manual_touch=False,
+        clear_crashlog_before_start=True,
+        poll_sec=0.01,
+        release_profile="core_1_0",
+        expected_firmware_commit=commit,
+        github_actions_run="123",
+        workflow_run_attempt="1",
+        expected_sd_history_mode="disabled",
+        expected_d1l_public_key=PUBLIC_KEY,
+        platform_name="nt",
+        port_lister=lambda: [
+            {
+                "device": "COM12",
+                "vid": 0x1A86,
+                "pid": 0x7523,
+                "serial_number": None,
+                "hwid": "USB VID:PID=1A86:7523 LOCATION=1-2",
+                "location": "1-2",
+            }
+        ],
+    )
+
+    assert commands == ["version", "identity status"]
+    assert report["expected_d1l_public_key"] == PUBLIC_KEY
+    assert report["d1l_identity_status"]["public_key"] == wrong_key
+    assert report["d1l_identity_ok"] is False
+    assert report["identity_preflight_only"] is True
+    assert report["clear_crashlog_before_start"] is False
+    assert report["clear_crashlog_requested"] is True
+    assert report["events"] == []
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
+    assert report["closure_eligible"] is False
+    assert report["ok"] is False
+
+
+def test_scroll_probe_rejects_missing_key_before_source_or_serial_io(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "git_metadata",
+        lambda _root: pytest.fail("source access must not begin"),
+    )
+    monkeypatch.setattr(
+        scroll_probe_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail("serial must not open"),
+    )
+
+    with pytest.raises(ValueError, match="exact 64-hex"):
+        scroll_probe_d1l.run_scroll_probe(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            screens=list(scroll_probe_d1l.CORE_SCROLL_SEQUENCE),
+            dwell_sec=0.0,
+            manual_touch=False,
+            clear_crashlog_before_start=False,
+            poll_sec=0.01,
+            release_profile="core_1_0",
+            expected_firmware_commit="a" * 40,
+            github_actions_run="123",
+            workflow_run_attempt="1",
+            expected_sd_history_mode="disabled",
+            expected_d1l_public_key="short",
+        )
 
 
 def test_scroll_probe_ignores_normal_power_on_history_but_rejects_crash_like_resets():

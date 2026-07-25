@@ -117,7 +117,7 @@ def test_direct_list_projects_unique_conversations_with_thread_cursor_truth():
     assert "snapshot->recent_dm_unread_count" in phase1
     assert "snapshot->recent_dm_muted" in phase1
     assert '"%lu unread%s | %s"' in messages
-    assert '"%u conversations | %lu unread + %lu muted"' in messages
+    assert '"%u conversations | %lu unread + %lu excluded"' in messages
 
 
 def test_public_conversation_bubbles_align_and_show_truthful_time_and_state():

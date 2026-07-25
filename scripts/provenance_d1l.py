@@ -9,7 +9,13 @@ external-parameter schema is exactly:
 
 * ``sourceRepository``: the canonical SIGUI repository URL;
 * ``sourceRevision``: the exact 40-character Git commit being packaged;
-* ``releaseProfile``: the literal string ``d1l``.
+* ``releaseProfile``: the package release profile.
+
+The default/full-feature package retains the legacy ``d1l`` parameter shape.
+Core 1.0 additionally binds the canonical Actions repository, workflow name and
+path, exact run ID, and exact run attempt. This prevents a provenance statement
+from another Actions invocation at the same source commit from being
+transplanted into a Core candidate package.
 
 The operation copies the ESP32 and optional RP2040 build outputs into a D1L
 release directory, generates checksummed metadata, and emits one subject per
@@ -73,6 +79,10 @@ LOCAL_BUILDER = (
     "#local-builder-v1"
 )
 WORKFLOW_PATH = ".github/workflows/d1l-ci.yml"
+WORKFLOW_NAME = "d1l-ci"
+CANONICAL_REPOSITORY = "n30nex/SIGUI"
+DEFAULT_RELEASE_PROFILE = "d1l"
+CORE_RELEASE_PROFILE = "core_1_0"
 PROFILE = "SIGUI deterministic unsigned D1L provenance profile v1"
 PACKAGE_EXCLUSIONS = {
     "README_RELEASE.md",
@@ -83,6 +93,17 @@ ATTESTATION_EXTENSION = {
     "authenticated": False,
     "format": "unsigned-json",
     "slsaBuildLevel": "not-claimed",
+}
+
+CORE_EXTERNAL_PARAMETER_KEYS = {
+    "sourceRepository",
+    "sourceRevision",
+    "releaseProfile",
+    "workflowRepository",
+    "workflowName",
+    "workflowPath",
+    "workflowRunId",
+    "workflowRunAttempt",
 }
 
 
@@ -216,26 +237,97 @@ def collect_materials(
     return sorted(materials, key=lambda item: (item["uri"], item["name"]))
 
 
-def workflow_context(manifest: dict, source_commit: str) -> tuple[str, str]:
+def positive_run_identity(value: object, field: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[1-9][0-9]*", value) is None:
+        raise ValueError(f"{field} must be an exact positive decimal string")
+    return value
+
+
+def core_external_parameters(manifest: dict, source_commit: str) -> dict[str, str]:
+    if manifest.get("release_profile") != CORE_RELEASE_PROFILE:
+        raise ValueError("Core provenance requires release_profile=core_1_0")
+    if exact_sha(manifest.get("firmware_commit"), "Core firmware commit") != source_commit:
+        raise ValueError("Core firmware commit does not match provenance source")
+
     workflow = manifest.get("workflow")
     if not isinstance(workflow, dict):
-        return source_commit, LOCAL_BUILDER
+        raise ValueError("Core provenance requires an exact Actions workflow identity")
+    if exact_sha(workflow.get("sha"), "Core workflow source commit") != source_commit:
+        raise ValueError("Core workflow source commit does not match provenance source")
+    if workflow.get("repository") != CANONICAL_REPOSITORY:
+        raise ValueError(
+            "Core workflow repository does not match the canonical source repository"
+        )
+    if workflow.get("workflow") != WORKFLOW_NAME:
+        raise ValueError("Core workflow name must be d1l-ci")
+    if workflow.get("path") not in {None, WORKFLOW_PATH}:
+        raise ValueError("Core workflow path is not canonical")
+
+    run_id = positive_run_identity(workflow.get("run_id"), "Core workflow run ID")
+    run_attempt = positive_run_identity(
+        workflow.get("run_attempt"), "Core workflow run attempt"
+    )
+    if positive_run_identity(manifest.get("actions_run"), "Core package Actions run") != run_id:
+        raise ValueError("Core package Actions run does not match workflow run")
+    if (
+        positive_run_identity(
+            manifest.get("actions_run_attempt"), "Core package Actions run attempt"
+        )
+        != run_attempt
+    ):
+        raise ValueError("Core package Actions run attempt does not match workflow run")
+    expected_run_url = (
+        f"https://github.com/{CANONICAL_REPOSITORY}/actions/runs/{run_id}"
+    )
+    if workflow.get("run_url") != expected_run_url:
+        raise ValueError("Core workflow run URL is not canonical")
+
+    return {
+        "sourceRepository": PROJECT_REPOSITORY,
+        "sourceRevision": source_commit,
+        "releaseProfile": CORE_RELEASE_PROFILE,
+        "workflowRepository": CANONICAL_REPOSITORY,
+        "workflowName": WORKFLOW_NAME,
+        "workflowPath": WORKFLOW_PATH,
+        "workflowRunId": run_id,
+        "workflowRunAttempt": run_attempt,
+    }
+
+
+def workflow_context(
+    manifest: dict, source_commit: str
+) -> tuple[str, str, dict[str, str]]:
+    workflow = manifest.get("workflow")
+    if manifest.get("release_profile") == CORE_RELEASE_PROFILE:
+        parameters = core_external_parameters(manifest, source_commit)
+        reference = workflow.get("ref") if isinstance(workflow, dict) else None
+        if not isinstance(reference, str) or not reference.strip():
+            raise ValueError("Core workflow ref is missing or malformed")
+        return reference, GITHUB_HOSTED_BUILDER, parameters
+
+    parameters = {
+        "sourceRepository": PROJECT_REPOSITORY,
+        "sourceRevision": source_commit,
+        "releaseProfile": DEFAULT_RELEASE_PROFILE,
+    }
+    if not isinstance(workflow, dict):
+        return source_commit, LOCAL_BUILDER, parameters
 
     sha = workflow.get("sha")
     if sha is not None and exact_sha(sha, "workflow source commit") != source_commit:
         raise ValueError("Workflow source commit does not match provenance source")
     repository = workflow.get("repository")
-    if repository is not None and repository != "n30nex/SIGUI":
+    if repository is not None and repository != CANONICAL_REPOSITORY:
         raise ValueError("Workflow repository does not match the canonical source repository")
     reference = workflow.get("ref")
     if reference is not None and (not isinstance(reference, str) or not reference.strip()):
         raise ValueError("Workflow ref is malformed")
     run_id = workflow.get("run_id")
     if run_id is None:
-        return reference or source_commit, LOCAL_BUILDER
+        return reference or source_commit, LOCAL_BUILDER, parameters
     if not str(run_id).isdigit() or not repository:
         raise ValueError("GitHub Actions provenance has incomplete run identity")
-    return reference or source_commit, GITHUB_HOSTED_BUILDER
+    return reference or source_commit, GITHUB_HOSTED_BUILDER, parameters
 
 
 def build_statement(
@@ -247,7 +339,9 @@ def build_statement(
     identity = normalize_source_identity(source_identity)
     source_commit = identity["commit"]
     subjects = collect_subjects(root, package_dir, package_manifest, identity)
-    reference, builder_id = workflow_context(package_manifest, source_commit)
+    reference, builder_id, external_parameters = workflow_context(
+        package_manifest, source_commit
+    )
     materials = collect_materials(root.resolve(), identity, reference)
     statement = {
         "_type": STATEMENT_TYPE,
@@ -256,11 +350,7 @@ def build_statement(
         "predicate": {
             "buildDefinition": {
                 "buildType": BUILD_TYPE,
-                "externalParameters": {
-                    "sourceRepository": PROJECT_REPOSITORY,
-                    "sourceRevision": source_commit,
-                    "releaseProfile": "d1l",
-                },
+                "externalParameters": external_parameters,
                 "resolvedDependencies": materials,
             },
             "runDetails": {"builder": {"id": builder_id}},
@@ -337,13 +427,40 @@ def validate_profile(statement: object, source_commit: str) -> list[str]:
     if not isinstance(definition, dict) or definition.get("buildType") != BUILD_TYPE:
         errors.append("build definition or build type is missing or invalid")
         definition = {}
-    expected_parameters = {
-        "sourceRepository": PROJECT_REPOSITORY,
-        "sourceRevision": commit,
-        "releaseProfile": "d1l",
-    }
-    if definition.get("externalParameters") != expected_parameters:
+    parameters = definition.get("externalParameters")
+    if not isinstance(parameters, dict):
         errors.append("external parameters are incomplete or unexpected")
+        parameters = {}
+    release_profile = parameters.get("releaseProfile")
+    if release_profile == CORE_RELEASE_PROFILE:
+        if set(parameters) != CORE_EXTERNAL_PARAMETER_KEYS:
+            errors.append("Core external parameters are incomplete or unexpected")
+        if (
+            parameters.get("sourceRepository") != PROJECT_REPOSITORY
+            or parameters.get("sourceRevision") != commit
+            or parameters.get("workflowRepository") != CANONICAL_REPOSITORY
+            or parameters.get("workflowName") != WORKFLOW_NAME
+            or parameters.get("workflowPath") != WORKFLOW_PATH
+        ):
+            errors.append("Core source or workflow identity is invalid")
+        try:
+            positive_run_identity(
+                parameters.get("workflowRunId"), "Core provenance workflow run ID"
+            )
+            positive_run_identity(
+                parameters.get("workflowRunAttempt"),
+                "Core provenance workflow run attempt",
+            )
+        except ValueError:
+            errors.append("Core workflow run identity is invalid")
+    else:
+        expected_parameters = {
+            "sourceRepository": PROJECT_REPOSITORY,
+            "sourceRevision": commit,
+            "releaseProfile": DEFAULT_RELEASE_PROFILE,
+        }
+        if parameters != expected_parameters:
+            errors.append("external parameters are incomplete or unexpected")
     materials = definition.get("resolvedDependencies")
     if not isinstance(materials, list) or not materials:
         errors.append("resolved dependencies are missing")
@@ -363,10 +480,56 @@ def validate_profile(statement: object, source_commit: str) -> list[str]:
     builder_id = builder.get("id") if isinstance(builder, dict) else None
     if builder_id not in {GITHUB_HOSTED_BUILDER, LOCAL_BUILDER}:
         errors.append("builder identity is missing or not allowlisted")
+    if release_profile == CORE_RELEASE_PROFILE and builder_id != GITHUB_HOSTED_BUILDER:
+        errors.append("Core provenance requires the GitHub-hosted builder")
     if isinstance(run_details, dict) and "metadata" in run_details:
         errors.append("deterministic profile must omit invocation metadata")
     if predicate.get("sigui_attestation") != ATTESTATION_EXTENSION:
         errors.append("unsigned-attestation limitation is missing or invalid")
+    return errors
+
+
+def validate_core_actions_binding(
+    statement: object,
+    source_commit: str,
+    run_id: object,
+    run_attempt: object,
+) -> list[str]:
+    """Validate exact Core profile and Actions invocation semantics."""
+
+    commit = exact_sha(source_commit, "expected Core provenance source commit")
+    expected_run_id = positive_run_identity(run_id, "expected Core workflow run ID")
+    expected_run_attempt = positive_run_identity(
+        run_attempt, "expected Core workflow run attempt"
+    )
+    errors = validate_profile(statement, commit)
+    parameters: object = None
+    if isinstance(statement, dict):
+        predicate = statement.get("predicate")
+        definition = (
+            predicate.get("buildDefinition")
+            if isinstance(predicate, dict)
+            else None
+        )
+        parameters = (
+            definition.get("externalParameters")
+            if isinstance(definition, dict)
+            else None
+        )
+    expected = {
+        "sourceRepository": PROJECT_REPOSITORY,
+        "sourceRevision": commit,
+        "releaseProfile": CORE_RELEASE_PROFILE,
+        "workflowRepository": CANONICAL_REPOSITORY,
+        "workflowName": WORKFLOW_NAME,
+        "workflowPath": WORKFLOW_PATH,
+        "workflowRunId": expected_run_id,
+        "workflowRunAttempt": expected_run_attempt,
+    }
+    if parameters != expected:
+        errors.append(
+            "provenance is not bound to the exact Core Actions workflow invocation"
+        )
     return errors
 
 
@@ -414,7 +577,7 @@ def write_package_provenance(
     if errors:
         raise ValueError("Written provenance failed validation: " + "; ".join(errors))
     materials = statement["predicate"]["buildDefinition"]["resolvedDependencies"]
-    return {
+    metadata = {
         "path": path.relative_to(package_dir).as_posix(),
         "sha256": sha256_file(path),
         "statement_type": STATEMENT_TYPE,
@@ -427,6 +590,19 @@ def write_package_provenance(
         "slsa_build_level": "not-claimed",
         "valid": True,
     }
+    parameters = statement["predicate"]["buildDefinition"]["externalParameters"]
+    metadata["release_profile"] = parameters["releaseProfile"]
+    if parameters["releaseProfile"] == CORE_RELEASE_PROFILE:
+        metadata.update(
+            {
+                "workflow_repository": parameters["workflowRepository"],
+                "workflow_name": parameters["workflowName"],
+                "workflow_path": parameters["workflowPath"],
+                "workflow_run_id": parameters["workflowRunId"],
+                "workflow_run_attempt": parameters["workflowRunAttempt"],
+            }
+        )
+    return metadata
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -16,6 +16,38 @@ RUN_ID = "123456789"
 D1L_PORT = f"COM{matrix.D1L_PORT_NUMBER}"
 
 
+def test_cli_rejects_hardware_before_any_child_or_identity_io(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        matrix,
+        "run_matrix",
+        lambda _args: pytest.fail(
+            "disabled hardware CLI must not enter the matrix"
+        ),
+    )
+
+    result = matrix.main(
+        [
+            "--port",
+            D1L_PORT,
+            "--expected-firmware-commit",
+            COMMIT,
+            "--github-actions-run",
+            RUN_ID,
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert output["classification"] == "hardware_execution_disabled"
+    assert output["ok"] is False
+    assert output["public_rf_tx"] is False
+    assert output["dm_rf_tx"] is False
+    assert output["formats_sd"] is False
+    assert "narrow Core" in output["error"]
+
+
 def args(**overrides):
     values = {
         "port": D1L_PORT,

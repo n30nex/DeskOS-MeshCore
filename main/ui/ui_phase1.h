@@ -17,6 +17,7 @@ typedef struct {
     bool surface_supported;
     bool target_found;
     bool scrollable;
+    bool movement_required;
     bool moved;
     char surface[24];
     char tab[16];
@@ -59,6 +60,8 @@ typedef struct {
     bool onboarding_visible;
     bool dock_hidden;
     bool dm_mode;
+    bool tx_suppressed;
+    bool send_enabled;
     char target[16];
     char active_tab[16];
     int32_t sheet_x;
@@ -76,6 +79,7 @@ typedef struct {
 } d1l_ui_compose_probe_result_t;
 
 esp_err_t d1l_ui_phase1_start(void);
+bool d1l_ui_phase1_started(void);
 esp_err_t d1l_ui_phase1_show_home(void);
 esp_err_t d1l_ui_phase1_request_tab(const char *name);
 esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,

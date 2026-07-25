@@ -13,11 +13,27 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 try:
     from verify_checksums import is_link_or_reparse, verify_checksum_tree
 except ModuleNotFoundError:
     from scripts.verify_checksums import is_link_or_reparse, verify_checksum_tree
+
+try:
+    from d1l_serial_target import (
+        EXPECTED_PID,
+        EXPECTED_VID,
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+    )
+except ModuleNotFoundError:
+    from scripts.d1l_serial_target import (
+        EXPECTED_PID,
+        EXPECTED_VID,
+        POSIX_D1L_TARGET,
+        WINDOWS_D1L_TARGET,
+    )
 
 if __package__:
     from .meshcore_conformance_d1l import (
@@ -61,6 +77,14 @@ PROJECT = "MeshCore DeskOS D1L"
 DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
 FLASH_BAUD = 460800
 PACKAGE_METADATA_SCHEMA = 1
+UPDATE_MANIFEST_HEADER = "D1L-UPDATE-MANIFEST-V1"
+UPDATE_PRODUCT = "MeshCore DeskOS D1L"
+UPDATE_TARGET = "seeed_indicator_d1l"
+UPDATE_SIGNER_KEY_ID = "d1l-prod-8241789a002d0b50"
+UPDATE_SIGNING_PUBLIC_KEY_HEX = (
+    "e048dd4ebb613fb55378714ae527d7de"
+    "9374270c7a18b29565c2715b17e5b26c"
+)
 BUILD_INPUTS_SOURCE = Path(".github/d1l-build-inputs.json")
 HOST_REQUIREMENTS_SOURCE = Path("requirements/ci-host-windows.txt")
 COMPLETION_LEDGER_SOURCE = Path("docs/COMPLETION_LEDGER.yaml")
@@ -101,6 +125,89 @@ MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
 MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
 MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
 MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT = MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
+CORE_RELEASE_PROFILE = "core_1_0"
+FULL_FEATURE_RELEASE_PROFILE = "full_feature"
+CORE_PACKAGE_SCHEMA = 2
+FULL_FEATURE_PACKAGE_SCHEMA = 2
+CORE_INSTALL_CONTRACT_SCHEMA = 2
+CORE_GENERATED_INSTALL_FILES = (
+    "d1l_serial_target.py",
+    "flash_project.py",
+    "flash_project.ps1",
+    "flash_project.sh",
+    "flash_full_8mb.ps1",
+    "docs/CORE_INSTALL_RECOVERY.md",
+)
+RELEASE_PROFILES = frozenset(
+    {"development", CORE_RELEASE_PROFILE, FULL_FEATURE_RELEASE_PROFILE}
+)
+PRODUCTION_RELEASE_PROFILES = frozenset(
+    {CORE_RELEASE_PROFILE, FULL_FEATURE_RELEASE_PROFILE}
+)
+SD_HISTORY_MODES = frozenset({"disabled", "conditional", "supported_optional"})
+CORE_SUPPORTED_CAPABILITIES_BASE = (
+    "board_initialization",
+    "display_touch_backlight",
+    "home_core_navigation",
+    "public_messages",
+    "direct_messages",
+    "basic_contacts",
+    "nodes",
+    "packets",
+    "route_signal_read_only",
+    "radio_settings",
+    "identity",
+    "retained_nvs",
+    "diagnostics",
+    "usb_recovery",
+    "time_truth",
+)
+CORE_UNAVAILABLE_CAPABILITIES_BASE = (
+    "map",
+    "wifi_user_control",
+    "ble",
+    "multi_channel_management",
+    "admin",
+    "observer_mqtt",
+    "signed_update",
+    "mutable_terminal",
+    "location",
+    "advanced_qr_emoji",
+    "user_trace",
+    "notification_system",
+)
+FULL_FEATURE_SUPPORTED_CAPABILITIES = (
+    "board_initialization",
+    "display_touch_backlight",
+    "display_preferences_accessibility",
+    "home_navigation",
+    "public_messages",
+    "direct_messages",
+    "contacts",
+    "heard_nodes",
+    "packets",
+    "multi_channel_management",
+    "routes_and_trace",
+    "radio_settings",
+    "identity_and_adverts",
+    "retained_nvs",
+    "sd_history",
+    "map",
+    "wifi_user_control",
+    "secure_ble_companion_core_protocol",
+    "authenticated_repeater_room_admin",
+    "observer_mqtt_tls",
+    "signed_sd_ota_update",
+    "usb_terminal",
+    "location",
+    "qr_sharing",
+    "curated_glyph_palette",
+    "notifications",
+    "event_log",
+    "service_control_sheets",
+    "diagnostics_and_recovery",
+    "time_truth",
+)
 
 
 def utc_stamp() -> str:
@@ -109,6 +216,124 @@ def utc_stamp() -> str:
 
 def parse_offset(value: str) -> int:
     return int(value, 0)
+
+
+def validate_release_settings(
+    release_profile: str, sd_history_mode: str
+) -> tuple[str, str]:
+    if release_profile not in RELEASE_PROFILES:
+        raise ValueError(f"Unsupported release profile: {release_profile}")
+    if sd_history_mode not in SD_HISTORY_MODES:
+        raise ValueError(f"Unsupported SD history mode: {sd_history_mode}")
+    return release_profile, sd_history_mode
+
+
+def source_security_sequence(source_identity: dict) -> int:
+    """Return the exact source-commit epoch used by the firmware build."""
+    created = source_identity.get("created")
+    if not isinstance(created, str) or not created.endswith("Z"):
+        raise ValueError("D1L source commit timestamp is missing or non-canonical")
+    try:
+        timestamp = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        epoch = int(timestamp.timestamp())
+    except (OverflowError, OSError, ValueError) as exc:
+        raise ValueError("D1L source commit timestamp is invalid") from exc
+    canonical = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    if created != canonical or epoch < 1767225600 or epoch > 3978743295:
+        raise ValueError(
+            "D1L source commit timestamp is outside the release-safe sequence range"
+        )
+    return epoch
+
+
+def build_release_settings(
+    build_dir: Path,
+    release_profile: str | None = None,
+    sd_history_mode: str | None = None,
+) -> tuple[str, str]:
+    """Resolve the immutable firmware settings from the configured build."""
+    values: dict[str, str] = {}
+    cache = build_dir / "CMakeCache.txt"
+    if cache.is_file():
+        for raw_line in cache.read_text(encoding="utf-8", errors="strict").splitlines():
+            if raw_line.startswith("D1L_RELEASE_PROFILE:"):
+                values["release_profile"] = raw_line.split("=", 1)[-1].strip()
+            elif raw_line.startswith("D1L_SD_HISTORY_MODE:"):
+                values["sd_history_mode"] = raw_line.split("=", 1)[-1].strip()
+    if (
+        release_profile is not None
+        and values.get("release_profile") is not None
+        and release_profile != values["release_profile"]
+    ):
+        raise ValueError(
+            "Explicit release profile does not match configured firmware"
+        )
+    if (
+        sd_history_mode is not None
+        and values.get("sd_history_mode") is not None
+        and sd_history_mode != values["sd_history_mode"]
+    ):
+        raise ValueError(
+            "Explicit SD history mode does not match configured firmware"
+        )
+
+    # The callable API keeps its historical full-feature defaults. The CLI
+    # resolves real Actions packages from CMakeCache unless explicitly bound.
+    profile = release_profile or values.get("release_profile") or "full_feature"
+    sd_mode = sd_history_mode or values.get("sd_history_mode") or "conditional"
+    return validate_release_settings(profile, sd_mode)
+
+
+def core_capability_truth(sd_history_mode: str) -> dict:
+    if sd_history_mode not in SD_HISTORY_MODES:
+        raise ValueError(f"Unsupported SD history mode: {sd_history_mode}")
+    supported = list(CORE_SUPPORTED_CAPABILITIES_BASE)
+    unavailable = list(CORE_UNAVAILABLE_CAPABILITIES_BASE)
+    if sd_history_mode == "supported_optional":
+        supported.append("sd_history")
+        sd_state = "qualified_optional"
+    else:
+        unavailable.append("sd_history")
+        sd_state = (
+            "disabled_nvs_authoritative"
+            if sd_history_mode == "disabled"
+            else "conditional_unqualified"
+        )
+    return {
+        "supported_capabilities": supported,
+        "unavailable_capabilities": unavailable,
+        "sd_history_state": sd_state,
+        "storage_authority": (
+            "nvs"
+            if sd_history_mode in {"disabled", "conditional"}
+            else "nvs_with_qualified_optional_sd_history"
+        ),
+    }
+
+
+def full_feature_capability_truth(sd_history_mode: str) -> dict:
+    if sd_history_mode not in SD_HISTORY_MODES:
+        raise ValueError(f"Unsupported SD history mode: {sd_history_mode}")
+    return {
+        "supported_capabilities": list(FULL_FEATURE_SUPPORTED_CAPABILITIES),
+        "unavailable_capabilities": [],
+        "sd_history_state": (
+            "disabled_nvs_authoritative"
+            if sd_history_mode == "disabled"
+            else (
+                "qualified_optional"
+                if sd_history_mode == "supported_optional"
+                else "runtime_conditional_on_verified_bridge"
+            )
+        ),
+        "storage_authority": (
+            "nvs"
+            if sd_history_mode == "disabled"
+            else "nvs_with_runtime_verified_sd_history"
+        ),
+    }
 
 
 def sha256_file(path: Path) -> str:
@@ -329,7 +554,12 @@ def write_package_metadata_artifact(
     return metadata
 
 
-def package_inventory_payloads(root: Path, source_commit: str) -> dict[str, dict]:
+def package_inventory_payloads(
+    root: Path,
+    source_commit: str,
+    release_profile: str = "full_feature",
+    sd_history_mode: str = "conditional",
+) -> dict[str, dict]:
     source_commit = exact_sha(source_commit, "package metadata source commit")
     build_inputs_path = root / BUILD_INPUTS_SOURCE
     build_inputs = load_required_json_object(build_inputs_path, "D1L build-input lock")
@@ -384,6 +614,100 @@ def package_inventory_payloads(root: Path, source_commit: str) -> dict[str, dict
             "or creating release evidence."
         ),
     }
+    if release_profile == CORE_RELEASE_PROFILE:
+        truth = core_capability_truth(sd_history_mode)
+        capability_payload.update(
+            {
+                "release_profile": release_profile,
+                "sd_history_mode": sd_history_mode,
+                "supported_capabilities": truth["supported_capabilities"],
+                "unavailable_capabilities": truth["unavailable_capabilities"],
+                "full_feature_release_ready": False,
+                "capabilities": [
+                    {"id": capability, "core_state": "supported"}
+                    for capability in truth["supported_capabilities"]
+                ]
+                + [
+                    {"id": capability, "core_state": "unavailable"}
+                    for capability in truth["unavailable_capabilities"]
+                ],
+                "note": (
+                    "Core profile capability truth generated from the immutable "
+                    "Core 1.0 product contract. Full-feature ledger capability "
+                    "claims are intentionally not projected into this package."
+                ),
+            }
+        )
+        evidence_payload.update(
+            {
+                "release_profile": release_profile,
+                "sd_history_mode": sd_history_mode,
+                "core_release_ready": False,
+                "full_feature_release_ready": False,
+                "work_packages": [],
+                "blockers": [],
+                "core_evidence_requirements": [
+                    "exact_actions_candidate",
+                    "checksums_provenance_sbom",
+                    "exact_com12_flash",
+                    "core_smoke_ui_reboot_persistence",
+                    "controlled_rf_dm",
+                    "sd_decision",
+                    "active_60m_idle_30m_soak",
+                    "install_recovery_review",
+                    "zero_core_p0_and_critical_p1",
+                ],
+                "note": (
+                    "Packaging does not evaluate Core release readiness. "
+                    "scripts/core_release_gate_audit_d1l.py evaluates exact "
+                    "candidate evidence separately."
+                ),
+            }
+        )
+    elif release_profile == FULL_FEATURE_RELEASE_PROFILE:
+        truth = full_feature_capability_truth(sd_history_mode)
+        capability_payload.update(
+            {
+                "release_profile": release_profile,
+                "sd_history_mode": sd_history_mode,
+                "supported_capabilities": truth["supported_capabilities"],
+                "unavailable_capabilities": truth["unavailable_capabilities"],
+                "full_feature_release_ready": False,
+                "capabilities": [
+                    {"id": capability, "full_feature_state": "supported"}
+                    for capability in truth["supported_capabilities"]
+                ],
+                "note": (
+                    "Full Feature capability truth generated from the immutable "
+                    "production profile. Packaging does not itself close the "
+                    "exact-candidate or physical release gates."
+                ),
+            }
+        )
+        evidence_payload.update(
+            {
+                "release_profile": release_profile,
+                "sd_history_mode": sd_history_mode,
+                "full_feature_release_ready": False,
+                "full_feature_evidence_requirements": [
+                    "exact_actions_candidate",
+                    "signed_update_bundle",
+                    "checksums_provenance_sbom",
+                    "stable_by_id_flash",
+                    "automated_device_acceptance",
+                    "controlled_rf_acceptance",
+                    "ble_companion_acceptance",
+                    "wifi_map_observer_acceptance",
+                    "sd_update_recovery_acceptance",
+                    "final_physical_ui_confirmation",
+                    "zero_release_blocking_defects",
+                ],
+                "note": (
+                    "Packaging indexes the current ledger but does not evaluate "
+                    "Full Feature readiness or create physical evidence."
+                ),
+            }
+        )
     return {
         "build_inputs": build_payload,
         "capability_manifest": capability_payload,
@@ -392,9 +716,18 @@ def package_inventory_payloads(root: Path, source_commit: str) -> dict[str, dict
 
 
 def write_package_inventory_metadata(
-    root: Path, package_dir: Path, source_commit: str
+    root: Path,
+    package_dir: Path,
+    source_commit: str,
+    release_profile: str = "full_feature",
+    sd_history_mode: str = "conditional",
 ) -> dict[str, dict]:
-    payloads = package_inventory_payloads(root, source_commit)
+    payloads = package_inventory_payloads(
+        root,
+        source_commit,
+        release_profile=release_profile,
+        sd_history_mode=sd_history_mode,
+    )
     return {
         contract_name: write_package_metadata_artifact(
             package_dir, contract_name, source_commit, payload
@@ -837,6 +1170,8 @@ def flash_role_for_path(path: str) -> str:
         return "bootloader"
     if name == "partition-table.bin":
         return "partition-table"
+    if name == "ota_data_initial.bin":
+        return "ota-data"
     if name.endswith(".bin"):
         return "app"
     return "artifact"
@@ -1027,23 +1362,201 @@ def workflow_info() -> dict:
 
 
 def app_entry(entries: list[dict]) -> dict:
-    for entry in entries:
-        if entry["role"] == "app":
-            return entry
-    raise ValueError("No app binary found in flash files")
+    matches = [
+        entry
+        for entry in entries
+        if entry["role"] == "app"
+        and Path(entry["source"]).name == "meshcore_deskos_d1l.bin"
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "Expected exactly one meshcore_deskos_d1l.bin app image in flash files"
+        )
+    return matches[0]
 
 
 def copy_update_image(package_dir: Path, firmware_dir: Path, app: dict) -> dict:
     update_dir = package_dir / "update"
     update_dir.mkdir(parents=True, exist_ok=True)
     source = firmware_dir.parent / app["path"]
-    dest = update_dir / "meshcore_deskos_d1l-app.bin"
+    dest = update_dir / "d1l-update.bin"
     shutil.copy2(source, dest)
     return {
         "path": dest.relative_to(package_dir).as_posix(),
         "size": dest.stat().st_size,
         "sha256": sha256_file(dest),
-        "note": "Application image for OTA/update flows once enabled; serial release flashing still uses the project flash set.",
+        "note": (
+            "Application image for the fixed local SD update path. Serial "
+            "project flashing remains the partition-migration and USB recovery path."
+        ),
+    }
+
+
+def write_signed_update_bundle(
+    root: Path,
+    package_dir: Path,
+    update_image: dict,
+    source_commit: str,
+    version: str,
+    security_sequence: int,
+    signing_key: Path,
+) -> dict:
+    """Create the exact canonical manifest consumed by update_manager.c."""
+    source_commit = exact_sha(source_commit, "signed update source commit")
+    if (
+        isinstance(security_sequence, bool)
+        or not isinstance(security_sequence, int)
+        or security_sequence <= 0
+        or security_sequence > 0xFFFFFFFF
+    ):
+        raise ValueError("D1L update security sequence is invalid")
+    signing_key = signing_key.resolve(strict=True)
+    if not signing_key.is_file() or signing_key.stat().st_size == 0:
+        raise ValueError("D1L update signing key is missing or empty")
+    image_path = package_dir / update_image["path"]
+    if not image_path.is_file():
+        raise FileNotFoundError("D1L update image is missing")
+    partition_table = root / "partitions_d1l.csv"
+    if not partition_table.is_file():
+        raise FileNotFoundError("D1L partition table is missing")
+    update_dir = image_path.parent
+    manifest_path = update_dir / "d1l-update.manifest"
+    signature_path = update_dir / "d1l-update.sig"
+    public_der_path = update_dir / ".signer-public.der"
+    public_pem_path = update_dir / ".signer-public.pem"
+
+    manifest_text = (
+        f"{UPDATE_MANIFEST_HEADER}\n"
+        f"product={UPDATE_PRODUCT}\n"
+        f"target={UPDATE_TARGET}\n"
+        f"version={version}\n"
+        f"source_sha={source_commit}\n"
+        f"partition_table_sha256={sha256_file(partition_table)}\n"
+        f"image_sha256={sha256_file(image_path)}\n"
+        f"image_size={image_path.stat().st_size}\n"
+        f"security_sequence={security_sequence}\n"
+        f"signer_key_id={UPDATE_SIGNER_KEY_ID}\n"
+    )
+    manifest_path.write_text(manifest_text, encoding="ascii", newline="\n")
+    try:
+        subprocess.run(
+            [
+                "openssl",
+                "pkey",
+                "-in",
+                str(signing_key),
+                "-pubout",
+                "-outform",
+                "DER",
+                "-out",
+                str(public_der_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        public_der = public_der_path.read_bytes()
+        if (
+            len(public_der) != 44
+            or public_der[-32:].hex() != UPDATE_SIGNING_PUBLIC_KEY_HEX
+        ):
+            raise ValueError(
+                "D1L update signing secret does not match the firmware public key"
+            )
+        subprocess.run(
+            [
+                "openssl",
+                "pkeyutl",
+                "-sign",
+                "-rawin",
+                "-inkey",
+                str(signing_key),
+                "-in",
+                str(manifest_path),
+                "-out",
+                str(signature_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if signature_path.stat().st_size != 64:
+            raise ValueError("D1L Ed25519 update signature is not 64 bytes")
+        subprocess.run(
+            [
+                "openssl",
+                "pkey",
+                "-in",
+                str(signing_key),
+                "-pubout",
+                "-out",
+                str(public_pem_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "openssl",
+                "pkeyutl",
+                "-verify",
+                "-pubin",
+                "-inkey",
+                str(public_pem_path),
+                "-rawin",
+                "-in",
+                str(manifest_path),
+                "-sigfile",
+                str(signature_path),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise ValueError("OpenSSL is required to sign D1L updates") from exc
+    except subprocess.CalledProcessError as exc:
+        raise ValueError("D1L update signing or verification failed") from exc
+    finally:
+        public_der_path.unlink(missing_ok=True)
+        public_pem_path.unlink(missing_ok=True)
+
+    return {
+        "schema": 1,
+        "signed": True,
+        "product": UPDATE_PRODUCT,
+        "target": UPDATE_TARGET,
+        "version": version,
+        "source_commit": source_commit,
+        "security_sequence": security_sequence,
+        "signer_key_id": UPDATE_SIGNER_KEY_ID,
+        "partition_table_sha256": sha256_file(partition_table),
+        "image": {
+            **update_image,
+            "sd_destination": "updates/d1l-update.bin",
+        },
+        "manifest": {
+            "path": manifest_path.relative_to(package_dir).as_posix(),
+            "sd_destination": "updates/d1l-update.manifest",
+            "size": manifest_path.stat().st_size,
+            "sha256": sha256_file(manifest_path),
+        },
+        "signature": {
+            "path": signature_path.relative_to(package_dir).as_posix(),
+            "sd_destination": "updates/d1l-update.sig",
+            "size": signature_path.stat().st_size,
+            "sha256": sha256_file(signature_path),
+            "algorithm": "Ed25519",
+        },
+        "trigger_policy": "local_ui_or_usb_confirmation_only",
+        "rf_trigger_allowed": False,
+        "partition_table_replacement_in_firmware": False,
+        "rollback_required": True,
     }
 
 
@@ -1092,62 +1605,488 @@ def command_flash_files(entries: list[dict]) -> list[str]:
     return args
 
 
-def write_flash_scripts(package_dir: Path, entries: list[dict], flasher_args: dict, full_image: dict) -> dict:
+def powershell_checksum_guard_lines() -> list[str]:
+    """Inline package-root checksum verification for generated flash scripts."""
+    return [
+        "function Assert-PackageChecksums {",
+        "    param([string]$PackageRoot)",
+        "    $Manifest = Join-Path $PackageRoot 'SHA256SUMS.txt'",
+        '    if (!(Test-Path -LiteralPath $Manifest -PathType Leaf)) { throw "Missing package SHA256SUMS.txt." }',
+        "    $Prefix = [IO.Path]::GetFullPath($PackageRoot).TrimEnd('\\', '/') + [IO.Path]::DirectorySeparatorChar",
+        "    $ManifestPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)",
+        "    foreach ($Line in Get-Content -LiteralPath $Manifest) {",
+        "        if ($Line -notmatch '^([0-9A-Fa-f]{64})  \\./(.+)$') { throw \"Invalid SHA256SUMS.txt row: $Line\" }",
+        "        $Expected = $Matches[1].ToLowerInvariant()",
+        "        $Relative = $Matches[2]",
+        "        if ($Relative.Contains('\\') -or $Relative.Split('/') -contains '..') { throw \"Unsafe checksum path: $Relative\" }",
+        "        if (!$ManifestPaths.Add($Relative)) { throw \"Duplicate checksum path: $Relative\" }",
+        "        $Target = [IO.Path]::GetFullPath((Join-Path $PackageRoot $Relative))",
+        "        if (!$Target.StartsWith($Prefix, [StringComparison]::OrdinalIgnoreCase)) { throw \"Checksum path escapes package: $Relative\" }",
+        "        if (!(Test-Path -LiteralPath $Target -PathType Leaf)) { throw \"Missing checksummed file: $Relative\" }",
+        "        if (((Get-Item -LiteralPath $Target).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw \"Reparse-point file rejected: $Relative\" }",
+        "        $Actual = (Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash.ToLowerInvariant()",
+        "        if ($Actual -ne $Expected) { throw \"SHA256 mismatch: $Relative\" }",
+        "    }",
+        "    $AllEntries = @(Get-ChildItem -LiteralPath $PackageRoot -Recurse -Force)",
+        "    foreach ($Entry in $AllEntries) {",
+        "        if (($Entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw \"Reparse-point package entry rejected: $($Entry.FullName)\" }",
+        "    }",
+        "    $PackageFiles = @($AllEntries | Where-Object { !$_.PSIsContainer -and $_.FullName -ne $Manifest })",
+        "    foreach ($File in $PackageFiles) {",
+        "        if (!$File.FullName.StartsWith($Prefix, [StringComparison]::OrdinalIgnoreCase)) { throw \"Package file escapes package root: $($File.FullName)\" }",
+        "        $Relative = $File.FullName.Substring($Prefix.Length).Replace('\\', '/')",
+        "        if (!$ManifestPaths.Contains($Relative)) { throw \"Unchecksummed package file: $Relative\" }",
+        "    }",
+        "    if ($ManifestPaths.Count -ne $PackageFiles.Count) { throw \"SHA256SUMS.txt is not a complete one-to-one package file inventory.\" }",
+        "}",
+        "Assert-PackageChecksums -PackageRoot $Root",
+    ]
+
+
+def copy_core_serial_target_resolver(
+    root: Path,
+    package_dir: Path,
+) -> dict:
+    root = root.resolve(strict=True)
+    source_candidate = root / "scripts" / "d1l_serial_target.py"
+    if is_link_or_reparse(source_candidate):
+        raise ValueError("Core serial target resolver source is linked")
+    source = source_candidate.resolve(strict=True)
+    try:
+        source.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Core serial target resolver escaped the source root") from exc
+    if (
+        not source.is_file()
+        or is_link_or_reparse(source)
+        or source.stat().st_size <= 0
+    ):
+        raise ValueError("Core serial target resolver source is invalid")
+    target = package_dir / "d1l_serial_target.py"
+    shutil.copyfile(source, target)
+    if is_link_or_reparse(target) or target.stat().st_size <= 0:
+        raise ValueError("Packaged Core serial target resolver is invalid")
+    return {
+        "path": target.name,
+        "size": target.stat().st_size,
+        "sha256": sha256_file(target),
+    }
+
+
+def core_flash_runner_source(
+    entries: list[dict],
+    *,
+    flash_mode: str,
+    flash_size: str,
+    flash_freq: str,
+) -> str:
+    flash_plan = [
+        [entry["offset"], entry["path"]]
+        for entry in sorted(entries, key=lambda item: parse_offset(item["offset"]))
+    ]
+    template = r'''#!/usr/bin/env python3
+"""Checksum- and identity-guarded Core 1.0 project flasher."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import re
+import stat
+import subprocess
+import sys
+import types
+from pathlib import Path, PurePosixPath
+from typing import Any, Callable
+
+
+WINDOWS_D1L_TARGET = __WINDOWS_TARGET__
+POSIX_D1L_TARGET = __POSIX_TARGET__
+EXPECTED_VID = __EXPECTED_VID__
+EXPECTED_PID = __EXPECTED_PID__
+FLASH_BAUD = __FLASH_BAUD__
+FLASH_MODE = __FLASH_MODE__
+FLASH_SIZE = __FLASH_SIZE__
+FLASH_FREQ = __FLASH_FREQ__
+FLASH_PLAN = __FLASH_PLAN__
+_CHECKSUM_ROW = re.compile(r"([0-9A-Fa-f]{64})  \./(.+)\Z")
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        info = path.stat(follow_symlinks=False)
+    except OSError:
+        return True
+    attributes = getattr(info, "st_file_attributes", 0)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return path.is_symlink() or bool(attributes & reparse_flag)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _checked_package_file(root: Path, relative: str) -> Path:
+    if (
+        not relative
+        or "\\" in relative
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in relative)
+    ):
+        raise ValueError(f"Unsafe checksum path: {relative!r}")
+    posix_path = PurePosixPath(relative)
+    if posix_path.is_absolute() or any(
+        part in {"", ".", ".."} for part in posix_path.parts
+    ):
+        raise ValueError(f"Unsafe checksum path: {relative!r}")
+    cursor = root
+    for part in posix_path.parts:
+        cursor /= part
+        if _is_link_or_reparse(cursor):
+            raise ValueError(f"Linked/reparse package path rejected: {relative}")
+    resolved = cursor.resolve(strict=True)
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Checksum path escapes package: {relative}") from exc
+    if not resolved.is_file():
+        raise ValueError(f"Missing checksummed file: {relative}")
+    return resolved
+
+
+def verify_complete_package(package_root: Path) -> None:
+    root = package_root.resolve(strict=True)
+    manifest = root / "SHA256SUMS.txt"
+    if (
+        not manifest.is_file()
+        or _is_link_or_reparse(manifest)
+        or manifest.stat().st_size <= 0
+    ):
+        raise ValueError("Missing or linked package SHA256SUMS.txt")
+
+    expected: dict[str, tuple[str, str]] = {}
+    for raw_line in manifest.read_text(encoding="ascii").splitlines():
+        match = _CHECKSUM_ROW.fullmatch(raw_line)
+        if match is None:
+            raise ValueError(f"Invalid SHA256SUMS.txt row: {raw_line}")
+        digest, relative = match.groups()
+        folded = relative.casefold()
+        if folded in expected:
+            raise ValueError(f"Duplicate checksum path: {relative}")
+        target = _checked_package_file(root, relative)
+        actual = _sha256(target)
+        if actual != digest.lower():
+            raise ValueError(f"SHA256 mismatch: {relative}")
+        expected[folded] = (relative, actual)
+
+    actual_paths: dict[str, str] = {}
+    for candidate in sorted(root.rglob("*")):
+        if _is_link_or_reparse(candidate):
+            raise ValueError(f"Linked/reparse package entry rejected: {candidate}")
+        if not candidate.is_file() or candidate == manifest:
+            continue
+        relative = candidate.relative_to(root).as_posix()
+        folded = relative.casefold()
+        if folded in actual_paths:
+            raise ValueError(f"Ambiguous package path: {relative}")
+        actual_paths[folded] = relative
+    if not expected or set(expected) != set(actual_paths):
+        missing = sorted(set(actual_paths) - set(expected))
+        extra = sorted(set(expected) - set(actual_paths))
+        raise ValueError(
+            "SHA256SUMS.txt is not a complete one-to-one package file "
+            f"inventory (unchecksummed={missing}, missing={extra})"
+        )
+    for folded, (relative, _digest) in expected.items():
+        if actual_paths[folded] != relative:
+            raise ValueError(f"Checksum path spelling mismatch: {relative}")
+
+
+def _load_resolver(root: Path) -> types.ModuleType:
+    path = root / "d1l_serial_target.py"
+    source = path.read_text(encoding="utf-8")
+    module = types.ModuleType("_packaged_d1l_serial_target")
+    module.__file__ = str(path)
+    exec(compile(source, str(path), "exec"), module.__dict__)
+    if (
+        module.WINDOWS_D1L_TARGET != WINDOWS_D1L_TARGET
+        or module.POSIX_D1L_TARGET != POSIX_D1L_TARGET
+        or module.EXPECTED_VID != EXPECTED_VID
+        or module.EXPECTED_PID != EXPECTED_PID
+    ):
+        raise ValueError("Packaged D1L serial target policy is inconsistent")
+    return module
+
+
+def _default_port_lister() -> list[Any]:
+    try:
+        from serial.tools import list_ports
+    except ImportError as exc:
+        raise ValueError("pyserial is required to identify the D1L target") from exc
+    return list(list_ports.comports())
+
+
+def run_flash(
+    port: str,
+    *,
+    package_root: Path | None = None,
+    platform_name: str | None = None,
+    port_lister: Callable[[], list[Any]] | None = None,
+    command_runner: Callable[..., Any] | None = None,
+    resolver_module: Any | None = None,
+    resolver_hooks: dict[str, Any] | None = None,
+    validate_only: bool = False,
+) -> dict[str, Any]:
+    raw_root = (
+        Path(__file__).parent
+        if package_root is None
+        else Path(package_root)
+    )
+    if _is_link_or_reparse(raw_root):
+        raise ValueError("Linked/reparse package root rejected")
+    root = raw_root.resolve(strict=True)
+    verify_complete_package(root)
+    resolver = resolver_module or _load_resolver(root)
+    hooks = dict(resolver_hooks or {})
+    snapshot = resolver.resolve_target(
+        port,
+        port_lister=port_lister or _default_port_lister,
+        platform_name=platform_name,
+        **hooks,
+    )
+    resolver.validate_snapshot(snapshot, snapshot["requested_path"])
+    authorized_port = snapshot["requested_path"]
+    if authorized_port not in {WINDOWS_D1L_TARGET, POSIX_D1L_TARGET}:
+        raise ValueError("Resolver returned an unauthorized D1L target")
+    if validate_only:
+        return {"target": snapshot, "command": None}
+
+    command = [
+        sys.executable,
+        "-m",
+        "esptool",
+        "--chip",
+        "esp32s3",
+        "--port",
+        authorized_port,
+        "--baud",
+        str(FLASH_BAUD),
+        "--before",
+        "default-reset",
+        "--after",
+        "hard-reset",
+        "write-flash",
+        "--flash-mode",
+        FLASH_MODE,
+        "--flash-size",
+        FLASH_SIZE,
+        "--flash-freq",
+        FLASH_FREQ,
+    ]
+    for offset, relative in FLASH_PLAN:
+        command.extend((offset, str(root / relative)))
+    runner = command_runner or subprocess.run
+    result = runner(command, cwd=root)
+    returncode = getattr(result, "returncode", result if type(result) is int else None)
+    if returncode != 0:
+        raise RuntimeError(f"Project flash failed with exit code {returncode!r}")
+    return {"target": snapshot, "command": command}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", default=os.environ.get("D1L_PORT"))
+    parser.add_argument("--validate-only", action="store_true")
+    args = parser.parse_args(argv)
+    if not isinstance(args.port, str) or not args.port.strip():
+        parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
+    try:
+        run_flash(args.port, validate_only=args.validate_only)
+    except (OSError, RuntimeError, ValueError) as exc:
+        parser.error(str(exc))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+    replacements = {
+        "__WINDOWS_TARGET__": repr(WINDOWS_D1L_TARGET),
+        "__POSIX_TARGET__": repr(POSIX_D1L_TARGET),
+        "__EXPECTED_VID__": str(EXPECTED_VID),
+        "__EXPECTED_PID__": str(EXPECTED_PID),
+        "__FLASH_BAUD__": str(FLASH_BAUD),
+        "__FLASH_MODE__": repr(str(flash_mode)),
+        "__FLASH_SIZE__": repr(str(flash_size)),
+        "__FLASH_FREQ__": repr(str(flash_freq)),
+        "__FLASH_PLAN__": json.dumps(flash_plan, separators=(",", ":")),
+    }
+    for marker, replacement in replacements.items():
+        template = template.replace(marker, replacement)
+    return template
+
+
+def core_install_file_bindings(package_dir: Path) -> dict[str, dict[str, Any]]:
+    bindings: dict[str, dict[str, Any]] = {}
+    for relative in CORE_GENERATED_INSTALL_FILES:
+        path = package_dir / relative
+        if (
+            not path.is_file()
+            or is_link_or_reparse(path)
+            or path.stat().st_size <= 0
+        ):
+            raise ValueError(f"Core generated install file is invalid: {relative}")
+        bindings[relative] = {
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+    return bindings
+
+
+def write_flash_scripts(
+    root: Path,
+    package_dir: Path,
+    entries: list[dict],
+    flasher_args: dict,
+    full_image: dict,
+    release_profile: str = "full_feature",
+) -> dict:
     flash_settings = flasher_args.get("flash_settings", {})
     flash_mode = flash_settings.get("flash_mode", "dio")
     flash_size = flash_settings.get("flash_size", "8MB")
     flash_freq = flash_settings.get("flash_freq", "80m")
     project_args = command_flash_files(entries)
 
+    if release_profile == CORE_RELEASE_PROFILE:
+        resolver = copy_core_serial_target_resolver(root, package_dir)
+        py_project = package_dir / "flash_project.py"
+        py_project.write_text(
+            core_flash_runner_source(
+                entries,
+                flash_mode=str(flash_mode),
+                flash_size=str(flash_size),
+                flash_freq=str(flash_freq),
+            ),
+            encoding="ascii",
+        )
+
+        ps_project = package_dir / "flash_project.ps1"
+        ps_project.write_text(
+            "\n".join(
+                (
+                    "param([string]$Port = $env:D1L_PORT)",
+                    '$ErrorActionPreference = "Stop"',
+                    'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+                    "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
+                    f'if ($ValidatedPort -ne "{WINDOWS_D1L_TARGET}") {{ throw "Core 1.0 Windows D1L flashing requires {WINDOWS_D1L_TARGET}." }}',
+                    "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
+                    "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort",
+                    'if ($LASTEXITCODE -ne 0) { throw "Project flash failed with exit code $LASTEXITCODE" }',
+                    "",
+                )
+            ),
+            encoding="ascii",
+        )
+
+        sh_project = package_dir / "flash_project.sh"
+        sh_project.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env sh",
+                    "set -eu",
+                    ': "${D1L_PORT:?Set D1L_PORT to the stable D1L by-id path.}"',
+                    f'if [ "$D1L_PORT" != "{POSIX_D1L_TARGET}" ]; then',
+                    f'  printf "%s\\n" "Core 1.0 POSIX D1L flashing requires {POSIX_D1L_TARGET}." >&2',
+                    "  exit 2",
+                    "fi",
+                    'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+                    'PYTHON_BIN="${D1L_PYTHON:-python3}"',
+                    '"$PYTHON_BIN" "$ROOT/flash_project.py" --port "$D1L_PORT"',
+                    "",
+                )
+            ),
+            encoding="ascii",
+        )
+        sh_project.chmod(0o755)
+
+        ps_full = package_dir / "flash_full_8mb.ps1"
+        ps_full_lines = [
+            "param([string]$Port = $env:D1L_PORT)",
+            '$ErrorActionPreference = "Stop"',
+            'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+            "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
+            f'if ($ValidatedPort -ne "{WINDOWS_D1L_TARGET}") {{ throw "Core 1.0 Windows recovery requires {WINDOWS_D1L_TARGET}." }}',
+            "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
+            *powershell_checksum_guard_lines(),
+            "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --validate-only",
+            'if ($LASTEXITCODE -ne 0) { throw "D1L identity validation failed with exit code $LASTEXITCODE" }',
+            'Write-Warning "WINDOWS-ONLY RECOVERY: this writes the full 8MB image at 0x0 and can overwrite persisted settings/logs."',
+            '$Confirm = Read-Host "Type FULL-FLASH-$ValidatedPort to continue"',
+            'if ($Confirm -ne "FULL-FLASH-$ValidatedPort") { throw "Full flash confirmation failed." }',
+            "python -m esptool --chip esp32s3 --port $ValidatedPort --baud "
+            f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+            f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+            f"{full_image['flash_offset']} (Join-Path $Root '{full_image['path']}')",
+            'if ($LASTEXITCODE -ne 0) { throw "Full flash failed with exit code $LASTEXITCODE" }',
+            "",
+        ]
+        ps_full.write_text("\n".join(ps_full_lines), encoding="ascii")
+        return {
+            "shared_project_flash": py_project.name,
+            "serial_target_resolver": resolver["path"],
+            "windows_project_flash": ps_project.name,
+            "posix_project_flash": sh_project.name,
+            "windows_full_flash": ps_full.name,
+            "posix_full_flash": None,
+        }
+
     ps_project = package_dir / "flash_project.ps1"
-    ps_project.write_text(
-        "\n".join(
-            [
-                "param([string]$Port = $env:D1L_PORT)",
-                '$ErrorActionPreference = "Stop"',
-                'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
-                "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
-                "$Firmware = Join-Path $Root 'firmware'",
-                "python -m esptool --chip esp32s3 --port $Port --baud "
-                f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
-                f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
-                + " ".join(
-                    f"{project_args[i]} (Join-Path $Root '{project_args[i + 1]}')"
-                    for i in range(0, len(project_args), 2)
-                ),
-                "if ($LASTEXITCODE -ne 0) { throw \"Project flash failed with exit code $LASTEXITCODE\" }",
-                "",
-            ]
+    ps_project_lines = [
+        "param([string]$Port = $env:D1L_PORT)",
+        '$ErrorActionPreference = "Stop"',
+        'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+        "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
+        *powershell_checksum_guard_lines(),
+        "$Firmware = Join-Path $Root 'firmware'",
+        "python -m esptool --chip esp32s3 --port $Port --baud "
+        f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+        f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+        + " ".join(
+            f"{project_args[i]} (Join-Path $Root '{project_args[i + 1]}')"
+            for i in range(0, len(project_args), 2)
         ),
-        encoding="ascii",
-    )
+        'if ($LASTEXITCODE -ne 0) { throw "Project flash failed with exit code $LASTEXITCODE" }',
+        "",
+    ]
+    ps_project.write_text("\n".join(ps_project_lines), encoding="ascii")
 
     ps_full = package_dir / "flash_full_8mb.ps1"
-    ps_full.write_text(
-        "\n".join(
-            [
-                "param([string]$Port = $env:D1L_PORT)",
-                '$ErrorActionPreference = "Stop"',
-                'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
-                "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
-                'Write-Warning "This writes the full 8MB image at 0x0 and can overwrite persisted settings/logs."',
-                '$Confirm = Read-Host "Type FULL-FLASH-$Port to continue"',
-                'if ($Confirm -ne "FULL-FLASH-$Port") { throw "Full flash confirmation failed." }',
-                "python -m esptool --chip esp32s3 --port $Port --baud "
-                f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
-                f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
-                f"{full_image['flash_offset']} (Join-Path $Root '{full_image['path']}')",
-                "if ($LASTEXITCODE -ne 0) { throw \"Full flash failed with exit code $LASTEXITCODE\" }",
-                "",
-            ]
-        ),
-        encoding="ascii",
-    )
+    ps_full_lines = [
+        "param([string]$Port = $env:D1L_PORT)",
+        '$ErrorActionPreference = "Stop"',
+        'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+        "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
+        *powershell_checksum_guard_lines(),
+        'Write-Warning "This writes the full 8MB image at 0x0 and can overwrite persisted settings/logs."',
+        '$Confirm = Read-Host "Type FULL-FLASH-$Port to continue"',
+        'if ($Confirm -ne "FULL-FLASH-$Port") { throw "Full flash confirmation failed." }',
+        "python -m esptool --chip esp32s3 --port $Port --baud "
+        f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+        f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+        f"{full_image['flash_offset']} (Join-Path $Root '{full_image['path']}')",
+        'if ($LASTEXITCODE -ne 0) { throw "Full flash failed with exit code $LASTEXITCODE" }',
+        "",
+    ]
+    ps_full.write_text("\n".join(ps_full_lines), encoding="ascii")
 
     sh_project = package_dir / "flash_project.sh"
     sh_project.write_text(
         "\n".join(
-            [
+            (
                 "#!/usr/bin/env sh",
                 "set -eu",
                 ': "${D1L_PORT:?Set D1L_PORT to the D1L serial port.}"',
@@ -1156,16 +2095,15 @@ def write_flash_scripts(package_dir: Path, entries: list[dict], flasher_args: di
                 f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
                 f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
                 + " ".join(
-                    f"{project_args[i]} \"$ROOT/{project_args[i + 1]}\""
+                    f'{project_args[i]} "$ROOT/{project_args[i + 1]}"'
                     for i in range(0, len(project_args), 2)
                 ),
                 "",
-            ]
+            )
         ),
         encoding="ascii",
     )
     sh_project.chmod(0o755)
-
     return {
         "windows_project_flash": ps_project.name,
         "windows_full_flash": ps_full.name,
@@ -1173,9 +2111,435 @@ def write_flash_scripts(package_dir: Path, entries: list[dict], flasher_args: di
     }
 
 
+def write_supported_features(
+    package_dir: Path,
+    *,
+    source_commit: str,
+    actions_run: str,
+    actions_run_attempt: str,
+    sd_history_mode: str,
+    supported_capabilities: list[str],
+    unavailable_capabilities: list[str],
+) -> dict:
+    path = package_dir / "SUPPORTED_FEATURES.md"
+    supported_lines = "\n".join(
+        f"- `{capability}`" for capability in supported_capabilities
+    )
+    unavailable_lines = "\n".join(
+        f"- `{capability}`" for capability in unavailable_capabilities
+    )
+    if sd_history_mode == "disabled":
+        sd_text = (
+            "SD history is disabled and deferred. NVS is authoritative. "
+            "No RP2040 payload is included."
+        )
+    elif sd_history_mode == "supported_optional":
+        sd_text = (
+            "SD history is an optional supported capability only for the paired "
+            "artifacts in this exact package."
+        )
+    else:
+        sd_text = (
+            "SD history is conditional and unqualified, so it is not a supported "
+            "Core release capability."
+        )
+    path.write_text(
+        f"""# MeshCore DeskOS D1L Core 1.0 Supported Features
+
+Release profile: `{CORE_RELEASE_PROFILE}`
+
+Firmware commit: `{source_commit}`
+
+GitHub Actions run: `{actions_run}`
+
+GitHub Actions run attempt: `{actions_run_attempt}`
+
+SD history mode: `{sd_history_mode}`
+
+{sd_text}
+
+## Supported
+
+{supported_lines}
+
+## Unavailable
+
+{unavailable_lines}
+
+Unavailable capabilities are intentionally hidden or rejected before side
+effects. Map, Wi-Fi, BLE, OTA, multi-channel management, administration,
+Observer/MQTT, and location are deferred.
+
+## Current known limitations
+
+- SD history is `{sd_history_mode}`; when disabled, retained Core data uses NVS.
+- Updates and recovery are USB-only. OTA and signed SD update are unavailable.
+- The Full Feature profile is not release-ready and is not represented by this
+  package.
+
+## Support and reporting
+
+Report defects with the firmware commit, GitHub Actions run, and run attempt
+shown above at https://github.com/n30nex/SIGUI/issues/new.
+
+Use USB installation and recovery only. Never format an SD card on the device.
+""",
+        encoding="ascii",
+    )
+    return {
+        "path": path.name,
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+    }
+
+
+def write_core_install_recovery_guide(
+    package_dir: Path,
+    *,
+    source_commit: str,
+    actions_run: str,
+    actions_run_attempt: str,
+    sd_history_mode: str,
+) -> dict:
+    docs_dir = package_dir / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    path = docs_dir / "CORE_INSTALL_RECOVERY.md"
+    path.write_text(
+        f"""# MeshCore DeskOS D1L Core 1.0 Install and Recovery
+
+Firmware commit: `{source_commit}`
+
+GitHub Actions run: `{actions_run}`
+
+GitHub Actions run attempt: `{actions_run_attempt}`
+
+Release profile: `{CORE_RELEASE_PROFILE}`
+
+SD history mode: `{sd_history_mode}`
+
+## Before installing
+
+1. Use one of the two supported stable targets:
+   - Windows: `{WINDOWS_D1L_TARGET}`
+   - POSIX/Pi 5: `{POSIX_D1L_TARGET}`
+2. The device must report USB VID:PID `{EXPECTED_VID:04X}:{EXPECTED_PID:04X}`.
+3. On POSIX, `/dev/ttyUSB<number>` is observational evidence only. Never pass
+   a raw tty path to a package flash command.
+4. Never use COM8, COM11, COM16, or COM29 for the ESP32 Core install.
+5. The generated entrypoint verifies every file against `SHA256SUMS.txt` and
+   rejects missing, extra, linked, duplicate, or mismatched files.
+6. Read `SUPPORTED_FEATURES.md`. Map, Wi-Fi, BLE, OTA, multi-channel
+   management, administration, Observer/MQTT, and location are unavailable.
+7. Never format an SD card on the device.
+
+## Normal non-erasing USB install
+
+The normal project flash writes the Actions-built bootloader, partition table,
+and application at their declared ESP-IDF offsets. It does not issue an erase
+and preserves unrelated NVS regions. Both wrappers invoke the package-root
+`flash_project.py`, which verifies the complete checksum inventory, resolves
+the exact USB identity, and gives esptool only the stable requested target.
+
+### Windows
+
+```powershell
+$PackageRoot = (Get-Location).Path
+$env:D1L_PORT = "{WINDOWS_D1L_TARGET}"
+& (Join-Path $PackageRoot "flash_project.ps1") -Port {WINDOWS_D1L_TARGET}
+```
+
+### POSIX / Raspberry Pi 5
+
+```sh
+export D1L_PORT="{POSIX_D1L_TARGET}"
+./flash_project.sh
+```
+
+After flashing, query `version` and `health`. Require the exact commit above,
+`release_profile=core_1_0`, and the exact SD history mode above before using
+any evidence from the device.
+
+## Recovery
+
+Try the normal project flash first. The full 8MB recovery image is a last
+resort: it can overwrite settings, contacts, messages, and other retained
+state. Core recovery is Windows-only. No POSIX recovery wrapper is shipped.
+`flash_full_8mb.ps1` verifies the complete checksum inventory and the COM12
+USB identity before it asks the operator to type `FULL-FLASH-COM12`.
+
+```powershell
+$PackageRoot = (Get-Location).Path
+$env:D1L_PORT = "{WINDOWS_D1L_TARGET}"
+& (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port {WINDOWS_D1L_TARGET}
+```
+
+Re-verify `version`, `health`, display, touch, and retained-state expectations
+after recovery. Core 1.0 supports USB install/recovery only; it does not
+support OTA or signed SD update.
+""",
+        encoding="ascii",
+    )
+    return {
+        "path": path.relative_to(package_dir).as_posix(),
+        "source": "generated_core_profile",
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+    }
+
 def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -> None:
     readme = package_dir / "README_RELEASE.md"
     app = app_entry(manifest["flash_files"])
+    if manifest.get("release_profile") == CORE_RELEASE_PROFILE:
+        sd_mode = manifest["sd_history_mode"]
+        supported_lines = "\n".join(
+            f"- `{capability}`"
+            for capability in manifest["supported_capabilities"]
+        )
+        unavailable_lines = "\n".join(
+            f"- `{capability}`"
+            for capability in manifest["unavailable_capabilities"]
+        )
+        checksum_rows = [
+            (
+                str(entry["path"]),
+                str(entry["sha256"]),
+            )
+            for entry in manifest["flash_files"]
+        ]
+        full_image = manifest.get("full_flash_image")
+        if isinstance(full_image, dict):
+            checksum_rows.append(
+                (str(full_image["path"]), str(full_image["sha256"]))
+            )
+        supported_features = manifest.get("supported_features")
+        if isinstance(supported_features, dict):
+            checksum_rows.append(
+                (
+                    str(supported_features["path"]),
+                    str(supported_features["sha256"]),
+                )
+            )
+        for release_doc in manifest.get("release_docs", []):
+            if isinstance(release_doc, dict):
+                checksum_rows.append(
+                    (
+                        str(release_doc["path"]),
+                        str(release_doc["sha256"]),
+                    )
+                )
+        checksum_lines = "\n".join(
+            f"- `{path}`: `{digest}`" for path, digest in checksum_rows
+        )
+        sd_note = (
+            "SD history is disabled/deferred; NVS is authoritative and no "
+            "RP2040 payload is included."
+            if sd_mode == "disabled"
+            else (
+                "SD history is qualified optional and is bound to the paired "
+                "RP2040 artifacts in this package."
+                if sd_mode == "supported_optional"
+                else "SD history remains conditional and is not release-qualified."
+            )
+        )
+        readme.write_text(
+            f"""# {PROJECT} Core 1.0 Release Package
+
+Package: `{package_name}`
+
+Release profile: `{manifest['release_profile']}`
+
+Git commit: `{manifest['firmware_commit']}`
+
+GitHub Actions run: `{manifest['actions_run']}`
+
+GitHub Actions run attempt: `{manifest['actions_run_attempt']}`
+
+SD history mode: `{sd_mode}`
+
+{sd_note}
+
+`SUPPORTED_FEATURES.md` is the authoritative package capability summary.
+`full_feature_release_ready` is always `false` for this package.
+
+## Supported matrix
+
+{supported_lines}
+
+## Unavailable matrix
+
+{unavailable_lines}
+
+Unavailable means hidden or rejected before side effects. Map, Wi-Fi, BLE,
+OTA, multi-channel management, administration, Observer/MQTT, and location
+are explicitly deferred.
+
+## SHA-256 values
+
+{checksum_lines}
+
+`SHA256SUMS.txt` contains the authoritative SHA-256 value for every other file
+in the package except itself. The generated Python entrypoint and both
+normal-install wrappers verify that complete checksum tree before writing. The Windows-only recovery wrapper also
+performs the same inventory and USB identity checks before its warning.
+
+## Normal USB Install
+
+Normal project flashing writes the exact Actions-built bootloader, partition
+table, and app at their ESP-IDF offsets without erasing unrelated NVS regions.
+It accepts exactly `COM12` on Windows or
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` on POSIX, and requires
+VID:PID `1A86:7523`.
+
+```powershell
+$PackageRoot = (Get-Location).Path
+$env:D1L_PORT = "COM12"
+& (Join-Path $PackageRoot "flash_project.ps1") -Port COM12
+```
+
+```sh
+export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+./flash_project.sh
+```
+
+On POSIX, `/dev/ttyUSB<number>` is observational only and is never an
+authorized open target. Never use COM8, COM11, COM16, or COM29.
+
+## Recovery
+
+Read `docs/CORE_INSTALL_RECOVERY.md` before recovery. The full 8MB recovery image
+requires an explicit typed confirmation and can overwrite retained state.
+Recovery remains Windows-only; no POSIX full-flash wrapper is included.
+USB install/recovery is the only supported update path in Core 1.0.
+
+Never format an SD card on the device.
+
+## Current known limitations
+
+- SD history is `{sd_mode}`. When disabled, retained Core data uses NVS and no
+  RP2040 payload is included.
+- Only the supported matrix above is available; Full Feature remains
+  unreleased.
+- Installation and recovery are USB-only; OTA and signed SD update are
+  unavailable.
+
+## Support and reporting
+
+Report defects at https://github.com/n30nex/SIGUI/issues/new. Include firmware
+commit `{manifest['firmware_commit']}`, Actions run
+`{manifest['actions_run']}`, run attempt
+`{manifest['actions_run_attempt']}`, this package name, and the relevant
+evidence.
+
+App image: `{app['path']}`
+
+App SHA256: `{app['sha256']}`
+""",
+            encoding="ascii",
+        )
+        return
+    if manifest.get("release_profile") == FULL_FEATURE_RELEASE_PROFILE:
+        supported_lines = "\n".join(
+            f"- `{capability}`"
+            for capability in manifest["supported_capabilities"]
+        )
+        signed_update = manifest["signed_update"]
+        readme.write_text(
+            f"""# {PROJECT} Full Feature Release Package
+
+Package: `{package_name}`
+
+Release profile: `{manifest['release_profile']}`
+
+Firmware commit: `{manifest['firmware_commit']}`
+
+GitHub Actions run: `{manifest['actions_run']}`
+
+GitHub Actions run attempt: `{manifest['actions_run_attempt']}`
+
+SD history mode: `{manifest['sd_history_mode']}`
+
+This package contains the production Full Feature firmware and a verified
+Ed25519-signed local update bundle. `full_feature_release_ready` remains
+`false` until the exact package is flashed and its physical release gates are
+recorded; packaging never manufactures that evidence.
+
+## Supported capabilities
+
+{supported_lines}
+
+The BLE companion deliberately rejects factory reset, remote reboot, and
+private-key import/export. Those are production security boundaries, not
+missing user features. RF-triggered firmware update is also impossible.
+
+## Contents
+
+- `firmware/` contains the bootloader, OTA partition table, application image,
+  and `flasher_args.json`.
+- `update/d1l-update.bin`, `update/d1l-update.manifest`, and
+  `update/d1l-update.sig` are one exact signed update set.
+- `full-flash/meshcore_deskos_d1l-full-8mb.bin` is the destructive
+  factory/recovery image.
+- `docs/`, `notices/`, `evidence/`, the SBOM, provenance, and package metadata
+  are bound by `SHA256SUMS.txt`.
+
+Update signer: `{signed_update['signer_key_id']}`
+
+Update security sequence: `{signed_update['security_sequence']}`
+
+## Normal project flash
+
+On the current Pi 5 development route, open only the stable D1L identity:
+
+```sh
+export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+./flash_project.sh
+```
+
+The target must enumerate as VID:PID `1A86:7523`. Never substitute
+`/dev/ttyUSB<number>` and never probe another Pi serial device. On Windows,
+resolve the D1L by the same VID:PID immediately before use; do not reuse an
+old COM assignment.
+
+Normal project flashing writes bootloader, OTA partition table, and app at the
+ESP-IDF offsets. Use the full 8MB image only for reviewed recovery because it
+can overwrite settings, logs, contacts, and message state.
+
+## Signed local update
+
+Copy this exact set to the mounted card without renaming:
+
+- `update/d1l-update.bin` -> `updates/d1l-update.bin`
+- `update/d1l-update.manifest` -> `updates/d1l-update.manifest`
+- `update/d1l-update.sig` -> `updates/d1l-update.sig`
+
+Then use the on-device Update sheet, or the local USB console:
+
+```text
+update status
+update install CONFIRM-SIGNED-UPDATE
+update status
+update reboot CONFIRM-REBOOT-UPDATE
+```
+
+The device verifies product, target, exact image size/hash, partition-table
+hash, signer identity, signature, and monotonic security sequence before
+writing the inactive OTA slot. It confirms the new image after a healthy boot
+and otherwise retains ESP-IDF rollback behavior. Never format the SD card.
+
+## Checksums and reporting
+
+Verify `SHA256SUMS.txt` before flashing. Report defects at
+https://github.com/n30nex/SIGUI/issues/new with firmware commit
+`{manifest['firmware_commit']}`, Actions run `{manifest['actions_run']}`,
+attempt `{manifest['actions_run_attempt']}`, and the relevant device receipt.
+
+App image: `{app['path']}`
+
+App SHA256: `{app['sha256']}`
+""",
+            encoding="ascii",
+        )
+        return
     if manifest.get("rp2040_artifacts"):
         rp2040_contents = "- `rp2040/` contains the Actions-built RP2040 SD bridge, legacy smoke, and official Seeed SD smoke UF2 artifacts."
     else:
@@ -1194,7 +2558,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 
 - `firmware/` contains the bootloader, partition table, app binary, and `flasher_args.json`.
 {rp2040_contents}
-- `update/meshcore_deskos_d1l-app.bin` is the application image for future OTA/update flows.
+- `update/d1l-update.bin` is the application image for development update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
 - `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.
 - `notices/` contains the project license, third-party notices, source audit notes, attributions, and the verbatim orlp Ed25519 zlib license for public distribution.
@@ -1250,7 +2614,20 @@ def create_release_package(
     rp2040_artifact_root: Path | None = None,
     meshcore_conformance_json: Path | None = None,
     meshcore_signed_advert_runtime_json: Path | None = None,
+    release_profile: str = "full_feature",
+    sd_history_mode: str = "conditional",
+    update_signing_key: Path | None = None,
 ) -> dict:
+    release_profile, sd_history_mode = validate_release_settings(
+        release_profile, sd_history_mode
+    )
+    if (
+        release_profile == FULL_FEATURE_RELEASE_PROFILE
+        and update_signing_key is None
+    ):
+        raise ValueError(
+            "full_feature release packaging requires an update signing key"
+        )
     flasher_args = load_flasher_args(build_dir)
     package_dir = out_dir / package_name
     if package_dir.exists():
@@ -1270,6 +2647,45 @@ def create_release_package(
         raise ValueError("release package source identity does not match repository HEAD")
     source_git["commit"] = expected_commit
     source_git["short_commit"] = expected_commit[:7]
+    workflow = workflow_info()
+    if release_profile in PRODUCTION_RELEASE_PROFILES:
+        profile_label = (
+            "Core"
+            if release_profile == CORE_RELEASE_PROFILE
+            else "Full Feature"
+        )
+        workflow_sha = workflow.get("sha")
+        workflow_run_id = workflow.get("run_id")
+        workflow_run_attempt = workflow.get("run_attempt")
+        if exact_sha(
+            workflow_sha, f"{profile_label} package Actions SHA"
+        ) != expected_commit:
+            raise ValueError(
+                f"{profile_label} package requires GITHUB_SHA to match the "
+                "exact firmware commit"
+            )
+        if (
+            not isinstance(workflow_run_id, str)
+            or re.fullmatch(r"[1-9][0-9]*", workflow_run_id) is None
+        ):
+            raise ValueError(
+                f"{profile_label} package requires the exact numeric GitHub "
+                "Actions run ID"
+            )
+        if (
+            not isinstance(workflow_run_attempt, str)
+            or re.fullmatch(r"[1-9][0-9]*", workflow_run_attempt)
+            is None
+        ):
+            raise ValueError(
+                f"{profile_label} package requires the exact positive GitHub Actions "
+                "run attempt"
+            )
+        if workflow.get("repository") != "n30nex/SIGUI":
+            raise ValueError(
+                f"{profile_label} package requires the canonical n30nex/SIGUI "
+                "Actions repository"
+            )
     meshcore_conformance = copy_meshcore_conformance_evidence(
         meshcore_conformance_json,
         meshcore_signed_advert_runtime_json,
@@ -1286,22 +2702,81 @@ def create_release_package(
     firmware_dir = package_dir / "firmware"
     entries = copy_flash_files(build_dir, firmware_dir, flasher_args)
     app = app_entry(entries)
-    update_image = copy_update_image(package_dir, firmware_dir, app)
+    update_image = (
+        None
+        if release_profile == CORE_RELEASE_PROFILE
+        else copy_update_image(package_dir, firmware_dir, app)
+    )
+    signed_update = (
+        write_signed_update_bundle(
+            root,
+            package_dir,
+            update_image,
+            expected_commit,
+            d1l_firmware_version(root),
+            source_security_sequence(source_identity),
+            update_signing_key,
+        )
+        if update_image is not None and update_signing_key is not None
+        else None
+    )
     full_image = write_full_flash_image(build_dir, package_dir, flasher_args, full_size)
     debug_files = copy_optional_debug_files(build_dir, package_dir)
     notice_files = copy_notice_files(root, package_dir)
-    release_docs = copy_release_docs(root, package_dir)
-    rp2040_artifacts = copy_rp2040_artifacts(rp2040_artifact_root, package_dir)
-    scripts = write_flash_scripts(package_dir, entries, flasher_args, full_image)
+    release_docs = (
+        []
+        if release_profile == CORE_RELEASE_PROFILE
+        else copy_release_docs(root, package_dir)
+    )
+    if release_profile == CORE_RELEASE_PROFILE and sd_history_mode == "disabled":
+        rp2040_artifacts = []
+    else:
+        rp2040_artifacts = copy_rp2040_artifacts(
+            rp2040_artifact_root, package_dir
+        )
+    if (
+        release_profile == CORE_RELEASE_PROFILE
+        and sd_history_mode == "supported_optional"
+        and not rp2040_artifacts
+    ):
+        raise ValueError(
+            "Core supported_optional SD requires the exact paired RP2040 artifacts"
+        )
+    scripts = write_flash_scripts(
+        root,
+        package_dir,
+        entries,
+        flasher_args,
+        full_image,
+        release_profile=release_profile,
+    )
+    if release_profile == CORE_RELEASE_PROFILE:
+        release_docs = [
+            write_core_install_recovery_guide(
+                package_dir,
+                source_commit=expected_commit,
+                actions_run=str(workflow["run_id"]),
+                actions_run_attempt=str(workflow["run_attempt"]),
+                sd_history_mode=sd_history_mode,
+            )
+        ]
 
     manifest = {
-        "schema": 1,
+        "schema": (
+            CORE_PACKAGE_SCHEMA
+            if release_profile == CORE_RELEASE_PROFILE
+            else (
+                FULL_FEATURE_PACKAGE_SCHEMA
+                if release_profile == FULL_FEATURE_RELEASE_PROFILE
+                else 1
+            )
+        ),
         "project": PROJECT,
         "app_version": d1l_firmware_version(root),
         "package": package_name,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "git": source_git,
-        "workflow": workflow_info(),
+        "workflow": workflow,
         "source_build_dir": str(build_dir),
         "flash_settings": flasher_args.get("flash_settings", {}),
         "flash_files": entries,
@@ -1309,6 +2784,7 @@ def create_release_package(
         "meshcore_conformance": meshcore_conformance,
         "meshcore_signed_advert_runtime": meshcore_signed_advert_runtime,
         "update_image": update_image,
+        "signed_update": signed_update,
         "full_flash_image": full_image,
         "debug_files": debug_files,
         "release_docs": release_docs,
@@ -1320,7 +2796,126 @@ def create_release_package(
             "Flash backup may be skipped only when the operator explicitly requests that for hardware validation.",
         ],
     }
-    manifest.update(write_package_inventory_metadata(root, package_dir, expected_commit))
+    if release_profile == CORE_RELEASE_PROFILE:
+        capability_truth = core_capability_truth(sd_history_mode)
+        manifest.update(
+            {
+                "release_profile": release_profile,
+                "firmware_commit": expected_commit,
+                "actions_run": str(workflow["run_id"]),
+                "actions_run_attempt": str(workflow["run_attempt"]),
+                "supported_capabilities": capability_truth[
+                    "supported_capabilities"
+                ],
+                "unavailable_capabilities": capability_truth[
+                    "unavailable_capabilities"
+                ],
+                "sd_history_mode": sd_history_mode,
+                "sd_history_state": capability_truth["sd_history_state"],
+                "storage_authority": capability_truth["storage_authority"],
+                "full_feature_release_ready": False,
+                "install_recovery_guide": {
+                    "schema": CORE_INSTALL_CONTRACT_SCHEMA,
+                    "usb_only": True,
+                    "normal_install_script": "flash_project.py",
+                    "normal_install_scripts": {
+                        "windows": "flash_project.ps1",
+                        "posix": "flash_project.sh",
+                    },
+                    "normal_install_port": WINDOWS_D1L_TARGET,
+                    "normal_install_targets": {
+                        "windows": {
+                            "requested_path": WINDOWS_D1L_TARGET,
+                            "target_kind": "windows_com",
+                            "vid": EXPECTED_VID,
+                            "pid": EXPECTED_PID,
+                        },
+                        "posix": {
+                            "requested_path": POSIX_D1L_TARGET,
+                            "target_kind": "posix_by_id",
+                            "vid": EXPECTED_VID,
+                            "pid": EXPECTED_PID,
+                        },
+                    },
+                    "target_policy": {
+                        "stable_requested_path_only": True,
+                        "resolved_tty_observational_only": True,
+                        "hardware_identity_required": True,
+                        "raw_posix_tty_forbidden": True,
+                    },
+                    "normal_install_preserves_unrelated_nvs": True,
+                    "normal_install_package_root_only": True,
+                    "normal_install_checksum_verified": True,
+                    "recovery_script": "flash_full_8mb.ps1",
+                    "recovery_platform": "windows_only",
+                    "posix_recovery_script": None,
+                    "recovery_requires_typed_confirmation": True,
+                    "recovery_checksum_verified": True,
+                    "recovery_target_identity_verified": True,
+                    "install_guide": "docs/CORE_INSTALL_RECOVERY.md",
+                    "recovery_guide": "docs/CORE_INSTALL_RECOVERY.md",
+                    "no_on_device_sd_format": True,
+                    "generated_files": core_install_file_bindings(package_dir),
+                },
+            }
+        )
+        manifest["supported_features"] = write_supported_features(
+            package_dir,
+            source_commit=expected_commit,
+            actions_run=str(workflow["run_id"]),
+            actions_run_attempt=str(workflow["run_attempt"]),
+            sd_history_mode=sd_history_mode,
+            supported_capabilities=manifest["supported_capabilities"],
+            unavailable_capabilities=manifest["unavailable_capabilities"],
+        )
+        if sd_history_mode == "disabled":
+            manifest["notes"].extend(
+                (
+                    "SD history is deferred and disabled; NVS is authoritative.",
+                    "RP2040 release payloads are intentionally omitted.",
+                )
+            )
+    elif release_profile == FULL_FEATURE_RELEASE_PROFILE:
+        capability_truth = full_feature_capability_truth(sd_history_mode)
+        manifest.update(
+            {
+                "release_profile": release_profile,
+                "firmware_commit": expected_commit,
+                "actions_run": str(workflow["run_id"]),
+                "actions_run_attempt": str(workflow["run_attempt"]),
+                "supported_capabilities": capability_truth[
+                    "supported_capabilities"
+                ],
+                "unavailable_capabilities": capability_truth[
+                    "unavailable_capabilities"
+                ],
+                "sd_history_mode": sd_history_mode,
+                "sd_history_state": capability_truth["sd_history_state"],
+                "storage_authority": capability_truth["storage_authority"],
+                "full_feature_release_ready": False,
+                "signed_update_required": True,
+                "security_constraints": [
+                    "No RF-triggered firmware update",
+                    "No BLE private-key import or export",
+                    "No BLE factory reset or remote reboot",
+                    "Admin mutations require authenticated capability gates and local confirmation",
+                    "Room administration never synchronizes room history",
+                ],
+            }
+        )
+        if not isinstance(signed_update, dict) or not signed_update.get("signed"):
+            raise ValueError(
+                "Full Feature package requires a verified signed update bundle"
+            )
+    manifest.update(
+        write_package_inventory_metadata(
+            root,
+            package_dir,
+            expected_commit,
+            release_profile=release_profile,
+            sd_history_mode=sd_history_mode,
+        )
+    )
     manifest["sbom"] = write_package_sbom(
         root,
         package_dir,
@@ -1351,6 +2946,9 @@ def main() -> int:
     parser.add_argument("--rp2040-artifact-root", default=None)
     parser.add_argument("--meshcore-conformance-json", default=None)
     parser.add_argument("--meshcore-signed-advert-runtime-json", default=None)
+    parser.add_argument("--release-profile", choices=sorted(RELEASE_PROFILES))
+    parser.add_argument("--sd-history-mode", choices=sorted(SD_HISTORY_MODES))
+    parser.add_argument("--update-signing-key", default=None)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -1360,6 +2958,11 @@ def main() -> int:
     out_dir = Path(args.out_dir)
     if not out_dir.is_absolute():
         out_dir = root / out_dir
+    release_profile, sd_history_mode = build_release_settings(
+        build_dir,
+        release_profile=args.release_profile,
+        sd_history_mode=args.sd_history_mode,
+    )
     info = git_info(root)
     package_name = args.package_name
     if not package_name:
@@ -1389,6 +2992,19 @@ def main() -> int:
             root / meshcore_signed_advert_runtime_json
         )
 
+    update_signing_key = (
+        Path(args.update_signing_key) if args.update_signing_key else None
+    )
+    if update_signing_key and not update_signing_key.is_absolute():
+        update_signing_key = root / update_signing_key
+    if (
+        release_profile == FULL_FEATURE_RELEASE_PROFILE
+        and update_signing_key is None
+    ):
+        parser.error(
+            "full_feature release packaging requires --update-signing-key"
+        )
+
     manifest = create_release_package(
         root,
         build_dir,
@@ -1398,6 +3014,9 @@ def main() -> int:
         rp2040_artifact_root=rp2040_artifact_root,
         meshcore_conformance_json=meshcore_conformance_json,
         meshcore_signed_advert_runtime_json=meshcore_signed_advert_runtime_json,
+        release_profile=release_profile,
+        sd_history_mode=sd_history_mode,
+        update_signing_key=update_signing_key,
     )
     print(json.dumps(manifest))
     return 0

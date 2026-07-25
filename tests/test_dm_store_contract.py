@@ -433,8 +433,8 @@ def test_console_and_smoke_expose_dm_workflow():
     assert 'ok_begin("messages dm")' in console
     assert 'strcmp(line, "messages dm")' in console
     assert 'strncmp(line, "messages dm ", 12)' in console
-    assert "d1l_dm_store_copy_recent_page(entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE" in console
-    assert "d1l_dm_store_copy_thread_page(thread_fingerprint, entries" in console
+    assert "d1l_dm_store_copy_recent_page_snapshot(" in console
+    assert "d1l_dm_store_copy_thread_page_snapshot(" in console
     assert 'strcmp(line, "messages dm clear")' in console
     assert 'strncmp(line, "mesh send dm ", 13)' in console
     assert "d1l_meshcore_service_send_dm(fingerprint, text)" in console

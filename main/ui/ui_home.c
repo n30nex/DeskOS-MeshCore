@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "lvgl.h"
 
 static const d1l_ui_home_box_t k_destination_boxes[D1L_UI_HOME_DESTINATION_COUNT] = {
@@ -19,6 +20,12 @@ static const d1l_ui_home_box_t k_status_boxes[D1L_UI_HOME_STATUS_COUNT] = {
     [D1L_UI_HOME_STATUS_BLE] = {196, 298, 88, 84},
     [D1L_UI_HOME_STATUS_SD] = {287, 298, 88, 84},
     [D1L_UI_HOME_STATUS_ATTENTION] = {378, 298, 88, 84},
+};
+
+static const d1l_ui_home_box_t k_compact_status_boxes[D1L_UI_HOME_STATUS_COUNT] = {
+    [D1L_UI_HOME_STATUS_MESH] = {14, 298, 144, 84},
+    [D1L_UI_HOME_STATUS_SD] = {160, 298, 144, 84},
+    [D1L_UI_HOME_STATUS_ATTENTION] = {306, 298, 144, 84},
 };
 
 
@@ -43,6 +50,42 @@ d1l_ui_home_box_t d1l_ui_home_status_box(d1l_ui_home_status_slot_t slot)
         return (d1l_ui_home_box_t){0, 0, 0, 0};
     }
     return k_status_boxes[index];
+}
+
+bool d1l_ui_home_action_available(d1l_ui_home_action_t action)
+{
+    switch (action) {
+    case D1L_UI_HOME_ACTION_MESSAGES:
+        return d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_PUBLIC_MESSAGES) ||
+               d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_DIRECT_MESSAGES);
+    case D1L_UI_HOME_ACTION_NETWORK:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_NODES);
+    case D1L_UI_HOME_ACTION_MAP:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
+    case D1L_UI_HOME_ACTION_PACKETS:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_PACKETS);
+    case D1L_UI_HOME_ACTION_RADIO:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_RADIO_SETTINGS);
+    case D1L_UI_HOME_ACTION_WIFI:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL);
+    case D1L_UI_HOME_ACTION_BLE:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
+    case D1L_UI_HOME_ACTION_STORAGE:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_RETAINED_NVS);
+    case D1L_UI_HOME_ACTION_ATTENTION:
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_DIAGNOSTICS);
+    case D1L_UI_HOME_ACTION_MORE:
+        return true;
+    case D1L_UI_HOME_ACTION_NONE:
+    default:
+        return false;
+    }
 }
 
 static lv_obj_t *home_create_label(lv_obj_t *parent, const char *text, uint32_t color)
@@ -99,7 +142,8 @@ static void home_action_event_cb(lv_event_t *event)
     }
     const d1l_ui_home_action_t action = binding->action;
     if (action > D1L_UI_HOME_ACTION_NONE &&
-        action <= D1L_UI_HOME_ACTION_ATTENTION) {
+        action <= D1L_UI_HOME_ACTION_PACKETS &&
+        d1l_ui_home_action_available(action)) {
         binding->controller->action_handler(
             action, binding->controller->action_context);
     }
@@ -112,7 +156,8 @@ static void home_bind_action(lv_obj_t *object,
 {
     if (!object || !binding || !controller || !controller->action_handler ||
         action <= D1L_UI_HOME_ACTION_NONE ||
-        action > D1L_UI_HOME_ACTION_ATTENTION) {
+        action > D1L_UI_HOME_ACTION_PACKETS ||
+        !d1l_ui_home_action_available(action)) {
         return;
     }
     binding->controller = controller;
@@ -188,7 +233,11 @@ static void render_status_item(lv_obj_t *card,
         return;
     }
     const d1l_ui_home_box_t card_box = d1l_ui_home_device_box();
-    const d1l_ui_home_box_t box = d1l_ui_home_status_box(slot);
+    const bool compact_status =
+        !d1l_ui_home_action_available(D1L_UI_HOME_ACTION_WIFI) &&
+        !d1l_ui_home_action_available(D1L_UI_HOME_ACTION_BLE);
+    const d1l_ui_home_box_t box = compact_status ?
+        k_compact_status_boxes[slot] : d1l_ui_home_status_box(slot);
     lv_obj_t *item = lv_obj_create(card);
     if (!item) {
         return;
@@ -211,13 +260,13 @@ static void render_status_item(lv_obj_t *card,
     }
     lv_obj_t *name_label = home_create_label(item, label, 0xA7B4BE);
     if (name_label) {
-        home_set_dot_width(name_label, 80);
+        home_set_dot_width(name_label, box.width - 8);
         lv_obj_set_style_text_align(name_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(name_label, 4, 32);
     }
     lv_obj_t *value_label = home_create_label(item, value, color);
     if (value_label) {
-        home_set_dot_width(value_label, 80);
+        home_set_dot_width(value_label, box.width - 8);
         lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(value_label, 4, 55);
     }
@@ -239,16 +288,25 @@ static void render_device_status(lv_obj_t *parent,
                        "Mesh", view_model->mesh_value,
                        view_model->mesh_value_color, D1L_UI_HOME_ACTION_RADIO,
                        &bindings[D1L_UI_HOME_STATUS_MESH], controller);
-    render_status_item(card, D1L_UI_HOME_STATUS_WIFI, LV_SYMBOL_WIFI,
-                       "Wi-Fi", view_model->wifi_value,
-                       view_model->wifi_value_color, D1L_UI_HOME_ACTION_WIFI,
-                       &bindings[D1L_UI_HOME_STATUS_WIFI], controller);
-    render_status_item(card, D1L_UI_HOME_STATUS_BLE, LV_SYMBOL_BLUETOOTH,
-                       "BLE", view_model->ble_value,
-                       view_model->ble_value_color, D1L_UI_HOME_ACTION_BLE,
-                       &bindings[D1L_UI_HOME_STATUS_BLE], controller);
-    render_status_item(card, D1L_UI_HOME_STATUS_SD, LV_SYMBOL_SD_CARD,
-                       "SD", view_model->sd_compact_value,
+    if (d1l_ui_home_action_available(D1L_UI_HOME_ACTION_WIFI)) {
+        render_status_item(card, D1L_UI_HOME_STATUS_WIFI, LV_SYMBOL_WIFI,
+                           "Wi-Fi", view_model->wifi_value,
+                           view_model->wifi_value_color, D1L_UI_HOME_ACTION_WIFI,
+                           &bindings[D1L_UI_HOME_STATUS_WIFI], controller);
+    }
+    if (d1l_ui_home_action_available(D1L_UI_HOME_ACTION_BLE)) {
+        render_status_item(card, D1L_UI_HOME_STATUS_BLE, LV_SYMBOL_BLUETOOTH,
+                           "BLE", view_model->ble_value,
+                           view_model->ble_value_color, D1L_UI_HOME_ACTION_BLE,
+                           &bindings[D1L_UI_HOME_STATUS_BLE], controller);
+    }
+    const bool sd_history_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_SD_HISTORY);
+    render_status_item(card, D1L_UI_HOME_STATUS_SD,
+                       sd_history_available ? LV_SYMBOL_SD_CARD : LV_SYMBOL_SAVE,
+                       sd_history_available ? "SD" : "Storage",
+                       sd_history_available ?
+                           view_model->sd_compact_value : "Internal",
                        view_model->sd_value_color, D1L_UI_HOME_ACTION_STORAGE,
                        &bindings[D1L_UI_HOME_STATUS_SD], controller);
     render_status_item(card, D1L_UI_HOME_STATUS_ATTENTION, LV_SYMBOL_WARNING,
@@ -271,10 +329,28 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
     controller->action_handler = action_handler;
     controller->action_context = action_context;
     memset(controller->bindings, 0, sizeof(controller->bindings));
+    const bool map_available =
+        d1l_ui_home_action_available(D1L_UI_HOME_ACTION_MAP);
+    const char *third_title = map_available ? "Map" : "Packets";
+    const char *third_detail = map_available ?
+        "Saved center and a small local map area" :
+        "Read-only packet log, search, and signal details";
+    const char *third_status = map_available ?
+        controller->rendered.map_status : controller->rendered.more_status;
+    const uint32_t third_status_color = map_available ?
+        controller->rendered.map_status_color :
+        controller->rendered.more_status_color;
+    const d1l_ui_home_action_t third_action = map_available ?
+        D1L_UI_HOME_ACTION_MAP : D1L_UI_HOME_ACTION_PACKETS;
+    const char *messages_detail =
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT) ?
+        "Public, direct, and room conversations" :
+        "Public and direct conversations";
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MESSAGES,
                             LV_SYMBOL_ENVELOPE, "Messages",
-                            "Public, direct, and room conversations",
+                            messages_detail,
                             controller->rendered.messages_status,
                             controller->rendered.messages_status_color,
                             D1L_UI_HOME_ACTION_MESSAGES,
@@ -290,16 +366,16 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
                             &controller->bindings[D1L_UI_HOME_DESTINATION_NETWORK],
                             controller);
 
-    render_destination_card(parent, D1L_UI_HOME_DESTINATION_MAP, LV_SYMBOL_IMAGE, "Map",
-                            "Saved center and a small local map area",
-                            controller->rendered.map_status,
-                            controller->rendered.map_status_color,
-                            D1L_UI_HOME_ACTION_MAP,
+    render_destination_card(parent, D1L_UI_HOME_DESTINATION_MAP,
+                            map_available ? LV_SYMBOL_IMAGE : LV_SYMBOL_LIST,
+                            third_title, third_detail, third_status,
+                            third_status_color, third_action,
                             &controller->bindings[D1L_UI_HOME_DESTINATION_MAP],
                             controller);
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MORE, LV_SYMBOL_SETTINGS,
-                            "Tools", "Device settings, utilities, and support",
+                            map_available ? "Tools" : "Settings",
+                            "Device settings, utilities, and support",
                             controller->rendered.more_status,
                             controller->rendered.more_status_color,
                             D1L_UI_HOME_ACTION_MORE,

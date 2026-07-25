@@ -9,6 +9,7 @@
 #include "mbedtls/md.h"
 #include "nvs.h"
 
+#include "app/release_profile.h"
 #include "mesh/store_lock.h"
 
 #define D1L_CHANNEL_STORE_NAMESPACE "d1l_channels"
@@ -26,6 +27,13 @@ static const uint8_t s_public_secret[D1L_CHANNEL_SECRET_MAX_LEN] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
+
+static bool channel_available_in_release_profile(uint64_t channel_id)
+{
+    return channel_id == D1L_CHANNEL_PUBLIC_ID ||
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
+}
 
 /* Frozen v1 layout. It predates explicit source/import provenance and the
  * separate stable history key. */
@@ -1613,6 +1621,9 @@ esp_err_t d1l_channel_store_reconcile_retained_rows(
     uint32_t baseline_read_through[D1L_CHANNEL_STORE_CAPACITY] = {0};
     uint32_t retained_unread[D1L_CHANNEL_STORE_CAPACITY] = {0};
     for (size_t i = 0U; i < row_count; ++i) {
+        if (!channel_available_in_release_profile(rows[i].channel_id)) {
+            continue;
+        }
         const int index = index_by_id(rows[i].channel_id);
         if (index < 0) {
             /* History for a removed channel remains identity-isolated until a
@@ -1634,6 +1645,10 @@ esp_err_t d1l_channel_store_reconcile_retained_rows(
     bool unknown_out_of_domain = false;
     if (!generation_known) {
         for (size_t i = 0U; i < s_count; ++i) {
+            if (!channel_available_in_release_profile(
+                    s_entries[i].channel_id)) {
+                continue;
+            }
             if (s_entries[i].newest_message_seq >=
                     message_generation->next_seq ||
                 s_entries[i].read_through_seq >=
@@ -1651,6 +1666,9 @@ esp_err_t d1l_channel_store_reconcile_retained_rows(
 
     for (size_t i = 0U; i < s_count; ++i) {
         const d1l_channel_entry_t *entry = &s_entries[i];
+        if (!channel_available_in_release_profile(entry->channel_id)) {
+            continue;
+        }
         if (true_generation_reset) {
             derived_newest[i] = retained_newest[i];
             baseline_read_through[i] = 0U;
@@ -1667,6 +1685,9 @@ esp_err_t d1l_channel_store_reconcile_retained_rows(
         }
     }
     for (size_t i = 0U; i < row_count; ++i) {
+        if (!channel_available_in_release_profile(rows[i].channel_id)) {
+            continue;
+        }
         const int index = index_by_id(rows[i].channel_id);
         if (index >= 0 && rows[i].received &&
             rows[i].message_seq > baseline_read_through[index]) {
@@ -1679,6 +1700,9 @@ esp_err_t d1l_channel_store_reconcile_retained_rows(
         s_message_clear_lineage != message_generation->clear_lineage;
     for (size_t i = 0U; i < s_count; ++i) {
         d1l_channel_entry_t *entry = &s_entries[i];
+        if (!channel_available_in_release_profile(entry->channel_id)) {
+            continue;
+        }
         const uint32_t newest = derived_newest[i];
         const uint32_t unread = retained_unread[i];
         const uint32_t read_through = unread == 0U ?
@@ -1704,6 +1728,9 @@ esp_err_t d1l_channel_store_reconcile_retained_rows(
     const uint32_t reconciled_at_ms = now_ms();
     for (size_t i = 0U; i < s_count; ++i) {
         d1l_channel_entry_t *entry = &s_entries[i];
+        if (!channel_available_in_release_profile(entry->channel_id)) {
+            continue;
+        }
         const uint32_t newest = derived_newest[i];
         const uint32_t unread = retained_unread[i];
         const uint32_t read_through = unread == 0U ?
@@ -1884,6 +1911,28 @@ size_t d1l_channel_store_copy_hash_matches(
     d1l_store_lock_take(&s_store_lock);
     size_t count = 0U;
     for (size_t i = 0U; i < s_count && count < max_keys; ++i) {
+        if (s_entries[i].enabled != 0U &&
+            s_entries[i].channel_hash == channel_hash) {
+            copy_protocol_key(&s_entries[i], &out_keys[count++]);
+        }
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return count;
+}
+
+size_t d1l_channel_store_copy_rx_hash_matches(
+    uint8_t channel_hash, d1l_channel_protocol_key_t *out_keys,
+    size_t max_keys)
+{
+    if (!out_keys || max_keys == 0U || ensure_loaded() != ESP_OK) {
+        return 0U;
+    }
+    d1l_store_lock_take(&s_store_lock);
+    size_t count = 0U;
+    for (size_t i = 0U; i < s_count && count < max_keys; ++i) {
+        if (!channel_available_in_release_profile(s_entries[i].channel_id)) {
+            continue;
+        }
         if (s_entries[i].enabled != 0U &&
             s_entries[i].channel_hash == channel_hash) {
             copy_protocol_key(&s_entries[i], &out_keys[count++]);

@@ -77,5 +77,7 @@ typedef struct {
 
 bool d1l_ui_storage_view(const d1l_ui_storage_view_input_t *input,
                          d1l_ui_storage_view_model_t *out_view);
+bool d1l_ui_storage_location_available(
+    d1l_ui_storage_location_t location);
 bool d1l_ui_storage_view_model_is_valid(
     const d1l_ui_storage_view_model_t *view_model);

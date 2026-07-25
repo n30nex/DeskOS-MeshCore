@@ -1,8 +1,13 @@
+import json
 import sys
+from pathlib import Path
 
 import pytest
 
 from scripts import soak_d1l
+
+
+D1L_PUBLIC_KEY = soak_d1l.rf_acceptance.DEFAULT_D1L_PUBLIC_KEY
 
 
 def base_health(uptime_ms=1000):
@@ -827,6 +832,358 @@ def test_collect_sample_aborts_after_timeout_without_followup_commands(monkeypat
     assert len(row["results"]) == 1
 
 
+def test_active_listener_flow_requires_exact_counters_and_12_hex_sender():
+    peer_public_key = "0123456789abcdef" + "22" * 24
+    d1l_public_key = "abcdef012345" + "33" * 26
+
+    def listener_status(
+        *,
+        rx_dm: int,
+        tx_dm: int,
+        replies: int,
+        ack_misses: int,
+        rx_at: str,
+        tx_at: str,
+    ) -> dict:
+        return {
+            "run_id": "listener-run-1",
+            "service": "openclaw-radio-listener",
+            "serial": {
+                "port": "COM15",
+                "mesh_connected": True,
+                "public_key": peer_public_key,
+            },
+            "mesh": {
+                "last_rx_sender": d1l_public_key[:12],
+                "last_rx_kind": "dm",
+                "last_tx_kind": "dm",
+                "last_rx_at": rx_at,
+                "last_tx_at": tx_at,
+            },
+            "counters": {
+                "rx_dm_total": rx_dm,
+                "tx_dm_total": tx_dm,
+                "local_fast_reply_total": replies,
+                "tx_dm_ack_miss_total": ack_misses,
+            },
+        }
+
+    before = listener_status(
+        rx_dm=10,
+        tx_dm=20,
+        replies=30,
+        ack_misses=2,
+        rx_at="before-rx",
+        tx_at="before-tx",
+    )
+    after = listener_status(
+        rx_dm=16,
+        tx_dm=26,
+        replies=36,
+        ack_misses=2,
+        rx_at="after-rx",
+        tx_at="after-tx",
+    )
+    ok, deltas = soak_d1l.active_listener_flow_ok(
+        before,
+        after,
+        successful_send_count=6,
+        d1l_public_key=d1l_public_key,
+        peer_fingerprint=peer_public_key[:16].upper(),
+        peer_public_key=peer_public_key,
+        minimum_send_count=6,
+    )
+
+    assert ok is True
+    assert deltas == {
+        "rx_dm_total": 6,
+        "tx_dm_total": 6,
+        "local_fast_reply_total": 6,
+        "tx_dm_ack_miss_total": 0,
+    }
+
+    wrong_sender = json.loads(json.dumps(after))
+    wrong_sender["mesh"]["last_rx_sender"] = d1l_public_key[:16]
+    assert soak_d1l.active_listener_flow_ok(
+        before,
+        wrong_sender,
+        successful_send_count=6,
+        d1l_public_key=d1l_public_key,
+        peer_fingerprint=peer_public_key[:16].upper(),
+        peer_public_key=peer_public_key,
+        minimum_send_count=6,
+    )[0] is False
+    assert soak_d1l.active_listener_flow_ok(
+        before,
+        after,
+        successful_send_count=5,
+        d1l_public_key=d1l_public_key,
+        peer_fingerprint=peer_public_key[:16].upper(),
+        peer_public_key=peer_public_key,
+        minimum_send_count=6,
+    )[0] is False
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_active_listener_flow_accepts_only_exact_pinned_peer_binding(
+    local,
+):
+    rf = soak_d1l.rf_acceptance
+    config = (
+        rf.local_peer_config()
+        if local
+        else rf.remote_peer_config()
+    )
+    d1l_public_key = rf.DEFAULT_D1L_PUBLIC_KEY
+
+    def status(
+        *,
+        rx: int,
+        tx: int,
+        replies: int,
+        rx_at: str,
+        tx_at: str,
+    ) -> dict:
+        return {
+            "run_id": "pi5-peer-run",
+            "service": "openclaw-radio-listener",
+            "serial": {
+                "port": rf.REMOTE_PEER_DEVICE,
+                "mesh_connected": True,
+                "public_key": rf.REMOTE_PEER_PUBLIC_KEY,
+            },
+            "mesh": {
+                "last_rx_sender": d1l_public_key[:12],
+                "last_rx_kind": "dm",
+                "last_tx_kind": "dm",
+                "last_rx_at": rx_at,
+                "last_tx_at": tx_at,
+            },
+            "counters": {
+                "rx_dm_total": rx,
+                "tx_dm_total": tx,
+                "local_fast_reply_total": replies,
+                "tx_dm_ack_miss_total": 2,
+            },
+        }
+
+    before = status(
+        rx=10,
+        tx=20,
+        replies=30,
+        rx_at="before-rx",
+        tx_at="before-tx",
+    )
+    after = status(
+        rx=16,
+        tx=26,
+        replies=36,
+        rx_at="after-rx",
+        tx_at="after-tx",
+    )
+    arguments = {
+        "successful_send_count": 6,
+        "d1l_public_key": d1l_public_key,
+        "peer_fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+        "peer_public_key": rf.REMOTE_PEER_PUBLIC_KEY,
+        "minimum_send_count": 6,
+        (
+            "local_config" if local else "remote_config"
+        ): config,
+    }
+
+    ok, deltas = soak_d1l.active_listener_flow_ok(
+        before,
+        after,
+        **arguments,
+    )
+
+    assert ok is True
+    assert deltas["rx_dm_total"] == 6
+
+    wrong_device = json.loads(json.dumps(after))
+    wrong_device["serial"]["port"] = "/dev/krab-other"
+    assert (
+        soak_d1l.active_listener_flow_ok(
+            before,
+            wrong_device,
+            **arguments,
+        )[0]
+        is False
+    )
+
+    mixed_arguments = {
+        **arguments,
+        "remote_config": rf.remote_peer_config(),
+        "local_config": rf.local_peer_config(),
+    }
+    assert (
+        soak_d1l.active_listener_flow_ok(
+            before,
+            after,
+            **mixed_arguments,
+        )[0]
+        is False
+    )
+
+    disconnected = json.loads(json.dumps(after))
+    disconnected["serial"]["mesh_connected"] = False
+    assert (
+        soak_d1l.active_listener_flow_ok(
+            before,
+            disconnected,
+            **arguments,
+        )[0]
+        is False
+    )
+
+
+def test_openclaw_active_soak_text_and_send_floor_are_fail_fast():
+    assert soak_d1l.listener_test_text_ok("Core acceptance TEST 1")
+    assert soak_d1l.listener_test_text_ok("core_soak_test")
+    assert not soak_d1l.listener_test_text_ok("core soak")
+    assert not soak_d1l.listener_test_text_ok("contest")
+    assert soak_d1l.expected_active_send_count(3600, 600) == 6
+    assert soak_d1l.expected_active_send_count(3600, 601) == 6
+    assert soak_d1l.expected_active_send_count(3600, 0) is None
+
+
+@pytest.mark.parametrize(
+    "port",
+    ["COM8", "COM11", "COM16", "COM29", "/dev/ttyUSB2"],
+)
+def test_core_disabled_soak_rejects_unsafe_target_before_serial_open(port):
+    with pytest.raises(ValueError, match="requires COM12"):
+        run_soak_for_timeout_test(
+            port=port,
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("release_profile", "sd_history_mode"),
+    [
+        (None, None),
+        ("core_1_0", None),
+        (None, "disabled"),
+        ("full_feature", "disabled"),
+        ("full_feature", "supported_optional"),
+        ("core_1_0", "enabled"),
+    ],
+)
+def test_release_bound_soak_requires_supported_release_contract_before_io(
+    release_profile,
+    sd_history_mode,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: pytest.fail(
+            "source or hardware I/O must not begin without a release contract"
+        ),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail(
+            "serial must not open without a release contract"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="release-bound hardware soak"):
+        run_soak_for_timeout_test(
+            expected_firmware_commit="a" * 40,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            expected_release_profile=release_profile,
+            expected_sd_history_mode=sd_history_mode,
+        )
+
+
+@pytest.mark.parametrize("public_key", [None, "", "abc123"])
+def test_release_bound_soak_requires_exact_d1l_key_before_io(
+    public_key,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: pytest.fail(
+            "source or hardware I/O must not begin without the exact D1L key"
+        ),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail(
+            "serial must not open without the exact D1L key"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="release-bound hardware soak"):
+        run_soak_for_timeout_test(
+            expected_firmware_commit="a" * 40,
+            expected_d1l_public_key=public_key,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+        )
+
+
+def test_release_bound_active_soak_rejects_raw_tty_before_peer_or_serial(
+    monkeypatch,
+):
+    external_calls = []
+
+    def unexpected_external(*_args, **_kwargs):
+        external_calls.append(True)
+        raise AssertionError("unsafe target must fail before external I/O")
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "qualified_controlled_peer_receipt",
+        unexpected_external,
+    )
+    monkeypatch.setattr(soak_d1l, "open_d1l_serial", unexpected_external)
+    monkeypatch.setattr(
+        soak_d1l.rf_acceptance,
+        "capture_remote_peer_status",
+        unexpected_external,
+    )
+
+    with pytest.raises(ValueError, match="requires COM12"):
+        run_soak_for_timeout_test(
+            port="/dev/ttyUSB2",
+            active_dm_fingerprint=(
+                soak_d1l.rf_acceptance.REMOTE_PEER_FINGERPRINT
+            ),
+            active_dm_text="core soak test",
+            expected_firmware_commit="a" * 40,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+        )
+
+    assert external_calls == []
+
+
 class FakeSoakPort:
     def reset_input_buffer(self):
         pass
@@ -860,9 +1217,538 @@ def run_soak_for_timeout_test(**overrides):
         "sd_file_canary": False,
         "allow_sd_unavailable": False,
         "expected_firmware_commit": None,
+        "expected_d1l_public_key": D1L_PUBLIC_KEY,
     }
     args.update(overrides)
     return soak_d1l.run_serial_soak(**args)
+
+
+def windows_target_row(*, vid=0x1A86, pid=0x7523, location="1-2"):
+    return {
+        "device": "COM12",
+        "vid": vid,
+        "pid": pid,
+        "serial_number": None,
+        "hwid": f"USB VID:PID={vid:04X}:{pid:04X} LOCATION={location}",
+        "location": location,
+    }
+
+
+def windows_target_snapshot():
+    return soak_d1l.resolve_core_target(
+        "COM12",
+        port_lister=lambda: [windows_target_row()],
+        platform_name="nt",
+    )
+
+
+def test_core_soak_binds_target_before_and_after_serial(monkeypatch):
+    lister_calls = []
+    opened = []
+
+    def list_target():
+        lister_calls.append(True)
+        return [windows_target_row()]
+
+    def fake_collect(_ser, _timeout, label, elapsed_sec, *_args, **_kwargs):
+        row = sample(
+            label,
+            elapsed_sec,
+            base_health(),
+            {"rx_packets": 0, "tx_packets": 0},
+        )
+        row["aborted_after_timeout"] = None
+        return row
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **kwargs: (
+            opened.append(kwargs["port"]) or FakeSoakPort()
+        ),
+    )
+    monkeypatch.setattr(soak_d1l, "collect_sample", fake_collect)
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        expected_release_profile="core_1_0",
+        expected_sd_history_mode="disabled",
+        sample_storage=True,
+        allow_sd_unavailable=True,
+        port_lister=list_target,
+        platform_name="nt",
+    )
+
+    assert report["schema"] == 2
+    assert report["port"] == "COM12"
+    assert report["d1l_target"]["requested_path"] == "COM12"
+    assert report["d1l_target_after"]["requested_path"] == "COM12"
+    assert report["target_identity_continuity_ok"] is True
+    assert (
+        report["d1l_target"]["stable_identity_sha256"]
+        == report["d1l_target_after"]["stable_identity_sha256"]
+    )
+    assert opened == ["COM12"]
+    assert len(lister_calls) == 2
+
+
+def test_full_feature_soak_binds_target_before_and_after_serial(monkeypatch):
+    lister_calls = []
+    opened = []
+
+    def list_target():
+        lister_calls.append(True)
+        return [windows_target_row()]
+
+    def fake_collect(_ser, _timeout, label, elapsed_sec, *_args, **_kwargs):
+        row = sample(
+            label,
+            elapsed_sec,
+            base_health(),
+            {"rx_packets": 0, "tx_packets": 0},
+        )
+        row["aborted_after_timeout"] = None
+        return row
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **kwargs: (
+            opened.append(kwargs["port"]) or FakeSoakPort()
+        ),
+    )
+    monkeypatch.setattr(soak_d1l, "collect_sample", fake_collect)
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        expected_release_profile="full_feature",
+        expected_sd_history_mode="conditional",
+        port_lister=list_target,
+        platform_name="nt",
+    )
+
+    assert report["schema"] == 2
+    assert report["port"] == "COM12"
+    assert report["d1l_target"]["requested_path"] == "COM12"
+    assert report["d1l_target_after"]["requested_path"] == "COM12"
+    assert report["target_identity_continuity_ok"] is True
+    assert (
+        report["d1l_target"]["stable_identity_sha256"]
+        == report["d1l_target_after"]["stable_identity_sha256"]
+    )
+    assert opened == ["COM12"]
+    assert len(lister_calls) == 2
+
+
+def test_qualified_rf_receipt_consumes_strict_schema2_target_binding(
+    tmp_path,
+    monkeypatch,
+):
+    rf = soak_d1l.rf_acceptance
+    commit = "a" * 40
+    target = windows_target_snapshot()
+    config = rf.remote_peer_config()
+    report = {
+        "schema": 2,
+        "mode": "rf-full-acceptance",
+        "ok": True,
+        "closure_eligible": True,
+        "expected_firmware_commit": commit,
+        "github_actions_run": "123",
+        "workflow_run_attempt": "1",
+        "target_fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+        "controlled_peer": {
+            "evidence_source": rf.REMOTE_PEER_EVIDENCE_SOURCE,
+            "port": None,
+            "fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+            **config,
+        },
+        "controlled_peer_adapter": rf.REMOTE_PEER_ADAPTER,
+        "d1l_public_key": rf.DEFAULT_D1L_PUBLIC_KEY,
+        "public_rf_tx": False,
+        "port": "COM12",
+        "d1l_target": target,
+        "d1l_target_after": json.loads(json.dumps(target)),
+        "target_identity_continuity_ok": True,
+        "checks": {"d1l_target_identity_continuity": True},
+    }
+    receipt = tmp_path / "rf.json"
+    receipt.write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setattr(
+        soak_d1l,
+        "pinned_peer_evidence_metadata_ok",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        rf,
+        "remote_peer_report_shape_ok",
+        lambda _data: True,
+    )
+
+    qualified, row = soak_d1l.qualified_controlled_peer_receipt(
+        path=receipt,
+        root=tmp_path,
+        commit=commit,
+        run_id="123",
+        run_attempt="1",
+        fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+        expected_d1l_target_sha256=target[
+            "stable_identity_sha256"
+        ],
+    )
+
+    assert qualified == report
+    assert row["path"] == "rf.json"
+
+    forged = json.loads(json.dumps(report))
+    forged["d1l_target_after"]["vid"] = 0x10C4
+    receipt.unlink()
+    receipt.write_text(json.dumps(forged), encoding="utf-8")
+    with pytest.raises(
+        ValueError,
+        match="not bound to the exact D1L serial target",
+    ):
+        soak_d1l.qualified_controlled_peer_receipt(
+            path=receipt,
+            root=tmp_path,
+            commit=commit,
+            run_id="123",
+            run_attempt="1",
+            fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+            expected_d1l_target_sha256=target[
+                "stable_identity_sha256"
+            ],
+        )
+
+
+def test_core_soak_rejects_wrong_usb_identity_before_serial(monkeypatch):
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail(
+            "serial must not open for the wrong USB identity"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="VID"):
+        run_soak_for_timeout_test(
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+            port_lister=lambda: [windows_target_row(vid=0x10C4)],
+            platform_name="nt",
+        )
+
+
+def test_core_soak_rejects_target_drift_after_serial(monkeypatch):
+    locations = iter(("1-2", "1-9"))
+
+    def fake_collect(_ser, _timeout, label, elapsed_sec, *_args, **_kwargs):
+        row = sample(
+            label,
+            elapsed_sec,
+            base_health(),
+            {"rx_packets": 0, "tx_packets": 0},
+        )
+        row["aborted_after_timeout"] = None
+        return row
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSoakPort(),
+    )
+    monkeypatch.setattr(soak_d1l, "collect_sample", fake_collect)
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(ValueError, match="identity changed"):
+        run_soak_for_timeout_test(
+            duration_sec=0.001,
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+            port_lister=lambda: [
+                windows_target_row(location=next(locations))
+            ],
+            platform_name="nt",
+        )
+
+
+def test_release_active_soak_rejects_non_test_text_before_peer_capture(
+    monkeypatch,
+):
+    commit = "a" * 40
+
+    class FakeSerialModule:
+        pass
+
+    monkeypatch.setitem(sys.modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "qualified_controlled_peer_receipt",
+        lambda **_kwargs: (
+            {
+                "controlled_peer": {
+                    "public_key": "0123456789abcdef" + "22" * 24,
+                },
+                "d1l_public_key": "abcdef012345" + "33" * 26,
+            },
+            {"path": "rf.json", "size": 1, "sha256": "0" * 64},
+        ),
+    )
+    monkeypatch.setattr(
+        soak_d1l.rf_acceptance,
+        "capture_peer_status",
+        lambda *_args, **_kwargs: pytest.fail(
+            "peer status must not be captured for invalid test text"
+        ),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail(
+            "COM12 must not open for invalid test text"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="word 'test'"):
+        run_soak_for_timeout_test(
+            active_dm_fingerprint="0123456789ABCDEF",
+            active_dm_text="core soak",
+            expected_firmware_commit=commit,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+            controlled_peer_receipt=Path("ignored.json"),
+            port_lister=lambda: [windows_target_row()],
+            platform_name="nt",
+        )
+
+
+def test_release_active_soak_wrong_full_d1l_key_has_no_peer_or_rf_io(
+    tmp_path,
+    monkeypatch,
+):
+    rf = soak_d1l.rf_acceptance
+    commit = "a" * 40
+    expected_key = rf.DEFAULT_D1L_PUBLIC_KEY
+    wrong_suffix = (
+        "0" * 48 if expected_key[16:] != "0" * 48 else "1" * 48
+    )
+    wrong_key = expected_key[:16] + wrong_suffix
+    commands = []
+    peer_calls = []
+
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        soak_d1l,
+        "__file__",
+        str(tmp_path / "scripts" / "soak_d1l.py"),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    config = rf.remote_peer_config()
+    peer_report = {
+        "controlled_peer": {
+            "evidence_source": rf.REMOTE_PEER_EVIDENCE_SOURCE,
+            "port": None,
+            "fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+            **config,
+        },
+        "controlled_peer_adapter": rf.REMOTE_PEER_ADAPTER,
+        "d1l_public_key": expected_key,
+    }
+    monkeypatch.setattr(
+        soak_d1l,
+        "qualified_controlled_peer_receipt",
+        lambda **_kwargs: (peer_report, {"path": "rf.json"}),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSoakPort(),
+    )
+
+    def fake_send(_ser, command, *_args, **_kwargs):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": commit,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+            }
+        if command == "identity status":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "identity status",
+                "public_key_ready": True,
+                "public_key": wrong_key,
+                "fingerprint": wrong_key[:16].upper(),
+                "role": "desk_companion",
+            }
+        pytest.fail(f"unexpected command after identity mismatch: {command}")
+
+    def unexpected_peer(*_args, **_kwargs):
+        peer_calls.append(True)
+        raise AssertionError("peer I/O must not begin for the wrong D1L key")
+
+    monkeypatch.setattr(soak_d1l, "send_soak_command", fake_send)
+    monkeypatch.setattr(
+        rf,
+        "capture_remote_peer_status",
+        unexpected_peer,
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "collect_sample",
+        lambda *_args, **_kwargs: pytest.fail(
+            "sampling must not begin for the wrong D1L key"
+        ),
+    )
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        active_dm_fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+        active_dm_text="core soak test",
+        expected_firmware_commit=commit,
+        github_run_id="123",
+        workflow_run_attempt="1",
+        expected_release_profile="core_1_0",
+        expected_sd_history_mode="disabled",
+        sample_storage=True,
+        allow_sd_unavailable=True,
+        controlled_peer_receipt=tmp_path / "rf.json",
+        peer_capture_dir=tmp_path / "artifacts" / "soak" / "rf-peer",
+        port_lister=lambda: [windows_target_row()],
+        platform_name="nt",
+    )
+
+    assert commands == ["version", "identity status"]
+    assert peer_calls == []
+    assert report["preflight_commands"] == [
+        "version",
+        "identity status",
+    ]
+    assert report["expected_d1l_public_key"] == expected_key
+    assert report["d1l_identity_status"]["public_key"] == wrong_key
+    assert report["d1l_identity_ok"] is False
+    assert report["preflight_failure"] == "d1l_identity_mismatch"
+    assert report["active_events"] == []
+    assert report["samples"] == []
+    assert report["controlled_peer_before"] == {}
+    assert report["controlled_peer_after"] == {}
+    assert report["dm_rf_tx"] is False
+    assert report["closure_eligible"] is False
+    assert report["ok"] is False
+
+
+def test_release_idle_soak_wrong_full_d1l_key_stops_before_sampling(
+    monkeypatch,
+):
+    commit = "a" * 40
+    wrong_key = D1L_PUBLIC_KEY[:16] + "cd" * 24
+    commands = []
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: FakeSoakPort(),
+    )
+
+    def fake_send(_ser, command, *_args, **_kwargs):
+        commands.append(command)
+        if command == "version":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "version",
+                "build_commit": commit,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+            }
+        if command == "identity status":
+            return {
+                "schema": 1,
+                "ok": True,
+                "cmd": "identity status",
+                "public_key_ready": True,
+                "public_key": wrong_key,
+                "fingerprint": wrong_key[:16].upper(),
+                "role": "desk_companion",
+            }
+        pytest.fail(f"unexpected command after identity mismatch: {command}")
+
+    monkeypatch.setattr(soak_d1l, "send_soak_command", fake_send)
+    monkeypatch.setattr(
+        soak_d1l,
+        "collect_sample",
+        lambda *_args, **_kwargs: pytest.fail(
+            "idle sampling must not begin for the wrong D1L key"
+        ),
+    )
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        expected_firmware_commit=commit,
+        github_run_id="123",
+        workflow_run_attempt="1",
+        expected_release_profile="core_1_0",
+        expected_sd_history_mode="disabled",
+        sample_storage=True,
+        allow_sd_unavailable=True,
+        port_lister=lambda: [windows_target_row()],
+        platform_name="nt",
+    )
+
+    assert commands == ["version", "identity status"]
+    assert report["preflight_commands"] == ["version", "identity status"]
+    assert report["d1l_identity_required"] is True
+    assert report["expected_d1l_public_key"] == D1L_PUBLIC_KEY
+    assert report["d1l_identity_status"]["public_key"] == wrong_key
+    assert report["d1l_identity_ok"] is False
+    assert report["preflight_failure"] == "d1l_identity_mismatch"
+    assert report["samples"] == []
+    assert report["dm_rf_tx"] is False
+    assert report["closure_eligible"] is False
+    assert report["ok"] is False
 
 
 def test_soak_stops_after_crashlog_clear_timeout(monkeypatch):
@@ -1085,3 +1971,193 @@ def test_main_rejects_malformed_expected_firmware_commit(monkeypatch):
         soak_d1l.main()
 
     assert exc_info.value.code == 2
+
+
+def test_soak_report_collision_prevents_serial_and_peer_access(
+    tmp_path,
+    monkeypatch,
+):
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        soak_d1l,
+        "__file__",
+        str(tmp_path / "scripts" / "soak_d1l.py"),
+    )
+    report_path = tmp_path / "soak-report.json"
+    report_path.write_bytes(b"sentinel")
+    calls = []
+
+    def unexpected_hardware(**_kwargs):
+        calls.append(True)
+        raise AssertionError("report collision must fail before hardware")
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "run_serial_soak",
+        unexpected_hardware,
+    )
+    monkeypatch.setattr(
+        soak_d1l.rf_acceptance,
+        "run_remote_peer_operation",
+        unexpected_hardware,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "soak_d1l.py",
+            "--port",
+            "COM12",
+            "--expected-firmware-commit",
+            "a" * 40,
+            "--github-run-id",
+            "1",
+            "--github-run-attempt",
+            "1",
+            "--out",
+            str(report_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        soak_d1l.main()
+
+    assert exc_info.value.code == 2
+    assert calls == []
+    assert report_path.read_bytes() == b"sentinel"
+
+
+def test_soak_dry_run_writes_the_exclusively_reserved_report(
+    tmp_path,
+    monkeypatch,
+):
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        soak_d1l,
+        "__file__",
+        str(tmp_path / "scripts" / "soak_d1l.py"),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "stamp_report",
+        lambda report, _root: report,
+    )
+    report_path = tmp_path / "soak-dry-run.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "soak_d1l.py",
+            "--dry-run",
+            "--out",
+            str(report_path),
+        ],
+    )
+
+    assert soak_d1l.main() == 0
+    report = json.loads(report_path.read_text(encoding="ascii"))
+    assert report["mode"] == "dry-run"
+    assert report["hardware_required"] is False
+    assert report_path.read_bytes().endswith(b"\n")
+
+
+def test_soak_peer_sidecar_collision_prevents_serial_and_ssh(
+    tmp_path,
+    monkeypatch,
+):
+    rf = soak_d1l.rf_acceptance
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.setattr(
+        soak_d1l,
+        "__file__",
+        str(tmp_path / "scripts" / "soak_d1l.py"),
+    )
+    real_datetime = soak_d1l.datetime
+
+    class FixedDateTime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime(
+                2026,
+                7,
+                23,
+                17,
+                0,
+                0,
+                123456,
+                tzinfo=tz,
+            )
+
+    monkeypatch.setattr(soak_d1l, "datetime", FixedDateTime)
+    monkeypatch.setitem(sys.modules, "serial", object())
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": "a" * 40,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    config = rf.remote_peer_config()
+    peer_report = {
+        "controlled_peer": {
+            "evidence_source": rf.REMOTE_PEER_EVIDENCE_SOURCE,
+            "port": None,
+            "fingerprint": rf.REMOTE_PEER_FINGERPRINT,
+            **config,
+        },
+        "controlled_peer_adapter": rf.REMOTE_PEER_ADAPTER,
+        "d1l_public_key": rf.DEFAULT_D1L_PUBLIC_KEY,
+    }
+    monkeypatch.setattr(
+        soak_d1l,
+        "qualified_controlled_peer_receipt",
+        lambda **_kwargs: (peer_report, {"path": "rf.json"}),
+    )
+    external_calls = []
+
+    def unexpected_external(*_args, **_kwargs):
+        external_calls.append(True)
+        raise AssertionError("collision must fail before external I/O")
+
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        unexpected_external,
+    )
+    monkeypatch.setattr(
+        rf,
+        "capture_remote_peer_status",
+        unexpected_external,
+    )
+    capture_dir = tmp_path / "artifacts" / "soak" / "rf-peer"
+    capture_dir.mkdir(parents=True)
+    token = (
+        "core-soak-aaaaaaaaaaaa-1-1-"
+        "20260723T170000123456Z"
+    )
+    collision = capture_dir / f"{token}_peer_after.json"
+    collision.write_bytes(b"sentinel")
+
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        run_soak_for_timeout_test(
+            active_dm_fingerprint=rf.REMOTE_PEER_FINGERPRINT,
+            active_dm_text="core soak test",
+            active_interval_sec=10.0,
+            expected_firmware_commit="a" * 40,
+            github_run_id="1",
+            workflow_run_attempt="1",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+            controlled_peer_receipt=tmp_path / "rf.json",
+            peer_capture_dir=capture_dir,
+            port_lister=lambda: [windows_target_row()],
+            platform_name="nt",
+        )
+
+    assert external_calls == []
+    assert collision.read_bytes() == b"sentinel"
+    assert not (capture_dir / f"{token}_peer_before.json").exists()

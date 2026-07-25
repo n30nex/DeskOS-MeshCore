@@ -177,6 +177,12 @@ const char *d1l_dm_ack_dispatch_kind_name(uint8_t dispatch_kind);
 d1l_dm_store_stats_t d1l_dm_store_stats(void);
 size_t d1l_dm_store_copy_recent_page(d1l_dm_entry_t *out_entries, size_t max_entries,
                                      size_t skip_newest, size_t *out_total_matches);
+/* Copies one DM page, its retained stats, and any matching volatile preview
+ * identity under one store lock. */
+size_t d1l_dm_store_copy_recent_page_snapshot(
+    d1l_dm_entry_t *out_entries, size_t max_entries, size_t skip_newest,
+    size_t *out_total_matches, d1l_dm_store_stats_t *out_stats,
+    uint32_t *out_volatile_seq);
 size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries, size_t max_entries);
 /* Searches one exact-fingerprint conversation across the bounded durable ring
  * and its optional volatile tail.  Paging skips newest matching rows, while
@@ -188,6 +194,10 @@ size_t d1l_dm_store_query_thread_page(const char *contact_fingerprint,
                                       size_t max_entries, size_t skip_newest,
                                       const char *query,
                                       size_t *out_total_matches);
+size_t d1l_dm_store_copy_thread_page_snapshot(
+    const char *contact_fingerprint, d1l_dm_entry_t *out_entries,
+    size_t max_entries, size_t skip_newest, size_t *out_total_matches,
+    d1l_dm_store_stats_t *out_stats, uint32_t *out_volatile_seq);
 size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
                                      d1l_dm_entry_t *out_entries,
                                      size_t max_entries, size_t skip_newest,

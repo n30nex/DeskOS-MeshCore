@@ -19,7 +19,7 @@ def test_retained_scheduler_storage_status_json_is_valid_at_counter_limits(tmp_p
 
     console = (ROOT / "main/comms/usb_console.c").read_text(encoding="utf-8")
     json_string_printer = extract(
-        console, "static void print_json_string", "static void print_hex_bytes_json"
+        console, "static void print_json_string", "typedef enum {"
     )
     scheduler_printer = extract(
         console,

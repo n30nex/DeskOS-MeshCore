@@ -4,12 +4,18 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "lvgl.h"
 #include "ui_modal.h"
 
 enum {
     BINDING_CLOSE_DISPLAY = 0,
+    BINDING_BRIGHTNESS,
+    BINDING_NIGHT_MODE,
+    BINDING_HIGH_CONTRAST,
+    BINDING_TIMEOUT,
     BINDING_CLOSE_DIAGNOSTICS,
+    BINDING_OPEN_TERMINAL,
 };
 
 _Static_assert(sizeof(d1l_ui_device_sheets_controller_t) <=
@@ -54,7 +60,7 @@ static void action_event_cb(lv_event_t *event)
     if (!binding_is_current(binding) ||
         !binding->controller->action_handler ||
         binding->action <= D1L_UI_DEVICE_SHEETS_ACTION_NONE ||
-        binding->action > D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DIAGNOSTICS) {
+        binding->action > D1L_UI_DEVICE_SHEETS_ACTION_OPEN_TERMINAL) {
         return;
     }
     binding->controller->action_handler(
@@ -294,30 +300,43 @@ bool d1l_ui_device_sheets_render_display(
     configure_wrapped_label(summary, 8, 88);
     complete = summary != NULL && complete;
 
-    lv_obj_t *brightness = create_button(
-        controller, sheet, "Brightness", 8, 144, 126, 44, 0U,
-        D1L_UI_DEVICE_SHEETS_ACTION_NONE);
-    lv_obj_t *night = create_button(
-        controller, sheet, "Night", 144, 144, 86, 44, 0U,
-        D1L_UI_DEVICE_SHEETS_ACTION_NONE);
-    lv_obj_t *contrast = create_button(
-        controller, sheet, "Contrast", 240, 144, 106, 44, 0U,
-        D1L_UI_DEVICE_SHEETS_ACTION_NONE);
-    lv_obj_t *timeout = create_button(
-        controller, sheet, "Timeout", 8, 196, 126, 44, 0U,
-        D1L_UI_DEVICE_SHEETS_ACTION_NONE);
-    lv_obj_t *disabled[] = {brightness, night, contrast, timeout};
-    for (size_t i = 0U; i < sizeof(disabled) / sizeof(disabled[0]); ++i) {
-        if (disabled[i]) {
-            lv_obj_add_state(disabled[i], LV_STATE_DISABLED);
-        } else {
-            complete = false;
-        }
+    char brightness_text[24];
+    snprintf(brightness_text, sizeof(brightness_text), "Brightness %u%%",
+             (unsigned)snapshot->display_brightness_percent);
+    char night_text[18];
+    snprintf(night_text, sizeof(night_text), "Night %s",
+             snapshot->night_mode ? "On" : "Off");
+    char contrast_text[22];
+    snprintf(contrast_text, sizeof(contrast_text), "Contrast %s",
+             snapshot->high_contrast ? "On" : "Off");
+    char timeout_text[24];
+    if (snapshot->display_timeout_seconds == 0U) {
+        snprintf(timeout_text, sizeof(timeout_text), "Timeout Off");
+    } else {
+        snprintf(timeout_text, sizeof(timeout_text), "Timeout %us",
+                 (unsigned)snapshot->display_timeout_seconds);
     }
+    complete = create_button(
+        controller, sheet, brightness_text, 8, 144, 154, 44,
+        BINDING_BRIGHTNESS,
+        D1L_UI_DEVICE_SHEETS_ACTION_BRIGHTNESS) != NULL && complete;
+    complete = create_button(
+        controller, sheet, night_text, 172, 144, 116, 44,
+        BINDING_NIGHT_MODE,
+        D1L_UI_DEVICE_SHEETS_ACTION_NIGHT_MODE) != NULL && complete;
+    complete = create_button(
+        controller, sheet, contrast_text, 298, 144, 118, 44,
+        BINDING_HIGH_CONTRAST,
+        D1L_UI_DEVICE_SHEETS_ACTION_HIGH_CONTRAST) != NULL && complete;
+    complete = create_button(
+        controller, sheet, timeout_text, 8, 196, 154, 44,
+        BINDING_TIMEOUT,
+        D1L_UI_DEVICE_SHEETS_ACTION_TIMEOUT) != NULL && complete;
 
     lv_obj_t *note = create_label(
         sheet,
-        "Fixed UTC offset only; daylight saving is not automatic. Other display controls remain staged.",
+        "Fixed UTC offset only; daylight saving is not automatic. Touch wakes and "
+        "unlocks. Night mode dims without changing saved daytime brightness.",
         0xFBBF24);
     configure_wrapped_label(note, 8, 260);
     complete = note != NULL && complete;
@@ -406,34 +425,24 @@ bool d1l_ui_device_sheets_render_diagnostics(
     complete = create_diagnostic_line(sheet, text, 8, 216, 0x93C5FD, 408) != NULL &&
                complete;
 
-    lv_obj_t *stores = create_label(sheet, "Crashlog  Exports  Serial", 0xF4F7FB);
+    lv_obj_t *stores = create_label(sheet, "Crashlog  Events  Serial", 0xF4F7FB);
     if (stores) {
         lv_obj_set_pos(stores, 8, 246);
     }
     complete = stores != NULL && complete;
     lv_obj_t *note = create_label(
         sheet,
-        "Advanced details stay here so normal screens remain simple.",
+        "Open Terminal for the bounded redacted event ring and runtime log level.",
         0xFBBF24);
     configure_wrapped_label(note, 8, 268);
     complete = note != NULL && complete;
 
-    lv_obj_t *crashlog = create_button(
-        controller, sheet, "Crashlog", 8, 316, 112, 44, 0U,
-        D1L_UI_DEVICE_SHEETS_ACTION_NONE);
-    lv_obj_t *export_button = create_button(
-        controller, sheet, "Export", 132, 316, 96, 44, 0U,
-        D1L_UI_DEVICE_SHEETS_ACTION_NONE);
-    lv_obj_t *soak = create_button(
-        controller, sheet, "Soak", 240, 316, 86, 44, 0U,
-        D1L_UI_DEVICE_SHEETS_ACTION_NONE);
-    lv_obj_t *disabled[] = {crashlog, export_button, soak};
-    for (size_t i = 0U; i < sizeof(disabled) / sizeof(disabled[0]); ++i) {
-        if (disabled[i]) {
-            lv_obj_add_state(disabled[i], LV_STATE_DISABLED);
-        } else {
-            complete = false;
-        }
+    if (d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MUTABLE_TERMINAL)) {
+        complete = create_button(
+            controller, sheet, "Open Terminal", 8, 316, 150, 44,
+            BINDING_OPEN_TERMINAL,
+            D1L_UI_DEVICE_SHEETS_ACTION_OPEN_TERMINAL) != NULL && complete;
     }
     if (!complete) {
         invalidate_sheet(controller, sheet);

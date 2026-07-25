@@ -26,6 +26,7 @@ def test_ui_node_detail_controller_native(tmp_path: Path) -> None:
         str(ROOT / "tests/native/stubs"),
         "-I",
         str(ROOT / "main"),
+        str(ROOT / "main/app/release_profile.c"),
         str(ROOT / "main/ui/ui_node_detail.c"),
         str(ROOT / "tests/native/ui_node_detail_stubs/lvgl_stub.c"),
         str(ROOT / "tests/native/ui_node_detail_test.c"),

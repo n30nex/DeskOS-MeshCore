@@ -1,6 +1,37 @@
 # MeshCore DeskOS D1L Roadmap
 
-This is the active production roadmap. The release definition and blocker analysis in [KRAB'S THOUGHTS](KRABSTHOUGHTS.MD) are incorporated here; the audit remains the detailed rationale, while this file is the ordered execution plan.
+## Current production finish line (2026-07-25)
+
+Feature implementation for the `full_feature` profile is 100% complete in the
+active worktree. The only remaining production work is evidence execution:
+
+1. finish the source-bound manifests and focused/full host gates;
+2. commit and push one immutable candidate;
+3. require the exact-SHA `d1l-ci` run and Ed25519-signed package to pass;
+4. download and verify that exact artifact;
+5. flash the current D1L on Pi 5 using only
+   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with
+   `VID:PID 1a86:7523`;
+6. run automated post-flash, reboot/persistence, storage and non-Public RF
+   acceptance;
+7. collect one consolidated physical UI confirmation and publish only if the
+   final fail-closed audit is green.
+
+Implementation complete includes BLE companion core protocol, Wi-Fi, Map,
+multi-channel messaging, verified contacts/QR, TRACE, repeater and room
+administration with no-history room login and locally confirmed mutations,
+TLS/QoS1 Observer, structured terminal/event log, display and notification
+preferences, and signed dual-slot local update with anti-rollback/rollback.
+
+The D1L has no onboard GPS. Map center requires an explicit user-set center or
+authenticated companion provenance; peer markers require signed peer-advert
+coordinates. Read-only automation does not transmit on Public RF. SD remains
+FAT32-only, conditional, non-formatting and backed by bounded NVS fallback.
+
+The previous percentage snapshot below is retained as historical planning
+evidence. It is not the current implementation score or device route.
+
+This was the earlier production roadmap. The release definition and blocker analysis in [KRAB'S THOUGHTS](KRABSTHOUGHTS.MD) are incorporated here; the audit remains the detailed rationale, while this file preserves the earlier ordered execution plan.
 
 **Production release completion: 74% at the last strict-verified checkpoint; current fail-closed live score 64% (`64.2962962963%` raw).** Capability implementation is 80% (`80.3703703704%` raw), while final release-gate closure remains 0 of 11. The live score excludes automated-acceptance credit until current-main artifacts are downloaded and checksum-verified. These are reproducible reporting estimates, not release waivers; the firmware is not ready to tag or publish.
 

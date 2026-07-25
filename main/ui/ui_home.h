@@ -42,6 +42,7 @@ typedef enum {
     D1L_UI_HOME_ACTION_BLE,
     D1L_UI_HOME_ACTION_STORAGE,
     D1L_UI_HOME_ACTION_ATTENTION,
+    D1L_UI_HOME_ACTION_PACKETS,
 } d1l_ui_home_action_t;
 
 typedef void (*d1l_ui_home_action_handler_t)(d1l_ui_home_action_t action,
@@ -67,6 +68,7 @@ typedef struct d1l_ui_home_controller {
 d1l_ui_home_box_t d1l_ui_home_destination_box(d1l_ui_home_destination_slot_t slot);
 d1l_ui_home_box_t d1l_ui_home_device_box(void);
 d1l_ui_home_box_t d1l_ui_home_status_box(d1l_ui_home_status_slot_t slot);
+bool d1l_ui_home_action_available(d1l_ui_home_action_t action);
 void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
                         lv_obj_t *parent,
                         const d1l_ui_home_view_model_t *view_model,

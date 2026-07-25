@@ -114,7 +114,6 @@
         "runtime_queue_fairness"
       ],
       "remaining": [
-        "execute the complete production admin operation allowlist",
         "qualify official-peer RF"
       ]
     },
@@ -485,7 +484,7 @@
     "main/app/identity_state.h": "2bdd654902a4d656ad5cb293d0c26f70d6d10dfb8893764b6732027742a8e03b",
     "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
     "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",
-    "main/app/settings_model.h": "17e976c5105e35978187c58cd81da756d8a20808cac0cce9cfffba2e97ce5795",
+    "main/app/settings_model.h": "1d56b09a11cb0ccfec0a0a60018955915512248e8b41189e1b8a05804c28f63c",
     "main/app/settings_protocol_migration.c": "962da3f27cbb2a067499aab5399bc1ef317d5f90799881e0c80a3a42336cb407",
     "main/app/settings_protocol_migration.h": "8955e2e503fe4919ef7fdb354afd97f573dc954d8ceb05173fb64f767b820cb9",
     "main/app/settings_time_checkpoint.c": "0d27c2bd30e045025751ac1a79bb0ad01bbbf04f1b547b5b5f492d8bee0e6dbf",
@@ -493,8 +492,8 @@
     "main/hal/rp2040_bridge.h": "57af77842713ec9f2c2eeb6cf6bd856ccc5a75c79ca9540e82cd4b5d9cff099c",
     "main/mesh/dm_delivery_state.c": "a3ff6903299b70ed68727284de8c2b6e81b2f9db69a80902db75983ee91aee94",
     "main/mesh/dm_delivery_state.h": "d27b3666f03d27e74cb30efb2e77c47bd50f0273d7991e29315e55d5a2fd4185",
-    "main/mesh/meshcore_admin_dispatch.c": "3f91368320e13a138316d8a99ce9727d87695e1fbe2b770019ebda115e5be701",
-    "main/mesh/meshcore_admin_dispatch.h": "10e1e73af1046bbcf610457d6ae3adbb5e52e25962c4c249d2afc0d36567d43f",
+    "main/mesh/meshcore_admin_dispatch.c": "d129f74a297d5c40f78ab4696eb3987eeb9f11cda73bb3527e0fdffb73243288",
+    "main/mesh/meshcore_admin_dispatch.h": "cce74df8570d048fbfa4eb7bf5eec89d1a1847aacdde4a30dd7c45999c0971c6",
     "main/mesh/contact_store.c": "3f895213e9cb8fdf5da67a01fac26df35aa542c6f2ffcf179d1e0d276a1d9e14",
     "main/mesh/contact_store.h": "2252ef58b703c6721a1fd77f2a1306d6ea4d9f419af5c996666a212a29752750",
     "main/mesh/contact_uri.c": "a65175e4a07023adc2777a0504a2c83f5d409fdc4bd497cbddd4a4868f51fc8b",
@@ -530,11 +529,11 @@
     "main/platform/time_service_core.c": "005c5b75126104f410584e81396e573ee48553564bc94d4b45628192a26c94e3",
     "main/platform/time_service_core.h": "f3af332807f433d49344eaf45cee29473940a988c47e3c02c44fd44cd0306d75",
     "main/storage/map_tile_store.h": "a5e8f257ee2413a4a5446646f750c989e39a1df79d3f0876f6684ae61065cea7",
-    "main/storage/retained_blob_store.h": "2de19037857be8769da3ee005b175cf54ad3944b94fb8b5f870c629060391e4d",
+    "main/storage/retained_blob_store.h": "0301e8ad3c36c224d9dd5907035cf5b18af2fefa96d7572f82d6791c9d2e0972",
     "main/storage/storage_status.h": "9da4c29e51e6345de70770649f7e92b583edeb668cbb4017152130c20001700d",
     "tests/native/esp_nvs_stubs.c": "2ad701fb96d76e19518e193bcfafb7fada5d0e1a517a38406998fc386ad6b8ca",
     "tests/native/mbedtls_md_stub.c": "db5f82347ce2e70303a71a7b8dc0cae4c7de237e3a353605845763f6e61bda52",
-    "tests/native/meshcore_admin_dispatch_test.c": "830b262f3f15f95c27d374e93ad60eab2e52647e478346df70d604125312bfda",
+    "tests/native/meshcore_admin_dispatch_test.c": "f4e4e2236fb2801e4fa5ab35064f6ebdcb76d350dfa24ff4d911a448d4cfe781",
     "tests/native/meshcore_ack_completion_test.c": "152d878857e11211086027d7884ccc5728f107c817758c7ff652dadcf1292f5f",
     "tests/native/meshcore_lifetime_test.c": "4da88fd0e0f9e127224488c7fe55cec72413c653ed9b7b589d80cfc5998a9129",
     "tests/native/meshcore_runtime_guard_test.c": "5a41578aded709e2b5fc837d8da1d257b2381d10bfdc80f388a46a59e6badcb0",

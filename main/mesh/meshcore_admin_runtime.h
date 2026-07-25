@@ -32,6 +32,7 @@ typedef struct {
     d1l_meshcore_admin_state_t state;
     uint32_t generation;
     uint64_t request_deadline_us;
+    d1l_meshcore_admin_mutation_t pending_mutation;
 } d1l_meshcore_admin_context_t;
 
 typedef struct {
@@ -43,10 +44,16 @@ typedef struct {
     uint8_t firmware_level;
     uint32_t server_timestamp;
     uint32_t pending_tag;
+    d1l_meshcore_admin_mutation_t pending_mutation;
+    d1l_meshcore_admin_mutation_t last_mutation;
+    bool last_mutation_success;
     bool status_valid;
     d1l_meshcore_admin_status_t status;
     uint32_t login_tx_queued;
     uint32_t status_tx_queued;
+    uint32_t mutation_tx_queued;
+    uint32_t mutation_accepted;
+    uint32_t mutation_rejected;
     uint32_t response_accepted;
     uint32_t response_unmatched;
     uint32_t response_malformed;
@@ -84,6 +91,13 @@ esp_err_t d1l_meshcore_admin_build_status_packet(
     const d1l_meshcore_route_selection_t *selection, uint32_t tag,
     uint32_t uniqueness, d1l_meshcore_admin_encrypt_fn encrypt,
     uint8_t *raw, size_t raw_size, uint8_t *out_len);
+esp_err_t d1l_meshcore_admin_build_mutation_packet(
+    const d1l_settings_t *settings,
+    const d1l_meshcore_admin_binding_t *binding,
+    const d1l_meshcore_route_selection_t *selection,
+    d1l_meshcore_admin_mutation_t mutation, uint32_t timestamp,
+    d1l_meshcore_admin_encrypt_fn encrypt,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len);
 
 void d1l_meshcore_admin_runtime_init(void);
 void d1l_meshcore_admin_binding_wipe(
@@ -99,6 +113,8 @@ bool d1l_meshcore_admin_runtime_capture_pending(
     d1l_meshcore_admin_context_t *out_context);
 bool d1l_meshcore_admin_runtime_capture_authenticated(
     d1l_meshcore_admin_context_t *out_context);
+bool d1l_meshcore_admin_runtime_capture_mutation_pending(
+    d1l_meshcore_admin_context_t *out_context);
 bool d1l_meshcore_admin_runtime_validate_binding(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation);
 bool d1l_meshcore_admin_runtime_begin_status(
@@ -107,6 +123,18 @@ bool d1l_meshcore_admin_runtime_begin_status(
 void d1l_meshcore_admin_runtime_note_status_tx(uint32_t request_generation,
                                                uint32_t tag,
                                                esp_err_t result);
+bool d1l_meshcore_admin_runtime_begin_mutation(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    d1l_meshcore_admin_mutation_t mutation, uint32_t tag, uint64_t now_us,
+    uint32_t *out_request_generation);
+void d1l_meshcore_admin_runtime_note_mutation_tx(
+    uint32_t request_generation, d1l_meshcore_admin_mutation_t mutation,
+    uint32_t tag, esp_err_t result);
+d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_runtime_dispatch_mutation_response(
+    const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
+    uint32_t response_timestamp, const uint8_t *text, size_t text_len,
+    uint64_t now_us, bool *out_considered);
 d1l_meshcore_admin_response_result_t
 d1l_meshcore_admin_runtime_dispatch_response(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation,

@@ -523,6 +523,35 @@ static void test_message_volatile_preview_does_not_consume_history(void)
                                         &matches) == 1U);
     assert(matches == D1L_MESSAGE_STORE_CAPACITY + 1U);
     assert(visible[0].seq == D1L_MESSAGE_STORE_CAPACITY);
+    d1l_message_store_stats_t snapshot_stats = {0};
+    uint32_t volatile_seq = 0U;
+    memset(visible, 0, sizeof(visible));
+    assert(d1l_message_store_query_page_snapshot(
+               visible, D1L_MESSAGE_STORE_CAPACITY + 1U, 0U, NULL,
+               &matches, &snapshot_stats, &volatile_seq) ==
+           D1L_MESSAGE_STORE_CAPACITY + 1U);
+    assert_message_stats_equal(snapshot_stats, before);
+    assert(volatile_seq == before.next_seq);
+    assert(visible[D1L_MESSAGE_STORE_CAPACITY].seq == volatile_seq);
+    memset(visible, 0, sizeof(visible));
+    assert(d1l_message_store_query_page_snapshot(
+               visible, 1U, 1U, NULL, &matches, &snapshot_stats,
+               &volatile_seq) == 1U);
+    assert(matches == D1L_MESSAGE_STORE_CAPACITY + 1U);
+    assert(visible[0].seq == D1L_MESSAGE_STORE_CAPACITY);
+    assert(visible[0].seq != volatile_seq);
+    assert(d1l_message_store_append_public_volatile(
+               "rx", "UI Canary", "ui-data-canary replacement", -54, 61,
+               1U, 1U, true) == ESP_OK);
+    memset(visible, 0, sizeof(visible));
+    assert(d1l_message_store_query_page_snapshot(
+               visible, 1U, 0U, "replacement", &matches, &snapshot_stats,
+               &volatile_seq) == 1U);
+    assert(matches == 1U);
+    assert_message_stats_equal(snapshot_stats, before);
+    assert(volatile_seq == before.next_seq);
+    assert(visible[0].seq == volatile_seq);
+    assert(strcmp(visible[0].text, "ui-data-canary replacement") == 0);
 
     assert(d1l_message_store_append_public("rx", "Node", "public-real-next",
                                            -50, 70, 1U, 1U, true) == ESP_OK);
@@ -616,6 +645,46 @@ static void test_dm_volatile_preview_does_not_consume_history(void)
     assert(d1l_dm_store_copy_thread_page(fingerprint, visible, 1U, 1U,
                                          &matches) == 1U);
     assert(visible[0].seq == D1L_DM_STORE_CAPACITY);
+    d1l_dm_store_stats_t snapshot_stats = {0};
+    uint32_t volatile_seq = 0U;
+    memset(visible, 0, sizeof(visible));
+    assert(d1l_dm_store_copy_recent_page_snapshot(
+               visible, D1L_DM_STORE_CAPACITY + 1U, 0U, &matches,
+               &snapshot_stats, &volatile_seq) ==
+           D1L_DM_STORE_CAPACITY + 1U);
+    assert_dm_stats_equal(snapshot_stats, before);
+    assert(volatile_seq == before.next_seq);
+    assert(visible[D1L_DM_STORE_CAPACITY].seq == volatile_seq);
+    memset(visible, 0, sizeof(visible));
+    assert(d1l_dm_store_copy_recent_page_snapshot(
+               visible, 1U, 1U, &matches, &snapshot_stats,
+               &volatile_seq) == 1U);
+    assert(matches == D1L_DM_STORE_CAPACITY + 1U);
+    assert(visible[0].seq == D1L_DM_STORE_CAPACITY);
+    assert(visible[0].seq != volatile_seq);
+    memset(visible, 0, sizeof(visible));
+    volatile_seq = 0U;
+    assert(d1l_dm_store_copy_thread_page_snapshot(
+               fingerprint, visible, D1L_DM_STORE_CAPACITY + 1U, 0U,
+               &matches, &snapshot_stats, &volatile_seq) ==
+           D1L_DM_STORE_CAPACITY + 1U);
+    assert_dm_stats_equal(snapshot_stats, before);
+    assert(volatile_seq == before.next_seq);
+    assert(visible[D1L_DM_STORE_CAPACITY].seq == volatile_seq);
+    assert(d1l_dm_store_append_volatile(
+               fingerprint, "UI Canary", "rx",
+               "ui-data-canary dm-replacement", -54, 61, 1U, 1U, 1U,
+               true, false, 0x4321U) == ESP_OK);
+    memset(visible, 0, sizeof(visible));
+    assert(d1l_dm_store_copy_thread_page_snapshot(
+               fingerprint, visible, 1U, 0U, &matches, &snapshot_stats,
+               &volatile_seq) == 1U);
+    assert(matches == D1L_DM_STORE_CAPACITY + 1U);
+    assert_dm_stats_equal(snapshot_stats, before);
+    assert(volatile_seq == before.next_seq);
+    assert(visible[0].seq == volatile_seq);
+    assert(strcmp(visible[0].text,
+                  "ui-data-canary dm-replacement") == 0);
 
     memset(visible, 0, sizeof(visible));
     assert(d1l_dm_store_query_thread_page(
@@ -630,7 +699,8 @@ static void test_dm_volatile_preview_does_not_consume_history(void)
                &matches) == 1U);
     assert(matches == 1U);
     assert(visible[0].seq == before.next_seq);
-    assert(strcmp(visible[0].text, "ui-data-canary dm-test") == 0);
+    assert(strcmp(visible[0].text,
+                  "ui-data-canary dm-replacement") == 0);
     assert_dm_stats_equal(d1l_dm_store_stats(), before);
     assert(s_write_count[D1L_RETAINED_BLOB_STORE_DM_MESSAGES] == writes_before);
 

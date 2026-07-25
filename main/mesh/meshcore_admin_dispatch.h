@@ -25,6 +25,11 @@ extern "C" {
 #define D1L_MESHCORE_ADMIN_REPLAY_RESPONSES_PER_PEER 4U
 #define D1L_MESHCORE_ADMIN_PERMISSION_ADMIN 0x03U
 #define D1L_MESHCORE_ADMIN_REQUEST_GET_STATUS 0x01U
+#define D1L_MESHCORE_ADMIN_MUTATION_REPLY_MAX_BYTES 64U
+/* A room-admin session is management-only. UINT32_MAX prevents the pinned
+ * room server from scheduling stored or future room-post pushes, so the
+ * admin client never admits history or owes a room-post ACK. */
+#define D1L_MESHCORE_ADMIN_ROOM_NO_HISTORY_CURSOR UINT32_MAX
 
 typedef enum {
     D1L_MESHCORE_ADMIN_ROLE_NONE = 0,
@@ -37,12 +42,20 @@ typedef enum {
     D1L_MESHCORE_ADMIN_LOGIN_PENDING,
     D1L_MESHCORE_ADMIN_AUTHENTICATED,
     D1L_MESHCORE_ADMIN_STATUS_PENDING,
+    D1L_MESHCORE_ADMIN_MUTATION_PENDING,
     D1L_MESHCORE_ADMIN_TIMED_OUT,
 } d1l_meshcore_admin_state_t;
 
 typedef enum {
+    D1L_MESHCORE_ADMIN_MUTATION_NONE = 0,
+    D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS,
+    D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP,
+} d1l_meshcore_admin_mutation_t;
+
+typedef enum {
     D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED = 0,
     D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED,
+    D1L_MESHCORE_ADMIN_RESPONSE_REJECTED,
     D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED,
     D1L_MESHCORE_ADMIN_RESPONSE_EXPIRED,
     D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED,
@@ -107,6 +120,9 @@ typedef struct {
     uint32_t server_timestamp;
     uint32_t pending_tag;
     uint32_t last_completed_tag;
+    d1l_meshcore_admin_mutation_t pending_mutation;
+    d1l_meshcore_admin_mutation_t last_mutation;
+    bool last_mutation_success;
     uint64_t request_deadline_us;
     uint64_t idle_timeout_us;
     uint64_t idle_deadline_us;
@@ -159,6 +175,23 @@ bool d1l_meshcore_admin_begin_status_request(
     uint64_t now_us, uint64_t request_deadline_us);
 bool d1l_meshcore_admin_cancel_status_request(
     d1l_meshcore_admin_session_t *session, uint32_t tag);
+const char *d1l_meshcore_admin_mutation_name(
+    d1l_meshcore_admin_mutation_t mutation);
+const char *d1l_meshcore_admin_mutation_command(
+    d1l_meshcore_admin_mutation_t mutation);
+bool d1l_meshcore_admin_begin_mutation(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_mutation_t mutation, uint32_t tag,
+    uint64_t now_us, uint64_t request_deadline_us);
+bool d1l_meshcore_admin_cancel_mutation(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_mutation_t mutation, uint32_t tag);
+d1l_meshcore_admin_response_result_t
+d1l_meshcore_admin_accept_mutation_response(
+    d1l_meshcore_admin_session_t *session,
+    const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
+    uint32_t response_timestamp, const uint8_t *text, size_t text_len,
+    uint64_t now_us);
 size_t d1l_meshcore_admin_status_logical_size(
     d1l_meshcore_admin_role_t role);
 d1l_meshcore_admin_response_result_t

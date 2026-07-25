@@ -136,6 +136,9 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     build = c_function(service, "static esp_err_t build_channel_text_packet(")
     assert "raw[i++] = channel->channel_hash" in build
     assert "channel->secret" in build
+    assert "sender_name" in build
+    assert "message_offset = 5U + sender_name_len + 2U" in build
+    assert "settings->node_name, text" in send
 
     active = c_function(
         service, "esp_err_t d1l_meshcore_service_send_active_channel("
@@ -146,7 +149,7 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     assert "D1L_CHANNEL_PUBLIC_ID" in public
 
     receive = c_function(service, "static void parse_rx_channel_packet(")
-    matches_index = receive.index("d1l_channel_store_copy_hash_matches")
+    matches_index = receive.index("d1l_channel_store_copy_rx_hash_matches")
     decrypt_index = receive.index("meshcore_decrypt_after_mac")
     finish_index = receive.index("d1l_meshcore_channel_dispatch_finish")
     current_key_index = receive.index("d1l_channel_store_copy_protocol_key")
@@ -158,6 +161,7 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     assert current_key_index < plaintext_index < duplicate_index < ready_index
     assert ready_index < append_index
     assert "D1L_CHANNEL_STORE_CAPACITY" in receive
+    assert "d1l_channel_store_copy_hash_matches" not in receive
     assert "d1l_channel_store_find_unique_hash" not in receive
     assert "channel_protocol_keys_equal" in receive
     assert "channel_rx_unknown_hash++" in receive
@@ -197,7 +201,7 @@ def test_rejected_channel_rx_is_retained_side_effect_free_in_production_order():
             "if (dispatch_outcome != D1L_MESHCORE_CHANNEL_DISPATCH_ACCEPTED)",
             "d1l_channel_protocol_key_t current_key",
         ),
-        ("if (!selected_current)", "if (plain_len < 6U"),
+        ("if (!selected_current ||", "if (plain_len < 6U"),
         (
             "if (plain_len < 6U || (plain[4] >> 2) != 0)",
             "d1l_meshcore_text_plaintext_view_t text_view",

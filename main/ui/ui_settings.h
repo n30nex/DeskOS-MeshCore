@@ -44,6 +44,7 @@ typedef struct d1l_ui_settings_controller {
     lv_obj_t *menu;
 } d1l_ui_settings_controller_t;
 
+bool d1l_ui_settings_action_available(d1l_ui_settings_action_t action);
 bool d1l_ui_settings_render(d1l_ui_settings_controller_t *controller,
                             lv_obj_t *parent,
                             const d1l_ui_more_view_model_t *view_model,

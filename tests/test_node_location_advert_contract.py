@@ -281,7 +281,7 @@ def test_marker_query_is_bounded_passive_and_location_only():
         assert forbidden not in query
 
 
-def test_serial_nodes_and_diagnostic_export_report_exact_advert_coordinates():
+def test_non_core_serial_nodes_and_export_report_exact_advert_coordinates():
     console = read("main/comms/usb_console.c")
     cmd_nodes = function_slice(console, "static void cmd_nodes", "static void cmd_nodes_clear")
     export_nodes = function_slice(
@@ -300,18 +300,25 @@ def test_serial_nodes_and_diagnostic_export_report_exact_advert_coordinates():
         assert field in cmd_nodes
         if "marker_generation" not in field:
             assert field in export_nodes
+    assert "const bool include_location = !d1l_release_profile_is_core();" in cmd_nodes
+    assert cmd_nodes.count("if (include_location) {") == 3
 
 
 def test_product_contract_has_manual_center_and_no_onboard_gps_claim():
     roadmap = read("docs/ROADMAP.md")
-    guide = read("docs/USER_GUIDE_D1L.md")
+    core_guide = read("docs/USER_GUIDE_D1L.md")
+    full_feature_guide = read(
+        "docs/FULL_FEATURE_DEVELOPMENT_GUIDE_D1L_2026-07-18.md"
+    )
     ui_spec = read("docs/UI_SPEC_480x480_DARK.md")
 
     assert "D1L has no onboard GPS" in roadmap
     assert "explicit user-set center" in roadmap
     assert "signed peer-advert coordinates" in roadmap
-    assert "D1L has no onboard GPS" in guide
-    assert "saved manual location" in guide
+    assert "D1L has no onboard GPS" in core_guide
+    assert "GPS/location" in core_guide
+    assert "saved manual location" not in core_guide
+    assert "saved manual location" in full_feature_guide
     assert "D1L has no onboard GPS" in ui_spec
     assert "Advert location" in ui_spec
 

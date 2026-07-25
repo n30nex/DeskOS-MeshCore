@@ -147,7 +147,7 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "optional search filters retained rows and offset pages older rows" in console
     assert "Public messages are kept in bounded retained storage" in console
     assert "Public messages are kept in a bounded NVS store" not in console
-    assert "d1l_message_store_query_page(entries" in console
+    assert "d1l_message_store_query_page_snapshot(" in console
     assert "D1L_CONSOLE_MESSAGE_PAGE_SIZE" in console
     assert "messages public" in SMOKE_COMMANDS
     assert "messages public search test" in SMOKE_COMMANDS

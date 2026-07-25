@@ -8,6 +8,7 @@
 #include "comms/connectivity_manager.h"
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
+#include "hal/display_preferences.h"
 #include "mesh/channel_message_coordinator.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
@@ -94,6 +95,12 @@ static bool valid_radio_edit(const d1l_app_radio_profile_edit_t *profile)
            profile->coding_rate <= 8U &&
            profile->tx_power_dbm >= -9 &&
            profile->tx_power_dbm <= D1L_RADIO_TX_POWER_DBM;
+}
+
+static bool multi_channel_management_available(void)
+{
+    return d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
 }
 
 static void radio_edit_from_settings(const d1l_settings_t *settings,
@@ -290,7 +297,9 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     memset(snapshot, 0, sizeof(*snapshot));
 
     d1l_settings_t settings = {0};
+    d1l_display_preferences_t display_preferences = {0};
     (void)d1l_settings_public_snapshot(&settings);
+    d1l_display_preferences_get(&display_preferences);
     d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
     d1l_message_store_stats_t messages = d1l_message_store_stats();
     d1l_dm_store_stats_t dms = d1l_dm_store_stats();
@@ -309,6 +318,11 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
 
     snapshot->board_ready = s_model.board_ready;
     snapshot->ui_ready = s_model.ui_ready;
+    snapshot->release_profile_id = d1l_release_profile_id();
+    snapshot->release_profile = d1l_release_profile_name();
+    snapshot->sd_history_mode_id = d1l_release_sd_history_mode();
+    snapshot->sd_history_mode = d1l_release_sd_history_mode_name();
+    snapshot->release_capabilities = *d1l_release_capabilities();
     snapshot->identity_ready = settings.identity_ready || mesh.identity_ready;
     snapshot->settings_load_status = d1l_settings_load_status();
     snapshot->identity_state = d1l_settings_persisted_identity_state();
@@ -331,18 +345,35 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->observer_enabled = connectivity.observer_enabled_setting;
     snapshot->wifi_profile_saved = connectivity.wifi_profile_saved;
     snapshot->wifi_password_saved = connectivity.wifi_password_saved;
-    snapshot->wifi_scan_supported = connectivity.wifi_scan_supported;
+    snapshot->wifi_scan_supported =
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
+        connectivity.wifi_scan_supported;
     snapshot->wifi_stack_active = connectivity.wifi_stack_active;
     snapshot->wifi_connected = connectivity.wifi_connected;
     snapshot->wifi_connecting = connectivity.wifi_connecting;
     snapshot->onboarding_complete = settings.onboarding_complete;
     snapshot->wifi_build_enabled = connectivity.wifi_build_enabled;
     snapshot->ble_build_enabled = connectivity.ble_build_enabled;
-    snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED;
+    snapshot->ble_transport_supported =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE) &&
+        D1L_BLE_COMPANION_TRANSPORT_SUPPORTED;
+    snapshot->ble_peer_known = connectivity.ble_peer_known;
+    snapshot->ble_protocol_running = connectivity.ble_protocol_running;
+    snapshot->ble_protocol_ready = connectivity.ble_protocol_ready;
     snapshot->wifi_state = connectivity.wifi_state;
     snapshot->wifi_last_error = connectivity.wifi_last_error;
     snapshot->wifi_rssi_dbm = connectivity.wifi_rssi_dbm;
     snapshot->wifi_channel = connectivity.wifi_channel;
+    snapshot->ble_pairing_passkey = connectivity.ble_pairing_passkey;
+    snapshot->ble_protocol_command_count =
+        connectivity.ble_protocol_command_count;
+    snapshot->ble_protocol_response_count =
+        connectivity.ble_protocol_response_count;
+    snapshot->ble_protocol_unsupported_count =
+        connectivity.ble_protocol_unsupported_count;
+    snapshot->ble_protocol_malformed_count =
+        connectivity.ble_protocol_malformed_count;
     snapshot->ble_state = connectivity.ble_state;
     snapshot->coexistence_policy = connectivity.coexistence_policy;
     snapshot->storage_direct_supported = storage.direct_supported;
@@ -367,16 +398,23 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->dm_store_persistence_degraded =
         retained_store_persistence_degraded(
             &storage, D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
-    snapshot->map_page_supported = true;
+    snapshot->map_page_supported =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
     snapshot->map_tile_render_supported = D1L_MAP_TILE_RENDER_SUPPORTED;
     snapshot->map_tile_sideload_supported = false;
     snapshot->map_location_set = settings.map_location_set;
-    /* Every current map-location writer is an explicit local UI/USB action.
-     * Authenticated companion ownership remains a separate future setter and
-     * must not be inferred from the coordinate alone. */
-    snapshot->map_center_source = settings.map_location_set ?
-        D1L_MAP_CENTER_SOURCE_MANUAL : D1L_MAP_CENTER_SOURCE_UNKNOWN;
+    snapshot->map_center_source = D1L_MAP_CENTER_SOURCE_UNKNOWN;
+    if (settings.map_location_set &&
+        settings.map_location_source ==
+            D1L_MAP_LOCATION_SOURCE_AUTHENTICATED_COMPANION) {
+        snapshot->map_center_source =
+            D1L_MAP_CENTER_SOURCE_AUTHENTICATED_COMPANION;
+    } else if (settings.map_location_set &&
+               settings.map_location_source ==
+                   D1L_MAP_LOCATION_SOURCE_MANUAL) {
+        snapshot->map_center_source = D1L_MAP_CENTER_SOURCE_MANUAL;
+    }
     snapshot->map_marker_age_reference_valid =
         time_status.clock.certificate_time_valid &&
         time_status.clock.wall_epoch_sec >= D1L_TIME_WALL_MIN_EPOCH &&
@@ -385,7 +423,10 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
         snapshot->map_marker_reference_timestamp =
             (uint32_t)time_status.clock.wall_epoch_sec;
     }
-    snapshot->map_tile_download_supported = connectivity.wifi_build_enabled &&
+    snapshot->map_tile_download_supported = snapshot->map_page_supported &&
+                                            d1l_release_feature_available(
+                                                D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
+                                            connectivity.wifi_build_enabled &&
                                             connectivity.wifi_connected &&
                                             snapshot->map_tile_cache_ready &&
                                             snapshot->map_location_set &&
@@ -425,6 +466,14 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->time_approximate = time_status.display_time_approximate;
     snapshot->timezone_settings_ready =
         time_status.timezone_settings_ready;
+    snapshot->high_contrast = settings.high_contrast;
+    snapshot->night_mode = settings.night_mode;
+    snapshot->display_brightness_percent =
+        display_preferences.brightness_percent;
+    snapshot->display_timeout_seconds =
+        display_preferences.timeout_seconds;
+    snapshot->notification_mode =
+        (uint8_t)display_preferences.notification_mode;
     snapshot->timezone_offset_minutes =
         time_status.timezone_offset_minutes;
     copy_cstr(snapshot->time_label, sizeof(snapshot->time_label),
@@ -539,11 +588,19 @@ esp_err_t d1l_app_model_send_public_text(const char *text)
 esp_err_t d1l_app_model_send_channel_text(uint64_t channel_id,
                                           const char *text)
 {
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     return d1l_meshcore_service_send_channel(channel_id, text);
 }
 
 esp_err_t d1l_app_model_send_active_channel_text(const char *text)
 {
+    if (!multi_channel_management_available()) {
+        return d1l_meshcore_service_send_channel(
+            D1L_CHANNEL_PUBLIC_ID, text);
+    }
     return d1l_meshcore_service_send_active_channel(text);
 }
 
@@ -558,6 +615,26 @@ esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
         out_stats);
     if (ret != ESP_OK) {
         return ret;
+    }
+    if (!multi_channel_management_available()) {
+        size_t public_index = *out_count;
+        for (size_t i = 0U; i < *out_count; ++i) {
+            if (out_channels[i].channel_id == D1L_CHANNEL_PUBLIC_ID) {
+                public_index = i;
+                break;
+            }
+        }
+        if (public_index == *out_count) {
+            *out_count = 0U;
+            *out_active_channel_id = 0U;
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (public_index != 0U) {
+            out_channels[0] = out_channels[public_index];
+        }
+        *out_count = 1U;
+        *out_active_channel_id = D1L_CHANNEL_PUBLIC_ID;
+        out_stats->count = 1U;
     }
     const d1l_read_state_stats_t read_state = d1l_read_state_stats();
     for (size_t i = 0U; i < *out_count; ++i) {
@@ -574,6 +651,10 @@ esp_err_t d1l_app_model_select_channel(uint64_t channel_id,
 {
     if (channel_id == 0U) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        return ESP_ERR_NOT_SUPPORTED;
     }
     if (out_channel) {
         memset(out_channel, 0, sizeof(*out_channel));
@@ -625,6 +706,9 @@ esp_err_t d1l_app_model_add_channel(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -639,6 +723,9 @@ esp_err_t d1l_app_model_create_channel(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -663,6 +750,9 @@ esp_err_t d1l_app_model_import_channel_uri(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -677,6 +767,9 @@ esp_err_t d1l_app_model_update_channel(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -691,6 +784,9 @@ esp_err_t d1l_app_model_remove_channel(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -705,6 +801,9 @@ esp_err_t d1l_app_model_remove_channel(
 esp_err_t d1l_app_model_export_channel_share_uri(
     uint64_t channel_id, char *dest, size_t dest_size)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (!dest || dest_size == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -744,6 +843,13 @@ size_t d1l_app_model_query_channel_messages_page(
     size_t max_entries, size_t skip_newest, const char *query,
     size_t *out_total_matches)
 {
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        if (out_total_matches) {
+            *out_total_matches = 0U;
+        }
+        return 0U;
+    }
     return d1l_message_store_query_channel_page(
         channel_id, out_entries, max_entries, skip_newest, query,
         out_total_matches);
@@ -758,12 +864,18 @@ esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
                                                      char *out_token,
                                                      size_t out_token_size)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     return d1l_meshcore_service_request_path_discovery_probe(
         fingerprint, out_token, out_token_size);
 }
 
 esp_err_t d1l_app_model_send_trace_contact(const char *fingerprint)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     return d1l_meshcore_service_send_trace_contact(fingerprint);
 }
 
@@ -881,6 +993,10 @@ esp_err_t d1l_app_model_mark_channel_read(uint64_t channel_id)
     if (channel_id == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (channel_id == D1L_CHANNEL_PUBLIC_ID) {
         return d1l_app_model_mark_public_read();
     }
@@ -899,29 +1015,62 @@ esp_err_t d1l_app_model_request_advert(bool flood)
     return d1l_meshcore_service_request_advert(flood);
 }
 
-esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7)
+static esp_err_t validate_map_location(int32_t lat_e7, int32_t lon_e7)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (lat_e7 < D1L_MAP_LOCATION_LAT_E7_MIN ||
         lat_e7 > D1L_MAP_LOCATION_LAT_E7_MAX ||
         lon_e7 < D1L_MAP_LOCATION_LON_E7_MIN ||
         lon_e7 > D1L_MAP_LOCATION_LON_E7_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
+    return ESP_OK;
+}
 
+esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7)
+{
+    const esp_err_t valid = validate_map_location(lat_e7, lon_e7);
+    if (valid != ESP_OK) {
+        return valid;
+    }
     d1l_settings_t settings = {0};
     settings.map_location_set = true;
     settings.map_lat_e7 = lat_e7;
     settings.map_lon_e7 = lon_e7;
+    settings.map_location_source = D1L_MAP_LOCATION_SOURCE_MANUAL;
+    return d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_MAP_LOCATION);
+}
+
+esp_err_t d1l_app_model_set_companion_map_location(
+    int32_t lat_e7, int32_t lon_e7)
+{
+    const esp_err_t valid = validate_map_location(lat_e7, lon_e7);
+    if (valid != ESP_OK) {
+        return valid;
+    }
+    d1l_settings_t settings = {0};
+    settings.map_location_set = true;
+    settings.map_lat_e7 = lat_e7;
+    settings.map_lon_e7 = lon_e7;
+    settings.map_location_source =
+        D1L_MAP_LOCATION_SOURCE_AUTHENTICATED_COMPANION;
     return d1l_settings_update_fields(
         &settings, D1L_SETTINGS_UPDATE_MAP_LOCATION);
 }
 
 esp_err_t d1l_app_model_clear_map_location(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     d1l_settings_t settings = {0};
     settings.map_location_set = false;
     settings.map_lat_e7 = 0;
     settings.map_lon_e7 = 0;
+    settings.map_location_source = D1L_MAP_LOCATION_SOURCE_UNKNOWN;
     return d1l_settings_update_fields(
         &settings, D1L_SETTINGS_UPDATE_MAP_LOCATION);
 }
@@ -974,6 +1123,16 @@ esp_err_t d1l_app_model_clear_wifi_profile(void)
 esp_err_t d1l_app_model_set_ble_enabled(bool enabled)
 {
     return d1l_connectivity_set_ble_enabled(enabled);
+}
+
+esp_err_t d1l_app_model_ble_begin_pairing(void)
+{
+    return d1l_connectivity_ble_begin_pairing();
+}
+
+esp_err_t d1l_app_model_ble_forget_peer(void)
+{
+    return d1l_connectivity_ble_forget_peer();
 }
 
 void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile)

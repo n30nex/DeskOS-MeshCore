@@ -400,6 +400,12 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_tab" in console
     assert "cmd_ui_scroll_probe" in console
     assert "cmd_ui_compose_probe" in console
+    assert "movement_required" in header
+    assert "movement_required" in console
+    assert "tx_suppressed" in header
+    assert "tx_suppressed" in console
+    assert "send_enabled" in header
+    assert "send_enabled" in console
     assert "cmd_ui_data_canary" in console
     assert "cmd_ui_capture_status" in console
     assert "cmd_ui_capture_begin" in console
@@ -436,7 +442,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_keyboard_set_textarea(keyboard, NULL)" in keyboard
     assert "d1l_compose_kb_map_lc" in keyboard
     assert "lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER" in keyboard
-    assert "lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14" in keyboard
+    assert "lv_obj_set_style_text_font(" in keyboard
+    assert "keyboard, &d1l_ui_font_symbols_14, LV_PART_ITEMS" in keyboard
     assert "lv_obj_set_size(keyboard, (lv_coord_t)width, (lv_coord_t)height)" in keyboard
     assert "lv_obj_set_align(keyboard, LV_ALIGN_TOP_LEFT)" in keyboard
     assert "lv_keyboard_set_textarea(keyboard, textarea)" in keyboard
@@ -591,8 +598,8 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
     channel_compose = source.split("static bool show_channel_compose_sheet", 1)[1].split(
         "static void open_compose_event_cb", 1
     )[0]
-    dm_compose = source.split("static void open_dm_compose_for_contact", 1)[1].split(
-        "static bool contact_from_node_view", 1
+    dm_compose = source.split("static void present_dm_compose_sheet", 1)[1].split(
+        "static void open_dm_compose_for_contact", 1
     )[0]
     assert "request_full_screen_repaint();" in channel_compose
     assert "request_full_screen_repaint();" in dm_compose
@@ -907,9 +914,16 @@ def test_ui_allocation_wrappers_and_stack_budget_are_hardened():
     source = read("main/ui/ui_phase1.c")
     device_sheets = read("main/ui/ui_device_sheets.c")
     contact_sheets = read("main/ui/ui_contact_sheets.c")
-    assert "#define D1L_UI_TASK_STACK_BYTES 6144U" in source
+    assert "#define D1L_UI_TASK_STACK_BYTES 12288U" in source
     assert "#define D1L_TOUCH_TASK_STACK_BYTES 4096U" in source
-    assert 'xTaskCreatePinnedToCore(ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES' in source
+    assert '#include "freertos/idf_additions.h"' in source
+    assert "xTaskCreatePinnedToCoreWithCaps(" in source
+    assert 'ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES' in source
+    assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in source
+    assert ") != pdPASS" in source
+    assert "s_ui_task_handle = NULL" in source
+    assert "s_touch_task_handle = NULL" in source
+    assert "bool d1l_ui_phase1_started(void)" in source
     assert "ui_task_stack_free_words" in device_sheets
     assert "create_screen_object" in source
     assert "create_object" in source
@@ -984,7 +998,7 @@ def test_dm_composer_opens_from_contact_rows():
     assert "selected = *entry" in source
     assert "dm_identity_for_contact(entry, &selected)" in source
     assert "if (!eligibility.can_open_compose)" in source
-    assert "s_compose_contact = selected" in source
+    assert "s_compose_contact = *selected" in source
     assert 'lv_label_set_text(s_compose_title, title)' in source
     assert 'lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message")' in source
     assert 'show_toast(s_compose_dm ? "DM" : "Channel message", ret)' in source
@@ -1194,7 +1208,8 @@ def test_node_detail_sheet_opens_from_heard_node_rows():
     assert '"Path hops %u  hash %u byte  advert %lums"' in detail
     assert '"Last heard %lums  first %lums  count %lu"' in detail
     assert 'create_button(controller, "DM"' in detail
-    assert '"Manage locked"' in detail
+    assert '"Admin"' in detail
+    assert '"Verified server; local authenticated login required."' in detail
     assert 'create_button(controller, "Close"' in detail
     assert "d1l_ui_node_detail_create(&s_node_detail_controller, s_screen)" in source
 
@@ -1496,8 +1511,8 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
         '"Rename"',
         '"Remove from favorites"',
         '"Add to favorites"',
-        '"Unmute notifications"',
-        '"Mute notifications"',
+        '"Include in unread count"',
+        '"Exclude from unread count"',
         '"Export QR"',
         '"Forget contact"',
     ):
@@ -1735,8 +1750,10 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "d1l_app_model_wifi_connect()" in source
     assert "d1l_app_model_clear_wifi_profile()" in source
     assert "d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled)" in source
-    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false" in header
-    assert "snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED" in read("main/app/app_model.c")
+    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED true" in header
+    app_model = read("main/app/app_model.c")
+    assert "D1L_RELEASE_FEATURE_BLE" in app_model
+    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED" in app_model
     assert "if (!controller->rendered.controls_available)" in wifi_module
     assert "lv_textarea_set_max_length(" in wifi_module
     assert "D1L_WIFI_SSID_LEN - 1U" in wifi_module
@@ -1748,13 +1765,14 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "D1L_UI_WIFI_ACTION_SCAN" in source
     assert "D1L_UI_WIFI_ACTION_CONNECT" in source
     assert '"BLE companion transport is unavailable in this release."' in connectivity
-    assert '"No BLE pairing or transport artifact is present for public release."' in connectivity
+    assert '"Secure MeshCore companion transport is available."' in connectivity
+    assert '"No BLE pairing or transport runtime is present."' in connectivity
     assert '"Enable unavailable"' in ble_module
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
     assert '"Fixed UTC offset only; daylight saving is not automatic.' in device_sheets
-    assert '"Advanced details stay here so normal screens remain simple."' in device_sheets
+    assert '"Open Terminal for the bounded redacted event ring and runtime log level."' in device_sheets
     assert '"reset %s  heap %luK/%luK  ui stk %lu"' in device_sheets
 
 
@@ -1857,3 +1875,35 @@ def test_live_packet_receive_store_reads_are_serialized_for_ui_snapshots():
     assert "node_total_written" in ui_source
     assert "route_total_written" in ui_source
     assert "packet_total_written" in ui_source
+
+
+def test_compose_probe_is_tx_suppressed_without_weakening_dm_admission():
+    source = read("main/ui/ui_phase1.c")
+
+    production = source.split(
+        "static void open_dm_compose_for_contact", 1
+    )[1].split("static void open_node_dm_for", 1)[0]
+    assert "dm_identity_for_contact(entry, &selected)" in production
+    assert production.index("if (!eligibility.can_open_compose)") < (
+        production.index("present_dm_compose_sheet(&selected, false)")
+    )
+
+    probe = source.split(
+        "static void open_compose_probe_on_ui_task", 1
+    )[1].split("static void open_keyboard_probe_on_ui_task", 1)[0]
+    assert "present_dm_compose_sheet(&contact, true)" in probe
+    assert "open_dm_compose_for_contact(&contact)" not in probe
+    assert "s_compose_probe_send_suppressed = true" in probe
+
+    send = source.split("static void send_compose_text(void)", 1)[1].split(
+        "static void send_compose_event_cb", 1
+    )[0]
+    suppression = send.index("if (s_compose_probe_send_suppressed)")
+    assert suppression < send.index("d1l_app_model_send_dm_text")
+    assert suppression < send.index("d1l_app_model_send_channel_text")
+    assert "return;" in send[suppression:send.index("const char *text")]
+
+    hide = source.split("static void hide_compose_sheet(void)", 1)[1].split(
+        "static void hide_public_history_sheet", 1
+    )[0]
+    assert "s_compose_probe_send_suppressed = false" in hide

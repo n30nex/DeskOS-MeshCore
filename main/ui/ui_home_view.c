@@ -3,9 +3,42 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
+
 static bool text_equals(const char *value, const char *expected)
 {
     return value && expected && strcmp(value, expected) == 0;
+}
+
+void d1l_ui_home_view_apply_release_profile(
+    d1l_ui_home_view_input_t *input)
+{
+    if (!input) {
+        return;
+    }
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL)) {
+        input->wifi_connected = false;
+        input->wifi_enabled = false;
+        input->wifi_connecting = false;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE)) {
+        input->ble_build_enabled = false;
+        input->ble_transport_supported = false;
+        input->ble_companion_enabled = false;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        input->map_location_set = false;
+        input->map_tile_cache_ready = false;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+        input->storage_retained_sd_degraded = false;
+        input->storage_sd_data_root_ready = false;
+        input->storage_setup_required = false;
+        input->storage_sd_needs_fat32 = false;
+        input->storage_sd_state = "internal";
+        input->storage_setup_action = "forced_nvs";
+    }
 }
 
 static bool mesh_needs_attention(const d1l_ui_home_view_input_t *input)
@@ -139,7 +172,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
         input->public_unread_count + input->dm_unread_count;
     if (unread_count > 0U && input->muted_dm_unread_count > 0U) {
         snprintf(out_view->messages_status, sizeof(out_view->messages_status),
-                 "%llu unread + %llu muted",
+                 "%llu unread + %llu excluded",
                  (unsigned long long)unread_count,
                  (unsigned long long)input->muted_dm_unread_count);
     } else if (unread_count > 0U) {
@@ -147,7 +180,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
                  "%llu unread", (unsigned long long)unread_count);
     } else if (input->muted_dm_unread_count > 0U) {
         snprintf(out_view->messages_status, sizeof(out_view->messages_status),
-                 "%llu muted",
+                 "%llu excluded",
                  (unsigned long long)input->muted_dm_unread_count);
     } else {
         snprintf(out_view->messages_status, sizeof(out_view->messages_status),

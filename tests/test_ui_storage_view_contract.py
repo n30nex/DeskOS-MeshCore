@@ -41,6 +41,8 @@ def test_storage_sheet_consumes_only_the_owned_view_truth():
     assert "s_storage_view.data_summary" in phase1
     assert "s_storage_view.card" in phase1
     assert "s_storage_view.locations[index]" in phase1
+    assert "d1l_ui_storage_location_available(location->location)" in phase1
+    assert "visible_index" in phase1
 
     removed_helpers = (
         "storage_snapshot_needs_attention",

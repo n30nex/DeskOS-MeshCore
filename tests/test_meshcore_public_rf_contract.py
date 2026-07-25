@@ -69,7 +69,11 @@ def test_meshcore_service_rejects_139_byte_or_invalid_utf8_text_without_truncati
     assert "validate_user_text(text)" in dm_builder
     assert 'snprintf((char *)&plain[5]' not in public_builder
     assert 'snprintf((char *)&plain[5]' not in dm_builder
-    assert "memcpy(&plain[5], text, message_len)" in public_builder
+    assert "strnlen(sender_name, D1L_NODE_NAME_LEN)" in public_builder
+    assert "memcpy(&plain[5], sender_name, sender_name_len)" in public_builder
+    assert "plain[5U + sender_name_len] = ':'" in public_builder
+    assert "plain[6U + sender_name_len] = ' '" in public_builder
+    assert "memcpy(&plain[message_offset], text, message_len)" in public_builder
     assert "memcpy(&plain[5], text, message_len)" in dm_builder
     assert "validate_user_text(text)" in public_sender
     assert public_sender.index("validate_user_text(text)") < public_sender.index(

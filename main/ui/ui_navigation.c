@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "freertos/FreeRTOS.h"
 
 static portMUX_TYPE s_navigation_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -52,6 +53,28 @@ bool d1l_ui_screen_from_name(const char *name, d1l_ui_screen_t *out_screen)
         return false;
     }
     return true;
+}
+
+bool d1l_ui_screen_available(d1l_ui_screen_t screen)
+{
+    switch (screen) {
+    case D1L_UI_SCREEN_HOME:
+    case D1L_UI_SCREEN_SETTINGS:
+        return true;
+    case D1L_UI_SCREEN_MESSAGES:
+        return d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_PUBLIC_MESSAGES) ||
+               d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_DIRECT_MESSAGES);
+    case D1L_UI_SCREEN_NODES:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_NODES);
+    case D1L_UI_SCREEN_MAP:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
+    case D1L_UI_SCREEN_PACKETS:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_PACKETS);
+    default:
+        return false;
+    }
 }
 
 bool d1l_ui_scroll_surface_from_name(const char *name,
@@ -164,8 +187,46 @@ bool d1l_ui_scroll_surface_from_name(const char *name,
     return true;
 }
 
+bool d1l_ui_scroll_surface_available(const char *surface,
+                                     d1l_ui_screen_t screen)
+{
+    if (!surface || !d1l_ui_screen_available(screen)) {
+        return false;
+    }
+    if (strcmp(surface, "public_messages") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_PUBLIC_MESSAGES);
+    }
+    if (strcmp(surface, "dm_thread") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_DIRECT_MESSAGES);
+    }
+    if (strcmp(surface, "wifi") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL);
+    }
+    if (strcmp(surface, "storage_card") == 0 ||
+        strcmp(surface, "storage_data") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_SD_HISTORY);
+    }
+    if (strcmp(surface, "contact_route") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_USER_TRACE);
+    }
+    if (strcmp(surface, "mesh_roles") == 0 ||
+        strcmp(surface, "mesh_rooms") == 0 ||
+        strcmp(surface, "mesh_repeaters") == 0) {
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN);
+    }
+    return true;
+}
+
 void d1l_ui_navigation_request(d1l_ui_screen_t screen)
 {
+    if (!d1l_ui_screen_available(screen)) {
+        return;
+    }
     portENTER_CRITICAL(&s_navigation_lock);
     s_pending_screen = screen;
     s_switch_pending = true;

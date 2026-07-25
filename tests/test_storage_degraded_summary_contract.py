@@ -62,10 +62,10 @@ def test_more_sd_card_summary_uses_attention_status_and_warning_style_when_degra
     render_body = source.split("bool d1l_ui_more_view(", 1)[1]
     status = render_body.split("const char *storage_status", 1)[1].split(";", 1)[0]
 
-    assert "sd_attention" in status
+    assert "storage_attention" in status
     assert '"Needs attention"' in status
     assert "storage_ready" in status
-    assert status.index("sd_attention") < status.index("storage_ready")
+    assert status.index("storage_attention") < status.index("storage_ready")
 
     readiness = render_body.split("const bool storage_ready", 1)[1].split(";", 1)[0]
     assert "input->storage_data_enabled" in readiness
@@ -74,9 +74,9 @@ def test_more_sd_card_summary_uses_attention_status_and_warning_style_when_degra
     storage_rows = render_body.split(
         "D1L_UI_MORE_CATEGORY_STORAGE_MAPS", 1
     )[1].split("D1L_UI_MORE_CATEGORY_DEVICE", 1)[0]
-    assert "sd_attention ? COLOR_RED" in storage_rows
+    assert "storage_attention ? COLOR_RED" in storage_rows
     assert "storage_ready ? COLOR_GREEN" in storage_rows
-    assert "D1L_UI_SETTINGS_ACTION_STORAGE, sd_attention" in storage_rows
+    assert "D1L_UI_SETTINGS_ACTION_STORAGE, storage_attention" in storage_rows
 
     category_summary = render_body.split(
         "const char *storage_summary", 1
@@ -133,7 +133,7 @@ def test_probe_and_reported_sd_errors_use_friendly_attention_summary_before_read
     more_readiness = more_render.split("const bool storage_ready", 1)[1].split(";", 1)[0]
     assert "input->storage_data_enabled" in more_readiness
     assert "input->storage_sd_data_root_ready" in more_readiness
-    assert 'sd_attention ? "Needs attention"' in more_render
+    assert 'storage_attention ? "Needs attention"' in more_render
 
     for raw_fault in raw_faults:
         assert raw_fault not in home_summary

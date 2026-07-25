@@ -720,7 +720,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "This device never formats cards." in ui
     assert "const bool storage_attention =" in more_ui
     assert "const bool sd_attention =" in more_ui
-    assert 'sd_attention ? "Needs attention"' in more_ui
+    assert 'storage_attention ? "Needs attention"' in more_ui
     assert '"Backup needs attention"' in more_ui
     assert '"Storage needs attention"' in more_ui
     assert 'storage_ready ? "Ready"' in more_ui
@@ -1130,11 +1130,14 @@ def test_docs_keep_sd_backed_store_claims_pending_until_hardware_proof():
     limitations = read("docs/KNOWN_LIMITATIONS.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
 
-    for doc in [readme, user_guide, limitations, checklist]:
+    for doc in [limitations, checklist]:
         assert "retained stores" in doc or "Retained DeskOS stores" in doc or "Optional SD-card" in doc
         assert "pending" in doc.lower() or "fallback" in doc.lower()
 
     assert "SD-backed message/packet/route/export/map-tile stores" in checklist
     assert "- [ ] Optional SD-card data storage implemented" in checklist
-    assert "retained public/dm message history" in user_guide.lower()
-    assert "Retained Public/DM message history" in readme
+    for core_doc in [readme, user_guide]:
+        assert "SD history" in core_doc
+        assert "disabled" in core_doc
+        assert "NVS" in core_doc
+        assert "RP2040 payload" in core_doc

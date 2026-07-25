@@ -22,12 +22,69 @@ DOCK_Y = 428
 DOCK_H = 52
 MIN_TOUCH_TARGET = 44
 D1L_NODE_STORE_CAPACITY = 64
+FULL_FEATURE_RELEASE_PROFILE = "full_feature"
+CORE_RELEASE_PROFILE = "core_1_0"
+RELEASE_PROFILES = (FULL_FEATURE_RELEASE_PROFILE, CORE_RELEASE_PROFILE)
 DOCK_TABS = (
     ("Home", "Home", "home", "LV_SYMBOL_HOME"),
     ("Messages", "Messages", "messages", "LV_SYMBOL_ENVELOPE"),
     ("Nodes", "Nodes", "nodes", "LV_SYMBOL_LIST"),
     ("Map", "Map", "map", "LV_SYMBOL_IMAGE"),
     ("Settings", "Tools", "settings", "LV_SYMBOL_SETTINGS"),
+)
+CORE_DOCK_TABS = (
+    ("Home", "Home", "home", "LV_SYMBOL_HOME"),
+    ("Messages", "Messages", "messages", "LV_SYMBOL_ENVELOPE"),
+    ("Nodes", "Nodes", "nodes", "LV_SYMBOL_LIST"),
+    ("Packets", "Packets", "packets", "LV_SYMBOL_LIST"),
+    ("Settings", "Settings", "settings", "LV_SYMBOL_SETTINGS"),
+)
+CORE_ROOT_VIEWS = ("home", "messages", "nodes", "packets", "settings")
+CORE_EXCLUDED_DESTINATION_FEATURES = (
+    ("map", "map"),
+    ("map_options", "map"),
+    ("map_location", "map"),
+    ("map_cache", "map"),
+    ("wifi_setup_sheet", "wifi_user_control"),
+    ("ble_setup_sheet", "ble"),
+    ("channel_selector_sheet", "multi_channel_management"),
+    ("channel_selector_private_sheet", "multi_channel_management"),
+    ("messages_channel_private", "multi_channel_management"),
+    ("compose_channel_private_sheet", "multi_channel_management"),
+    ("compose_channel_disabled_sheet", "multi_channel_management"),
+    ("channel_history_private_sheet", "multi_channel_management"),
+    ("channel_search_private_sheet", "multi_channel_management"),
+    ("mesh_roles_sheet", "repeater_room_admin"),
+    ("mesh_rooms_page", "repeater_room_admin"),
+    ("mesh_repeaters_page", "repeater_room_admin"),
+    ("admin", "repeater_room_admin"),
+    ("observer_mqtt", "observer_mqtt"),
+    ("signed_update", "signed_sd_update_ota"),
+    ("ota_update", "signed_sd_update_ota"),
+    ("gps_location", "gps_location"),
+    ("mutable_terminal", "mutable_terminal"),
+    ("route_trace_sheet", "user_trace_path"),
+    ("advert_sheet", "advanced_qr_emoji"),
+    ("contact_export_sheet", "advanced_qr_emoji"),
+    ("settings_advanced_expanded", "advanced_qr_emoji"),
+    ("advanced_qr_emoji", "advanced_qr_emoji"),
+)
+CORE_EXCLUDED_DESTINATIONS = tuple(
+    destination
+    for destination, _feature in CORE_EXCLUDED_DESTINATION_FEATURES
+)
+CORE_UNAVAILABLE_CAPABILITIES = (
+    "map",
+    "wifi_user_control",
+    "ble",
+    "multi_channel_management",
+    "repeater_room_admin",
+    "observer_mqtt",
+    "signed_sd_update_ota",
+    "gps_location",
+    "mutable_terminal",
+    "advanced_qr_emoji",
+    "user_trace_path",
 )
 DOCKED_VIEWS = frozenset(
     {
@@ -99,6 +156,16 @@ SAMPLE_LONG_PUBLIC_MESSAGE = (
     "Public test reply received after the desk moved between rooms. The complete message stays readable here, "
     "including the sender's note that the direct route recovered without losing the original message text."
 )
+
+
+def dock_tabs_for_profile(
+    release_profile: str,
+) -> tuple[tuple[str, str, str, str], ...]:
+    if release_profile == CORE_RELEASE_PROFILE:
+        return CORE_DOCK_TABS
+    if release_profile == FULL_FEATURE_RELEASE_PROFILE:
+        return DOCK_TABS
+    raise ValueError(f"unknown release profile: {release_profile}")
 
 
 @dataclass(frozen=True)
@@ -242,7 +309,7 @@ class Snapshot:
     dm_delivery_active: bool = False
     dm_delivery_state: str = "not_applicable"
     muted_unread_dm: int = 0
-    firmware_version: str = "1.0.0-rc1"
+    firmware_version: str = "1.0.0"
     map_cached_tile_count: int = 0
     map_visible_tile_count: int = 9
     map_progress_completed: int = 0
@@ -452,6 +519,67 @@ def sample_snapshot() -> Snapshot:
     )
 
 
+def project_core_snapshot(snap: Snapshot) -> Snapshot:
+    """Apply the immutable Core 1.0 capability projection to fake state."""
+
+    public_channel = next(
+        (channel for channel in snap.channels if channel.channel_id == 1),
+        Channel(1, "Public", enabled=True, active=True, unread=snap.unread_public),
+    )
+
+    def project_node(node: Node) -> Node:
+        return replace(
+            node,
+            advert_lat_e6=None,
+            advert_lon_e6=None,
+            location_advert_timestamp=0,
+        )
+    return replace(
+        snap,
+        wifi_build_enabled=False,
+        wifi_enabled=False,
+        wifi_connecting=False,
+        wifi_connected=False,
+        ble_build_enabled=False,
+        ble_transport_supported=False,
+        ble_companion_enabled=False,
+        storage_sd_present=False,
+        storage_sd_mounted=False,
+        storage_sd_data_root_ready=False,
+        storage_sd_needs_fat32=False,
+        storage_setup_required=False,
+        storage_data_enabled=False,
+        storage_retained_sd_degraded=False,
+        storage_sd_state="internal",
+        storage_sd_filesystem="unavailable",
+        storage_capacity_kb=0,
+        storage_free_kb=0,
+        storage_backend="nvs",
+        message_store_backend="nvs",
+        dm_store_backend="nvs",
+        packet_log_backend="nvs",
+        route_store_backend="nvs",
+        storage_setup_action="forced_nvs",
+        map_tile_backend="unavailable",
+        export_backend="serial",
+        map_tile_cache_ready=False,
+        map_tile_download_supported=False,
+        map_tile_render_supported=False,
+        map_tile_sideload_supported=False,
+        map_location_set=False,
+        map_lat_e7=0,
+        map_lon_e7=0,
+        map_center_source="unset",
+        rooms=tuple(project_node(node) for node in snap.rooms),
+        repeaters=tuple(project_node(node) for node in snap.repeaters),
+        contacts=tuple(project_node(node) for node in snap.contacts),
+        heard=tuple(project_node(node) for node in snap.heard),
+        channels=(replace(public_channel, active=True),),
+        channel_messages=(),
+        active_channel_id=1,
+    )
+
+
 def more_connectivity_ready_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
@@ -489,7 +617,7 @@ def more_long_labels_snapshot() -> Snapshot:
         node_name="DeskOS D1L Lab Companion With A Deliberately Long Device Name",
         mesh_state="ready, listening, synchronized, and retaining a deliberately long state label",
         firmware_version=(
-            "1.0.0-rc1+exact-commit-provenance-with-a-deliberately-long-label"
+            "1.0.0+exact-commit-provenance-with-a-deliberately-long-label"
         ),
     )
 
@@ -1040,8 +1168,15 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
 
 
 class Surface:
-    def __init__(self, view: str):
+    def __init__(
+        self,
+        view: str,
+        release_profile: str = FULL_FEATURE_RELEASE_PROFILE,
+    ):
+        if release_profile not in RELEASE_PROFILES:
+            raise ValueError(f"unknown release profile: {release_profile}")
         self.view = view
+        self.release_profile = release_profile
         self.image = Image.new("RGB", (WIDTH, HEIGHT), BG)
         self.draw = ImageDraw.Draw(self.image)
         self._fonts: dict[tuple[int, bool], ImageFont.ImageFont] = {}
@@ -1296,9 +1431,17 @@ class Surface:
         ]
         dock_target_count = sum(1 for target in self.touch_targets if target["kind"] == "dock_tab")
         dock_expected = self.view in DOCKED_VIEWS
-        dock_invariant_ok = self.dock_rendered == dock_expected and dock_target_count == (5 if dock_expected else 0)
+        expected_dock_target_count = (
+            len(dock_tabs_for_profile(self.release_profile))
+            if dock_expected else 0
+        )
+        dock_invariant_ok = (
+            self.dock_rendered == dock_expected
+            and dock_target_count == expected_dock_target_count
+        )
         return {
             "name": self.view,
+            "release_profile": self.release_profile,
             "screenshot": screenshot.as_posix(),
             "labels": self.labels,
             "touch_targets": self.touch_targets,
@@ -1307,6 +1450,7 @@ class Surface:
             "dock_expected": dock_expected,
             "dock_rendered": self.dock_rendered,
             "dock_target_count": dock_target_count,
+            "dock_expected_target_count": expected_dock_target_count,
             "dock_invariant_ok": dock_invariant_ok,
             "missing_required_labels": missing,
             "truncated_labels": [r for r in self.text_records if r["truncated"]],
@@ -1692,8 +1836,28 @@ def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     s.text("MeshCore DeskOS", (16, 8, 190, 30), 18, TEXT, True)
     s.text(snap.node_name, (16, 30, 150, 49), 12, MUTED)
     s.text(f"--:--  Mesh {snap.mesh_state}", (202, 10, 464, 28), 12, ACCENT, True, "right")
-    wifi_state = "connected" if snap.wifi_connected else ("connecting" if snap.wifi_connecting else "off")
-    s.text(f"Wi-Fi {wifi_state}  BLE off  SD {home_storage_status(snap)}", (202, 31, 464, 49), 11, MUTED, align="right")
+    if s.release_profile == CORE_RELEASE_PROFILE:
+        nvs_state = "retained" if snap.storage_data_enabled else "ready"
+        s.text(
+            f"NVS {nvs_state}  USB recovery",
+            (202, 31, 464, 49),
+            11,
+            MUTED,
+            align="right",
+        )
+    else:
+        wifi_state = (
+            "connected"
+            if snap.wifi_connected
+            else ("connecting" if snap.wifi_connecting else "off")
+        )
+        s.text(
+            f"Wi-Fi {wifi_state}  BLE off  SD {home_storage_status(snap)}",
+            (202, 31, 464, 49),
+            11,
+            MUTED,
+            align="right",
+        )
     s.line(((0, TOP_BAR_H), (WIDTH, TOP_BAR_H)))
 
 
@@ -1740,10 +1904,11 @@ def draw_dock(s: Surface, active: str):
     s.metrics["dock_y"] = DOCK_Y
     s.metrics["dock_height"] = DOCK_H
     s.metrics["docked_content_height"] = DOCK_Y - TOP_BAR_H
-    w = WIDTH // len(DOCK_TABS)
-    for i, (name, label, destination, icon) in enumerate(DOCK_TABS):
+    dock_tabs = dock_tabs_for_profile(s.release_profile)
+    w = WIDTH // len(dock_tabs)
+    for i, (name, label, destination, icon) in enumerate(dock_tabs):
         x0 = i * w
-        x1 = WIDTH if i == len(DOCK_TABS) - 1 else (i + 1) * w
+        x1 = WIDTH if i == len(dock_tabs) - 1 else (i + 1) * w
         active_tab = name == active
         button_box = (x0 + 4, DOCK_Y + 4, x1 - 4, DOCK_Y + 48)
         s.round_rect(
@@ -2217,7 +2382,7 @@ def draw_home_status_icon(
     elif kind == "ble":
         s.draw.line(((x, y - 8), (x, y + 8), (x + 6, y + 3), (x - 5, y - 2),
                      (x + 6, y - 7), (x, y - 12)), fill=color, width=2)
-    elif kind == "sd":
+    elif kind in ("sd", "storage"):
         s.draw.polygon(((x - 7, y - 8), (x + 3, y - 8), (x + 7, y - 4),
                         (x + 7, y + 8), (x - 7, y + 8)), outline=color)
         s.draw.line(((x - 3, y - 7), (x - 3, y - 3)), fill=color, width=2)
@@ -2247,7 +2412,7 @@ def draw_home_body(s: Surface, snap: Snapshot):
         if snap.muted_unread_dm else
         "All caught up"
     )
-    tiles = (
+    full_feature_tiles = (
         (
             (12, 16, 234, 156),
             "chat",
@@ -2289,6 +2454,53 @@ def draw_home_body(s: Surface, snap: Snapshot):
             "settings",
         ),
     )
+    core_tiles = (
+        (
+            (12, 16, 234, 156),
+            "chat",
+            "Messages",
+            "Public and direct conversations",
+            messages_status,
+            AMBER if audible_unread else (MUTED if snap.muted_unread_dm else ACCENT),
+            "open_messages_root",
+            "messages",
+        ),
+        (
+            (246, 16, 468, 156),
+            "signal",
+            "Nodes",
+            "Contacts, nearby nodes, and routing",
+            f"{len(snap.contacts)} contacts | {len(snap.heard)} nearby",
+            GREEN if snap.contacts else MUTED,
+            "open_nodes",
+            "nodes",
+        ),
+        (
+            (12, 164, 234, 304),
+            "signal",
+            "Packets",
+            "Read-only packet log, search, and signal details",
+            f"{len(snap.packets)} packet{'s' if len(snap.packets) != 1 else ''} captured",
+            VIOLET if snap.packets else MUTED,
+            "open_packets",
+            "packets",
+        ),
+        (
+            (246, 164, 468, 304),
+            "settings",
+            "Settings",
+            "Device settings, utilities, and support",
+            f"{len(snap.packets)} packet{'s' if len(snap.packets) != 1 else ''} captured",
+            VIOLET if snap.packets else MUTED,
+            "open_settings",
+            "settings",
+        ),
+    )
+    tiles = (
+        core_tiles
+        if s.release_profile == CORE_RELEASE_PROFILE
+        else full_feature_tiles
+    )
     for box, icon, label, detail, status, color, action, destination in tiles:
         draw_destination_card(
             s,
@@ -2325,21 +2537,36 @@ def draw_home_body(s: Surface, snap: Snapshot):
     attention_color = RED if attention_required else (AMBER if attention_notice else GREEN)
     status_box = (12, 312, 468, 400)
     s.round_rect(status_box, (13, 23, 18), (31, 55, 46), 8)
-    status_items = (
+    full_feature_status_items = (
         ("Mesh", mesh_status, mesh_color, "mesh", "LV_SYMBOL_LOOP", "open_radio_settings", "radio_settings_sheet"),
         ("Wi-Fi", wifi_status, wifi_color, "wifi", "LV_SYMBOL_WIFI", "open_wifi_settings", "wifi_setup_sheet"),
         ("BLE", ble_status, ble_color, "ble", "LV_SYMBOL_BLUETOOTH", "open_ble_settings", "ble_setup_sheet"),
         ("SD", storage_status, storage_color, "sd", "LV_SYMBOL_SD_CARD", "open_storage_setup", "storage_setup_sheet"),
         ("Attention", attention_status, attention_color, "attention", "LV_SYMBOL_WARNING", "open_diagnostics", "diagnostics_sheet"),
     )
+    core_status_items = (
+        ("Mesh", mesh_status, mesh_color, "mesh", "LV_SYMBOL_LOOP", "open_radio_settings", "radio_settings_sheet"),
+        ("Storage", "Internal", MUTED, "storage", "LV_SYMBOL_SAVE", "open_storage_setup", "storage_setup_sheet"),
+        ("Attention", attention_status, attention_color, "attention", "LV_SYMBOL_WARNING", "open_diagnostics", "diagnostics_sheet"),
+    )
+    status_items = (
+        core_status_items
+        if s.release_profile == CORE_RELEASE_PROFILE
+        else full_feature_status_items
+    )
     semantic_labels: list[str] = []
     for index, (label, value, color, kind, icon, action, destination) in enumerate(status_items):
-        x0 = 14 + index * 91
-        item_box = (x0, 314, x0 + 88, 398)
+        if s.release_profile == CORE_RELEASE_PROFILE:
+            x0 = 14 + index * 146
+            item_box = (x0, 314, x0 + 144, 398)
+        else:
+            x0 = 14 + index * 91
+            item_box = (x0, 314, x0 + 88, 398)
         s.round_rect(item_box, (17, 29, 23), (17, 29, 23), 7)
-        draw_home_status_icon(s, kind, (x0 + 44, 327), color)
-        s.text(label, (x0 + 4, 342, x0 + 84, 360), 10, MUTED, True, "center")
-        s.text(value, (x0 + 4, 365, x0 + 84, 388), 10, color, True, "center")
+        x1 = item_box[2]
+        draw_home_status_icon(s, kind, ((x0 + x1) // 2, 327), color)
+        s.text(label, (x0 + 4, 342, x1 - 4, 360), 10, MUTED, True, "center")
+        s.text(value, (x0 + 4, 365, x1 - 4, 388), 10, color, True, "center")
         semantic_label = f"{label}: {value}"
         semantic_labels.append(semantic_label)
         s.touch_target(
@@ -2525,13 +2752,15 @@ def render_messages_public(s: Surface, snap: Snapshot):
     selected_messages = messages_for_channel(snap)
     draw_top_bar(s, snap)
     draw_button(s, (18, 64, 90, 108), "Back", MUTED, action="open_messages_root", destination="messages")
-    s.text(selected_channel.name, (104, 66, 340, 92), 20, ACCENT, True)
-    draw_button(
-        s, (350, 64, 442, 108), "Channels", BLUE,
-        action="open_channel_selector",
-        destination="channel_selector_sheet" if selected_channel.channel_id == 1
-        else "channel_selector_private_sheet",
-    )
+    title_right = 442 if s.release_profile == CORE_RELEASE_PROFILE else 340
+    s.text(selected_channel.name, (104, 66, title_right, 92), 20, ACCENT, True)
+    if s.release_profile != CORE_RELEASE_PROFILE:
+        draw_button(
+            s, (350, 64, 442, 108), "Channels", BLUE,
+            action="open_channel_selector",
+            destination="channel_selector_sheet" if selected_channel.channel_id == 1
+            else "channel_selector_private_sheet",
+        )
     s.text(
         f"{len(selected_messages)} messages | {selected_channel.unread} unread",
         (104, 92, 344, 112),
@@ -2636,7 +2865,9 @@ def render_messages_public(s: Surface, snap: Snapshot):
             "active_channel_name": selected_channel.name,
             "active_channel_enabled": selected_channel.enabled,
             "active_channel_source_count": len(selected_messages),
-            "channel_selector_available": True,
+            "channel_selector_available": (
+                s.release_profile != CORE_RELEASE_PROFILE
+            ),
             "public_source_count": len(snap.public_messages),
             "public_rendered_count": len(visible),
             "dm_source_count": len(snap.dm_messages),
@@ -3764,7 +3995,17 @@ def render_packets(s: Surface, snap: Snapshot):
     s.text("find raw/test", (28, 200, 464, 218), 11, AMBER)
     s.text("Packet Feed", (28, 224, 180, 244), 14, MUTED, True)
     packet_query_limit = min(len(snap.packets), 100)
-    s.text(f"page 1-{packet_query_limit}/{len(snap.packets)} SD", (220, 224, 452, 244), 11, MUTED, True, "right")
+    page_backend = (
+        "NVS" if s.release_profile == CORE_RELEASE_PROFILE else "SD"
+    )
+    s.text(
+        f"page 1-{packet_query_limit}/{len(snap.packets)} {page_backend}",
+        (220, 224, 452, 244),
+        11,
+        MUTED,
+        True,
+        "right",
+    )
     y = 236
 
     def packet_color(packet: Packet) -> tuple[int, int, int]:
@@ -3795,19 +4036,37 @@ def render_packets(s: Surface, snap: Snapshot):
     if len(snap.packets) > packet_query_limit:
         draw_button(s, (16, y + 4, 146, y + 44), "Load Older", BLUE, action="load_older_packets")
         y += 50
-    draw_button(s, (16, 420 - 44, 146, 420 - 8), "Mesh Roles", GREEN, action="open_mesh_roles", destination="mesh_roles_sheet")
-    s.text("Routes", (166, 382, 260, 402), 14, MUTED, True)
+    if s.release_profile != CORE_RELEASE_PROFILE:
+        draw_button(
+            s,
+            (16, 420 - 44, 146, 420 - 8),
+            "Mesh Roles",
+            GREEN,
+            action="open_mesh_roles",
+            destination="mesh_roles_sheet",
+        )
+        routes_label_box = (166, 382, 260, 402)
+        route_row_box = (236, 374, 464, 410)
+    else:
+        routes_label_box = (16, 382, 110, 402)
+        route_row_box = (116, 374, 464, 410)
+    s.text("Routes", routes_label_box, 14, MUTED, True)
     for route in snap.routes[:1]:
         draw_row(
             s,
-            (236, 374, 464, 410),
+            route_row_box,
             f"{route.kind} {route.direction}",
             f"{route.meta}  {route.note}",
             target_label=f"Route row {route.kind} {route.direction}",
             action="open_route_detail",
             destination="route_detail_sheet",
         )
-    draw_dock(s, "Settings")
+    draw_dock(
+        s,
+        "Packets"
+        if s.release_profile == CORE_RELEASE_PROFILE
+        else "Settings",
+    )
     s.metrics.update(
         {
             "packet_source_count": len(snap.packets),
@@ -3816,11 +4075,18 @@ def render_packets(s: Surface, snap: Snapshot):
             "packet_sd_history_page": True,
             "packet_rendered_count": len(visible_packets),
             "packet_load_older_available": len(snap.packets) > packet_query_limit,
+            "packet_backend": page_backend.lower(),
+            "mesh_roles_available": (
+                s.release_profile != CORE_RELEASE_PROFILE
+            ),
         }
     )
 
 
-def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
+def more_category_specs(
+    snap: Snapshot,
+    release_profile: str = FULL_FEATURE_RELEASE_PROFILE,
+) -> tuple[dict[str, object], ...]:
     """Return the stable More hierarchy represented by the firmware accordion."""
 
     packet_status = f"{len(snap.packets)} saved"
@@ -3851,6 +4117,77 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
         if snap.radio_apply_pending
         else ("Ready" if snap.radio_ready or snap.radio_applied else "Needs setup")
     )
+    if release_profile == CORE_RELEASE_PROFILE:
+        return (
+            {
+                "key": "tools",
+                "title": "Tools",
+                "summary": "Packets and diagnostics",
+                "color": ACCENT,
+                "warning": False,
+                "action": "toggle_more_tools",
+                "leaves": (
+                    ("Packets", packet_status, BLUE, "open_packets", "packets", False),
+                    ("Diagnostics", "Health & reports", VIOLET, "open_diagnostics", "diagnostics_sheet", False),
+                ),
+            },
+            {
+                "key": "connections",
+                "title": "Connections",
+                "summary": "Radio profile",
+                "color": GREEN,
+                "warning": False,
+                "action": "toggle_more_connections",
+                "leaves": (
+                    ("Radio", radio_status, GREEN if snap.radio_ready else TEXT, "open_radio_settings", "radio_settings_sheet", False),
+                ),
+            },
+            {
+                "key": "storage_maps",
+                "title": "Storage",
+                "summary": "Retained internal storage",
+                "color": AMBER,
+                "warning": snap.storage_retained_backup_degraded,
+                "action": "toggle_more_storage_maps",
+                "leaves": (
+                    (
+                        "Storage",
+                        "Internal NVS issue"
+                        if snap.storage_retained_backup_degraded
+                        else "Internal NVS",
+                        RED if snap.storage_retained_backup_degraded else TEXT,
+                        "open_storage_setup",
+                        "storage_setup_sheet",
+                        snap.storage_retained_backup_degraded,
+                    ),
+                ),
+            },
+            {
+                "key": "device",
+                "title": "Device",
+                "summary": "Display and identity",
+                "color": BLUE,
+                "warning": False,
+                "action": "toggle_more_device",
+                "leaves": (
+                    ("Display", "Brightness & theme", GREEN, "open_display_settings", "display_settings_sheet", False),
+                    ("Identity", "Ready" if snap.identity_ready else "Not set", TEXT, None, None, False),
+                ),
+            },
+            {
+                "key": "support",
+                "title": "Support",
+                "summary": "About this device",
+                "color": VIOLET,
+                "warning": False,
+                "action": "toggle_more_support",
+                "leaves": (
+                    ("About", f"Version {snap.firmware_version}", TEXT, None, None, False),
+                ),
+            },
+        )
+    if release_profile != FULL_FEATURE_RELEASE_PROFILE:
+        raise ValueError(f"unknown release profile: {release_profile}")
     return (
         {
             "key": "tools",
@@ -3954,7 +4291,9 @@ def draw_more_header(s: Surface, snap: Snapshot):
 def render_settings(s: Surface, snap: Snapshot):
     draw_more_header(s, snap)
 
-    for index, category in enumerate(more_category_specs(snap)):
+    for index, category in enumerate(
+        more_category_specs(snap, s.release_profile)
+    ):
         y0 = 110 + index * 52
         draw_more_category(
             s,
@@ -3972,7 +4311,7 @@ def render_settings_expanded(s: Surface, snap: Snapshot, selected_key: str):
     """Render a deterministic scroll anchor for one expanded More category."""
 
     draw_more_header(s, snap)
-    categories = more_category_specs(snap)
+    categories = more_category_specs(snap, s.release_profile)
     selected_index = next(index for index, category in enumerate(categories) if category["key"] == selected_key)
     selected = categories[selected_index]
     draw_more_category(
@@ -4633,7 +4972,7 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
         back_action="close_contact_options",
         back_destination="contact_detail_sheet",
     )
-    rows = (
+    full_feature_rows = (
         ((16, 120, 464, 168), "Route", "Trace path", BLUE, "open_route_trace", "route_trace_sheet", False),
         ((16, 172, 464, 220), "Rename", "Change alias", ACCENT, "open_contact_edit", "contact_edit_sheet", False),
         ((16, 224, 464, 272), "Favorite", "Off", AMBER, "toggle_favorite", None, False),
@@ -4649,6 +4988,25 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
             True,
         ),
     )
+    core_rows = (
+        ((16, 120, 464, 180), "Rename", "Change alias", ACCENT, "open_contact_edit", "contact_edit_sheet", False),
+        ((16, 188, 464, 248), "Favorite", "Off", AMBER, "toggle_favorite", None, False),
+        ((16, 256, 464, 316), "Mute", "Off", VIOLET, "toggle_mute", None, False),
+        (
+            (16, 324, 464, 392),
+            "Forget contact",
+            "Requires confirmation",
+            RED,
+            "open_forget_contact_confirm",
+            "forget_contact_confirm_page",
+            True,
+        ),
+    )
+    rows = (
+        core_rows
+        if s.release_profile == CORE_RELEASE_PROFILE
+        else full_feature_rows
+    )
     for box, title, status, color, action, destination, warning in rows:
         draw_more_leaf(
             s,
@@ -4660,7 +5018,12 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
             destination=destination,
             warning=warning,
         )
-    s.metrics.update({"contact_hierarchy_level": "options", "contact_option_count": 6})
+    s.metrics.update(
+        {
+            "contact_hierarchy_level": "options",
+            "contact_option_count": len(rows),
+        }
+    )
 
 
 def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
@@ -4691,13 +5054,19 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
             action="explain_node_dm",
             destination=None,
         )
+    core_profile = s.release_profile == CORE_RELEASE_PROFILE
+    return_destination = (
+        "nodes"
+        if core_profile or node.advert_lat_e6 is None
+        else "map"
+    )
     draw_button(
         s,
         (344, 72, 420, 116),
         "Close",
         MUTED,
         action="close_node_detail",
-        destination="map" if node.advert_lat_e6 is not None else "nodes",
+        destination=return_destination,
     )
     s.round_rect((36, 150, 110, 176), (22, 39, 49), role_badge_color(node.role), 8)
     s.text(role_badge_text(node.role), (42, 152, 104, 174), 11, role_badge_color(node.role), True, "center")
@@ -4711,25 +5080,56 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
     s.text(node.signal, (124, 256, 262, 276), 14, GREEN, True)
     s.text("Path", (272, 256, 328, 276), 13, MUTED, True)
     s.text(node.meta, (328, 256, 428, 276), 12, MUTED)
-    location = (
-        f"{format_e6(node.advert_lat_e6)}, {format_e6(node.advert_lon_e6)}"
-        if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
-        else "not provided"
-    )
-    s.text("Advert location", (36, 314, 158, 334), 13, BLUE, True)
-    s.text(location, (160, 314, 428, 334), 13, TEXT)
-    s.text("Last heard", (36, 338, 142, 358), 13, MUTED, True)
-    s.text("12s ago  heard 24", (144, 338, 428, 358), 14, TEXT)
+    location = None
+    if not core_profile:
+        location = (
+            f"{format_e6(node.advert_lat_e6)}, {format_e6(node.advert_lon_e6)}"
+            if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
+            else "not provided"
+        )
+        s.text("Advert location", (36, 314, 158, 334), 13, BLUE, True)
+        s.text(location, (160, 314, 428, 334), 13, TEXT)
+    last_heard_y = 314 if core_profile else 338
+    status_y = 346 if core_profile else 370
+    reason_y = 368 if core_profile else 392
+    s.text("Last heard", (36, last_heard_y, 142, last_heard_y + 20), 13, MUTED, True)
+    s.text("12s ago  heard 24", (144, last_heard_y, 428, last_heard_y + 20), 14, TEXT)
     status = "DM ready" if dm_available else "DM unavailable"
-    s.text(f"{status} [{dm_reason}]", (36, 370, 428, 390), 12, GREEN if dm_available else AMBER, True)
-    s.text(DM_IDENTITY_REASON_TEXT[dm_reason], (36, 392, 428, 424), 11, MUTED)
+    s.text(
+        f"{status} [{dm_reason}]",
+        (36, status_y, 428, status_y + 20),
+        12,
+        GREEN if dm_available else AMBER,
+        True,
+    )
+    s.text(
+        DM_IDENTITY_REASON_TEXT[dm_reason],
+        (36, reason_y, 428, reason_y + 32),
+        11,
+        MUTED,
+    )
     if management_gated:
-        s.text("Manage locked", (36, 426, 428, 446), 11, MUTED, True)
-        s.text("Authenticated admin session required.", (36, 448, 428, 468), 10, MUTED)
-    return_destination = "map" if node.advert_lat_e6 is not None else "nodes"
+        draw_button(
+            s,
+            (24, 412, 128, 452),
+            "Admin",
+            VIOLET,
+            action="open_server_admin",
+            destination=None,
+        )
+        s.text(
+            "Verified server; local authenticated login required.",
+            (136, 420, 412, 460),
+            10,
+            MUTED,
+        )
     s.metrics.update(
         {
-            "node_detail_location_provenance": "advert",
+            "node_detail_location_provenance": (
+                "unavailable_in_release_profile"
+                if core_profile
+                else "advert"
+            ),
             "node_detail_advert_location": location,
             "node_detail_return_destination": return_destination,
             "node_detail_return_reuses_map_view": return_destination == "map",
@@ -4740,7 +5140,7 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
             "node_detail_dm_rf_tx": False,
             "node_detail_management_gated": management_gated,
             "node_detail_frame": [16, 60, 464, 476],
-            "node_detail_content_bottom": 468 if management_gated else 424,
+            "node_detail_content_bottom": 460 if management_gated else 424,
             "node_detail_content_clipped": False,
         }
     )
@@ -6237,7 +6637,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Support",
         "About this device",
         "About",
-        "Version 1.0.0-rc1",
+        "Version 1.0.0",
     ),
     "settings_advanced_expanded": (
         "Tools",
@@ -6412,8 +6812,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Why no DM?",
         "DM unavailable [role_not_dm_capable]",
         "This verified role does not support direct chat.",
-        "Manage locked",
-        "Authenticated admin session required.",
+        "Admin",
+        "Verified server; local authenticated login required.",
         "Close",
     ),
     "contact_edit_sheet": ("Rename Contact", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"),
@@ -6511,6 +6911,83 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Use Defaults",
     ),
 }
+
+CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
+    "home": (
+        "DeskOS",
+        "Messages",
+        "Nodes",
+        "Packets",
+        "Settings",
+        "Mesh",
+        "Storage",
+        "Internal",
+        "Attention",
+    ),
+    "messages": (
+        "Messages",
+        "Choose a conversation type",
+        "Public",
+        "Default channel conversation",
+        "Direct messages",
+        "Private contact conversations",
+    ),
+    "messages_public": ("Public", "Back", "Mark read", "History", "Compose"),
+    "packets": (
+        "Packets",
+        "live tail  rssi -41  snr 30  avg -46",
+        "All",
+        "RX",
+        "TX",
+        "Text",
+        "Search",
+        "Pause",
+        "Packet Feed",
+        "Routes",
+    ),
+    "settings": (
+        "Tools",
+        "Settings and utilities",
+        "Packets and diagnostics",
+        "Connections",
+        "Radio profile",
+        "Storage",
+        "Retained internal storage",
+        "Device",
+        "Support",
+    ),
+    "contact_options_page": (
+        "Contact Options",
+        "Back",
+        "Rename",
+        "Favorite",
+        "Mute",
+        "Forget contact",
+        "Requires confirmation",
+    ),
+    "node_detail_sheet": (
+        "Node Detail",
+        "Role",
+        "Fingerprint",
+        "Public key",
+        "Signal",
+        "Path",
+        "Last heard",
+        "Close",
+    ),
+}
+
+
+def required_labels_for_profile(
+    view: str,
+    release_profile: str,
+) -> tuple[str, ...]:
+    if release_profile == CORE_RELEASE_PROFILE:
+        return CORE_REQUIRED_LABELS.get(view, REQUIRED_LABELS.get(view, ()))
+    if release_profile == FULL_FEATURE_RELEASE_PROFILE:
+        return REQUIRED_LABELS.get(view, ())
+    raise ValueError(f"unknown release profile: {release_profile}")
+
 
 EXPECTED_INCOMING_EVENT_FLOWS: tuple[dict[str, object], ...] = (
     {
@@ -6989,6 +7466,53 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     },
 )
 
+CORE_EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
+    {
+        "name": "core_home_navigation",
+        "steps": (
+            {"view": "home", "action": "open_messages_root", "destination": "messages"},
+            {"view": "home", "action": "open_nodes", "destination": "nodes"},
+            {"view": "home", "action": "open_packets", "destination": "packets"},
+            {"view": "home", "action": "open_settings", "destination": "settings"},
+            {"view": "home", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
+            {"view": "home", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
+            {"view": "home", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+        ),
+    },
+    {
+        "name": "core_messages_navigation",
+        "steps": (
+            {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
+            {"view": "messages", "action": "open_messages_dm", "destination": "messages_dm"},
+        ),
+    },
+    {
+        "name": "core_nodes_navigation",
+        "steps": (
+            {"view": "nodes", "action": "open_contact_detail", "destination": "contact_detail_sheet"},
+            {"view": "nodes", "action": "open_node_detail", "destination": "node_detail_sheet"},
+            {"view": "nodes", "action": "open_dm_compose", "destination": "compose_dm_sheet"},
+        ),
+    },
+    {
+        "name": "core_packets_navigation",
+        "steps": (
+            {"view": "packets", "action": "open_packet_search", "destination": "packet_search_sheet"},
+            {"view": "packets", "action": "open_packet_detail", "destination": "packet_detail_sheet"},
+        ),
+    },
+    {
+        "name": "core_settings_categories",
+        "steps": (
+            {"view": "settings", "action": "toggle_more_tools"},
+            {"view": "settings", "action": "toggle_more_connections"},
+            {"view": "settings", "action": "toggle_more_storage_maps"},
+            {"view": "settings", "action": "toggle_more_device"},
+            {"view": "settings", "action": "toggle_more_support"},
+        ),
+    },
+)
+
 
 # This cycle intentionally contains only RF-silent, non-destructive actions.  It
 # returns to Home so it can be repeated for a bounded navigation/lifecycle soak.
@@ -7051,6 +7575,45 @@ LIFECYCLE_TRANSITION_CYCLE: tuple[tuple[str, str], ...] = (
     ("diagnostics_sheet", "close_diagnostics"),
 )
 
+CORE_LIFECYCLE_TRANSITION_CYCLE: tuple[tuple[str, str], ...] = (
+    ("home", "open_messages_root"),
+    ("messages", "open_messages_public"),
+    ("messages_public", "open_public_compose"),
+    ("compose_sheet", "edit_public_message"),
+    ("compose_sheet", "clear_public_message"),
+    ("compose_sheet", "close_compose"),
+    ("messages_public", "open_messages_root"),
+    ("messages", "open_messages_dm"),
+    ("messages_dm", "open_dm_thread"),
+    ("dm_thread_sheet", "toggle_dm_details"),
+    ("dm_thread_details_sheet", "toggle_dm_details"),
+    ("dm_thread_sheet", "open_dm_search"),
+    ("dm_search_sheet", "edit_dm_search"),
+    ("dm_search_sheet", "close_dm_search"),
+    ("dm_thread_sheet", "open_dm_reply"),
+    ("compose_dm_sheet", "edit_dm_message"),
+    ("compose_dm_sheet", "clear_dm_message"),
+    ("compose_dm_sheet", "close_compose"),
+    ("messages_dm", "open_nodes"),
+    ("nodes", "open_node_detail"),
+    ("node_detail_sheet", "close_node_detail"),
+    ("nodes", "open_contact_detail"),
+    ("contact_detail_sheet", "close_contact_detail"),
+    ("nodes", "open_packets"),
+    ("packets", "open_packet_detail"),
+    ("packet_detail_sheet", "close_packet_detail"),
+    ("packets", "open_packet_search"),
+    ("packet_search_sheet", "edit_packet_search"),
+    ("packet_search_sheet", "close_packet_search"),
+    ("packets", "open_settings"),
+    ("settings", "open_home"),
+    ("home", "open_radio_settings"),
+    ("radio_settings_sheet", "radio_freq_up"),
+    ("radio_settings_sheet", "close_radio_settings"),
+    ("home", "open_diagnostics"),
+    ("diagnostics_sheet", "close_diagnostics"),
+)
+
 
 @dataclass(frozen=True)
 class LifecycleState:
@@ -7059,6 +7622,7 @@ class LifecycleState:
     generation: int = 0
     focused_action: str | None = None
     modal_stack: tuple[str, ...] = ()
+    release_profile: str = FULL_FEATURE_RELEASE_PROFILE
 
 
 @dataclass(frozen=True)
@@ -7099,7 +7663,10 @@ def lifecycle_binding(generation: int, view: str, target: dict[str, object]) -> 
     )
 
 
-def lifecycle_active_tab(view: str) -> str | None:
+def lifecycle_active_tab(
+    view: str,
+    release_profile: str = FULL_FEATURE_RELEASE_PROFILE,
+) -> str | None:
     if view == "home":
         return "home"
     if view not in DOCKED_VIEWS:
@@ -7110,7 +7677,13 @@ def lifecycle_active_tab(view: str) -> str | None:
         return "nodes"
     if view == "map":
         return "map"
-    if view == "packets" or view.startswith("settings"):
+    if view == "packets":
+        return (
+            "packets"
+            if release_profile == CORE_RELEASE_PROFILE
+            else "settings"
+        )
+    if view.startswith("settings"):
         return "settings"
     return None
 
@@ -7132,6 +7705,15 @@ def dispatch_lifecycle_binding(state: LifecycleState, binding: LifecycleBinding)
     destination = binding.destination
     if destination == "active_tab":
         destination = state.active_tab
+    if (
+        state.release_profile == CORE_RELEASE_PROFILE
+        and destination in CORE_EXCLUDED_DESTINATIONS
+    ):
+        return LifecycleDispatch(
+            False,
+            "unavailable_in_release_profile",
+            state,
+        )
     if destination is not None and destination not in RENDERERS:
         return LifecycleDispatch(False, "unknown_destination", state)
 
@@ -7145,7 +7727,10 @@ def dispatch_lifecycle_binding(state: LifecycleState, binding: LifecycleBinding)
             replace(state, focused_action=focused_action),
         )
 
-    next_active_tab = lifecycle_active_tab(destination) or state.active_tab
+    next_active_tab = (
+        lifecycle_active_tab(destination, state.release_profile)
+        or state.active_tab
+    )
     next_stack = state.modal_stack
     if destination != state.current_view:
         destination_is_root = destination == "home" or destination in DOCKED_VIEWS
@@ -7165,6 +7750,7 @@ def dispatch_lifecycle_binding(state: LifecycleState, binding: LifecycleBinding)
             generation=state.generation,
             focused_action=focused_action if destination == state.current_view else None,
             modal_stack=next_stack,
+            release_profile=state.release_profile,
         ),
     )
 
@@ -7239,7 +7825,10 @@ def text_record_overlaps(records: list[dict[str, object]]) -> list[dict[str, obj
     return overlaps
 
 
-def build_flow_report(report_views: list[dict[str, object]]) -> dict[str, object]:
+def build_flow_report(
+    report_views: list[dict[str, object]],
+    release_profile: str = FULL_FEATURE_RELEASE_PROFILE,
+) -> dict[str, object]:
     views_by_name = {str(view["name"]): view for view in report_views}
     flows = []
     missing_steps: list[dict[str, object]] = []
@@ -7271,7 +7860,12 @@ def build_flow_report(report_views: list[dict[str, object]]) -> dict[str, object
             if target["formats_sd"]:
                 format_actions.append(action_summary)
 
-    for flow in EXPECTED_FLOWS:
+    expected_flows = (
+        CORE_EXPECTED_FLOWS
+        if release_profile == CORE_RELEASE_PROFILE
+        else EXPECTED_FLOWS
+    )
+    for flow in expected_flows:
         flow_views = {str(step["view"]) for step in flow["steps"]}
         if not flow_views <= set(views_by_name):
             skipped_flows.append(str(flow["name"]))
@@ -7295,6 +7889,7 @@ def build_flow_report(report_views: list[dict[str, object]]) -> dict[str, object
 
     return {
         "schema": 1,
+        "release_profile": release_profile,
         "min_touch_target": MIN_TOUCH_TARGET,
         "flows": flows,
         "skipped_flows": skipped_flows,
@@ -7410,9 +8005,15 @@ def render_lifecycle_generation(
     snap: Snapshot,
 ) -> tuple[LifecycleState, Surface, dict[str, object], list[LifecycleBinding], list[dict[str, object]]]:
     rendered_state = replace(state, generation=state.generation + 1)
-    surface = Surface(rendered_state.current_view)
+    surface = Surface(
+        rendered_state.current_view,
+        release_profile=rendered_state.release_profile,
+    )
     RENDERERS[rendered_state.current_view](surface, snap)
-    required_labels = REQUIRED_LABELS.get(rendered_state.current_view, ())
+    required_labels = required_labels_for_profile(
+        rendered_state.current_view,
+        rendered_state.release_profile,
+    )
     summary = surface.summary(
         Path("lifecycle") / f"{rendered_state.current_view}.png",
         required_labels,
@@ -7518,14 +8119,20 @@ def render_lifecycle_generation(
     return rendered_state, surface, summary, bindings, failures
 
 
-def lifecycle_incoming_event_probe(snap: Snapshot) -> tuple[dict[str, object], list[dict[str, object]]]:
+def lifecycle_incoming_event_probe(
+    snap: Snapshot,
+    release_profile: str = FULL_FEATURE_RELEASE_PROFILE,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     report_views: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
     for expected in EXPECTED_INCOMING_EVENT_FLOWS:
         view = str(expected["view"])
-        surface = Surface(view)
+        surface = Surface(view, release_profile=release_profile)
         RENDERERS[view](surface, snap)
-        summary = surface.summary(Path("lifecycle") / f"{view}.png", REQUIRED_LABELS.get(view, ()))
+        summary = surface.summary(
+            Path("lifecycle") / f"{view}.png",
+            required_labels_for_profile(view, release_profile),
+        )
         report_views.append(summary)
         if summary["overflow"] or summary["touch_target_issues"] or not summary["dock_invariant_ok"]:
             failures.append(
@@ -7553,16 +8160,26 @@ def run_lifecycle_stress(
     snap: Snapshot | None = None,
     *,
     transitions: int = 1000,
-    action_cycle: tuple[tuple[str, str], ...] = LIFECYCLE_TRANSITION_CYCLE,
+    action_cycle: tuple[tuple[str, str], ...] | None = None,
     scenario: str = "default",
+    release_profile: str = FULL_FEATURE_RELEASE_PROFILE,
 ) -> dict[str, object]:
     """Exercise rendered UI bindings through a bounded, stateful lifecycle run."""
 
     if transitions < 1:
         raise ValueError("transitions must be at least 1")
-    if not action_cycle:
+    if release_profile not in RELEASE_PROFILES:
+        raise ValueError(f"unknown release profile: {release_profile}")
+    selected_action_cycle = (
+        CORE_LIFECYCLE_TRANSITION_CYCLE
+        if release_profile == CORE_RELEASE_PROFILE
+        else LIFECYCLE_TRANSITION_CYCLE
+    ) if action_cycle is None else action_cycle
+    if not selected_action_cycle:
         raise ValueError("action_cycle must not be empty")
     snapshot = snap or sample_snapshot()
+    if release_profile == CORE_RELEASE_PROFILE:
+        snapshot = project_core_snapshot(snapshot)
     failure_limit = 32
     failures: list[dict[str, object]] = []
 
@@ -7571,10 +8188,13 @@ def run_lifecycle_stress(
         if remaining > 0:
             failures.extend(items[:remaining])
 
-    incoming_event_report, incoming_failures = lifecycle_incoming_event_probe(snapshot)
+    incoming_event_report, incoming_failures = lifecycle_incoming_event_probe(
+        snapshot,
+        release_profile,
+    )
     add_failures(incoming_failures)
 
-    state = LifecycleState()
+    state = LifecycleState(release_profile=release_profile)
     stale_binding: LifecycleBinding | None = None
     completed = 0
     render_count = 0
@@ -7593,8 +8213,8 @@ def run_lifecycle_stress(
     render_fingerprint_checks = 0
 
     while completed < transitions and not failures:
-        cycle_index = completed % len(action_cycle)
-        expected_view, action = action_cycle[cycle_index]
+        cycle_index = completed % len(selected_action_cycle)
+        expected_view, action = selected_action_cycle[cycle_index]
         if state.current_view != expected_view:
             add_failures(
                 [
@@ -7762,7 +8382,9 @@ def run_lifecycle_stress(
                     ]
                 )
 
-            expected_final_view = action_cycle[completed % len(action_cycle)][0]
+            expected_final_view = selected_action_cycle[
+                completed % len(selected_action_cycle)
+            ][0]
             if state.current_view != expected_final_view:
                 add_failures(
                     [
@@ -7805,13 +8427,20 @@ def run_lifecycle_stress(
         "artifact_kind": "host_simulator_ui_runtime_safety_partial",
         "source": "tools/ui_simulator.py",
         "scenario": scenario,
+        "release_profile": release_profile,
+        "mode": "simulation",
+        "hardware_required": True,
+        "closure_eligible": False,
+        "physical_observed": False,
+        "public_rf_tx": False,
+        "formats_sd": False,
         "physical_acceptance_claimed": False,
         "rf_acceptance_claimed": False,
         "requested_transitions": transitions,
         "completed_transitions": completed,
-        "cycle_length": len(action_cycle),
-        "cycles_completed": completed // len(action_cycle),
-        "cycle_position": completed % len(action_cycle),
+        "cycle_length": len(selected_action_cycle),
+        "cycles_completed": completed // len(selected_action_cycle),
+        "cycle_position": completed % len(selected_action_cycle),
         "render_count": render_count,
         "render_fingerprint_checks": render_fingerprint_checks,
         "render_fingerprints": dict(sorted(render_fingerprints.items())),
@@ -7843,17 +8472,413 @@ def run_lifecycle_stress(
     }
 
 
+def core_view_available(view: str) -> bool:
+    """Return the bounded screenshot-entry surface for Core simulation."""
+
+    return view in CORE_ROOT_VIEWS
+
+
+def core_excluded_destination_rejections() -> list[dict[str, object]]:
+    return [
+        {
+            "destination": destination,
+            "feature": feature,
+            "rejected": not core_view_available(destination),
+            "reason": "unavailable_in_release_profile",
+            "release_profile": CORE_RELEASE_PROFILE,
+        }
+        for destination, feature in CORE_EXCLUDED_DESTINATION_FEATURES
+    ]
+
+
+def core_navigation_state_key(state: LifecycleState) -> str:
+    return f"{state.current_view}|{state.active_tab}"
+
+
+def build_core_navigation_graph_report(
+    snap: Snapshot,
+    *,
+    scenario: str = "default",
+) -> dict[str, object]:
+    """Walk every actually reachable Core view without dispatching unsafe actions."""
+
+    snapshot = project_core_snapshot(snap)
+    initial = LifecycleState(
+        current_view="home",
+        active_tab="home",
+        generation=1,
+        release_profile=CORE_RELEASE_PROFILE,
+    )
+    queue = [initial]
+    queued = {core_navigation_state_key(initial)}
+    cursor = 0
+    rendered_states: list[dict[str, object]] = []
+    rendered_views: set[str] = set()
+    accepted_edges: list[dict[str, object]] = []
+    render_errors: list[dict[str, object]] = []
+    render_invariant_issues: list[dict[str, object]] = []
+    excluded_touch_targets: list[dict[str, object]] = []
+    dead_touch_targets: list[dict[str, object]] = []
+    format_touch_targets: list[dict[str, object]] = []
+    location_claims: list[dict[str, object]] = []
+    rf_touch_targets: list[dict[str, object]] = []
+
+    while cursor < len(queue):
+        state = queue[cursor]
+        cursor += 1
+        state_key = core_navigation_state_key(state)
+        try:
+            surface = Surface(
+                state.current_view,
+                release_profile=CORE_RELEASE_PROFILE,
+            )
+            RENDERERS[state.current_view](surface, snapshot)
+        except Exception as exc:
+            render_errors.append(
+                {
+                    "state": state_key,
+                    "view": state.current_view,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        rendered_views.add(state.current_view)
+        summary = surface.summary(
+            Path("core-navigation") / f"{state.current_view}.png",
+            required_labels_for_profile(
+                state.current_view,
+                CORE_RELEASE_PROFILE,
+            ),
+        )
+        target_overlaps = touch_target_overlaps(surface.touch_targets)
+        if (
+            summary["overflow"]
+            or summary["touch_target_issues"]
+            or not summary["dock_invariant_ok"]
+            or target_overlaps
+        ):
+            render_invariant_issues.append(
+                {
+                    "state": state_key,
+                    "view": state.current_view,
+                    "overflow_count": len(summary["overflow"]),
+                    "missing_required_labels": summary[
+                        "missing_required_labels"
+                    ],
+                    "touch_target_issue_count": len(
+                        summary["touch_target_issues"]
+                    ),
+                    "touch_target_overlap_count": len(target_overlaps),
+                    "dock_invariant_ok": summary["dock_invariant_ok"],
+                }
+            )
+
+        if (
+            "Advert location" in surface.labels
+            or surface.metrics.get("node_detail_advert_location") is not None
+        ):
+            location_claims.append(
+                {
+                    "state": state_key,
+                    "view": state.current_view,
+                    "advert_location_label": (
+                        "Advert location" in surface.labels
+                    ),
+                    "advert_location": surface.metrics.get(
+                        "node_detail_advert_location"
+                    ),
+                }
+            )
+
+        rendered_states.append(
+            {
+                "state": state_key,
+                "view": state.current_view,
+                "active_tab": state.active_tab,
+                "touch_target_count": len(surface.touch_targets),
+            }
+        )
+        for target in surface.touch_targets:
+            destination = target.get("destination")
+            target_summary = {
+                "state": state_key,
+                "view": state.current_view,
+                "action": target["action"],
+                "label": target["label"],
+                "destination": destination,
+            }
+            if target["enabled"] and destination in CORE_EXCLUDED_DESTINATIONS:
+                excluded_touch_targets.append(target_summary)
+            if target["formats_sd"]:
+                format_touch_targets.append(target_summary)
+            if target["rf_tx"]:
+                rf_touch_targets.append(
+                    {
+                        **target_summary,
+                        "public_rf_tx": target["public_rf_tx"],
+                        "dm_tx": target["dm_tx"],
+                    }
+                )
+
+            binding = lifecycle_binding(
+                state.generation,
+                state.current_view,
+                target,
+            )
+            dispatched = dispatch_lifecycle_binding(state, binding)
+            destination_action = target["enabled"] and destination is not None
+            intentionally_not_dispatched = (
+                target["rf_tx"]
+                or target["destructive"]
+                or target["formats_sd"]
+                or destination in CORE_EXCLUDED_DESTINATIONS
+            )
+            if (
+                destination_action
+                and not intentionally_not_dispatched
+                and not dispatched.accepted
+            ):
+                dead_touch_targets.append(
+                    {
+                        **target_summary,
+                        "reason": dispatched.reason,
+                    }
+                )
+                continue
+            if not dispatched.accepted:
+                continue
+
+            next_state = dispatched.state
+            next_key = core_navigation_state_key(next_state)
+            if destination is not None:
+                accepted_edges.append(
+                    {
+                        **target_summary,
+                        "to_state": next_key,
+                        "to_view": next_state.current_view,
+                    }
+                )
+            if (
+                next_state.current_view != state.current_view
+                and next_key not in queued
+            ):
+                queued.add(next_key)
+                queue.append(next_state)
+
+    root_states = {
+        row["state"]
+        for row in rendered_states
+        if row["view"] in CORE_ROOT_VIEWS
+    }
+    reverse_edges: dict[str, set[str]] = {}
+    for edge in accepted_edges:
+        reverse_edges.setdefault(str(edge["to_state"]), set()).add(
+            str(edge["state"])
+        )
+    escapable_states = set(root_states)
+    escape_queue = list(root_states)
+    escape_cursor = 0
+    while escape_cursor < len(escape_queue):
+        destination_state = escape_queue[escape_cursor]
+        escape_cursor += 1
+        for source_state in reverse_edges.get(destination_state, set()):
+            if source_state in escapable_states:
+                continue
+            escapable_states.add(source_state)
+            escape_queue.append(source_state)
+    trapped_states = sorted(
+        row["state"]
+        for row in rendered_states
+        if row["view"] not in CORE_ROOT_VIEWS
+        and row["state"] not in escapable_states
+    )
+
+    ok = (
+        not render_errors
+        and not render_invariant_issues
+        and not excluded_touch_targets
+        and not dead_touch_targets
+        and not format_touch_targets
+        and not location_claims
+        and not trapped_states
+    )
+    return {
+        "schema": 1,
+        "ok": ok,
+        "artifact_kind": "host_simulator_core_navigation_non_closure",
+        "release_profile": CORE_RELEASE_PROFILE,
+        "scenario": scenario,
+        "mode": "simulation",
+        "hardware_required": True,
+        "closure_eligible": False,
+        "physical_observed": False,
+        "physical_acceptance_claimed": False,
+        "rf_acceptance_claimed": False,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "rendered_state_count": len(rendered_states),
+        "rendered_states": rendered_states,
+        "rendered_views": sorted(rendered_views),
+        "accepted_edge_count": len(accepted_edges),
+        "accepted_edges": accepted_edges,
+        "render_errors": render_errors,
+        "render_invariant_issues": render_invariant_issues,
+        "excluded_touch_targets": excluded_touch_targets,
+        "dead_touch_targets": dead_touch_targets,
+        "format_touch_targets": format_touch_targets,
+        "location_claims": location_claims,
+        "rf_touch_target_count": len(rf_touch_targets),
+        "rf_touch_targets": rf_touch_targets,
+        "rf_actions_dispatched": 0,
+        "format_actions_dispatched": 0,
+        "root_states": sorted(root_states),
+        "escapable_state_count": len(escapable_states),
+        "trapped_states": trapped_states,
+    }
+
+
+def build_core_surface_report(
+    report_views: list[dict[str, object]],
+) -> dict[str, object]:
+    expected_tabs = [
+        {
+            "name": name,
+            "label": label,
+            "destination": destination,
+            "icon": icon,
+        }
+        for name, label, destination, icon in CORE_DOCK_TABS
+    ]
+    expected_dock_destinations = [
+        tab["destination"] for tab in expected_tabs
+    ]
+    expected_root_views = list(CORE_ROOT_VIEWS)
+    rendered_root_views = [str(view["name"]) for view in report_views]
+    dock_observations: list[dict[str, object]] = []
+    exposed_destinations: set[str] = set()
+    excluded_touch_targets: list[dict[str, object]] = []
+    public_rf_actions: list[dict[str, object]] = []
+    format_actions: list[dict[str, object]] = []
+    for view in report_views:
+        view_name = str(view["name"])
+        dock_targets = [
+            target
+            for target in view["touch_targets"]
+            if target["kind"] == "dock_tab"
+        ]
+        if dock_targets:
+            dock_observations.append(
+                {
+                    "view": view_name,
+                    "labels": [target["semantic_label"] for target in dock_targets],
+                    "destinations": [target["destination"] for target in dock_targets],
+                    "selected_destinations": [
+                        target["destination"]
+                        for target in dock_targets
+                        if target["selected"]
+                    ],
+                }
+            )
+        for target in view["touch_targets"]:
+            destination = target.get("destination")
+            if destination:
+                exposed_destinations.add(str(destination))
+            if destination in CORE_EXCLUDED_DESTINATIONS:
+                excluded_touch_targets.append(
+                    {
+                        "view": view_name,
+                        "action": target["action"],
+                        "destination": destination,
+                    }
+                )
+            if target["public_rf_tx"]:
+                public_rf_actions.append(
+                    {
+                        "view": view_name,
+                        "action": target["action"],
+                    }
+                )
+            if target["formats_sd"]:
+                format_actions.append(
+                    {
+                        "view": view_name,
+                        "action": target["action"],
+                    }
+                )
+
+    dock_mismatches = [
+        observation
+        for observation in dock_observations
+        if observation["destinations"] != expected_dock_destinations
+        or len(observation["selected_destinations"]) != 1
+    ]
+    rejection_inventory = core_excluded_destination_rejections()
+    unrejected_destinations = [
+        row["destination"] for row in rejection_inventory
+        if row["rejected"] is not True
+    ]
+    ok = (
+        rendered_root_views == expected_root_views
+        and len(expected_tabs) == 5
+        and len(dock_observations) == 4
+        and not dock_mismatches
+        and not excluded_touch_targets
+        and not unrejected_destinations
+        and not public_rf_actions
+        and not format_actions
+    )
+    return {
+        "schema": 1,
+        "ok": ok,
+        "release_profile": CORE_RELEASE_PROFILE,
+        "mode": "simulation",
+        "hardware_required": True,
+        "closure_eligible": False,
+        "physical_observed": False,
+        "root_views_expected": expected_root_views,
+        "root_views_rendered": rendered_root_views,
+        "tabs": expected_tabs,
+        "tab_count": len(expected_tabs),
+        "dock_observations": dock_observations,
+        "dock_mismatches": dock_mismatches,
+        "exposed_destinations": sorted(exposed_destinations),
+        "excluded_destination_rejections": rejection_inventory,
+        "unrejected_excluded_destinations": unrejected_destinations,
+        "excluded_touch_targets": excluded_touch_targets,
+        "unavailable_capabilities": list(CORE_UNAVAILABLE_CAPABILITIES),
+        "public_rf_tx": False,
+        "public_rf_actions": public_rf_actions,
+        "formats_sd": False,
+        "format_actions": format_actions,
+    }
+
+
 def generate(
     out_dir: Path,
     views: tuple[str, ...] | None = None,
     scenario: str = "default",
     lifecycle_transitions: int = 0,
+    release_profile: str = FULL_FEATURE_RELEASE_PROFILE,
 ) -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     if scenario not in SCENARIOS:
         raise ValueError(f"unknown scenario: {scenario}")
+    if release_profile not in RELEASE_PROFILES:
+        raise ValueError(f"unknown release profile: {release_profile}")
     snap = SCENARIOS[scenario]()
-    selected = views or tuple(RENDERERS)
+    if release_profile == CORE_RELEASE_PROFILE:
+        snap = project_core_snapshot(snap)
+        selected = views or CORE_ROOT_VIEWS
+        rejected = [view for view in selected if not core_view_available(view)]
+        if rejected:
+            raise ValueError(
+                "Core 1.0 simulator rejects unavailable/non-root views: "
+                + ", ".join(rejected)
+            )
+    else:
+        selected = views or tuple(RENDERERS)
     report_views = []
     overflow_count = 0
     truncated_count = 0
@@ -7864,14 +8889,14 @@ def generate(
     for view in selected:
         if view not in RENDERERS:
             raise ValueError(f"unknown view: {view}")
-        surface = Surface(view)
+        surface = Surface(view, release_profile=release_profile)
         RENDERERS[view](surface, snap)
         screenshot = out_dir / f"{view}.png"
         surface.save(screenshot)
-        required_labels = REQUIRED_LABELS.get(view, ())
-        if view == "settings_support_expanded" and snap.firmware_version != "1.0.0-rc1":
+        required_labels = required_labels_for_profile(view, release_profile)
+        if view == "settings_support_expanded" and snap.firmware_version != "1.0.0":
             required_labels = tuple(
-                f"Version {snap.firmware_version}" if label == "Version 1.0.0-rc1" else label
+                f"Version {snap.firmware_version}" if label == "Version 1.0.0" else label
                 for label in required_labels
             )
         summary = surface.summary(screenshot, required_labels)
@@ -7892,13 +8917,27 @@ def generate(
             required_missing.append({"view": view, "label": label})
         report_views.append(summary)
 
-    flow_report = build_flow_report(report_views)
+    flow_report = build_flow_report(report_views, release_profile)
     incoming_event_report = build_incoming_event_report(report_views)
+    core_surface_report = (
+        build_core_surface_report(report_views)
+        if release_profile == CORE_RELEASE_PROFILE
+        else None
+    )
+    core_navigation_graph_report = (
+        build_core_navigation_graph_report(
+            snap,
+            scenario=scenario,
+        )
+        if release_profile == CORE_RELEASE_PROFILE
+        else None
+    )
     lifecycle_report = (
         run_lifecycle_stress(
             snap,
             transitions=lifecycle_transitions,
             scenario=scenario,
+            release_profile=release_profile,
         )
         if lifecycle_transitions
         else None
@@ -7911,8 +8950,30 @@ def generate(
             and not dock_invariant_issues
             and flow_report["ok"]
             and incoming_event_report["ok"]
+            and (
+                core_surface_report is None
+                or core_surface_report["ok"]
+            )
+            and (
+                core_navigation_graph_report is None
+                or core_navigation_graph_report["ok"]
+            )
             and (lifecycle_report is None or lifecycle_report["ok"])
         ),
+        "artifact_kind": (
+            "host_simulator_core_ui_regression_non_closure"
+            if release_profile == CORE_RELEASE_PROFILE
+            else "host_simulator_ui_reference_non_closure"
+        ),
+        "release_profile": release_profile,
+        "mode": "simulation",
+        "hardware_required": True,
+        "closure_eligible": False,
+        "physical_observed": False,
+        "physical_acceptance_claimed": False,
+        "rf_acceptance_claimed": False,
+        "public_rf_tx": bool(flow_report["public_rf_actions"]),
+        "formats_sd": bool(flow_report["format_actions"]),
         "display": {"width": WIDTH, "height": HEIGHT},
         "source": "tools/ui_simulator.py",
         "scenario": scenario,
@@ -7927,6 +8988,15 @@ def generate(
         "sibling_text_overlap_count": sibling_text_overlap_count,
         "required_labels_missing": required_missing,
     }
+    if core_surface_report is not None:
+        report["core_surface_report"] = core_surface_report
+        report["excluded_destination_rejections"] = (
+            core_surface_report["excluded_destination_rejections"]
+        )
+    if core_navigation_graph_report is not None:
+        report["core_navigation_graph_report"] = (
+            core_navigation_graph_report
+        )
     if lifecycle_report is not None:
         report["lifecycle_report"] = lifecycle_report
         lifecycle_path = out_dir / "ui-lifecycle-report.json"
@@ -7945,6 +9015,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--view", action="append", choices=tuple(RENDERERS), help="view to render; repeatable")
     parser.add_argument("--scenario", choices=tuple(SCENARIOS), default="default", help="snapshot scenario")
     parser.add_argument(
+        "--release-profile",
+        choices=RELEASE_PROFILES,
+        default=FULL_FEATURE_RELEASE_PROFILE,
+        help=(
+            "simulated release surface; core_1_0 renders only the five Core "
+            "root destinations and remains non-closure evidence"
+        ),
+    )
+    parser.add_argument(
         "--lifecycle-transitions",
         type=int,
         default=0,
@@ -7960,6 +9039,7 @@ def main() -> int:
         tuple(args.view) if args.view else None,
         scenario=args.scenario,
         lifecycle_transitions=args.lifecycle_transitions,
+        release_profile=args.release_profile,
     )
     lifecycle_report = report.get("lifecycle_report")
     print(
@@ -7969,6 +9049,9 @@ def main() -> int:
                 "views": len(report["views"]),
                 "out": args.out.as_posix(),
                 "scenario": args.scenario,
+                "release_profile": args.release_profile,
+                "mode": "simulation",
+                "closure_eligible": False,
                 "lifecycle_transitions": (
                     lifecycle_report["completed_transitions"] if lifecycle_report is not None else 0
                 ),

@@ -42,6 +42,10 @@ typedef struct {
     bool build_enabled;
     bool transport_supported;
     bool companion_enabled;
+    bool peer_known;
+    bool protocol_running;
+    bool protocol_ready;
+    uint32_t pairing_passkey;
     const char *state;
 } d1l_ui_ble_view_input_t;
 
@@ -53,6 +57,8 @@ typedef struct {
     char production_note[D1L_UI_CONNECTIVITY_TEXT_LEN];
     uint32_t state_color;
     bool controls_available;
+    bool pairing_available;
+    bool forget_available;
 } d1l_ui_ble_view_model_t;
 
 void d1l_ui_connectivity_wifi_view(const d1l_ui_wifi_view_input_t *input,

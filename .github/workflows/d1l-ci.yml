@@ -7,7 +7,7 @@ on:
         description: "Build RP2040 SD bridge artifacts and run SD bridge host dry-runs"
         required: false
         type: boolean
-        default: false
+        default: true
   push:
     branches:
       - main
@@ -33,12 +33,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          include_sd_bridge=false
-          reason=esp32_only
+          include_sd_bridge=true
+          reason=full_feature_candidate
 
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.include_sd_bridge }}" == "true" ]]; then
-            include_sd_bridge=true
-            reason=manual_dispatch
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.include_sd_bridge }}" == "true" ]]; then
+              include_sd_bridge=true
+              reason=manual_dispatch
+            fi
           else
             : > changed-files.txt
             if [[ "${{ github.event_name }}" == "pull_request" ]]; then
@@ -56,8 +58,7 @@ jobs:
             fi
 
             if grep -E '^(firmware/rp2040_sd_bridge/|firmware/rp2040_sd_smoke/|tools/rp2040_sd_protocol.py|scripts/(rp2040_|sd_).*_d1l.py|scripts/flash_rp2040_sd_bridge_uf2.py|tests/test_rp2040_sd_bridge_target.py|tests/test_storage_status_contract.py|docs/(SD_BRIDGE_PROTOCOL_D1L|RP2040_SD_BRIDGE_FLASH_D1L|D1L_SD_CARD_GUIDED_INSTALL)\.md)' changed-files.txt >/dev/null; then
-              include_sd_bridge=true
-              reason=sd_bridge_paths
+              reason=full_feature_sd_paths
             fi
           fi
 
@@ -99,6 +100,33 @@ jobs:
           python -m pip install --disable-pip-version-check --require-hashes -r $requirementsPath
           python -m pip check
           python -m pip list --format=json | Set-Content -LiteralPath "artifacts/build-inputs/ci-host-windows-installed.json" -Encoding utf8NoBOM
+
+      - name: Record exact candidate scope
+        shell: pwsh
+        env:
+          D1L_INCLUDE_SD_BRIDGE: ${{ needs.change-filter.outputs.include_sd_bridge }}
+          D1L_SCOPE_REASON: ${{ needs.change-filter.outputs.reason }}
+        run: |
+          $payload = [ordered]@{
+            schema = 1
+            kind = "d1l_candidate_scope"
+            source_commit = $env:GITHUB_SHA
+            workflow_run_id = [string]$env:GITHUB_RUN_ID
+            workflow_run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+            repository = $env:GITHUB_REPOSITORY
+            workflow = "d1l-ci"
+            event = $env:GITHUB_EVENT_NAME
+            include_sd_bridge = [System.Convert]::ToBoolean($env:D1L_INCLUDE_SD_BRIDGE)
+            scope_reason = $env:D1L_SCOPE_REASON
+            release_profile = "full_feature"
+            sd_history_mode = "conditional"
+          }
+          $path = "artifacts/build-inputs/d1l-candidate-scope.json"
+          $payload | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8NoBOM
+
+      - name: Checksum exact host build inputs
+        shell: pwsh
+        run: |
           $checksumRows = Get-ChildItem -LiteralPath "artifacts/build-inputs" -File |
             Where-Object Name -ne "SHA256SUMS.txt" |
             Sort-Object Name |
@@ -591,8 +619,19 @@ jobs:
 
       - name: Package D1L release
         shell: bash
+        env:
+          D1L_UPDATE_SIGNING_KEY_PEM: ${{ secrets.D1L_UPDATE_SIGNING_KEY_PEM }}
         run: |
-          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON" --meshcore-signed-advert-runtime-json "$D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON")
+          set -euo pipefail
+          if [[ -z "${D1L_UPDATE_SIGNING_KEY_PEM:-}" ]]; then
+            printf 'D1L_UPDATE_SIGNING_KEY_PEM is required for full_feature packaging\n' >&2
+            exit 1
+          fi
+          umask 077
+          update_key_path="$RUNNER_TEMP/d1l-update-private.pem"
+          trap 'rm -f "$update_key_path"' EXIT
+          printf '%s' "$D1L_UPDATE_SIGNING_KEY_PEM" > "$update_key_path"
+          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --release-profile full_feature --sd-history-mode conditional --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON" --meshcore-signed-advert-runtime-json "$D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON" --update-signing-key "$update_key_path")
           if [[ "${{ needs.change-filter.outputs.include_sd_bridge }}" == "true" ]]; then
             package_args+=(--rp2040-artifact-root artifacts/rp2040-release-inputs)
           fi
