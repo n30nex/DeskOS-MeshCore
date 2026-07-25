@@ -78,5 +78,5 @@ def test_more_scenarios_are_deterministic_bounded_and_side_effect_free(tmp_path:
 
     long_labels = view_map(reports["more-long-labels"])
     about = long_labels["settings_support_expanded"]
-    assert any(label.startswith("Version 1.0.0-rc1+exact-commit") for label in about["labels"])
+    assert any(label.startswith("Version 1.0.0+exact-commit") for label in about["labels"])
     assert about["truncated_labels"]

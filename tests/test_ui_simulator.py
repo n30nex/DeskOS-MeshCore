@@ -526,7 +526,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Tools", "Connections", "Wi-Fi", "Bluetooth", "Radio"} <= labels_by_view["settings_connections_expanded"]
     assert {"Tools", "Storage & maps", "SD Card", "Map options"} <= labels_by_view["settings_storage_maps_expanded"]
     assert {"Tools", "Device", "Display", "Identity"} <= labels_by_view["settings_device_expanded"]
-    assert {"Tools", "Support", "About", "Version 1.0.0-rc1"} <= labels_by_view["settings_support_expanded"]
+    assert {"Tools", "Support", "About", "Version 1.0.0"} <= labels_by_view["settings_support_expanded"]
     assert {"Tools", "Advanced", "Mesh advertise", "Broadcast presence"} <= labels_by_view["settings_advanced_expanded"]
     assert {
         "Wi-Fi Setup",

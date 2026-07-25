@@ -309,7 +309,7 @@ class Snapshot:
     dm_delivery_active: bool = False
     dm_delivery_state: str = "not_applicable"
     muted_unread_dm: int = 0
-    firmware_version: str = "1.0.0-rc1"
+    firmware_version: str = "1.0.0"
     map_cached_tile_count: int = 0
     map_visible_tile_count: int = 9
     map_progress_completed: int = 0
@@ -617,7 +617,7 @@ def more_long_labels_snapshot() -> Snapshot:
         node_name="DeskOS D1L Lab Companion With A Deliberately Long Device Name",
         mesh_state="ready, listening, synchronized, and retaining a deliberately long state label",
         firmware_version=(
-            "1.0.0-rc1+exact-commit-provenance-with-a-deliberately-long-label"
+            "1.0.0+exact-commit-provenance-with-a-deliberately-long-label"
         ),
     )
 
@@ -6637,7 +6637,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Support",
         "About this device",
         "About",
-        "Version 1.0.0-rc1",
+        "Version 1.0.0",
     ),
     "settings_advanced_expanded": (
         "Tools",
@@ -8894,9 +8894,9 @@ def generate(
         screenshot = out_dir / f"{view}.png"
         surface.save(screenshot)
         required_labels = required_labels_for_profile(view, release_profile)
-        if view == "settings_support_expanded" and snap.firmware_version != "1.0.0-rc1":
+        if view == "settings_support_expanded" and snap.firmware_version != "1.0.0":
             required_labels = tuple(
-                f"Version {snap.firmware_version}" if label == "Version 1.0.0-rc1" else label
+                f"Version {snap.firmware_version}" if label == "Version 1.0.0" else label
                 for label in required_labels
             )
         summary = surface.summary(screenshot, required_labels)

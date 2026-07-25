@@ -247,7 +247,7 @@ def write_fake_config(root: Path) -> None:
     (root / "main").mkdir(exist_ok=True)
     (root / "main" / "d1l_config.h").write_text(
         '#define D1L_FIRMWARE_NAME "MeshCore DeskOS D1L"\n'
-        '#define D1L_FIRMWARE_VERSION "1.0.0-rc1"\n',
+        '#define D1L_FIRMWARE_VERSION "1.0.0"\n',
         encoding="ascii",
     )
 
@@ -415,7 +415,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     package_dir = out / "d1l-test"
     assert manifest["schema"] == 1
     assert manifest["project"] == package_release_d1l.PROJECT
-    assert manifest["app_version"] == "1.0.0-rc1"
+    assert manifest["app_version"] == "1.0.0"
     assert "workflow" in manifest
     assert (package_dir / "firmware" / "bootloader.bin").read_bytes() == b"BOOT"
     assert (package_dir / "firmware" / "partition-table.bin").read_bytes() == b"PART"
