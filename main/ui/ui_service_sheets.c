@@ -359,7 +359,7 @@ bool d1l_ui_service_sheets_render_observer(
                                    status->connected ? 0x5EEAD4 : 0xFBBF24);
     position_dot(state, 8, 54, 408);
     complete = state && complete;
-    snprintf(line, sizeof(line), "Broker %s",
+    snprintf(line, sizeof(line), "Broker %.152s",
              status->broker_host[0] ? status->broker_host :
                                       "not configured");
     lv_obj_t *broker = create_label(sheet, line, 0xE5EDF5);
