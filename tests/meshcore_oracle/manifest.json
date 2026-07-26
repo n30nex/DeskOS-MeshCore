@@ -73,7 +73,7 @@
     "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
     "main/comms/usb_console.c": "887506a927e310b59b094a93a879d6cc74d9a76a81306800bc444b9e3e5b07bf",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
-    "main/mesh/contact_store.c": "207acd23e9f89b6fa7a67d50c9c1cb3a88643864656e64ba3f0963f0295ac097",
+    "main/mesh/contact_store.c": "c0a4e206a9fc433807ddb17e3a11b120caec7959c26bc1d857d89af30acdf418",
     "main/mesh/contact_store.h": "60a66b48162b280354b084b0852c178d6fce2e56c9040891ede160360f2e9d94",
     "main/mesh/dm_delivery_state.c": "a3ff6903299b70ed68727284de8c2b6e81b2f9db69a80902db75983ee91aee94",
     "main/mesh/dm_delivery_state.h": "d27b3666f03d27e74cb30efb2e77c47bd50f0273d7991e29315e55d5a2fd4185",

@@ -261,6 +261,8 @@ static d1l_store_lock_t s_deferred_flush_lock = D1L_STORE_LOCK_INITIALIZER;
 static bool fixed_hex_string_valid(const char *value, size_t hex_chars);
 static bool fixed_hex_strings_equal(const char *left, const char *right,
                                     size_t hex_chars);
+static int find_unique_index_by_fingerprint_hex(const char *fingerprint,
+                                                bool *out_ambiguous);
 
 static void mark_migrated_verification(d1l_contact_entry_t *entry)
 {
@@ -761,15 +763,14 @@ static void finalize_migrated_path_state(void)
 
 static int find_index_by_fingerprint(const char *fingerprint)
 {
-    if (!fingerprint || fingerprint[0] == '\0') {
+    if (!fixed_hex_string_valid(fingerprint,
+                                D1L_NODE_FINGERPRINT_LEN - 1U)) {
         return -1;
     }
-    for (size_t i = 0; i < s_count; ++i) {
-        if (strncmp(s_entries[i].fingerprint, fingerprint, sizeof(s_entries[i].fingerprint)) == 0) {
-            return (int)i;
-        }
-    }
-    return -1;
+    bool ambiguous = false;
+    const int index =
+        find_unique_index_by_fingerprint_hex(fingerprint, &ambiguous);
+    return ambiguous ? -1 : index;
 }
 
 static bool contact_path_len_valid(uint8_t path_len)

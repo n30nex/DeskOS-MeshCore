@@ -98,6 +98,7 @@ static void make_public_key(char key[D1L_NODE_PUBLIC_KEY_HEX_LEN], uint32_t id);
 static void fingerprint_from_key(
     char fingerprint[D1L_NODE_FINGERPRINT_LEN],
     const char key[D1L_NODE_PUBLIC_KEY_HEX_LEN]);
+static void uppercase_hex(char *dest, size_t dest_size, const char *src);
 
 typedef struct {
     uint32_t seq;
@@ -511,9 +512,14 @@ static void test_contact_v4_to_v7_migration_is_truthful(void)
 
     char valid_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
     char valid_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    char retained_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char retained_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
     make_public_key(valid_key, 0x51U);
     fingerprint_from_key(valid_fingerprint, valid_key);
-    fill_contact_v4(&legacy.entries[0], 7U, valid_fingerprint, valid_key,
+    uppercase_hex(retained_key, sizeof(retained_key), valid_key);
+    uppercase_hex(retained_fingerprint, sizeof(retained_fingerprint),
+                  valid_fingerprint);
+    fill_contact_v4(&legacy.entries[0], 7U, retained_fingerprint, retained_key,
                     "Migrated", "chat");
     fill_contact_v4(&legacy.entries[1], 8U, "ffffffffffffffff", "",
                     "Placeholder", "unknown");
@@ -523,6 +529,7 @@ static void test_contact_v4_to_v7_migration_is_truthful(void)
     assert(d1l_contact_store_init() == ESP_OK);
     d1l_contact_entry_t contact = {0};
     assert(d1l_contact_store_find_by_fingerprint(valid_fingerprint, &contact));
+    assert(strcmp(contact.fingerprint, retained_fingerprint) == 0);
     assert(contact.verification_source ==
            D1L_CONTACT_VERIFICATION_MIGRATED_SIGNED_ADVERT);
     assert(contact.verified_at_ms == 1400U);
