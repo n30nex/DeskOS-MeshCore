@@ -332,7 +332,15 @@ def test_factory_reset_sd_lineage_gates_all_primaries_aliases_and_segments():
     purge = retained.split("static esp_err_t sd_purge_store_for_generation", 1)[1].split(
         "static esp_err_t sd_finalize_lineage_for_generation", 1
     )[0]
-    for key in ('{"public"}', '{"threads"}', '{"routes_v2", "routes"}', '{"ring"}'):
+    for key in (
+        '{"public"}',
+        '{"threads"}',
+        '{"routes_v2", "routes"}',
+        '{"ring"}',
+        '{"nodes_v1"}',
+        '{"contacts"}',
+        '{"state"}',
+    ):
         assert key in purge
     write = retained.split("static esp_err_t sd_write_blob_with_lineage", 2)[2].split(
         "static esp_err_t sd_erase_blob_with_lineage", 1

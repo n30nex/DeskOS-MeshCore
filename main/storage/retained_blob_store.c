@@ -1617,6 +1617,10 @@ static bool sd_lineage_key_allowed(
         return strcmp(key, "ring") == 0;
     case D1L_RETAINED_BLOB_STORE_NODES:
         return strcmp(key, "nodes_v1") == 0;
+    case D1L_RETAINED_BLOB_STORE_CONTACTS:
+        return strcmp(key, "contacts") == 0;
+    case D1L_RETAINED_BLOB_STORE_READ_STATE:
+        return strcmp(key, "state") == 0;
     default:
         return false;
     }
@@ -1631,6 +1635,8 @@ static esp_err_t sd_purge_store_for_generation(
     static const char *const route_keys[] = {"routes_v2", "routes"};
     static const char *const packet_keys[] = {"ring"};
     static const char *const node_keys[] = {"nodes_v1"};
+    static const char *const contact_keys[] = {"contacts"};
+    static const char *const read_state_keys[] = {"state"};
     const char *const *keys = NULL;
     size_t key_count = 0U;
     if (!config) {
@@ -1656,6 +1662,14 @@ static esp_err_t sd_purge_store_for_generation(
     case D1L_RETAINED_BLOB_STORE_NODES:
         keys = node_keys;
         key_count = sizeof(node_keys) / sizeof(node_keys[0]);
+        break;
+    case D1L_RETAINED_BLOB_STORE_CONTACTS:
+        keys = contact_keys;
+        key_count = sizeof(contact_keys) / sizeof(contact_keys[0]);
+        break;
+    case D1L_RETAINED_BLOB_STORE_READ_STATE:
+        keys = read_state_keys;
+        key_count = sizeof(read_state_keys) / sizeof(read_state_keys[0]);
         break;
     default:
         return ESP_ERR_INVALID_ARG;
