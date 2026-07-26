@@ -54,6 +54,9 @@ def test_dm_command_is_authorized_owned_and_persisted_before_radio_admission():
     identity_at = handler.index("d1l_meshcore_service_ensure_identity()")
     timestamp_at = handler.index("d1l_settings_next_mesh_timestamp")
     append_at = handler.index("d1l_dm_store_append_tx(")
+    retry_at = handler.index(
+        "meshcore_service_finish_dm_persistence_admission("
+    )
     begin_at = handler.index("begin_pending_dm_tx(")
     waiting_at = handler.index("D1L_DM_DELIVERY_WAITING_RADIO", begin_at)
     active_at = handler.index("D1L_DM_DELIVERY_TX_ACTIVE", waiting_at)
@@ -64,6 +67,7 @@ def test_dm_command_is_authorized_owned_and_persisted_before_radio_admission():
         < identity_at
         < timestamp_at
         < append_at
+        < retry_at
         < begin_at
         < waiting_at
         < active_at
@@ -74,6 +78,33 @@ def test_dm_command_is_authorized_owned_and_persisted_before_radio_admission():
     assert "if (s_tx_busy)" in handler
     assert handler.index("if (s_tx_busy)", append_at) > append_at
     assert "record_detached_dm_queue_failure(" in handler
+
+    admission = body(
+        source,
+        "static esp_err_t meshcore_service_finish_dm_persistence_admission",
+        "static esp_err_t meshcore_service_handle_send_dm",
+    )
+    assert "append_outcome->error != ESP_ERR_NOT_FINISHED" in admission
+    assert "D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS" in admission
+    assert "vTaskDelay(retry_delay)" in admission
+    assert "d1l_dm_store_flush()" in admission
+    assert "append_outcome->durable = ret == ESP_OK" in admission
+    assert admission.index("d1l_dm_store_flush()") < admission.index(
+        "append_outcome->durable = ret == ESP_OK"
+    )
+    assert "ret != ESP_ERR_NOT_FINISHED" in admission
+
+
+def test_dm_console_reports_transient_storage_admission_truthfully():
+    console = read("main/comms/usb_console.c")
+    command = body(
+        console,
+        "static void cmd_mesh_send_dm",
+        "static void print_route_entry_json",
+    )
+    assert "ret == ESP_ERR_NOT_FINISHED" in command
+    assert "DM storage is busy; message was not transmitted, retry" in command
+    assert "DM requires a promoted contact with a retained public key" not in command
 
 
 def test_dm_contact_provenance_gate_has_zero_unproven_side_effects():
