@@ -44,6 +44,8 @@ static_assert(PAYLOAD_TYPE_TRACE == 0x09,
               "Pinned MeshCore TRACE payload type changed");
 static_assert(PAYLOAD_TYPE_MULTIPART == 0x0A,
               "Pinned MeshCore multipart payload type changed");
+static_assert(PAYLOAD_TYPE_CONTROL == 0x0B,
+              "Pinned MeshCore control payload type changed");
 static_assert(D1L_MESHCORE_PAYLOAD_VER_1 == PAYLOAD_VER_1,
               "Production and pinned v1 payload versions differ");
 static_assert(D1L_MESHCORE_MAX_PACKET_PAYLOAD == MAX_PACKET_PAYLOAD,
@@ -74,6 +76,8 @@ static_assert(D1L_MESHCORE_PAYLOAD_TRACE == PAYLOAD_TYPE_TRACE,
               "Production TRACE payload type differs");
 static_assert(D1L_MESHCORE_PAYLOAD_MULTIPART == PAYLOAD_TYPE_MULTIPART,
               "Production multipart payload type differs");
+static_assert(D1L_MESHCORE_PAYLOAD_CONTROL == PAYLOAD_TYPE_CONTROL,
+              "Production control payload type differs");
 
 #if !defined(__BYTE_ORDER__) || !defined(__ORDER_LITTLE_ENDIAN__)
 #error "The checked MeshCore Packet shim requires compiler byte-order macros"

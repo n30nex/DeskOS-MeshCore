@@ -38,13 +38,13 @@
     "preserve_output_on_reject": true
   },
   "vectors": {
-    "payload_types": 7,
+    "payload_types": 8,
     "route_types": 4,
     "path_cases": 9,
     "payload_lengths": 2,
-    "local_to_upstream": 504,
-    "upstream_to_local": 504,
-    "total": 1008
+    "local_to_upstream": 576,
+    "upstream_to_local": 576,
+    "total": 1152
   },
   "vector_matrix": {
     "payload_types": [
@@ -54,7 +54,8 @@
       {"name": "GRP_TXT", "code": 5},
       {"name": "PATH", "code": 8},
       {"name": "TRACE", "code": 9},
-      {"name": "MULTIPART", "code": 10}
+      {"name": "MULTIPART", "code": 10},
+      {"name": "CONTROL", "code": 11}
     ],
     "route_types": [
       {"name": "TRANSPORT_FLOOD", "code": 0},
