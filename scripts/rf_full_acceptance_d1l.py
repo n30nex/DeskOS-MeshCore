@@ -2221,6 +2221,98 @@ def validate_remote_control_exchange(
     }
 
 
+def remote_control_deadline_only_ok(
+    control: object,
+    *,
+    d1l_public_key: object,
+    token: object,
+    control_socket: object,
+) -> bool:
+    """Recognize only the bounded COM11 ACK-deadline response.
+
+    This is deliberately not delivery success. It only allows the runner to
+    continue long enough to collect independent D1L receive/ACK evidence.
+    """
+    if not isinstance(control, dict):
+        return False
+    try:
+        expected_request, _ = remote_control_request(
+            d1l_public_key, token
+        )
+    except ValueError:
+        return False
+    response = control.get("response")
+    response = response if isinstance(response, dict) else {}
+    error = response.get("error")
+    error = error if isinstance(error, dict) else {}
+    validation = control.get("validation")
+    validation = validation if isinstance(validation, dict) else {}
+    validation_checks = validation.get("checks")
+    expected_validation_checks = {
+        "request_raw_exact": True,
+        "request_object_exact": True,
+        "response_newline_exact": True,
+        "response_id_exact": True,
+        "response_op_exact": True,
+        "response_ok": False,
+        "response_not_cached": True,
+        "response_error_clear": False,
+        "target_exact": False,
+        "utf8_bytes_exact": False,
+        "delivery_acknowledged": False,
+        "delivery_event_present": False,
+        "delivery_payload_present": False,
+    }
+    duration_ms = response.get("duration_ms")
+    return bool(
+        control.get("op") == "radio.send_dm"
+        and control.get("socket_path") == control_socket
+        and control.get("request_id") == expected_request["id"]
+        and control.get("request") == expected_request
+        and set(response)
+        == {
+            "id",
+            "op",
+            "ok",
+            "cached",
+            "duration_ms",
+            "result",
+            "error",
+        }
+        and response.get("id") == expected_request["id"]
+        and response.get("op") == "radio.send_dm"
+        and response.get("ok") is False
+        and response.get("cached") is False
+        and isinstance(duration_ms, int)
+        and not isinstance(duration_ms, bool)
+        and 0 < duration_ms <= int(LOCAL_PEER_CONTROL_TIMEOUT_SEC * 1000)
+        and response.get("result") is None
+        and error
+        == {
+            "code": "deadline_exceeded",
+            "message": "operation exceeded its bounded deadline",
+        }
+        and isinstance(control.get("request_receipt"), dict)
+        and isinstance(control.get("response_receipt"), dict)
+        and re.fullmatch(
+            r"[0-9a-f]{64}", str(control.get("request_sha256") or "")
+        )
+        is not None
+        and re.fullmatch(
+            r"[0-9a-f]{64}", str(control.get("response_sha256") or "")
+        )
+        is not None
+        and validation.get("ok") is False
+        and validation.get("request") == expected_request
+        and validation.get("response") == response
+        and validation.get("request_sha256")
+        == control.get("request_sha256")
+        and validation.get("response_sha256")
+        == control.get("response_sha256")
+        and validation_checks == expected_validation_checks
+    )
+
+
 def send_remote_peer_dm(
     config: dict,
     *,
@@ -2447,12 +2539,7 @@ def send_local_peer_dm(
             d1l_public_key=d1l_public_key,
             token=token,
         )
-        if validation["ok"] is not True:
-            raise RemotePeerError(
-                "local_control_delivery_failed",
-                "local radio.send_dm did not return exact acknowledged delivery",
-            )
-        return {
+        control = {
             "op": "radio.send_dm",
             "socket_path": config["control_socket"],
             "request_id": request["id"],
@@ -2464,6 +2551,22 @@ def send_local_peer_dm(
             "response_sha256": validation["response_sha256"],
             "validation": validation,
         }
+        acknowledged = validation["ok"] is True
+        deadline_only = bool(
+            config == meshcorebot_local_peer_config()
+            and remote_control_deadline_only_ok(
+                control,
+                d1l_public_key=d1l_public_key,
+                token=token,
+                control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+            )
+        )
+        if not (acknowledged or deadline_only):
+            raise RemotePeerError(
+                "local_control_delivery_failed",
+                "local radio.send_dm did not return exact acknowledged delivery",
+            )
+        return control
     except Exception as exc:
         if owned_bundle is not None:
             owned_bundle.mark_incomplete(exc)
@@ -2988,6 +3091,78 @@ def new_entries_by_seq(
     return fresh
 
 
+def d1l_deadline_delivery_observation(
+    *,
+    control: object,
+    baseline_messages: dict | None,
+    final_messages: dict | None,
+    peer_after: dict | None,
+    fingerprint: str,
+    d1l_public_key: str,
+    token: str,
+    observed_at: datetime,
+) -> dict:
+    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+        raise ValueError("delivery observation time must be timezone-aware")
+    observed = observed_at.astimezone(timezone.utc)
+    new_messages = new_entries_by_seq(
+        baseline_messages, final_messages
+    )
+    inbound_rows = [
+        row
+        for row in new_messages
+        if row.get("direction") == "rx"
+        and row.get("text") == token
+        and entry_matches_fingerprint(
+            final_messages, row, fingerprint
+        )
+    ]
+    inbound = inbound_rows[0] if len(inbound_rows) == 1 else {}
+    ack = inbound.get("ack_response")
+    ack = ack if isinstance(ack, dict) else {}
+    path_hops = inbound.get("path_hops")
+    dispatch_count = ack.get("dispatch_count")
+    checks = {
+        "control_deadline_exact": remote_control_deadline_only_ok(
+            control,
+            d1l_public_key=d1l_public_key,
+            token=token,
+            control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+        ),
+        "one_new_inbound_exact": len(inbound_rows) == 1,
+        "inbound_delivered": inbound.get("delivered") is True,
+        "inbound_direct": (
+            isinstance(path_hops, int)
+            and not isinstance(path_hops, bool)
+            and path_hops == 0
+        ),
+        "ack_identity_valid": ack.get("identity_valid") is True,
+        "ack_dispatched": (
+            ack.get("state") == "sent"
+            and isinstance(dispatch_count, int)
+            and not isinstance(dispatch_count, bool)
+            and dispatch_count >= 1
+        ),
+        "ack_kind_exact": ack.get("last_kind")
+        in {"direct_ack", "flood_ack", "flood_ack_path", "path_ack"},
+        "ack_error_clear": ack.get("last_error") == "ESP_OK",
+        "peer_after_fresh": meshcorebot_peer_connected(
+            peer_after,
+            MESHCOREBOT_PEER_DEVICE,
+            MESHCOREBOT_PEER_FINGERPRINT,
+            observed_at=observed,
+        ),
+    }
+    return {
+        "schema": 1,
+        "kind": "d1l_observed_delivery_after_control_deadline",
+        "observed_at": observed.isoformat(),
+        "inbound_seq": _positive_seq(inbound.get("seq")),
+        "checks": checks,
+        "ok": all(checks.values()),
+    }
+
+
 def correlated_listener_transaction(
     *,
     baseline_messages: dict | None,
@@ -3184,6 +3359,37 @@ def latest_step_with_prefix(steps: list[dict], prefix: str) -> dict | None:
         if str(step.get("command", "")).startswith(prefix):
             return step
     return None
+
+
+def report_deadline_observed_delivery_ok(data: object) -> bool:
+    if not isinstance(data, dict):
+        return False
+    observation = data.get("controlled_peer_delivery_observation")
+    if not isinstance(observation, dict):
+        return False
+    observed_at = parse_aware_timestamp(observation.get("observed_at"))
+    steps = data.get("steps")
+    fingerprint = data.get("target_fingerprint")
+    if (
+        observed_at is None
+        or not isinstance(steps, list)
+        or not isinstance(fingerprint, str)
+    ):
+        return False
+    command = f"messages dm {fingerprint}"
+    baseline = first_command_step(steps, command)
+    final = latest_command_step(steps, command)
+    expected = d1l_deadline_delivery_observation(
+        control=data.get("controlled_peer_control"),
+        baseline_messages=baseline.get("result") if baseline else None,
+        final_messages=final.get("result") if final else None,
+        peer_after=data.get("controlled_peer_after"),
+        fingerprint=fingerprint,
+        d1l_public_key=data.get("d1l_public_key"),
+        token=data.get("inbound_token"),
+        observed_at=observed_at,
+    )
+    return observation == expected and expected.get("ok") is True
 
 
 def discord_command(public_key: str, inbound_token: str) -> str:
@@ -3584,16 +3790,6 @@ def build_report(
         )
     else:
         contact_ready = True
-    meshcorebot_control_ok = (
-        remote_control_semantic_ok(
-            remote_control,
-            d1l_public_key=public_key,
-            token=inbound_token,
-            control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
-        )
-        if peer_port == MESHCOREBOT_PEER_DEVICE
-        else True
-    )
     outbound_ok = bool(
         send_outbound
         and outbound_step
@@ -3615,6 +3811,42 @@ def build_report(
                 messages_result, inbound_token, fingerprint
             )
         )
+    )
+    delivery_observation = None
+    if (
+        peer_port == MESHCOREBOT_PEER_DEVICE
+        and remote_control_deadline_only_ok(
+            remote_control,
+            d1l_public_key=public_key,
+            token=inbound_token,
+            control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+        )
+    ):
+        delivery_observation = d1l_deadline_delivery_observation(
+            control=remote_control,
+            baseline_messages=baseline_messages_result,
+            final_messages=messages_result,
+            peer_after=peer_after,
+            fingerprint=fingerprint,
+            d1l_public_key=public_key,
+            token=inbound_token,
+            observed_at=datetime.now(timezone.utc),
+        )
+    meshcorebot_control_ok = (
+        (
+            remote_control_semantic_ok(
+                remote_control,
+                d1l_public_key=public_key,
+                token=inbound_token,
+                control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+            )
+            or bool(
+                delivery_observation
+                and delivery_observation.get("ok") is True
+            )
+        )
+        if peer_port == MESHCOREBOT_PEER_DEVICE
+        else True
     )
     transaction_correlation = (
         correlated_listener_transaction(
@@ -3812,6 +4044,7 @@ def build_report(
             if remote_mode or peer_port == MESHCOREBOT_PEER_DEVICE
             else None
         ),
+        "controlled_peer_delivery_observation": delivery_observation,
         "controlled_peer_control_plan": (
             {
                 "op": "radio.send_dm",
