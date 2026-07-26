@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -15,20 +16,52 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
-    from verify_checksums import verify_sha256_manifest
+    from verify_checksums import is_link_or_reparse, verify_sha256_manifest
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.verify_checksums import verify_sha256_manifest
+    from scripts.verify_checksums import (
+        is_link_or_reparse,
+        verify_sha256_manifest,
+    )
 
 try:
     from rf_full_acceptance_d1l import (
         LOCAL_PEER_EVIDENCE_SOURCE,
+        MESHCOREBOT_PEER_CONTROL_SOCKET,
+        MESHCOREBOT_PEER_DEVICE,
+        MESHCOREBOT_PEER_FINGERPRINT,
+        MESHCOREBOT_PEER_PROFILE,
+        MESHCOREBOT_PEER_PUBLIC_KEY,
+        MESHCOREBOT_PEER_STATUS_PATH,
+        LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
+        LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
+        REMOTE_PEER_HOSTNAME,
+        remote_control_request,
+        remote_control_semantic_ok,
         remote_peer_report_shape_ok as pinned_peer_report_shape_ok,
+        validate_remote_control_exchange,
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.rf_full_acceptance_d1l import (
         LOCAL_PEER_EVIDENCE_SOURCE,
+        MESHCOREBOT_PEER_CONTROL_SOCKET,
+        MESHCOREBOT_PEER_DEVICE,
+        MESHCOREBOT_PEER_FINGERPRINT,
+        MESHCOREBOT_PEER_PROFILE,
+        MESHCOREBOT_PEER_PUBLIC_KEY,
+        MESHCOREBOT_PEER_STATUS_PATH,
+        LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
+        LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
+        REMOTE_PEER_HOSTNAME,
+        remote_control_request,
+        remote_control_semantic_ok,
         remote_peer_report_shape_ok as pinned_peer_report_shape_ok,
+        validate_remote_control_exchange,
     )
+
+try:
+    from d1l_serial_target import POSIX_D1L_TARGET
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.d1l_serial_target import POSIX_D1L_TARGET
 
 try:
     from meshcore_conformance_d1l import (
@@ -356,6 +389,8 @@ def normalize_port(value: object) -> str | None:
 
 
 def allowed_port(value: object) -> bool:
+    if value == POSIX_D1L_TARGET:
+        return True
     normalized = normalize_port(value)
     return (
         normalized is not None
@@ -1960,12 +1995,151 @@ def real_hardware_rf_boundary_ok(data: dict, expected_port: str) -> bool:
     )
 
 
+def _strict_control_sidecar_bytes(
+    receipt: object,
+    evidence_root: Path,
+    *,
+    source_path: str,
+    transport: str,
+) -> tuple[bytes, Path] | None:
+    if not isinstance(receipt, dict):
+        return None
+    try:
+        root = Path(evidence_root).resolve(strict=True)
+        if not root.is_dir() or is_link_or_reparse(root):
+            return None
+        relative_text = receipt.get("path")
+        if (
+            not isinstance(relative_text, str)
+            or not relative_text
+            or "\\" in relative_text
+        ):
+            return None
+        relative = PurePosixPath(relative_text)
+        if (
+            relative.is_absolute()
+            or str(relative) != relative_text
+            or any(part in {"", ".", ".."} for part in relative.parts)
+        ):
+            return None
+        candidate = root.joinpath(*relative.parts)
+        cursor = root
+        for part in relative.parts[:-1]:
+            cursor /= part
+            if not cursor.is_dir() or is_link_or_reparse(cursor):
+                return None
+        if is_link_or_reparse(candidate):
+            return None
+        before = os.lstat(candidate)
+        if not stat.S_ISREG(before.st_mode):
+            return None
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(root)
+        raw = candidate.read_bytes()
+        after = os.lstat(candidate)
+        if (
+            before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+        ):
+            return None
+        digest = hashlib.sha256(raw).hexdigest()
+        peer_pid = receipt.get("source_peer_pid")
+        if not (
+            receipt.get("size") == len(raw)
+            and receipt.get("sha256") == digest
+            and receipt.get("source_path") == source_path
+            and receipt.get("source_host") == REMOTE_PEER_HOSTNAME
+            and receipt.get("source_hostname") == REMOTE_PEER_HOSTNAME
+            and receipt.get("transport") == transport
+            and isinstance(peer_pid, int)
+            and not isinstance(peer_pid, bool)
+            and peer_pid > 0
+            and receipt.get("source_peer_uid") == 0
+            and receipt.get("source_peer_gid") == 0
+        ):
+            return None
+        return raw, resolved
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def strict_control_sidecars_ok(
+    data: dict,
+    evidence_root: Path | None,
+    *,
+    control_socket: str,
+    request_transport: str,
+    response_transport: str,
+) -> bool:
+    if evidence_root is None:
+        return False
+    control = data.get("controlled_peer_control")
+    if not isinstance(control, dict):
+        return False
+    request_capture = _strict_control_sidecar_bytes(
+        control.get("request_receipt"),
+        evidence_root,
+        source_path=control_socket,
+        transport=request_transport,
+    )
+    response_capture = _strict_control_sidecar_bytes(
+        control.get("response_receipt"),
+        evidence_root,
+        source_path=control_socket,
+        transport=response_transport,
+    )
+    if request_capture is None or response_capture is None:
+        return False
+    request_raw, request_path = request_capture
+    response_raw, response_path = response_capture
+    if request_path == response_path:
+        return False
+    try:
+        expected_request, expected_raw = remote_control_request(
+            data.get("d1l_public_key"),
+            data.get("inbound_token"),
+        )
+        response = json.loads(response_raw.decode("utf-8"))
+        validation = validate_remote_control_exchange(
+            request_raw,
+            response_raw,
+            d1l_public_key=data.get("d1l_public_key"),
+            token=data.get("inbound_token"),
+        )
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return bool(
+        request_raw == expected_raw
+        and isinstance(response, dict)
+        and control.get("op") == "radio.send_dm"
+        and control.get("socket_path") == control_socket
+        and control.get("request_id") == expected_request["id"]
+        and control.get("request") == expected_request
+        and control.get("response") == response
+        and control.get("request_sha256")
+        == hashlib.sha256(request_raw).hexdigest()
+        and control.get("response_sha256")
+        == hashlib.sha256(response_raw).hexdigest()
+        and control.get("validation") == validation
+        and validation.get("ok") is True
+        and remote_control_semantic_ok(
+            control,
+            d1l_public_key=data.get("d1l_public_key"),
+            token=data.get("inbound_token"),
+            control_socket=control_socket,
+        )
+    )
+
+
 def controlled_peer_evidence_ok(
     data: dict,
     expected_port: str,
     expected_peer_port: str | None,
     *,
     require_status: bool,
+    evidence_root: Path | None = None,
 ) -> bool:
     peer = data.get("controlled_peer")
     if not isinstance(peer, dict):
@@ -1978,7 +2152,8 @@ def controlled_peer_evidence_ok(
     ):
         return False
     source = peer.get("evidence_source")
-    peer_port = normalize_port(peer.get("port"))
+    peer_identity = peer.get("port")
+    peer_port = normalize_port(peer_identity)
     expected_peer = normalize_port(expected_peer_port)
     if source == "d1l_bidirectional_rf":
         return (
@@ -1995,6 +2170,36 @@ def controlled_peer_evidence_ok(
         )
     if source != "explicit_peer_status":
         return False
+    if peer_identity == MESHCOREBOT_PEER_DEVICE:
+        return (
+            require_status
+            and expected_peer_port in (None, MESHCOREBOT_PEER_DEVICE)
+            and expected_port != MESHCOREBOT_PEER_DEVICE
+            and peer.get("fingerprint")
+            == MESHCOREBOT_PEER_FINGERPRINT
+            and peer.get("profile") == MESHCOREBOT_PEER_PROFILE
+            and peer.get("status_path")
+            == str(MESHCOREBOT_PEER_STATUS_PATH)
+            and peer.get("control_socket")
+            == MESHCOREBOT_PEER_CONTROL_SOCKET
+            and peer.get("public_key")
+            == MESHCOREBOT_PEER_PUBLIC_KEY
+            and peer.get("device_access")
+            == "opaque_status_identity_only"
+            and remote_control_semantic_ok(
+                data.get("controlled_peer_control"),
+                d1l_public_key=data.get("d1l_public_key"),
+                token=data.get("inbound_token"),
+                control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+            )
+            and strict_control_sidecars_ok(
+                data,
+                evidence_root,
+                control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+                request_transport=LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
+                response_transport=LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
+            )
+        )
     return (
         peer_port is not None
         and allowed_port(peer_port)
@@ -2025,6 +2230,8 @@ def dm_probe_ok(
     data: dict,
     expected_port: str,
     expected_peer_port: str | None = None,
+    *,
+    evidence_root: Path | None = None,
 ) -> bool:
     checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
     commands = data.get("commands_sent")
@@ -2037,6 +2244,7 @@ def dm_probe_ok(
             expected_port,
             expected_peer_port,
             require_status=True,
+            evidence_root=evidence_root,
         )
         and isinstance(commands, list)
         and bool(commands)
@@ -2066,9 +2274,19 @@ def outbound_dm_gate(
     data = read_json(artifact)
     mode = data.get("mode") if data else None
     if mode == "rf-full-acceptance":
-        valid = full_rf_acceptance_ok(data, expected_port, expected_peer_port)
+        valid = full_rf_acceptance_ok(
+            data,
+            expected_port,
+            expected_peer_port,
+            evidence_root=root,
+        )
     else:
-        valid = dm_probe_ok(data, expected_port, expected_peer_port)
+        valid = dm_probe_ok(
+            data,
+            expected_port,
+            expected_peer_port,
+            evidence_root=root,
+        )
     ok = bool(artifact and data and valid)
     return GateResult(
         "outbound_dm_controlled_peer",
@@ -2097,6 +2315,8 @@ def full_rf_acceptance_ok(
     data: dict,
     expected_port: str,
     expected_peer_port: str | None = None,
+    *,
+    evidence_root: Path | None = None,
 ) -> bool:
     checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
     steps = data.get("steps")
@@ -2128,6 +2348,7 @@ def full_rf_acceptance_ok(
             expected_port,
             expected_peer_port,
             require_status=require_status,
+            evidence_root=evidence_root,
         )
         and isinstance(steps, list)
         and bool(steps)
@@ -4162,6 +4383,7 @@ def full_rf_gate(
             data,
             expected_port,
             expected_peer_port,
+            evidence_root=root,
         )
         if passing:
             break

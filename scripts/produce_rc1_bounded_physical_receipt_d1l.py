@@ -434,7 +434,10 @@ def validate_ui(
 
 
 def validate_rf(
-    data: dict[str, Any], candidate: dict[str, str]
+    data: dict[str, Any],
+    candidate: dict[str, str],
+    *,
+    evidence_root: Path,
 ) -> dict[str, bool | int]:
     checks = data.get("checks")
     if not (
@@ -448,7 +451,11 @@ def validate_rf(
         and data.get("device_release_profile") == RELEASE_PROFILE
         and data.get("device_sd_history_mode") == SD_HISTORY_MODE
         and _target_pair(data)
-        and full_rf_acceptance_ok(data, POSIX_D1L_TARGET)
+        and full_rf_acceptance_ok(
+            data,
+            POSIX_D1L_TARGET,
+            evidence_root=evidence_root,
+        )
         and isinstance(checks, dict)
         and checks.get("ack_path") is True
     ):
@@ -1371,6 +1378,7 @@ def produce(
     package_dir: Path,
     sources: dict[str, Path],
     output: Path,
+    evidence_root: Path,
     evidence_output: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if set(sources) != set(SOURCE_ROLES):
@@ -1378,11 +1386,23 @@ def produce(
     resolved = {role: Path(path).resolve(strict=True) for role, path in sources.items()}
     if len(set(resolved.values())) != len(resolved):
         raise EvidenceError("one source file cannot fill multiple evidence roles")
+    evidence_root = Path(evidence_root).resolve(strict=True)
+    if not evidence_root.is_dir() or is_link_or_reparse(evidence_root):
+        raise EvidenceError("RF evidence root must be one exact regular directory")
     candidate = package_candidate(package_dir)
     loaded = {role: load_source(path, role) for role, path in resolved.items()}
     outcomes: dict[str, bool | int] = {}
     for role in SOURCE_ROLES:
-        derived = VALIDATORS[role](loaded[role], candidate)
+        validator = VALIDATORS[role]
+        derived = (
+            validator(
+                loaded[role],
+                candidate,
+                evidence_root=evidence_root,
+            )
+            if role == "rf" and validator is validate_rf
+            else validator(loaded[role], candidate)
+        )
         overlap = set(outcomes).intersection(derived)
         if overlap:
             raise EvidenceError(
@@ -1489,6 +1509,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         )
     )
     parser.add_argument("--package-dir", type=Path, required=True)
+    parser.add_argument("--evidence-root", type=Path, required=True)
     for role in SOURCE_ROLES:
         parser.add_argument(
             f"--{role.replace('_', '-')}-receipt",
@@ -1511,6 +1532,7 @@ def main(argv: list[str] | None = None) -> int:
             package_dir=args.package_dir,
             sources=sources,
             output=args.output,
+            evidence_root=args.evidence_root,
             evidence_output=args.evidence_output,
         )
     except (EvidenceError, FileNotFoundError, OSError, ValueError) as exc:

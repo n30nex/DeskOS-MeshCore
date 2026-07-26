@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import rf_full_acceptance_d1l as rf_accept
 from scripts import meshcore_signed_advert_runtime_d1l as signed_runtime
 from scripts import release_gate_audit_d1l as audit
 from scripts.release_gate_audit_d1l import build_audit, parse_args
@@ -881,6 +882,84 @@ def rf_hardware_boundary() -> dict:
     }
 
 
+def acknowledged_control(
+    target: str,
+    token: str,
+    socket_path: str,
+    evidence_root: Path,
+) -> dict:
+    request, request_raw = rf_accept.remote_control_request(target, token)
+    response = {
+        "id": request["id"],
+        "op": "radio.send_dm",
+        "ok": True,
+        "cached": False,
+        "result": {
+            "target": target[:12],
+            "utf8_bytes": len(token.encode("utf-8")),
+            "delivery": {
+                "acknowledged": True,
+                "event": "CONTACT_MSG_RECV",
+                "payload": {"ack": True},
+            },
+        },
+        "error": None,
+    }
+    response_raw = (
+        json.dumps(response, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        + b"\n"
+    )
+    validation = rf_accept.validate_remote_control_exchange(
+        request_raw,
+        response_raw,
+        d1l_public_key=target,
+        token=token,
+    )
+    sidecar_dir = evidence_root / "artifacts" / "rf-peer"
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    request_path = sidecar_dir / "request.jsonl"
+    response_path = sidecar_dir / "response.jsonl"
+    request_path.write_bytes(request_raw)
+    response_path.write_bytes(response_raw)
+
+    def receipt(path: Path, raw: bytes, transport: str) -> dict:
+        return {
+            "path": path.relative_to(evidence_root).as_posix(),
+            "size": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "source_path": socket_path,
+            "source_host": rf_accept.REMOTE_PEER_HOSTNAME,
+            "source_hostname": rf_accept.REMOTE_PEER_HOSTNAME,
+            "source_peer_pid": 4242,
+            "source_peer_uid": 0,
+            "source_peer_gid": 0,
+            "transport": transport,
+        }
+
+    return {
+        "op": "radio.send_dm",
+        "socket_path": socket_path,
+        "request_id": request["id"],
+        "request": request,
+        "response": response,
+        "request_receipt": receipt(
+            request_path,
+            request_raw,
+            rf_accept.LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
+        ),
+        "response_receipt": receipt(
+            response_path,
+            response_raw,
+            rf_accept.LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
+        ),
+        "request_sha256": hashlib.sha256(request_raw).hexdigest(),
+        "response_sha256": hashlib.sha256(response_raw).hexdigest(),
+        "validation": validation,
+    }
+
+
 def dm_probe_payload(**overrides: object) -> dict:
     commands = [
         "mesh send dm 0BF0A701D5AE2DB6 dm_probe_unit",
@@ -1015,6 +1094,110 @@ def test_full_rf_acceptance_accepts_only_validated_pi_local_peer(
         audit, "pinned_peer_report_shape_ok", lambda _data: False
     )
     assert audit.full_rf_acceptance_ok(payload, "COM12", None) is False
+
+
+def test_rf_audit_accepts_exact_pi_by_id_and_exact_opaque_com11_peer(
+    tmp_path: Path,
+):
+    boundary = rf_hardware_boundary()
+    boundary["port"] = audit.POSIX_D1L_TARGET
+    assert audit.real_hardware_rf_boundary_ok(
+        boundary,
+        audit.POSIX_D1L_TARGET,
+    )
+    assert not audit.allowed_port("/dev/ttyUSB2")
+
+    peer = {
+        "target_fingerprint": audit.MESHCOREBOT_PEER_FINGERPRINT,
+        "d1l_public_key": rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        "inbound_token": "rf_meshcorebot_in",
+        "controlled_peer": {
+            "fingerprint": audit.MESHCOREBOT_PEER_FINGERPRINT,
+            "evidence_source": "explicit_peer_status",
+            "port": audit.MESHCOREBOT_PEER_DEVICE,
+            "profile": audit.MESHCOREBOT_PEER_PROFILE,
+            "status_path": str(audit.MESHCOREBOT_PEER_STATUS_PATH),
+            "control_socket": audit.MESHCOREBOT_PEER_CONTROL_SOCKET,
+            "public_key": audit.MESHCOREBOT_PEER_PUBLIC_KEY,
+            "device_access": "opaque_status_identity_only",
+        },
+    }
+    assert not audit.controlled_peer_evidence_ok(
+        peer,
+        audit.POSIX_D1L_TARGET,
+        None,
+        require_status=True,
+        evidence_root=tmp_path,
+    )
+    peer["controlled_peer_control"] = acknowledged_control(
+        peer["d1l_public_key"],
+        peer["inbound_token"],
+        audit.MESHCOREBOT_PEER_CONTROL_SOCKET,
+        tmp_path,
+    )
+    assert audit.controlled_peer_evidence_ok(
+        peer,
+        audit.POSIX_D1L_TARGET,
+        None,
+        require_status=True,
+        evidence_root=tmp_path,
+    )
+    response_path = tmp_path / peer["controlled_peer_control"][
+        "response_receipt"
+    ]["path"]
+    response_path.write_bytes(b"{}\n")
+    assert not audit.controlled_peer_evidence_ok(
+        peer,
+        audit.POSIX_D1L_TARGET,
+        None,
+        require_status=True,
+        evidence_root=tmp_path,
+    )
+    peer["controlled_peer_control"] = acknowledged_control(
+        peer["d1l_public_key"],
+        peer["inbound_token"],
+        audit.MESHCOREBOT_PEER_CONTROL_SOCKET,
+        tmp_path,
+    )
+    request_path = tmp_path / peer["controlled_peer_control"][
+        "request_receipt"
+    ]["path"]
+    request_path.unlink()
+    assert not audit.controlled_peer_evidence_ok(
+        peer,
+        audit.POSIX_D1L_TARGET,
+        None,
+        require_status=True,
+        evidence_root=tmp_path,
+    )
+    peer["controlled_peer_control"] = acknowledged_control(
+        peer["d1l_public_key"],
+        peer["inbound_token"],
+        audit.MESHCOREBOT_PEER_CONTROL_SOCKET,
+        tmp_path,
+    )
+    peer["controlled_peer_control"]["response"]["cached"] = True
+    assert not audit.controlled_peer_evidence_ok(
+        peer,
+        audit.POSIX_D1L_TARGET,
+        None,
+        require_status=True,
+        evidence_root=tmp_path,
+    )
+    peer["controlled_peer_control"] = acknowledged_control(
+        peer["d1l_public_key"],
+        peer["inbound_token"],
+        audit.MESHCOREBOT_PEER_CONTROL_SOCKET,
+        tmp_path,
+    )
+    peer["controlled_peer"]["status_path"] = "/tmp/forged-status.json"
+    assert not audit.controlled_peer_evidence_ok(
+        peer,
+        audit.POSIX_D1L_TARGET,
+        None,
+        require_status=True,
+        evidence_root=tmp_path,
+    )
 
 
 def write_core_evidence(root: Path) -> None:
