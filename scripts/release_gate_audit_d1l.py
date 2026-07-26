@@ -34,6 +34,7 @@ try:
         MESHCOREBOT_PEER_STATUS_PATH,
         LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
         LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
+        RADIO_LISTENER_PORT,
         REMOTE_PEER_HOSTNAME,
         remote_control_deadline_only_ok,
         remote_control_request,
@@ -53,6 +54,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         MESHCOREBOT_PEER_STATUS_PATH,
         LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
         LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
+        RADIO_LISTENER_PORT,
         REMOTE_PEER_HOSTNAME,
         remote_control_deadline_only_ok,
         remote_control_request,
@@ -352,6 +354,8 @@ REQUIRED_DM_PROBE_CHECKS = {
 REQUIRED_FULL_RF_CHECKS = {
     "identity_public_key_matches",
     "controlled_peer_observed",
+    "outbound_send_exactly_once",
+    "direct_send_exactly_once",
     "outbound_dm",
     "inbound_dm",
     "ack_path",
@@ -2350,6 +2354,18 @@ def full_rf_acceptance_ok(
         if isinstance(data.get("controlled_peer"), dict)
         else None
     )
+    peer_port = (
+        data.get("controlled_peer", {}).get("port")
+        if isinstance(data.get("controlled_peer"), dict)
+        else None
+    )
+    listener_mode = (
+        source == LOCAL_PEER_EVIDENCE_SOURCE
+        or (
+            source == "explicit_peer_status"
+            and normalize_port(peer_port) == normalize_port(RADIO_LISTENER_PORT)
+        )
+    )
     require_status = source in {
         "explicit_peer_status",
         LOCAL_PEER_EVIDENCE_SOURCE,
@@ -2359,6 +2375,7 @@ def full_rf_acceptance_ok(
         data.get("inbound_token"),
         data.get("direct_token"),
     ]
+    transcript_tokens = tokens[:2] if listener_mode else tokens
     return (
         data.get("ok") is True
         and data.get("mode") == "rf-full-acceptance"
@@ -2388,7 +2405,10 @@ def full_rf_acceptance_ok(
         )
         and all(isinstance(token, str) and bool(token) for token in tokens)
         and len(set(tokens)) == len(tokens)
-        and all(token in json.dumps(steps, sort_keys=True) for token in tokens)
+        and all(
+            token in json.dumps(steps, sort_keys=True)
+            for token in transcript_tokens
+        )
         and isinstance(data.get("inbound_seen_at"), str)
         and bool(data["inbound_seen_at"].strip())
         and all(checks.get(name) is True for name in REQUIRED_FULL_RF_CHECKS)

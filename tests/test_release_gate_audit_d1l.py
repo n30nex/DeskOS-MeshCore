@@ -1056,6 +1056,8 @@ def full_rf_payload(
         "checks": {
             "identity_public_key_matches": True,
             "controlled_peer_observed": True,
+            "outbound_send_exactly_once": True,
+            "direct_send_exactly_once": True,
             "outbound_dm": True,
             "inbound_dm": True,
             "ack_path": True,
@@ -1085,9 +1087,15 @@ def test_full_rf_acceptance_accepts_only_validated_pi_local_peer(
             "max_status_age_sec": 120.0,
         }
     )
+    payload["steps"] = [
+        step
+        for step in payload["steps"]
+        if "rf_unit_direct" not in step["command"]
+    ]
     monkeypatch.setattr(
         audit, "pinned_peer_report_shape_ok", lambda _data: True
     )
+    assert "rf_unit_direct" not in json.dumps(payload["steps"])
     assert audit.full_rf_acceptance_ok(payload, "COM12", None) is True
 
     monkeypatch.setattr(
