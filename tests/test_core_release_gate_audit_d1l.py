@@ -2325,6 +2325,40 @@ def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
             "result": baseline_route,
         },
         {
+            "command": "mesh status",
+            "result": {
+                "ok": True,
+                "cmd": "mesh status",
+                "state": "ready",
+                "radio_ready": True,
+                "runtime": {
+                    "owner": "meshcore_service",
+                    "command_queue_depth": 0,
+                    "priority_queue_depth": 0,
+                    "event_queue_depth": 0,
+                    "owner_maintenance_runs": 41,
+                    "heartbeat": 9,
+                },
+            },
+        },
+        {
+            "command": "mesh status",
+            "result": {
+                "ok": True,
+                "cmd": "mesh status",
+                "state": "ready",
+                "radio_ready": True,
+                "runtime": {
+                    "owner": "meshcore_service",
+                    "command_queue_depth": 0,
+                    "priority_queue_depth": 0,
+                    "event_queue_depth": 0,
+                    "owner_maintenance_runs": 42,
+                    "heartbeat": 9,
+                },
+            },
+        },
+        {
             "command": (
                 f"mesh send dm {fingerprint} core acceptance test rf_remote_out"
             ),
@@ -2416,6 +2450,7 @@ def test_remote_rf_gate_recomputes_raw_status_and_control_sidecars(
     )
 
     assert gate.ok is True
+    assert gate.details["owner_readiness_ok"] is True
     assert gate.details["raw_status_ok"] is True
     assert gate.details["control_exchange_ok"] is True
     assert gate.details["peer_binding_ok"] is True
@@ -2443,6 +2478,32 @@ def test_remote_rf_gate_recomputes_raw_status_and_control_sidecars(
         ).ok
         is False
     )
+
+
+def test_remote_rf_gate_rejects_stalled_owner_readiness_evidence(
+    tmp_path: Path,
+):
+    receipt = write_remote_rf_receipt(tmp_path)
+    report = json.loads(receipt.read_text(encoding="utf-8"))
+    status_steps = [
+        step
+        for step in report["steps"]
+        if step.get("command") == "mesh status"
+    ]
+    status_steps[-1]["result"]["runtime"]["owner_maintenance_runs"] = 41
+    write_json(receipt, report)
+
+    gate = audit.rf_gate(
+        receipt,
+        tmp_path,
+        COMMIT,
+        "disabled",
+        RUN_ID,
+        RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert gate.details["owner_readiness_ok"] is False
 
 
 def test_remote_rf_gate_requires_exact_full_d1l_identity_status(
@@ -2483,6 +2544,7 @@ def test_local_rf_gate_recomputes_raw_status_and_control_sidecars(
     )
 
     assert gate.ok is True
+    assert gate.details["owner_readiness_ok"] is True
     assert gate.details["raw_status_ok"] is True
     assert gate.details["control_exchange_ok"] is True
     assert gate.details["source_rows_ok"] is True
