@@ -1477,6 +1477,14 @@ def protocol_tx_ready_for_rf(version_result: object) -> bool:
     )
 
 
+def radio_admission_retryable(result: object) -> bool:
+    return (
+        isinstance(result, dict)
+        and result.get("ok") is False
+        and result.get("code") == "ESP_ERR_TIMEOUT"
+    )
+
+
 def read_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
@@ -1509,6 +1517,7 @@ def status_snapshot(status: dict | None) -> dict:
             "tx_dm_ack_miss_total": counters.get("tx_dm_ack_miss_total"),
             "local_fast_reply_total": counters.get("local_fast_reply_total"),
         },
+        "pid": status.get("pid"),
         "run_id": status.get("run_id"),
         "service": status.get("service"),
         "status_written_at": status.get("status_written_at"),
@@ -3413,7 +3422,7 @@ def build_report(
     )
     outbound_step = command_step(steps, outbound_command)
     outbound_packets = command_step(steps, f"packets search {outbound_token}")
-    direct_step = command_step(steps, direct_command)
+    direct_step = latest_command_step(steps, direct_command)
     latest_messages = latest_step_with_prefix(steps, f"messages dm {fingerprint}")
     first_messages = first_command_step(
         steps, f"messages dm {fingerprint}"
@@ -4286,11 +4295,18 @@ def _run_hardware_reserved(
             run_command(ser, "packets")
             run_command(ser, f"routes trace {fingerprint}")
             if not listener_mode:
-                run_command(
+                direct_result = run_command(
                     ser,
                     f"mesh send dm {fingerprint} {direct_token}",
                     max(timeout, 8.0),
                 )
+                if radio_admission_retryable(direct_result):
+                    time.sleep(max(0.25, poll_sec))
+                    run_command(
+                        ser,
+                        f"mesh send dm {fingerprint} {direct_token}",
+                        max(timeout, 8.0),
+                    )
                 time.sleep(2.0)
                 run_command(ser, f"packets search {direct_token}")
             run_command(ser, f"messages dm {fingerprint}")

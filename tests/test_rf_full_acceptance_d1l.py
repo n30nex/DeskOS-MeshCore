@@ -182,6 +182,13 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
         },
         {
             "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct",
+            "result": {
+                "ok": False,
+                "code": "ESP_ERR_TIMEOUT",
+            },
+        },
+        {
+            "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct",
             "result": {"ok": True, "cmd": "mesh send dm"},
         },
         {
@@ -701,6 +708,22 @@ def test_rf_full_acceptance_rejects_protocol_tx_not_ready(
     }
 
     assert not rf_accept.protocol_tx_ready_for_rf(version)
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        ({"ok": False, "code": "ESP_ERR_TIMEOUT"}, True),
+        ({"ok": True, "code": "ESP_ERR_TIMEOUT"}, False),
+        ({"ok": False, "code": "ESP_ERR_NO_MEM"}, False),
+        ({"ok": False, "code": "TIMEOUT"}, False),
+        (None, False),
+    ],
+)
+def test_direct_dm_retry_requires_exact_radio_admission_timeout(
+    result, expected
+):
+    assert rf_accept.radio_admission_retryable(result) is expected
 
 
 def test_rf_report_cannot_use_later_ready_version_to_override_first_block():
@@ -1530,6 +1553,15 @@ def test_exact_meshcorebot_status_and_signed_contact_are_required():
         rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
         observed_at=observed,
     )
+    snapshot = rf_accept.status_snapshot(status)
+    assert snapshot["pid"] == 4242
+    assert rf_accept.meshcorebot_peer_connected(
+        snapshot,
+        rf_accept.MESHCOREBOT_PEER_DEVICE,
+        rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        observed_at=observed,
+    )
+
     forged = json.loads(json.dumps(status))
     forged["serial"]["configured_port"] = "/dev/krab-com12"
     assert not rf_accept.meshcorebot_peer_connected(

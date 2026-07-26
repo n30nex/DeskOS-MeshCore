@@ -1244,7 +1244,7 @@ bool d1l_ui_service_sheets_render_admin(
         } else {
             lv_obj_t *login = create_label(
                 sheet,
-                "Select a repeater or room in Network, open its details, then tap Admin.",
+                "Select a repeater or room in Nodes, open its details, then tap Admin.",
                 0xFBBF24);
             position_wrap(login, 8, 246, 408);
             complete = login && complete;
