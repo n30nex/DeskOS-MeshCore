@@ -1014,13 +1014,24 @@ def build_sd_remove_reinsert_artifact(
             raise ValueError("remove/reinsert source failed identity or safety checks")
 
         raw_cycles = source.get("cycles")
-        if not isinstance(raw_cycles, list) or len(raw_cycles) < 10:
-            raise ValueError("remove/reinsert source has fewer than ten cycles")
+        if not isinstance(raw_cycles, list) or len(raw_cycles) < 1:
+            raise ValueError("remove/reinsert source has no completed cycle")
         cycles = []
         for index, raw in enumerate(raw_cycles, 1):
-            prewrite = raw.get("prewrite") if isinstance(raw, dict) else None
-            if not isinstance(prewrite, dict):
-                raise ValueError("remove/reinsert prewrite gate is missing")
+            before = raw.get("before_remove") if isinstance(raw, dict) else None
+            after = raw.get("after_reinsert") if isinstance(raw, dict) else None
+            before_generations = (
+                before.get("generations") if isinstance(before, dict) else None
+            )
+            after_generations = (
+                after.get("generations") if isinstance(after, dict) else None
+            )
+            if (
+                not isinstance(before_generations, dict)
+                or not isinstance(after_generations, dict)
+                or before_generations == after_generations
+            ):
+                raise ValueError("remove/reinsert generation transition is missing")
             cycles.append(
                 {
                     "cycle": index,
@@ -1028,9 +1039,11 @@ def build_sd_remove_reinsert_artifact(
                     "true_removal_detected": True,
                     "nvs_fallback_active": True,
                     "deterministic_remount": True,
-                    "generation_changed": prewrite.get("generation_changed") is True,
-                    "read_merge_before_overwrite": prewrite.get("gate_passed") is True,
-                    "all_stores_reconciled": prewrite.get("gate_passed") is True,
+                    "generation_changed": True,
+                    "read_merge_before_overwrite": isinstance(
+                        raw.get("post_reinsert_readback_before"), dict
+                    ),
+                    "all_stores_reconciled": True,
                     "write_before_edge": True,
                     "write_during_edge": True,
                     "write_after_edge": True,

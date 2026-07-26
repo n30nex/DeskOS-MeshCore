@@ -150,6 +150,6 @@ def test_map_docs_define_the_bounded_interactive_policy_and_probe_safety():
     assert "at most 60%" in guide
     assert "at least 8 GiB" in guide
     assert "(c) OpenStreetMap contributors" in guide
-    assert "background download requires an explicitly authorized provider" in test_plan
+    assert "one authorized-provider Map download followed by offline cache" in test_plan
     assert "example manifest intentionally uses a non-routable placeholder" in attributions
     assert "must not be pointed at OpenStreetMap Standard" in attributions

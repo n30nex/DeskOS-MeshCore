@@ -19,7 +19,7 @@ import shutil
 import stat
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 try:
@@ -545,7 +545,7 @@ def _peer_snapshot(value: object) -> dict[str, Any]:
         }
         or value.get("source") != "local_peer_status_file"
         or not isinstance(value.get("path"), str)
-        or not Path(value["path"]).is_absolute()
+        or not PurePosixPath(value["path"]).is_absolute()
         or not isinstance(value.get("snapshot"), dict)
     ):
         raise EvidenceError("controlled-peer status capture shape is invalid")

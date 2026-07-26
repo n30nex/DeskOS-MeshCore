@@ -17,16 +17,14 @@ def test_ui_core_navigation_profile_matrix(tmp_path: Path) -> None:
             "core",
             "D1L_RELEASE_PROFILE_CORE_1_0",
             "D1L_SD_HISTORY_MODE_CONDITIONAL",
-            "1",
         ),
         (
             "development",
             "D1L_RELEASE_PROFILE_DEVELOPMENT",
             "D1L_SD_HISTORY_MODE_SUPPORTED_OPTIONAL",
-            "0",
         ),
     )
-    for name, profile, sd_mode, expect_core in cases:
+    for name, profile, sd_mode in cases:
         executable = tmp_path / (
             f"ui_core_navigation_{name}.exe"
             if os.name == "nt"
@@ -44,7 +42,6 @@ def test_ui_core_navigation_profile_matrix(tmp_path: Path) -> None:
             str(ROOT / "main"),
             f"-DD1L_RELEASE_PROFILE={profile}",
             f"-DD1L_SD_HISTORY_MODE={sd_mode}",
-            f"-DEXPECT_CORE={expect_core}",
             str(ROOT / "main/app/release_profile.c"),
             str(ROOT / "main/ui/ui_navigation.c"),
             str(ROOT / "tests/native/ui_core_navigation_test.c"),

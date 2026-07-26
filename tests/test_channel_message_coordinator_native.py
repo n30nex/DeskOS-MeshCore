@@ -13,11 +13,11 @@ def test_channel_message_coordinator_retries_revision_races(tmp_path):
         raise AssertionError("A C compiler is required for coordinator tests")
 
     cases = (
-        ("core", "D1L_RELEASE_PROFILE_CORE_1_0", "EXPECT_CORE=1"),
-        ("development", "D1L_RELEASE_PROFILE_DEVELOPMENT", "EXPECT_CORE=0"),
-        ("full", "D1L_RELEASE_PROFILE_FULL_FEATURE", "EXPECT_CORE=0"),
+        ("core", "D1L_RELEASE_PROFILE_CORE_1_0"),
+        ("development", "D1L_RELEASE_PROFILE_DEVELOPMENT"),
+        ("full", "D1L_RELEASE_PROFILE_FULL_FEATURE"),
     )
-    for name, profile, expectation in cases:
+    for name, profile in cases:
         executable = tmp_path / (
             f"channel_message_coordinator_{name}.exe"
             if os.name == "nt"
@@ -35,7 +35,6 @@ def test_channel_message_coordinator_retries_revision_races(tmp_path):
             str(ROOT / "main"),
             f"-DD1L_RELEASE_PROFILE={profile}",
             "-DD1L_SD_HISTORY_MODE=D1L_SD_HISTORY_MODE_DISABLED",
-            f"-D{expectation}",
             str(ROOT / "main/app/release_profile.c"),
             str(ROOT / "main/mesh/channel_message_coordinator.c"),
             str(ROOT / "tests/native/channel_message_coordinator_test.c"),

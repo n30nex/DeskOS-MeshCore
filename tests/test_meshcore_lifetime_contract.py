@@ -57,7 +57,10 @@ def test_node_reachability_never_reuses_persisted_uptime_after_reload():
     assert init.index("clear_ram()") < init.index("nvs_get_blob")
     assert "s_live_last_heard_ms[index] = now_ms" in upsert
     assert "s_live_heard_valid[index] = true" in upsert
-    assert "live_last_heard_before" in upsert
-    assert "live_heard_valid_before" in upsert
+    assert upsert.index("s_live_last_heard_ms[index] = now_ms") < upsert.index(
+        "note_persistence_dirty_locked(false, now_ms)"
+    )
+    assert "persist_node_snapshot(" not in upsert
+    assert "nvs_" not in upsert
     assert "node->last_heard_ms" not in view.split("view->reachable", 1)[1]
     assert "s_live_last_heard_ms[index]" in view

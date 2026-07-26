@@ -32,7 +32,7 @@ test "$(git rev-parse HEAD)" = "$SHA"
 test -z "$(git status --porcelain=v1)"
 test "$(stat -c %U "$ROOT")" = neonx
 
-PY=/home/siguidev/sigui-venv/bin/python
+PY=/home/neonx/sigui-venv/bin/python
 test -x "$PY"
 ```
 

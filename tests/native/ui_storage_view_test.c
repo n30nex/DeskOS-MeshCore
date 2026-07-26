@@ -203,7 +203,7 @@ static void test_release_profile_filters_only_unavailable_map_location(void)
     assert(d1l_ui_storage_location_available(
         D1L_UI_STORAGE_LOCATION_EXPORTS));
     assert(d1l_ui_storage_location_available(
-               D1L_UI_STORAGE_LOCATION_MAP_TILES) == !EXPECT_CORE);
+        D1L_UI_STORAGE_LOCATION_MAP_TILES));
     assert(!d1l_ui_storage_location_available(
         (d1l_ui_storage_location_t)D1L_UI_STORAGE_LOCATION_COUNT));
 }

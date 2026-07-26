@@ -5,6 +5,10 @@
 
 #include "ui/ui_home_view.h"
 
+#ifndef EXPECT_BLE
+#error "EXPECT_BLE must bind the release-profile case"
+#endif
+
 static void test_default_view_is_bounded_and_truthful(void)
 {
     d1l_ui_home_view_input_t input = {0};
@@ -267,27 +271,17 @@ static void test_release_profile_strips_hidden_sd_failures(void)
     d1l_ui_home_view_apply_release_profile(&input);
     d1l_ui_home_view_model_t view;
     d1l_ui_home_view(&input, &view);
-#if EXPECT_CORE
-    assert(!input.wifi_connected);
-    assert(!input.wifi_connecting);
-    assert(!input.ble_build_enabled);
-    assert(!input.map_location_set);
-    assert(!input.storage_retained_sd_degraded);
-    assert(!input.storage_sd_data_root_ready);
-    assert(strcmp(view.sd_value, "internal") == 0);
-    assert(strcmp(view.sd_compact_value, "Internal") == 0);
-    assert(view.sd_value_color == 0x8EA0AEU);
-    assert(!view.storage_needs_attention);
-    assert(strcmp(view.attention_value, "OK") == 0);
-#else
     assert(input.wifi_connected);
-    assert(input.ble_build_enabled);
+    assert(input.wifi_connecting);
+    assert(input.ble_build_enabled == (EXPECT_BLE != 0));
+    assert(input.ble_transport_supported == (EXPECT_BLE != 0));
+    assert(input.ble_companion_enabled == (EXPECT_BLE != 0));
     assert(input.map_location_set);
     assert(input.storage_retained_sd_degraded);
+    assert(input.storage_sd_data_root_ready);
     assert(strcmp(view.sd_compact_value, "Check") == 0);
     assert(view.sd_value_color == 0xF87171U);
     assert(view.storage_needs_attention);
-#endif
 
     input.storage_retained_backup_degraded = true;
     d1l_ui_home_view(&input, &view);

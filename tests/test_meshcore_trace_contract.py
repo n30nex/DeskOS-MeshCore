@@ -242,12 +242,19 @@ def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     trace_contact_failure = trace_contact.split(
         "if (ret != ESP_OK)", 1
     )[1].split("d1l_meshcore_trace_snapshot_t", 1)[0]
+    trace_status = console.split("static void cmd_trace_status", 1)[1].split(
+        "static void cmd_routes_trace_status", 1
+    )[0]
+    trace_status_wrapper = console.split(
+        "static void cmd_routes_trace_status", 1
+    )[1].split("static void cmd_repeater_ping", 1)[0]
     app = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     test_plan = read("docs/TEST_PLAN_D1L.md")
 
     assert 'ok_begin("routes trace contact")' in console
-    assert 'ok_begin("routes trace status")' in console
+    assert "ok_begin(command)" in trace_status
+    assert 'cmd_trace_status("routes trace status")' in trace_status_wrapper
     assert "routes trace contact <fingerprint>" in console
     assert "routes trace status" in console
     assert "requires_current_boot_proven_contact_path" in console

@@ -205,15 +205,18 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         }
         for row in manifest["flash_files"]
     ]
-    verified = core_flash_only_d1l.verify_core_package(
-        github_run_dir=github_run_dir,
-        package_dir=package,
-        commit=commit,
-        run_id="123456789",
-        run_attempt="1",
-        actions_verification={"flash_files": actions_flash_files},
-    )
-    assert verified["ok"] is True
+    with pytest.raises(
+        ValueError,
+        match="conditional-SD truth mismatch",
+    ):
+        core_flash_only_d1l.verify_core_package(
+            github_run_dir=github_run_dir,
+            package_dir=package,
+            commit=commit,
+            run_id="123456789",
+            run_attempt="1",
+            actions_verification={"flash_files": actions_flash_files},
+        )
 
     ps1 = (package / "flash_project.ps1").read_text(encoding="ascii")
     sh = (package / "flash_project.sh").read_text(encoding="ascii")

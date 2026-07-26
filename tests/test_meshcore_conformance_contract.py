@@ -570,23 +570,25 @@ def test_production_service_uses_the_codec_exercised_by_the_harness():
 
     assert '#include "mesh/meshcore_wire.h"' in service
     assert '"mesh/meshcore_wire.c"' in cmake
-    # Channel, DM, ACK, PATH, TRACE hash binding, advert, and authenticated
-    # admin RESPONSE each enter through the same fail-closed decoder.
-    assert service.count("d1l_meshcore_wire_decode_v1(") == 8
+    # Eight RX entry points (channel, DM, ACK, PATH, CONTROL discovery, TRACE
+    # hash binding, advert, and authenticated admin RESPONSE) plus the locally
+    # built channel-TX packet hash binding use the same fail-closed decoder.
+    assert service.count("d1l_meshcore_wire_decode_v1(") == 9
     assert service.count("d1l_meshcore_wire_decode(") == 0
     ack_builder = service.split("static esp_err_t build_dm_ack_response", 1)[1].split(
         "static bool dispatch_bounded_dm_ack", 1
     )[0]
-    # Existing packet builders plus admin ANON_REQ, status/telemetry REQ, and
-    # the exact allowlisted query/mutation REQs use the production encoder.
-    assert service.count("d1l_meshcore_wire_write_prefix(") == 7
+    # Existing packet builders, the bounded CONTROL discovery request, admin
+    # ANON_REQ, status/telemetry REQ, and the exact allowlisted query/mutation
+    # REQs use the production encoder.
+    assert service.count("d1l_meshcore_wire_write_prefix(") == 8
     assert admin_runtime.count("d1l_meshcore_wire_write_prefix(") == 5
     assert ack_builder.count("d1l_meshcore_wire_write_prefix(") == 3
     assert (
         service.count("d1l_meshcore_wire_write_prefix(")
         + admin_runtime.count("d1l_meshcore_wire_write_prefix(")
         - ack_builder.count("d1l_meshcore_wire_write_prefix(")
-        == 9
+        == 10
     )
     assert "parse_wire_packet" not in service
     for legacy_helper in [

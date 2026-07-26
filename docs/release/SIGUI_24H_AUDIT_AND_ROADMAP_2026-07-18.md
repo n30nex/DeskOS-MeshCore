@@ -1236,7 +1236,7 @@ python ./scripts/core_install_recovery_review_d1l.py \
   --confirm-checksums-reviewed \
   --confirm-normal-usb-install-reviewed \
   --confirm-generated-entrypoints-reviewed \
-  --confirm-windows-com12-normal-install-reviewed \
+  --confirm-windows-manual-non-qualifying-install-reviewed \
   --confirm-posix-stable-by-id-normal-install-reviewed \
   --confirm-usb-identity-policy-reviewed \
   --confirm-raw-tty-observational-only-reviewed \

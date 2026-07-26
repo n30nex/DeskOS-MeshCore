@@ -2318,7 +2318,9 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     assert "focused source checks" in active_test_plan
     assert "simulator images" in active_test_plan
     assert "alone do not pass" in active_test_plan
-    assert "one consolidated physical UI confirmation" in active_roadmap
+    assert "automated 12-surface navigation receipt" in active_roadmap
     assert "boot/five-root UI" in active_checklist
-    assert "one consolidated physical display/touch/keyboard review" in active_checklist
+    assert "automated 12-surface navigation receipt" in active_checklist
+    assert "one consolidated physical" not in active_roadmap
+    assert "one consolidated physical" not in active_checklist
     assert "No soak is required" in active_checklist
