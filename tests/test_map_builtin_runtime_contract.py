@@ -346,7 +346,7 @@ def test_same_visible_or_complete_hidden_plan_reuses_frame_without_worker_replay
         "esp_err_t d1l_map_view_service_acquire_visible",
         "void d1l_map_view_service_release_visible",
     )
-    identical = acquire.split("if (same_plan &&", 1)[1].split(
+    identical = acquire.split("if (!force_reload && same_plan &&", 1)[1].split(
         "uint32_t generation", 1
     )[0]
     completed = body(

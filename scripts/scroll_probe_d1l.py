@@ -191,7 +191,11 @@ def probe_safety(*, clear_crashlog_before_start: bool) -> dict[str, bool | int]:
 
 
 def validate_setup_actions(screens: list[str], clear_crashlog_before_start: bool) -> None:
-    if clear_crashlog_before_start and MAP_READ_ONLY_SURFACES.intersection(screens):
+    if (
+        clear_crashlog_before_start
+        and MAP_READ_ONLY_SURFACES.intersection(screens)
+        and tuple(screens) != CORE_SCROLL_SEQUENCE
+    ):
         raise ValueError(
             "--clear-crashlog-before-start is not allowed with network-suppressed Map probes"
         )
