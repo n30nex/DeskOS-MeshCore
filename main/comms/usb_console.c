@@ -4949,7 +4949,7 @@ static void retained_canary_fingerprint(const char *token,
                                         size_t fingerprint_size)
 {
     const uint32_t hash = retained_canary_hash(token);
-    snprintf(fingerprint, fingerprint_size, "%08lX%08lX",
+    snprintf(fingerprint, fingerprint_size, "%08lx%08lx",
              (unsigned long)hash,
              (unsigned long)(hash ^ 0xA5A5F00DUL));
 }

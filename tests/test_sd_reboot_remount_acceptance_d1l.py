@@ -40,7 +40,7 @@ def ready_storage_line(manager_state: str = "READY_SD") -> str:
         '"file_ops":true,"atomic_rename":true,"status_stale":false,'
         '"presence_stale":false,"refresh_failures":0,"file_line_max":512,'
         '"file_chunk_max":192,"path_max":96},"data_enabled":true,'
-        '"data_backend":"mixed","message_store_backend":"sd",'
+        '"data_backend":"sd","message_store_backend":"sd",'
         '"dm_store_backend":"sd","route_store_backend":"sd",'
         '"packet_log_backend":"sd","stores":{"messages":"sd","dm":"sd",'
         '"routes":"sd","packets":"sd"},'

@@ -74,6 +74,20 @@ def test_retained_history_backends_require_dedicated_anchor():
     assert not sd_file_canary_d1l.retained_history_backends_ready(external)
 
 
+def test_retained_history_backends_accept_sd_first_and_legacy_mixed_labels():
+    current = json.loads(ready_storage_status())
+    current["data_backend"] = "sd"
+    assert sd_file_canary_d1l.retained_history_backends_ready(current)
+
+    legacy = json.loads(ready_storage_status())
+    assert legacy["data_backend"] == "mixed"
+    assert sd_file_canary_d1l.retained_history_backends_ready(legacy)
+
+    unavailable = json.loads(ready_storage_status())
+    unavailable["data_backend"] = "volatile"
+    assert not sd_file_canary_d1l.retained_history_backends_ready(unavailable)
+
+
 def canary_success() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage filecanary",'
