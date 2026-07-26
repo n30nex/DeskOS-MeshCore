@@ -41,7 +41,7 @@
     }
   },
   "source_pins": {
-    ".github/workflows/d1l-ci.yml": "ae26bb5fb48e87be5a356db171e7475cd06cdab8e30dad0db9ba5c67dc20711e",
+    ".github/workflows/d1l-ci.yml": "fcfe9d61610bbb978f388ba0f37078d0919e3df542e4a36202797b47324beb8c",
     "main/CMakeLists.txt": "61c3195c0c15ea75ba3a68d6947915b619c3d186ebea1a0482b1551df93ee938",
     "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
     "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",
@@ -53,7 +53,7 @@
     "main/mesh/meshcore_path_state.c": "a6a5f42bc95f511115f1b9da12e4853fb868646ebc34ffaaeae85eb15cb72a58",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
-    "main/mesh/meshcore_service.c": "b5c86f8e5b6754e21e7de59ba794fddb1f7b4e6a35e426d7eb9432513f87a564",
+    "main/mesh/meshcore_service.c": "02ac83f6ba886b37d74839ca5f4467527219cd873eca0f9f879fef5a43ee2c5a",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "fe42a573ec801a7bef1ce7bf3a4e3243b2382d0a816ed6f93c91b1f4992542e8",
     "scripts/meshcore_conformance_d1l.py": "02189198cb33244c3d1c940981d128a80fd8c145ef3a09d2b8fec883d927f392",
@@ -64,7 +64,7 @@
     "tests/fuzz/settings_envelope_fuzz.c": "ddcb8ce9b14005c1a746bcd215666cd01280115f01d7efce186dcf68c418c5cd",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "75c63e33a1d15ed747b61e89380f52e41f34f2e04c676f235eeac923e3a77a1a",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "c9f5b06722d7d548530210ab6000374db41b75e850075acd4096ce69e8d31928",
     "tests/meshcore_remaining_fuzz/crypto_host_adapter.cpp": "1fa19502918fa07f1e30610ec04cf7d394d14caa16e0c5f779ce148a790842f6",
     "tests/meshcore_remaining_fuzz/stubs/esp_err.h": "a32529585b01ed39217555a23159f8434fcbf8601947728a66156715c0c6d2e2",
     "tests/meshcore_remaining_fuzz/stubs/mbedtls/aes.h": "ea331364a1c181f34a09a38e825d5ddb781261738785b47e814a54e18d3fe53f",
