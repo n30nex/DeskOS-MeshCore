@@ -527,6 +527,72 @@ def test_rf_full_acceptance_rejects_non_serial_peer_port():
         rf_accept.enforce_port_policy("COM12", "COM_DISABLED")
 
 
+def test_rf_full_acceptance_accepts_only_exact_opaque_com11_peer_identity():
+    assert rf_accept.enforce_port_policy(
+        d1l_serial_target.POSIX_D1L_TARGET,
+        rf_accept.MESHCOREBOT_PEER_DEVICE,
+    ) == (
+        d1l_serial_target.POSIX_D1L_TARGET,
+        rf_accept.MESHCOREBOT_PEER_DEVICE,
+    )
+    for forged in (
+        rf_accept.MESHCOREBOT_PEER_DEVICE.upper(),
+        "/dev/krab-com12",
+        "/dev/ttyACM0",
+    ):
+        with pytest.raises(ValueError, match="invalid controlled-peer port"):
+            rf_accept.enforce_port_policy(
+                d1l_serial_target.POSIX_D1L_TARGET,
+                forged,
+            )
+
+
+def test_com11_peer_requires_exact_status_path_before_hardware(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "rf_full_acceptance_d1l.py",
+            "--dry-run",
+            "--port",
+            d1l_serial_target.POSIX_D1L_TARGET,
+            "--peer-status",
+            "/tmp/forged-status.json",
+            "--peer-port",
+            rf_accept.MESHCOREBOT_PEER_DEVICE,
+            "--fingerprint",
+            rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        rf_accept.main()
+
+    assert "requires the exact status path" in capsys.readouterr().err
+
+
+def test_meshcorebot_dry_run_plans_runner_owned_local_control():
+    report = rf_accept.dry_run_report(
+        port=d1l_serial_target.POSIX_D1L_TARGET,
+        peer_status_path=rf_accept.MESHCOREBOT_PEER_STATUS_PATH,
+        peer_port=rf_accept.MESHCOREBOT_PEER_DEVICE,
+        fingerprint=rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="rf_meshcorebot",
+        send_outbound=True,
+    )
+
+    assert report["discord_command"] is None
+    assert report["controlled_peer_control_plan"] == {
+        "op": "radio.send_dm",
+        "socket_path": rf_accept.MESHCOREBOT_PEER_CONTROL_SOCKET,
+        "target": rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        "text": "rf_meshcorebot_in",
+        "transport": "local-unix-socket",
+        "execution": "runner_owned",
+    }
+
+
 @pytest.mark.parametrize("port", ["COM7", "COM13", "COM16", "COM30"])
 def test_rf_full_acceptance_requires_com12_for_d1l(port):
     with pytest.raises(ValueError, match="requires COM12"):
@@ -1376,6 +1442,65 @@ def remote_status(
     }
 
 
+def meshcorebot_status(observed: datetime) -> dict:
+    written = (observed - timedelta(seconds=2)).isoformat()
+    return {
+        "service": "meshcorebot",
+        "pid": 4242,
+        "status_written_at": written,
+        "serial": {
+            "active_port": rf_accept.MESHCOREBOT_PEER_DEVICE,
+            "configured_port": rf_accept.MESHCOREBOT_PEER_DEVICE,
+            "hardware_id": rf_accept.MESHCOREBOT_PEER_HARDWARE_ID,
+            "baud_rate": 115200,
+            "meshcore_connected": True,
+        },
+        "discord": {"connected": True},
+        "mesh": {
+            "last_poll_at": (
+                observed - timedelta(seconds=1)
+            ).isoformat(),
+        },
+    }
+
+
+def test_exact_meshcorebot_status_and_signed_contact_are_required():
+    observed = datetime(2026, 7, 26, 7, 15, tzinfo=timezone.utc)
+    status = meshcorebot_status(observed)
+    assert rf_accept.meshcorebot_peer_connected(
+        status,
+        rf_accept.MESHCOREBOT_PEER_DEVICE,
+        rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        observed_at=observed,
+    )
+    forged = json.loads(json.dumps(status))
+    forged["serial"]["configured_port"] = "/dev/krab-com12"
+    assert not rf_accept.meshcorebot_peer_connected(
+        forged,
+        rf_accept.MESHCOREBOT_PEER_DEVICE,
+        rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        observed_at=observed,
+    )
+
+    contacts = {
+        "ok": True,
+        "entries": [
+            {
+                "fingerprint": rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+                "public_key": rf_accept.MESHCOREBOT_PEER_PUBLIC_KEY,
+                "type": "chat",
+                "verification_source": "signed_advert",
+                "canonical": True,
+                "can_dm": True,
+                "can_admin": False,
+            }
+        ],
+    }
+    assert rf_accept.contacts_has_pinned_meshcorebot_peer(contacts)
+    contacts["entries"][0]["type"] = "repeater"
+    assert not rf_accept.contacts_has_pinned_meshcorebot_peer(contacts)
+
+
 def remote_config() -> dict:
     return rf_accept.remote_peer_config(
         ssh_host="neonx@192.168.0.24"
@@ -1626,6 +1751,33 @@ def test_remote_control_exchange_binds_exact_target_token_and_ack():
 
 def local_config() -> dict:
     return rf_accept.local_peer_config()
+
+
+def meshcorebot_local_config() -> dict:
+    return rf_accept.meshcorebot_local_peer_config()
+
+
+def test_meshcorebot_local_config_accepts_only_the_second_exact_pin():
+    config = meshcorebot_local_config()
+    assert config == {
+        "hostname": rf_accept.REMOTE_PEER_HOSTNAME,
+        "status_path": str(rf_accept.MESHCOREBOT_PEER_STATUS_PATH),
+        "control_socket": rf_accept.MESHCOREBOT_PEER_CONTROL_SOCKET,
+        "device": rf_accept.MESHCOREBOT_PEER_DEVICE,
+        "public_key": rf_accept.MESHCOREBOT_PEER_PUBLIC_KEY,
+        "max_status_age_sec": (
+            rf_accept.MESHCOREBOT_PEER_MAX_STATUS_AGE_SEC
+        ),
+    }
+    for field, forged in (
+        ("status_path", "/tmp/status.json"),
+        ("control_socket", "/tmp/control.sock"),
+        ("device", "/dev/ttyACM0"),
+        ("public_key", "f" * 64),
+    ):
+        candidate = {**config, field: forged}
+        with pytest.raises(ValueError, match="exact"):
+            rf_accept.validate_local_peer_config(candidate)
 
 
 @pytest.mark.parametrize(
@@ -2181,6 +2333,64 @@ def test_local_peer_capture_and_control_preserve_exact_sidecars(
         control["request_receipt"]["source_peer_uid"]
         == rf_accept.LOCAL_PEER_CONTROL_UID
     )
+
+
+def test_meshcorebot_local_control_captures_exact_acknowledged_exchange(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = meshcorebot_local_config()
+    token = "rf_meshcorebot_in"
+    request_raw, response_raw = remote_control_response(
+        rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token,
+    )
+
+    def fake_operation(
+        observed_config,
+        operation,
+        *,
+        control_request=None,
+        timeout_sec=rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC,
+    ):
+        assert observed_config == config
+        assert operation == "send_control"
+        assert control_request == request_raw
+        assert timeout_sec == rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC
+        return {
+            "socket_path": rf_accept.MESHCOREBOT_PEER_CONTROL_SOCKET,
+            "hostname": rf_accept.REMOTE_PEER_HOSTNAME,
+            "request_size": len(request_raw),
+            "request_sha256": hashlib.sha256(request_raw).hexdigest(),
+            "response_size": len(response_raw),
+            "response_sha256": hashlib.sha256(response_raw).hexdigest(),
+            "response_b64": base64.b64encode(response_raw).decode("ascii"),
+            "peer_pid": 7896,
+            "peer_uid": rf_accept.LOCAL_PEER_CONTROL_UID,
+            "peer_gid": rf_accept.LOCAL_PEER_CONTROL_GID,
+        }
+
+    monkeypatch.setattr(
+        rf_accept,
+        "run_local_peer_operation",
+        fake_operation,
+    )
+    request_path = tmp_path / "meshcorebot-request.jsonl"
+    response_path = tmp_path / "meshcorebot-response.jsonl"
+    control = rf_accept.send_local_peer_dm(
+        config,
+        d1l_public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token=token,
+        request_capture_path=request_path,
+        response_capture_path=response_path,
+        root=tmp_path,
+    )
+
+    assert control["validation"]["ok"] is True
+    assert request_path.read_bytes() == request_raw
+    assert response_path.read_bytes() == response_raw
+    assert control["request_receipt"]["source_peer_uid"] == 0
+    assert control["request_receipt"]["source_peer_gid"] == 0
 
 
 def test_local_sidecar_collision_prevents_serial_socket_and_ssh(

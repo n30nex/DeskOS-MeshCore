@@ -214,8 +214,10 @@ UI="$EVIDENCE_DIR/ui-navigation.json"
 
 ### Source 3: controlled-peer DM/ACK
 
-Run as `neonx`; `--peer-local` uses only the pinned local status file, Unix
-socket, peer device and peer key.
+Run as `neonx`. This exact COM11 identity makes the runner capture the generic
+Meshcorebot status itself, send the inbound DM through the pinned local Unix
+socket, validate its acknowledged response and retain both request/response
+sidecars. `/dev/krab-com11` is an opaque status identity and is never opened.
 
 ```bash
 RF="$EVIDENCE_DIR/rf-full-acceptance.json"
@@ -230,8 +232,14 @@ env \
   -u MESH_PEER_PUBLIC_KEY \
   "$PY" scripts/rf_full_acceptance_d1l.py \
   --port "$PORT" \
-  --peer-local \
+  --peer-status /opt/canadaverse/com11-meshcorebot/data/logs/meshcorebot.status.json \
+  --peer-port /dev/krab-com11 \
+  --fingerprint 0BF0A701D5AE2DB6 \
   --d1l-public-key "$D1L_PUBLIC_KEY" \
+  --token "rc1-${SHA:0:8}" \
+  --timeout 60 \
+  --wait-sec 90 \
+  --poll-sec 3 \
   --commit "$SHA" \
   --github-run-id "$RUN" \
   --github-run-attempt "$ATTEMPT" \
@@ -320,6 +328,7 @@ PHYSICAL_EVIDENCE="$EVIDENCE_DIR/rc1-bounded-physical-${SHA}.evidence.json"
 
 "$PY" scripts/produce_rc1_bounded_physical_receipt_d1l.py \
   --package-dir "$PACKAGE" \
+  --evidence-root "$ROOT" \
   --flash-receipt "$FLASH_RETAINED" \
   --ui-receipt "$UI" \
   --rf-receipt "$RF" \

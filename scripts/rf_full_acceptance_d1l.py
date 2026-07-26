@@ -89,7 +89,26 @@ REMOTE_PEER_MAX_CONTROL_BYTES = 64 * 1024
 REMOTE_PEER_SSH_TIMEOUT_SEC = 45.0
 REMOTE_PEER_SSH_IDENTITY_ENV = "MESH_PEER_SSH_IDENTITY"
 REMOTE_PEER_HELPER_SCHEMA = 1
-REMOTE_PEER_FORBIDDEN_DEVICE = "/dev/krab-" + "com" + str(11)
+MESHCOREBOT_INSTANCE = "com" + str(11)
+MESHCOREBOT_PEER_PROFILE = "meshcorebot_" + MESHCOREBOT_INSTANCE
+MESHCOREBOT_PEER_STATUS_PATH = PurePosixPath(
+    "/opt/canadaverse/"
+    + MESHCOREBOT_INSTANCE
+    + "-meshcorebot/data/logs/meshcorebot.status.json"
+)
+MESHCOREBOT_PEER_CONTROL_SOCKET = (
+    "/run/canadaverse-control/"
+    + MESHCOREBOT_INSTANCE
+    + "/control.sock"
+)
+MESHCOREBOT_PEER_DEVICE = "/dev/krab-" + "com" + str(11)
+MESHCOREBOT_PEER_HARDWARE_ID = "303a:1001"
+MESHCOREBOT_PEER_PUBLIC_KEY = (
+    "0bf0a701d5ae2db679c641ee999a70d4b55b61a2b77c47337ce35c16c9c19193"
+)
+MESHCOREBOT_PEER_FINGERPRINT = MESHCOREBOT_PEER_PUBLIC_KEY[:16].upper()
+MESHCOREBOT_PEER_MAX_STATUS_AGE_SEC = 120.0
+REMOTE_PEER_FORBIDDEN_DEVICE = MESHCOREBOT_PEER_DEVICE
 
 
 class RemotePeerError(RuntimeError):
@@ -609,6 +628,20 @@ def normalize_port(value: str | None) -> str | None:
     return normalized
 
 
+def normalize_peer_identity(value: str | None) -> str | None:
+    """Normalize serial peers while preserving the one pinned opaque Pi identity."""
+    if value == MESHCOREBOT_PEER_DEVICE:
+        return MESHCOREBOT_PEER_DEVICE
+    return normalize_port(value)
+
+
+def exact_meshcorebot_status_path(value: Path | None) -> bool:
+    return (
+        isinstance(value, Path)
+        and value.as_posix() == str(MESHCOREBOT_PEER_STATUS_PATH)
+    )
+
+
 def default_d1l_target() -> str:
     return (
         D1L_REQUIRED_PORT
@@ -839,13 +872,60 @@ def validate_local_peer_config(config: object) -> dict:
     }
     if set(config) != expected_keys:
         raise ValueError("local controlled-peer configuration has invalid fields")
-    validated = validate_remote_peer_config(
-        {
-            "ssh_host": REMOTE_PEER_SSH_HOST,
-            **config,
-        }
-    )
-    return {key: validated[key] for key in expected_keys}
+    com15_values = {
+        "hostname": REMOTE_PEER_HOSTNAME,
+        "status_path": REMOTE_PEER_STATUS_PATH,
+        "control_socket": REMOTE_PEER_CONTROL_SOCKET,
+        "device": REMOTE_PEER_DEVICE,
+        "public_key": REMOTE_PEER_PUBLIC_KEY,
+    }
+    meshcorebot_values = {
+        "hostname": REMOTE_PEER_HOSTNAME,
+        "status_path": str(MESHCOREBOT_PEER_STATUS_PATH),
+        "control_socket": MESHCOREBOT_PEER_CONTROL_SOCKET,
+        "device": MESHCOREBOT_PEER_DEVICE,
+        "public_key": MESHCOREBOT_PEER_PUBLIC_KEY,
+    }
+    selected = {
+        "hostname": config.get("hostname"),
+        "status_path": _bounded_posix_path(
+            config.get("status_path"), "controlled-peer status path"
+        ),
+        "control_socket": _bounded_posix_path(
+            config.get("control_socket"), "controlled-peer control socket"
+        ),
+        "device": _bounded_posix_path(
+            config.get("device"), "controlled-peer device"
+        ),
+        "public_key": exact_public_key(config.get("public_key")),
+    }
+    if selected == com15_values:
+        validated = validate_remote_peer_config(
+            {
+                "ssh_host": REMOTE_PEER_SSH_HOST,
+                **config,
+            }
+        )
+        return {key: validated[key] for key in expected_keys}
+    if selected != meshcorebot_values:
+        raise ValueError(
+            "local controlled-peer configuration must match the exact "
+            "COM15 responder or Meshcorebot pin"
+        )
+    max_age = config.get("max_status_age_sec")
+    if (
+        isinstance(max_age, bool)
+        or not isinstance(max_age, (int, float))
+        or not 1.0 <= float(max_age) <= MESHCOREBOT_PEER_MAX_STATUS_AGE_SEC
+    ):
+        raise ValueError(
+            "Meshcorebot status age must be between 1 and "
+            f"{MESHCOREBOT_PEER_MAX_STATUS_AGE_SEC:g} seconds"
+        )
+    return {
+        **selected,
+        "max_status_age_sec": float(max_age),
+    }
 
 
 def local_peer_config(
@@ -866,6 +946,16 @@ def local_peer_config(
             "public_key": public_key,
             "max_status_age_sec": max_status_age_sec,
         }
+    )
+
+
+def meshcorebot_local_peer_config() -> dict:
+    return local_peer_config(
+        status_path=str(MESHCOREBOT_PEER_STATUS_PATH),
+        control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+        device=MESHCOREBOT_PEER_DEVICE,
+        public_key=MESHCOREBOT_PEER_PUBLIC_KEY,
+        max_status_age_sec=MESHCOREBOT_PEER_MAX_STATUS_AGE_SEC,
     )
 
 
@@ -1326,11 +1416,12 @@ def enforce_port_policy(
     if legacy_port in FORBIDDEN_PORTS:
         raise ValueError(f"refusing forbidden D1L port {legacy_port}")
     normalized_port = enforce_core_port(port)
-    normalized_peer = normalize_port(peer_port)
+    normalized_peer = normalize_peer_identity(peer_port)
     if normalized_peer in FORBIDDEN_PORTS:
         raise ValueError(f"refusing forbidden controlled-peer port {normalized_peer}")
     if (
         normalized_peer is not None
+        and normalized_peer != MESHCOREBOT_PEER_DEVICE
         and re.fullmatch(r"COM[1-9][0-9]*", normalized_peer) is None
     ):
         raise ValueError(f"invalid controlled-peer port {normalized_peer}")
@@ -1439,6 +1530,82 @@ def radio_listener_connected(
         and isinstance(status.get("run_id"), str)
         and bool(status.get("run_id"))
     )
+
+
+def meshcorebot_peer_connected(
+    status: dict | None,
+    peer_identity: str | None,
+    fingerprint: str,
+    *,
+    observed_at: datetime | None = None,
+) -> bool:
+    """Validate the exact Meshcorebot status identity without opening its TTY."""
+    if (
+        peer_identity != MESHCOREBOT_PEER_DEVICE
+        or fingerprint != MESHCOREBOT_PEER_FINGERPRINT
+        or not isinstance(status, dict)
+    ):
+        return False
+    observed = observed_at or datetime.now(timezone.utc)
+    status_fresh, _ = _fresh_timestamp(
+        status.get("status_written_at"),
+        observed,
+        MESHCOREBOT_PEER_MAX_STATUS_AGE_SEC,
+    )
+    poll_fresh, _ = _fresh_timestamp(
+        get_path(status, "mesh", "last_poll_at"),
+        observed,
+        MESHCOREBOT_PEER_MAX_STATUS_AGE_SEC,
+    )
+    pid = status.get("pid")
+    return bool(
+        status.get("service") == "meshcorebot"
+        and isinstance(pid, int)
+        and not isinstance(pid, bool)
+        and pid > 0
+        and get_path(status, "serial", "active_port")
+        == MESHCOREBOT_PEER_DEVICE
+        and get_path(status, "serial", "configured_port")
+        == MESHCOREBOT_PEER_DEVICE
+        and get_path(status, "serial", "hardware_id")
+        == MESHCOREBOT_PEER_HARDWARE_ID
+        and get_path(status, "serial", "baud_rate") == 115200
+        and get_path(status, "serial", "meshcore_connected") is True
+        and get_path(status, "discord", "connected") is True
+        and status_fresh
+        and poll_fresh
+    )
+
+
+def explicit_peer_report_row(
+    *,
+    peer_status_path: Path | None,
+    peer_identity: str | None,
+    fingerprint: str,
+) -> dict:
+    row = {
+        "fingerprint": fingerprint,
+        "evidence_source": (
+            "explicit_peer_status"
+            if peer_status_path is not None and peer_identity is not None
+            else "d1l_bidirectional_rf"
+        ),
+        "port": peer_identity,
+        "status_path": (
+            str(peer_status_path) if peer_status_path is not None else None
+        ),
+    }
+    if peer_identity == MESHCOREBOT_PEER_DEVICE:
+        row.update(
+            {
+                "profile": MESHCOREBOT_PEER_PROFILE,
+                "public_key": MESHCOREBOT_PEER_PUBLIC_KEY,
+                "control_socket": MESHCOREBOT_PEER_CONTROL_SOCKET,
+                "device_access": "opaque_status_identity_only",
+            }
+        )
+        row["status_path"] = str(MESHCOREBOT_PEER_STATUS_PATH)
+    return row
 
 
 def counter_value(status: dict | None, name: str) -> int | None:
@@ -2634,6 +2801,28 @@ def contacts_has_exact_peer(
     )
 
 
+def contacts_has_pinned_meshcorebot_peer(result: object) -> bool:
+    """Require the existing signed chat advert; never rewrite its role."""
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        return False
+    matches = [
+        entry
+        for entry in entries(result)
+        if str(entry.get("fingerprint") or "").upper()
+        == MESHCOREBOT_PEER_FINGERPRINT
+    ]
+    return bool(
+        len(matches) == 1
+        and exact_public_key(matches[0].get("public_key"))
+        == MESHCOREBOT_PEER_PUBLIC_KEY
+        and matches[0].get("type") == "chat"
+        and matches[0].get("verification_source") == "signed_advert"
+        and matches[0].get("canonical") is True
+        and matches[0].get("can_dm") is True
+        and matches[0].get("can_admin") is False
+    )
+
+
 def entries(value: dict | None) -> list[dict]:
     rows = value.get("entries") if isinstance(value, dict) else None
     return rows if isinstance(rows, list) else []
@@ -3023,18 +3212,11 @@ def dry_run_report(
             local_mode=local_mode,
         )
     else:
-        controlled_peer = {
-            "fingerprint": fingerprint,
-            "evidence_source": (
-                "explicit_peer_status"
-                if peer_status_path is not None and peer_port is not None
-                else "d1l_bidirectional_rf"
-            ),
-            "port": peer_port,
-            "status_path": (
-                str(peer_status_path) if peer_status_path is not None else None
-            ),
-        }
+        controlled_peer = explicit_peer_report_row(
+            peer_status_path=peer_status_path,
+            peer_identity=peer_port,
+            fingerprint=fingerprint,
+        )
     return {
         "schema": RF_FULL_ACCEPTANCE_SCHEMA,
         "kind": "rf_full_acceptance",
@@ -3058,6 +3240,8 @@ def dry_run_report(
             if local_mode
             else REMOTE_PEER_ADAPTER
             if remote_config is not None
+            else MESHCOREBOT_PEER_PROFILE
+            if peer_port == MESHCOREBOT_PEER_DEVICE
             else None
         ),
         "controlled_peer_control_plan": (
@@ -3069,6 +3253,15 @@ def dry_run_report(
                 "transport": ("local-unix-socket" if local_mode else "ssh-stdin-json"),
             }
             if pinned_config is not None
+            else {
+                "op": "radio.send_dm",
+                "socket_path": MESHCOREBOT_PEER_CONTROL_SOCKET,
+                "target": public_key,
+                "text": inbound_token,
+                "transport": "local-unix-socket",
+                "execution": "runner_owned",
+            }
+            if peer_port == MESHCOREBOT_PEER_DEVICE
             else None
         ),
         "target_fingerprint": fingerprint,
@@ -3092,6 +3285,7 @@ def dry_run_report(
         "discord_command": (
             None
             if pinned_config is not None
+            or peer_port == MESHCOREBOT_PEER_DEVICE
             else discord_command(public_key, inbound_token)
         ),
         "public_rf_transmit": False,
@@ -3293,30 +3487,72 @@ def build_report(
         )
     else:
         remote_flow = None
-        peer_status_ok = (
-            normalize_port(
-                get_path(peer_before, "serial", "active_port")
+        if peer_port == MESHCOREBOT_PEER_DEVICE:
+            peer_status_ok = meshcorebot_peer_connected(
+                peer_before,
+                peer_port,
+                fingerprint,
+            ) and meshcorebot_peer_connected(
+                peer_after,
+                peer_port,
+                fingerprint,
             )
-            == peer_port
-            and get_path(
-                peer_before, "serial", "meshcore_connected"
+        else:
+            peer_status_ok = (
+                normalize_peer_identity(
+                    get_path(peer_before, "serial", "active_port")
+                )
+                == peer_port
+                and get_path(
+                    peer_before, "serial", "meshcore_connected"
+                )
+                is True
+                and get_path(peer_before, "discord", "connected") is True
+            ) or (
+                normalize_peer_identity(
+                    get_path(peer_after, "serial", "active_port")
+                )
+                == peer_port
+                and get_path(peer_after, "serial", "meshcore_connected")
+                is True
+                and get_path(peer_after, "discord", "connected") is True
             )
-            is True
-            and get_path(peer_before, "discord", "connected") is True
-        ) or (
-            normalize_port(
-                get_path(peer_after, "serial", "active_port")
-            )
-            == peer_port
-            and get_path(peer_after, "serial", "meshcore_connected")
-            is True
-            and get_path(peer_after, "discord", "connected") is True
-        )
         rx_dm_delta = None
         tx_dm_delta = None
         fast_reply_delta = None
         ack_miss_delta = None
         peer_counter_ok = peer_status_ok
+    if listener_mode:
+        contact_ready = bool(
+            peer_public_key is not None
+            and import_command is not None
+            and contact_import_ok(
+                contact_import_result,
+                peer_public_key,
+                fingerprint,
+            )
+            and contacts_has_exact_peer(
+                contact_after_result,
+                peer_public_key,
+                fingerprint,
+            )
+        )
+    elif peer_port == MESHCOREBOT_PEER_DEVICE:
+        contact_ready = contacts_has_pinned_meshcorebot_peer(
+            contact_before_result
+        )
+    else:
+        contact_ready = True
+    meshcorebot_control_ok = (
+        remote_control_semantic_ok(
+            remote_control,
+            d1l_public_key=public_key,
+            token=inbound_token,
+            control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+        )
+        if peer_port == MESHCOREBOT_PEER_DEVICE
+        else True
+    )
     outbound_ok = bool(
         send_outbound
         and outbound_step
@@ -3401,25 +3637,7 @@ def build_report(
             if peer_status_requested
             else True
         ),
-        "controlled_peer_contact_ready": (
-            bool(
-                listener_mode
-                and peer_public_key is not None
-                and import_command is not None
-                and contact_import_ok(
-                    contact_import_result,
-                    peer_public_key,
-                    fingerprint,
-                )
-                and contacts_has_exact_peer(
-                    contact_after_result,
-                    peer_public_key,
-                    fingerprint,
-                )
-            )
-            if listener_mode
-            else True
-        ),
+        "controlled_peer_contact_ready": contact_ready,
         "outbound_dm": outbound_ok,
         "inbound_dm": inbound_ok,
         "ack_path": ack_path_ok,
@@ -3438,6 +3656,10 @@ def build_report(
         checks["exact_candidate"] = firmware_identity_matches(
             version_result, expected_commit
         )
+    if peer_port == MESHCOREBOT_PEER_DEVICE:
+        checks["controlled_peer_control_acknowledged"] = (
+            meshcorebot_control_ok
+        )
     if remote_mode:
         controlled_peer = controlled_peer_report_row(
             remote_config,
@@ -3445,20 +3667,11 @@ def build_report(
             local_mode=local_mode,
         )
     else:
-        controlled_peer = {
-            "fingerprint": fingerprint,
-            "evidence_source": (
-                "explicit_peer_status"
-                if peer_status_requested
-                else "d1l_bidirectional_rf"
-            ),
-            "port": peer_port,
-            "status_path": (
-                str(peer_status_path)
-                if peer_status_path is not None
-                else None
-            ),
-        }
+        controlled_peer = explicit_peer_report_row(
+            peer_status_path=peer_status_path,
+            peer_identity=peer_port,
+            fingerprint=fingerprint,
+        )
     if listener_mode and not remote_mode:
         controlled_peer["public_key"] = peer_public_key
     report_ok = all(checks.values())
@@ -3497,6 +3710,8 @@ def build_report(
             if remote_mode
             else RADIO_LISTENER_PROFILE
             if listener_mode
+            else MESHCOREBOT_PEER_PROFILE
+            if peer_port == MESHCOREBOT_PEER_DEVICE
             else "meshcorebot"
         ),
         "target_fingerprint": fingerprint,
@@ -3552,12 +3767,34 @@ def build_report(
             else None
         ),
         "controlled_peer_control": (
-            remote_control if remote_mode else None
+            remote_control
+            if remote_mode or peer_port == MESHCOREBOT_PEER_DEVICE
+            else None
+        ),
+        "controlled_peer_control_plan": (
+            {
+                "op": "radio.send_dm",
+                "socket_path": MESHCOREBOT_PEER_CONTROL_SOCKET,
+                "target": public_key,
+                "text": inbound_token,
+                "transport": "local-unix-socket",
+                "execution": "runner_owned",
+            }
+            if peer_port == MESHCOREBOT_PEER_DEVICE
+            else None
         ),
         "transaction_correlation": transaction_correlation,
         "controlled_peer_contact_setup": {
-            "name": RADIO_LISTENER_CONTACT_NAME,
-            "public_key": peer_public_key,
+            "name": (
+                RADIO_LISTENER_CONTACT_NAME
+                if listener_mode
+                else None
+            ),
+            "public_key": (
+                MESHCOREBOT_PEER_PUBLIC_KEY
+                if peer_port == MESHCOREBOT_PEER_DEVICE
+                else peer_public_key
+            ),
             "fingerprint": fingerprint,
             "import_command": import_command,
             "before": contact_before_result,
@@ -3672,6 +3909,18 @@ def _run_hardware_reserved(
             "RF acceptance must run from the exact clean candidate source"
         )
     port, peer_port = enforce_port_policy(port, peer_port)
+    meshcorebot_control_config = None
+    if peer_port == MESHCOREBOT_PEER_DEVICE:
+        if str(fingerprint).upper() != MESHCOREBOT_PEER_FINGERPRINT:
+            raise ValueError(
+                "Meshcorebot fingerprint must match its exact public-key pin"
+            )
+        if not exact_meshcorebot_status_path(peer_status_path):
+            raise ValueError(
+                "Meshcorebot acceptance requires the exact status path "
+                f"{MESHCOREBOT_PEER_STATUS_PATH}"
+            )
+        meshcorebot_control_config = meshcorebot_local_peer_config()
     if port_lister is None:
         try:
             from serial.tools import list_ports
@@ -3746,7 +3995,7 @@ def _run_hardware_reserved(
         after_capture,
         label="controlled-peer after status",
     )
-    if remote_mode:
+    if remote_mode or meshcorebot_control_config is not None:
         request_reservation = evidence_bundle.reserve(
             "peer_request",
             request_capture,
@@ -3836,16 +4085,11 @@ def _run_hardware_reserved(
                         local_mode=local_mode,
                     )
                     if remote_mode
-                    else {
-                        "fingerprint": fingerprint,
-                        "evidence_source": "explicit_peer_status",
-                        "port": peer_port,
-                        "status_path": (
-                            str(peer_status_path)
-                            if peer_status_path is not None
-                            else None
-                        ),
-                    }
+                    else explicit_peer_report_row(
+                        peer_status_path=peer_status_path,
+                        peer_identity=peer_port,
+                        fingerprint=fingerprint,
+                    )
                 ),
                 "checks": {
                     "d1l_target_identity_continuity": (
@@ -3908,7 +4152,15 @@ def _run_hardware_reserved(
             raise ValueError(
                 "COM15 OpenClaw listener status/public-key identity is not ready"
             )
-        run_command(ser, "contacts")
+        contacts_before = run_command(ser, "contacts")
+        if (
+            peer_port == MESHCOREBOT_PEER_DEVICE
+            and not contacts_has_pinned_meshcorebot_peer(contacts_before)
+        ):
+            raise ValueError(
+                "Controlled Meshcorebot peer is not an exact canonical signed-advert "
+                "chat contact"
+            )
         if listener_mode:
             peer_public_key = exact_public_key(
                 get_path(peer_before, "serial", "public_key")
@@ -3958,6 +4210,18 @@ def _run_hardware_reserved(
             )
             remote_control = send_peer_dm(
                 remote_config,
+                d1l_public_key=public_key,
+                token=inbound_token,
+                request_capture_path=request_capture,
+                response_capture_path=response_capture,
+                root=root,
+                request_reservation=request_reservation,
+                response_reservation=response_reservation,
+                evidence_bundle=evidence_bundle,
+            )
+        elif meshcorebot_control_config is not None:
+            remote_control = send_local_peer_dm(
+                meshcorebot_control_config,
                 d1l_public_key=public_key,
                 token=inbound_token,
                 request_capture_path=request_capture,
@@ -4356,6 +4620,16 @@ def main() -> int:
             peer_port = None
     else:
         parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
+    if peer_port == MESHCOREBOT_PEER_DEVICE:
+        if not exact_meshcorebot_status_path(peer_status_path):
+            parser.error(
+                "Meshcorebot acceptance requires the exact status path "
+                f"{MESHCOREBOT_PEER_STATUS_PATH}"
+            )
+        if fingerprint != MESHCOREBOT_PEER_FINGERPRINT:
+            parser.error(
+                "Meshcorebot fingerprint must match its exact public-key pin"
+            )
     normalized_commit = exact_commit(args.commit)
     if not args.dry_run and normalized_commit is None:
         parser.error(
@@ -4447,6 +4721,7 @@ def main() -> int:
                 f"{report['discord_command']}"
             )
         elif report.get("controlled_peer_control_plan"):
+            control_plan = report["controlled_peer_control_plan"]
             local_plan = (
                 get_path(report, "controlled_peer", "access_mode")
                 == "local"
@@ -4454,6 +4729,10 @@ def main() -> int:
             print(
                 "Controlled-peer inbound plan: "
                 + (
+                    "use the exact Pi-local Meshcorebot Unix socket for one exact "
+                    if control_plan.get("socket_path")
+                    == MESHCOREBOT_PEER_CONTROL_SOCKET
+                    else
                     "use the pinned Pi-local Unix socket for one exact "
                     if local_plan
                     else "SSH to the pinned Pi peer and send one exact "

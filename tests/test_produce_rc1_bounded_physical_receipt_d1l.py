@@ -93,6 +93,7 @@ def test_producer_bundles_unique_machine_sources_and_hashes_receipt(
         package_dir=tmp_path / "package",
         sources=sources,
         output=output,
+        evidence_root=tmp_path,
     )
 
     receipt_bytes = output.read_bytes()
