@@ -96,6 +96,53 @@ def test_rf_full_acceptance_dry_run_is_dm_only():
     assert not any(command.startswith("mesh send public ") for command in report["commands"])
 
 
+def test_entry_fingerprint_evidence_matches_all_present_fields_case_insensitively():
+    expected = "0BF0A701D5AE2DB6"
+
+    assert rf_accept.entry_matches_fingerprint(
+        {"fingerprint": "0bF0a701D5aE2dB6"},
+        {"fingerprint": "0bf0A701d5ae2DB6"},
+        expected,
+    )
+    assert rf_accept.entry_matches_fingerprint(
+        {"fingerprint": "0bf0a701d5ae2db6"},
+        {},
+        expected,
+    )
+    assert rf_accept.entry_matches_fingerprint(
+        {},
+        {"fingerprint": "0BF0A701D5AE2DB6"},
+        expected,
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "entry"),
+    [
+        ({}, {}),
+        ({"fingerprint": ""}, {}),
+        ({}, {"fingerprint": ""}),
+        ({"fingerprint": 0}, {}),
+        ({"fingerprint": "0BF0A701D5AE2DB6"}, {"fingerprint": None}),
+        ({"fingerprint": "0BF0A701D5AE2DB"}, {}),
+        ({"fingerprint": "0BF0A701D5AE2DBG"}, {}),
+        (
+            {"fingerprint": "0BF0A701D5AE2DB6"},
+            {"fingerprint": "1BF0A701D5AE2DB6"},
+        ),
+    ],
+)
+def test_entry_fingerprint_evidence_rejects_unbound_or_malformed_fields(
+    value,
+    entry,
+):
+    assert not rf_accept.entry_matches_fingerprint(
+        value,
+        entry,
+        "0BF0A701D5AE2DB6",
+    )
+
+
 def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
     steps = [
         {

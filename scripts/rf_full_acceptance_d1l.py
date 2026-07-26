@@ -2848,13 +2848,19 @@ def fingerprints_equal(left: object, right: object) -> bool:
 
 
 def entry_matches_fingerprint(value: dict | None, entry: dict, fingerprint: str) -> bool:
-    top_level = value.get("fingerprint") if isinstance(value, dict) else None
-    entry_fingerprint = entry.get("fingerprint")
-    return (
-        not top_level or fingerprints_equal(top_level, fingerprint)
-    ) and (
-        not entry_fingerprint
-        or fingerprints_equal(entry_fingerprint, fingerprint)
+    expected = canonical_fingerprint(fingerprint)
+    observed = []
+    if isinstance(value, dict) and "fingerprint" in value:
+        observed.append(value["fingerprint"])
+    if "fingerprint" in entry:
+        observed.append(entry["fingerprint"])
+    return bool(
+        expected is not None
+        and observed
+        and all(
+            canonical_fingerprint(candidate) == expected
+            for candidate in observed
+        )
     )
 
 
