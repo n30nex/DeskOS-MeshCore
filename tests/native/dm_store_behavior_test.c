@@ -1594,6 +1594,33 @@ static void test_append_failure_retains_one_identity_row_until_flush(void)
     assert(((const test_blob_v6_t *)s_nvs.data)->count == 1U);
 }
 
+static void test_tx_append_quiesce_yield_flushes_same_row_without_duplicate(void)
+{
+    reset_backend();
+    s_sd_enabled = true;
+    s_backend_generation = 1U;
+    assert(d1l_dm_store_init() == ESP_OK);
+
+    s_sd_write_error = ESP_ERR_NOT_FINISHED;
+    d1l_dm_store_append_outcome_t append = {0};
+    assert(d1l_dm_store_append_tx(
+               "0123456789abcdef", "Node", "quiesce-retry", -50, 40,
+               1U, 1U, 0U, 0x2233U, &append) == ESP_ERR_NOT_FINISHED);
+    assert(append.inserted && !append.durable);
+    assert(append.row_seq == 1U);
+    assert(append.delivery_session_id != 0U);
+    assert(append.error == ESP_ERR_NOT_FINISHED);
+    assert(d1l_dm_store_stats().count == 1U);
+
+    s_sd_write_error = ESP_OK;
+    assert(d1l_dm_store_flush() == ESP_OK);
+    assert(d1l_dm_store_stats().count == 1U);
+    assert(((const test_blob_v6_t *)s_sd.data)->count == 1U);
+    assert(((const test_blob_v6_t *)s_nvs.data)->count == 1U);
+    assert(strcmp(((const test_blob_v6_t *)s_sd.data)->entries[0].text,
+                  "quiesce-retry") == 0);
+}
+
 static void test_partial_reservation_commit_never_rolls_back_or_sends_twice(void)
 {
     reset_backend();
@@ -2854,6 +2881,7 @@ int main(void)
     test_malformed_v5_ack_metadata_fails_closed();
     test_malformed_v6_delivery_metadata_fails_closed();
     test_append_failure_retains_one_identity_row_until_flush();
+    test_tx_append_quiesce_yield_flushes_same_row_without_duplicate();
     test_partial_reservation_commit_never_rolls_back_or_sends_twice();
     test_reboot_ack_state_mutations_are_bounded();
     test_txdone_persist_failure_blocks_until_flush_or_reboot();

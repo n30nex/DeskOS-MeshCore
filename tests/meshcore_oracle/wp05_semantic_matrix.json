@@ -494,7 +494,7 @@
     "main/mesh/dm_delivery_state.h": "d27b3666f03d27e74cb30efb2e77c47bd50f0273d7991e29315e55d5a2fd4185",
     "main/mesh/meshcore_admin_dispatch.c": "70709ad2387cd7eb2d092992d9bba1aa764f920be1968c558a475193b2d323cb",
     "main/mesh/meshcore_admin_dispatch.h": "cf9b2cf3558e3358ca4c658c54001f1b0d63092a56d48c3bc859ccb318450eff",
-    "main/mesh/contact_store.c": "207acd23e9f89b6fa7a67d50c9c1cb3a88643864656e64ba3f0963f0295ac097",
+    "main/mesh/contact_store.c": "c0a4e206a9fc433807ddb17e3a11b120caec7959c26bc1d857d89af30acdf418",
     "main/mesh/contact_store.h": "60a66b48162b280354b084b0852c178d6fce2e56c9040891ede160360f2e9d94",
     "main/mesh/contact_uri.c": "a65175e4a07023adc2777a0504a2c83f5d409fdc4bd497cbddd4a4868f51fc8b",
     "main/mesh/contact_uri.h": "1a06f9d47c284f1c9990f71357434e3b5446a516331e37447ef1e3d7676662ef",
@@ -554,6 +554,6 @@
     "tests/native/stubs/nvs.h": "ded0795263a44587b01dfb5b9cd664a1baa40fd460e27dd79ee50c902ccc32e0",
     "tests/native/stubs/sys/time.h": "251d586ea591ff51aa9d51e6843deadd6c578b5591658df50eb5121c9e6b39c7",
     "tests/native/time_service_checkpoint_integration_test.c": "2de100718160702b5ab54f5d8ca0f3d802e8b89f3d16756185be1b0f82f0ad41",
-    "tests/native/store_behavior_test.c": "efc32cd2b9ef1c7fc08777ab15951e5ade47b613cc22b1f1617e4c12f7fccf64"
+    "tests/native/store_behavior_test.c": "48d47a2d87b6b49c9f1baae88f1fcfa0a4af9572c3e7a5ec29db61dd495f3c49"
   }
 }

@@ -87,6 +87,8 @@
 #define D1L_MESHCORE_TX_WATCHDOG_GRACE_MS 250U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
 #define D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS 5000U
+#define D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS 20U
+#define D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS 2000U
 #define D1L_MESHCORE_PATH_RESPONSE_TIMEOUT_MS 60000U
 #define D1L_MESHCORE_RECIPROCAL_PATH_DELAY_MS 500U
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
@@ -5607,6 +5609,38 @@ static esp_err_t meshcore_service_validate_room_post_session(
     return valid ? ESP_OK : ESP_ERR_NOT_ALLOWED;
 }
 
+static esp_err_t meshcore_service_finish_dm_persistence_admission(
+    d1l_dm_store_append_outcome_t *append_outcome)
+{
+    if (!append_outcome || !append_outcome->inserted ||
+        append_outcome->delivery_session_id == 0U ||
+        append_outcome->error != ESP_ERR_NOT_FINISHED) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint64_t retry_started_us = (uint64_t)esp_timer_get_time();
+    const uint64_t retry_timeout_us =
+        (uint64_t)D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS * 1000ULL;
+    TickType_t retry_delay =
+        pdMS_TO_TICKS(D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS);
+    if (retry_delay == 0U) {
+        retry_delay = 1U;
+    }
+
+    esp_err_t ret = ESP_ERR_NOT_FINISHED;
+    while ((uint64_t)esp_timer_get_time() - retry_started_us <
+           retry_timeout_us) {
+        vTaskDelay(retry_delay);
+        ret = d1l_dm_store_flush();
+        append_outcome->durable = ret == ESP_OK;
+        append_outcome->error = ret;
+        if (ret != ESP_ERR_NOT_FINISHED) {
+            return ret;
+        }
+    }
+    return ret;
+}
+
 static esp_err_t meshcore_service_handle_send_dm(
     const d1l_meshcore_service_cmd_t *cmd)
 {
@@ -5702,6 +5736,13 @@ static esp_err_t meshcore_service_handle_send_dm(
         contact.alias[0] ? contact.alias : contact.fingerprint,
         cmd->dm_text, 0, 0, selection.path_hash_bytes,
         selection.path_hops, 0U, ack_hash, &append_outcome);
+    if (ret == ESP_ERR_NOT_FINISHED && append_outcome.inserted) {
+        /* The two-second storage-manager poll briefly owns bridge quiescence.
+         * Retry the already inserted row instead of duplicating it or reporting
+         * a contact failure. RF remains blocked until this row is durable. */
+        ret = meshcore_service_finish_dm_persistence_admission(
+            &append_outcome);
+    }
     if (ret != ESP_OK) {
         if (append_outcome.inserted) {
             (void)record_detached_dm_queue_failure(&append_outcome, ret);

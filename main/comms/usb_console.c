@@ -6771,10 +6771,20 @@ static void cmd_mesh_send_dm(const char *line)
     }
     esp_err_t ret = d1l_meshcore_service_send_dm(fingerprint, text);
     if (ret != ESP_OK) {
+        const char *hint =
+            ret == ESP_ERR_INVALID_SIZE ? "max 138 UTF-8 bytes" :
+            ret == ESP_ERR_NOT_FINISHED ?
+                "DM storage is busy; message was not transmitted, retry" :
+            ret == ESP_ERR_NOT_FOUND ?
+                "DM contact not found; receive or import its signed advert" :
+            ret == ESP_ERR_TIMEOUT ?
+                "DM request timed out before radio admission; retry" :
+            ret == ESP_ERR_INVALID_STATE ?
+                "DM is unavailable or another delivery is active" :
+                "DM could not be queued; message was not transmitted";
         err_result("mesh send dm",
                    ret == ESP_ERR_INVALID_SIZE ? "MESSAGE_TOO_LONG" : esp_err_to_name(ret),
-                   ret == ESP_ERR_INVALID_SIZE ? "max 138 UTF-8 bytes" :
-                   "DM requires a promoted contact with a retained public key");
+                   hint);
         return;
     }
     ok_begin("mesh send dm");
