@@ -400,6 +400,7 @@ def _actions_evidence(
     expected_sources = {
         "bootloader": "bootloader/bootloader.bin",
         "partition-table": "partition_table/partition-table.bin",
+        "ota-data": "ota_data_initial.bin",
         "app": "meshcore_deskos_d1l.bin",
     }
     firmware_rows: list[dict[str, Any]] = []

@@ -320,13 +320,15 @@ def write_esp32_actions_artifact(run_dir: Path) -> dict:
     files = {
         "build/bootloader/bootloader.bin": b"BOOT",
         "build/partition_table/partition-table.bin": b"PART",
+        "build/ota_data_initial.bin": b"OTA",
         "build/meshcore_deskos_d1l.bin": b"APP",
     }
     flasher = {
         "flash_files": {
             "0x0": "bootloader/bootloader.bin",
             "0x8000": "partition_table/partition-table.bin",
-            "0x10000": "meshcore_deskos_d1l.bin",
+            "0xf000": "ota_data_initial.bin",
+            "0x20000": "meshcore_deskos_d1l.bin",
         }
     }
     files["build/flasher_args.json"] = json.dumps(flasher, sort_keys=True).encode("utf-8")
@@ -2234,7 +2236,7 @@ def test_flash_receipt_gate_requires_known_d1l_flash_roles(tmp_path: Path):
     artifact = run_dir / "d1l-firmware-artifacts"
     flasher_path = artifact / "build" / "flasher_args.json"
     flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
-    flasher["flash_files"].pop("0x10000")
+    flasher["flash_files"].pop("0x20000")
     flasher_path.write_text(json.dumps(flasher, sort_keys=True), encoding="utf-8")
     manifest = artifact / "SHA256SUMS.txt"
     manifest.write_text(
@@ -2292,7 +2294,7 @@ def test_flash_receipt_gate_rejects_flasher_path_escape(tmp_path: Path):
     flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
     outside_app = run_dir / "outside-app.bin"
     outside_app.write_bytes(b"APP")
-    flasher["flash_files"]["0x10000"] = "../../outside-app.bin"
+    flasher["flash_files"]["0x20000"] = "../../outside-app.bin"
     flasher_path.write_text(json.dumps(flasher, sort_keys=True), encoding="utf-8")
 
     gate = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]

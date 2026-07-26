@@ -184,7 +184,8 @@ def _derived_firmware_hashes(actions_provenance: dict) -> tuple[dict[str, str], 
     expected_roles = {
         "bootloader": "0x0",
         "partition-table": "0x8000",
-        "app": "0x10000",
+        "ota-data": "0xf000",
+        "app": "0x20000",
     }
     flash_files = actions_provenance.get("esp32_flash_files")
     if not isinstance(flash_files, list):
