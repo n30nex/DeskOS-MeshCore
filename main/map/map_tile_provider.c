@@ -10,7 +10,27 @@
 #include "storage/map_tile_store.h"
 
 #define D1L_MAP_PROVIDER_FILE_TIMEOUT_MS 10000U
+#define D1L_MAP_PROVIDER_CONFIG_TMP_PATH "map/offline-provider.tmp"
 #define D1L_MAP_PROVIDER_DEFAULT_AVERAGE_TILE_BYTES (64U * 1024U)
+
+static const char s_default_provider_manifest[] =
+    "{\"schema\":1,"
+    "\"source_id\":\"nrcan-cbmt\","
+    "\"attribution\":\"Natural Resources Canada; Open Government Licence - Canada\","
+    "\"license_url\":\"https://open.canada.ca/en/open-government-licence-canada\","
+    "\"offline_storage_permitted\":true,"
+    "\"background_prefetch_permitted\":true,"
+    "\"network_url_template\":\"https://maps.geogratis.gc.ca/wms/CBMT?"
+    "mode=tile&tilemode=gmap&layers=National%20Sub_national%20Regional%20Sub_regional"
+    "&tile={x}+{y}+{z}\","
+    "\"tile_template\":\"z{z}/x{x}/y{y}.png\","
+    "\"max_zoom\":15,"
+    "\"average_tile_bytes\":65536,"
+    "\"minimum_request_interval_ms\":1000}\n";
+
+_Static_assert(sizeof(s_default_provider_manifest) - 1U <=
+                   D1L_MAP_PROVIDER_CONFIG_MAX_BYTES,
+               "default map provider manifest exceeds configured maximum");
 
 static portMUX_TYPE s_provider_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_map_tile_provider_t s_provider;
@@ -266,6 +286,46 @@ void d1l_map_tile_provider_snapshot(d1l_map_tile_provider_t *out_provider)
     portEXIT_CRITICAL(&s_provider_lock);
 }
 
+static esp_err_t seed_default_provider_config(void)
+{
+    const size_t payload_size = sizeof(s_default_provider_manifest) - 1U;
+    d1l_rp2040_file_result_t file = {0};
+    size_t offset = 0U;
+    while (offset < payload_size) {
+        const size_t remaining = payload_size - offset;
+        const size_t chunk =
+            remaining < D1L_RP2040_FILE_CHUNK_MAX ?
+                remaining : D1L_RP2040_FILE_CHUNK_MAX;
+        esp_err_t ret = d1l_rp2040_bridge_file_write(
+            D1L_MAP_PROVIDER_CONFIG_TMP_PATH, (uint32_t)offset,
+            (const uint8_t *)&s_default_provider_manifest[offset], chunk,
+            offset == 0U, &file, D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+        if (ret != ESP_OK || file.length != (uint32_t)chunk) {
+            const esp_err_t failure = ret == ESP_OK ? ESP_FAIL : ret;
+            (void)d1l_rp2040_bridge_file_delete(
+                D1L_MAP_PROVIDER_CONFIG_TMP_PATH, &file,
+                D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+            return failure;
+        }
+        offset += chunk;
+    }
+
+    /*
+     * Never replace an operator-supplied provider. If one appears between the
+     * initial stat and this commit, the non-replacing rename fails closed and
+     * refresh reads that file instead.
+     */
+    const esp_err_t ret = d1l_rp2040_bridge_file_rename(
+        D1L_MAP_PROVIDER_CONFIG_TMP_PATH, D1L_MAP_PROVIDER_CONFIG_PATH, false,
+        &file, D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        (void)d1l_rp2040_bridge_file_delete(
+            D1L_MAP_PROVIDER_CONFIG_TMP_PATH, &file,
+            D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+    }
+    return ret;
+}
+
 static esp_err_t read_provider_config(char *buffer, size_t buffer_size)
 {
     if (!buffer || buffer_size < 2U) {
@@ -393,7 +453,11 @@ esp_err_t d1l_map_tile_provider_refresh(
         return ESP_ERR_NOT_SUPPORTED;
     }
     char json[D1L_MAP_PROVIDER_CONFIG_MAX_BYTES + 1U];
-    const esp_err_t read_ret = read_provider_config(json, sizeof(json));
+    esp_err_t read_ret = read_provider_config(json, sizeof(json));
+    if (read_ret == ESP_ERR_NOT_FOUND) {
+        (void)seed_default_provider_config();
+        read_ret = read_provider_config(json, sizeof(json));
+    }
     d1l_map_tile_provider_t provider = {0};
     esp_err_t ret = read_ret;
     if (ret == ESP_OK) {
