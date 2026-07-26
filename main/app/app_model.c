@@ -814,8 +814,10 @@ esp_err_t d1l_app_model_remove_channel(
 esp_err_t d1l_app_model_export_channel_share_uri(
     uint64_t channel_id, char *dest, size_t dest_size)
 {
-    if (!multi_channel_management_available() ||
-        !d1l_release_feature_available(
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!d1l_release_feature_available(
             D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI)) {
         return ESP_ERR_NOT_SUPPORTED;
     }
