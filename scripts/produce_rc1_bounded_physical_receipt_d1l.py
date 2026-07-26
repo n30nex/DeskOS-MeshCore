@@ -358,7 +358,7 @@ def validate_flash(
         and _find_app_row(data, candidate["app_sha256"])
     ):
         raise EvidenceError("flash receipt does not prove the exact non-erasing app flash")
-    return {"settings_preserved": True}
+    return {}
 
 
 def _ui_health_truth(data: dict[str, Any], commit: str) -> bool:
