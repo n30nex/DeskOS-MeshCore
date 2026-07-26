@@ -35,8 +35,10 @@ try:
         LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
         LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
         REMOTE_PEER_HOSTNAME,
+        remote_control_deadline_only_ok,
         remote_control_request,
         remote_control_semantic_ok,
+        report_deadline_observed_delivery_ok,
         remote_peer_report_shape_ok as pinned_peer_report_shape_ok,
         validate_remote_control_exchange,
     )
@@ -52,8 +54,10 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         LOCAL_PEER_CONTROL_REQUEST_TRANSPORT,
         LOCAL_PEER_CONTROL_RESPONSE_TRANSPORT,
         REMOTE_PEER_HOSTNAME,
+        remote_control_deadline_only_ok,
         remote_control_request,
         remote_control_semantic_ok,
+        report_deadline_observed_delivery_ok,
         remote_peer_report_shape_ok as pinned_peer_report_shape_ok,
         validate_remote_control_exchange,
     )
@@ -2123,12 +2127,25 @@ def strict_control_sidecars_ok(
         and control.get("response_sha256")
         == hashlib.sha256(response_raw).hexdigest()
         and control.get("validation") == validation
-        and validation.get("ok") is True
-        and remote_control_semantic_ok(
-            control,
-            d1l_public_key=data.get("d1l_public_key"),
-            token=data.get("inbound_token"),
-            control_socket=control_socket,
+        and (
+            (
+                validation.get("ok") is True
+                and remote_control_semantic_ok(
+                    control,
+                    d1l_public_key=data.get("d1l_public_key"),
+                    token=data.get("inbound_token"),
+                    control_socket=control_socket,
+                )
+            )
+            or (
+                remote_control_deadline_only_ok(
+                    control,
+                    d1l_public_key=data.get("d1l_public_key"),
+                    token=data.get("inbound_token"),
+                    control_socket=control_socket,
+                )
+                and report_deadline_observed_delivery_ok(data)
+            )
         )
     )
 
@@ -2186,11 +2203,14 @@ def controlled_peer_evidence_ok(
             == MESHCOREBOT_PEER_PUBLIC_KEY
             and peer.get("device_access")
             == "opaque_status_identity_only"
-            and remote_control_semantic_ok(
-                data.get("controlled_peer_control"),
-                d1l_public_key=data.get("d1l_public_key"),
-                token=data.get("inbound_token"),
-                control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+            and (
+                remote_control_semantic_ok(
+                    data.get("controlled_peer_control"),
+                    d1l_public_key=data.get("d1l_public_key"),
+                    token=data.get("inbound_token"),
+                    control_socket=MESHCOREBOT_PEER_CONTROL_SOCKET,
+                )
+                or report_deadline_observed_delivery_ok(data)
             )
             and strict_control_sidecars_ok(
                 data,

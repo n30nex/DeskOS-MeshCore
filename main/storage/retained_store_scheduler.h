@@ -101,8 +101,10 @@ typedef struct {
 } d1l_retained_store_pass_t;
 
 /* Execute one descriptor pass. A forced pass is rejected unless it carries an
- * absolute deadline. No descriptor begins after that deadline, and quiesce or
- * deadline cancellation prevents all remaining descriptors from starting. */
+ * absolute deadline. Forced passes bypass due/backoff policy only for stores
+ * observed dirty or reconciliation-pending; clean stores remain skipped.
+ * No descriptor begins after that deadline, and quiesce or deadline
+ * cancellation prevents all remaining descriptors from starting. */
 esp_err_t d1l_retained_store_scheduler_run(
     const d1l_retained_store_descriptor_t *descriptors,
     size_t descriptor_count,

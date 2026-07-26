@@ -162,7 +162,10 @@ esp_err_t d1l_retained_store_scheduler_run(
                 cancellation_result, first_error);
             break;
         }
-        if (!options->force && !observation_pending(&result->before)) {
+        /* Force bypasses each store's due/backoff policy; it does not turn an
+         * already-clean durability observation into work. Rewriting clean SD
+         * stores can consume the entire shared reboot deadline. */
+        if (!observation_pending(&result->before)) {
             result->after = result->before;
             result->outcome = D1L_RETAINED_STORE_OUTCOME_SKIPPED_CLEAN;
             result->started_us = now_us;

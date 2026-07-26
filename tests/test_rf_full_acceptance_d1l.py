@@ -10,6 +10,7 @@ import pytest
 
 from scripts import rf_full_acceptance_d1l as rf_accept
 from scripts import d1l_serial_target
+from scripts import release_gate_audit_d1l as release_audit
 from scripts.smoke_d1l import expected_command_name
 
 
@@ -1634,6 +1635,38 @@ def remote_control_response(
             },
         },
         "error": None,
+    }
+    response_raw = (
+        json.dumps(
+            response,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+    return request_raw, response_raw
+
+
+def deadline_control_response(
+    target: str,
+    token: str,
+    *,
+    error_code: str = "deadline_exceeded",
+) -> tuple[bytes, bytes]:
+    request, request_raw = rf_accept.remote_control_request(
+        target, token
+    )
+    response = {
+        "id": request["id"],
+        "op": "radio.send_dm",
+        "ok": False,
+        "cached": False,
+        "duration_ms": 39055,
+        "result": None,
+        "error": {
+            "code": error_code,
+            "message": "operation exceeded its bounded deadline",
+        },
     }
     response_raw = (
         json.dumps(
@@ -3539,3 +3572,189 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
 
     report["controlled_peer_control"]["response"]["cached"] = True
     assert not rf_accept.remote_peer_report_shape_ok(report)
+
+
+def test_meshcorebot_deadline_continues_only_for_strict_d1l_observation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    token = "rf_deadline_in"
+    target = rf_accept.DEFAULT_D1L_PUBLIC_KEY
+    request_raw, response_raw = deadline_control_response(target, token)
+    active_response = {"raw": response_raw}
+
+    def fake_operation(
+        config,
+        operation,
+        *,
+        control_request=None,
+        timeout_sec=rf_accept.LOCAL_PEER_CONTROL_TIMEOUT_SEC,
+    ):
+        assert config == meshcorebot_local_config()
+        assert operation == "send_control"
+        assert control_request == request_raw
+        assert timeout_sec == rf_accept.LOCAL_PEER_CONTROL_TIMEOUT_SEC
+        raw = active_response["raw"]
+        return {
+            "socket_path": rf_accept.MESHCOREBOT_PEER_CONTROL_SOCKET,
+            "hostname": rf_accept.REMOTE_PEER_HOSTNAME,
+            "request_size": len(request_raw),
+            "request_sha256": hashlib.sha256(request_raw).hexdigest(),
+            "response_size": len(raw),
+            "response_sha256": hashlib.sha256(raw).hexdigest(),
+            "response_b64": base64.b64encode(raw).decode("ascii"),
+            "peer_pid": 4242,
+            "peer_uid": rf_accept.LOCAL_PEER_CONTROL_UID,
+            "peer_gid": rf_accept.LOCAL_PEER_CONTROL_GID,
+        }
+
+    monkeypatch.setattr(
+        rf_accept, "run_local_peer_operation", fake_operation
+    )
+    control = rf_accept.send_local_peer_dm(
+        meshcorebot_local_config(),
+        d1l_public_key=target,
+        token=token,
+        request_capture_path=tmp_path / "request.jsonl",
+        response_capture_path=tmp_path / "response.jsonl",
+        root=tmp_path,
+    )
+    assert control["response"]["ok"] is False
+    assert control["response"]["error"]["code"] == "deadline_exceeded"
+    assert rf_accept.remote_control_deadline_only_ok(
+        control,
+        d1l_public_key=target,
+        token=token,
+        control_socket=rf_accept.MESHCOREBOT_PEER_CONTROL_SOCKET,
+    )
+    assert not rf_accept.remote_control_semantic_ok(
+        control,
+        d1l_public_key=target,
+        token=token,
+        control_socket=rf_accept.MESHCOREBOT_PEER_CONTROL_SOCKET,
+    )
+
+    observed = datetime(2026, 7, 26, 19, 31, tzinfo=timezone.utc)
+    baseline = {
+        "ok": True,
+        "fingerprint": rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        "entries": [{"seq": 8, "direction": "tx", "text": "older"}],
+    }
+    inbound = {
+        "seq": 9,
+        "fingerprint": rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        "direction": "rx",
+        "text": token,
+        "delivered": True,
+        "path_hops": 0,
+        "ack_response": {
+            "identity_valid": True,
+            "state": "sent",
+            "dispatch_count": 2,
+            "last_kind": "flood_ack_path",
+            "last_error": "ESP_OK",
+        },
+    }
+    final = {
+        **baseline,
+        "entries": [*baseline["entries"], inbound],
+    }
+    observation = rf_accept.d1l_deadline_delivery_observation(
+        control=control,
+        baseline_messages=baseline,
+        final_messages=final,
+        peer_after=meshcorebot_status(observed),
+        fingerprint=rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        d1l_public_key=target,
+        token=token,
+        observed_at=observed,
+    )
+    assert observation["ok"] is True
+    assert all(observation["checks"].values())
+    report_data = {
+        "target_fingerprint": rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        "d1l_public_key": target,
+        "inbound_token": token,
+        "controlled_peer": {
+            "fingerprint": rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+            "evidence_source": "explicit_peer_status",
+            "port": rf_accept.MESHCOREBOT_PEER_DEVICE,
+            "profile": rf_accept.MESHCOREBOT_PEER_PROFILE,
+            "status_path": str(rf_accept.MESHCOREBOT_PEER_STATUS_PATH),
+            "control_socket": rf_accept.MESHCOREBOT_PEER_CONTROL_SOCKET,
+            "public_key": rf_accept.MESHCOREBOT_PEER_PUBLIC_KEY,
+            "device_access": "opaque_status_identity_only",
+        },
+        "controlled_peer_control": control,
+        "controlled_peer_delivery_observation": observation,
+        "controlled_peer_after": rf_accept.status_snapshot(
+            meshcorebot_status(observed)
+        ),
+        "steps": [
+            {
+                "command": (
+                    "messages dm "
+                    + rf_accept.MESHCOREBOT_PEER_FINGERPRINT
+                ),
+                "result": baseline,
+            },
+            {
+                "command": (
+                    "messages dm "
+                    + rf_accept.MESHCOREBOT_PEER_FINGERPRINT
+                ),
+                "result": final,
+            },
+        ],
+    }
+    assert rf_accept.report_deadline_observed_delivery_ok(report_data)
+    assert release_audit.controlled_peer_evidence_ok(
+        report_data,
+        release_audit.POSIX_D1L_TARGET,
+        rf_accept.MESHCOREBOT_PEER_DEVICE,
+        require_status=True,
+        evidence_root=tmp_path,
+    )
+
+    for mutation in (
+        {"path_hops": 1},
+        {"text": "wrong-token"},
+        {
+            "ack_response": {
+                **inbound["ack_response"],
+                "state": "pending",
+            }
+        },
+    ):
+        changed = {**inbound, **mutation}
+        rejected = rf_accept.d1l_deadline_delivery_observation(
+            control=control,
+            baseline_messages=baseline,
+            final_messages={
+                **final,
+                "entries": [*baseline["entries"], changed],
+            },
+            peer_after=meshcorebot_status(observed),
+            fingerprint=rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+            d1l_public_key=target,
+            token=token,
+            observed_at=observed,
+        )
+        assert rejected["ok"] is False
+
+    _, wrong_error = deadline_control_response(
+        target, token, error_code="peer_unavailable"
+    )
+    active_response["raw"] = wrong_error
+    with pytest.raises(
+        rf_accept.RemotePeerError,
+        match="did not return exact acknowledged delivery",
+    ):
+        rf_accept.send_local_peer_dm(
+            meshcorebot_local_config(),
+            d1l_public_key=target,
+            token=token,
+            request_capture_path=tmp_path / "wrong-request.jsonl",
+            response_capture_path=tmp_path / "wrong-response.jsonl",
+            root=tmp_path,
+        )
