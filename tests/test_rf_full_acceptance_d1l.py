@@ -763,6 +763,56 @@ def test_wait_for_mesh_owner_ready_timeout_is_bounded():
     assert sleeps == [0.25]
 
 
+def test_controlled_peer_send_waits_for_advancing_mesh_owner():
+    events = []
+    statuses = iter(
+        [
+            mesh_owner_status(41, heartbeat=9),
+            mesh_owner_status(42, heartbeat=9),
+        ]
+    )
+
+    def read_status():
+        status = next(statuses)
+        events.append(("mesh_status", status["runtime"]["owner_maintenance_runs"]))
+        return status
+
+    def send_peer():
+        events.append(("peer_send", None))
+        return {"validation": {"ok": True}}
+
+    result = rf_accept.send_controlled_peer_dm_after_mesh_owner_ready(
+        status_reader=read_status,
+        sender=send_peer,
+        timeout_sec=1.0,
+        poll_sec=0.25,
+    )
+
+    assert result == {"validation": {"ok": True}}
+    assert events == [
+        ("mesh_status", 41),
+        ("mesh_status", 42),
+        ("peer_send", None),
+    ]
+
+
+def test_controlled_peer_send_fails_closed_when_mesh_owner_times_out():
+    peer_calls = []
+
+    with pytest.raises(
+        ValueError,
+        match="did not become ready before controlled-peer inbound DM",
+    ):
+        rf_accept.send_controlled_peer_dm_after_mesh_owner_ready(
+            status_reader=lambda: mesh_owner_status(41, heartbeat=9),
+            sender=lambda: peer_calls.append(True),
+            timeout_sec=0.0,
+            poll_sec=0.25,
+        )
+
+    assert peer_calls == []
+
+
 def test_rf_report_rejects_failed_then_successful_outbound_duplicate():
     fingerprint = "0BF0A701D5AE2DB6"
     outbound_command = f"mesh send dm {fingerprint} rf_unit_out"

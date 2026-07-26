@@ -1540,6 +1540,24 @@ def wait_for_mesh_owner_ready(
         sleep(min(interval, remaining))
 
 
+def send_controlled_peer_dm_after_mesh_owner_ready(
+    *,
+    status_reader: Callable[[], dict],
+    sender: Callable[[], dict],
+    timeout_sec: float,
+    poll_sec: float,
+) -> dict:
+    if not wait_for_mesh_owner_ready(
+        status_reader,
+        timeout_sec=timeout_sec,
+        poll_sec=poll_sec,
+    ):
+        raise ValueError(
+            "MeshCore owner did not become ready before controlled-peer inbound DM"
+        )
+    return sender()
+
+
 def read_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
@@ -4556,28 +4574,38 @@ def _run_hardware_reserved(
                 if local_mode
                 else send_remote_peer_dm
             )
-            remote_control = send_peer_dm(
-                remote_config,
-                d1l_public_key=public_key,
-                token=inbound_token,
-                request_capture_path=request_capture,
-                response_capture_path=response_capture,
-                root=root,
-                request_reservation=request_reservation,
-                response_reservation=response_reservation,
-                evidence_bundle=evidence_bundle,
+            remote_control = send_controlled_peer_dm_after_mesh_owner_ready(
+                status_reader=lambda: run_command(ser, "mesh status"),
+                sender=lambda: send_peer_dm(
+                    remote_config,
+                    d1l_public_key=public_key,
+                    token=inbound_token,
+                    request_capture_path=request_capture,
+                    response_capture_path=response_capture,
+                    root=root,
+                    request_reservation=request_reservation,
+                    response_reservation=response_reservation,
+                    evidence_bundle=evidence_bundle,
+                ),
+                timeout_sec=wait_sec,
+                poll_sec=poll_sec,
             )
         elif meshcorebot_control_config is not None:
-            remote_control = send_local_peer_dm(
-                meshcorebot_control_config,
-                d1l_public_key=public_key,
-                token=inbound_token,
-                request_capture_path=request_capture,
-                response_capture_path=response_capture,
-                root=root,
-                request_reservation=request_reservation,
-                response_reservation=response_reservation,
-                evidence_bundle=evidence_bundle,
+            remote_control = send_controlled_peer_dm_after_mesh_owner_ready(
+                status_reader=lambda: run_command(ser, "mesh status"),
+                sender=lambda: send_local_peer_dm(
+                    meshcorebot_control_config,
+                    d1l_public_key=public_key,
+                    token=inbound_token,
+                    request_capture_path=request_capture,
+                    response_capture_path=response_capture,
+                    root=root,
+                    request_reservation=request_reservation,
+                    response_reservation=response_reservation,
+                    evidence_bundle=evidence_bundle,
+                ),
+                timeout_sec=wait_sec,
+                poll_sec=poll_sec,
             )
         deadline = time.time() + wait_sec
         while time.time() < deadline:
