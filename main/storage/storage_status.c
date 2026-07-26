@@ -1182,14 +1182,19 @@ static void storage_manager_task(void *arg)
 esp_err_t d1l_storage_boot_prepare(uint32_t timeout_ms)
 {
     esp_err_t ret = d1l_storage_status_refresh(timeout_ms);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT) {
         return ret;
     }
 
-    if (strcmp(s_status.sd_state, "mount_required") != 0) {
+    const bool refresh_timed_out = ret == ESP_ERR_TIMEOUT;
+    if (!refresh_timed_out &&
+        strcmp(s_status.sd_state, "mount_required") != 0 &&
+        strcmp(s_status.sd_state, "no_card") != 0) {
+        /* A cached false no-card state must not suppress one safe mount try. */
         return ret;
     }
 
+    /* The bridge may accept MOUNT even when its first STATUS reply was lost. */
     ret = d1l_storage_status_mount(timeout_ms);
     if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT) {
         return ret;
