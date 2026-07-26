@@ -2839,6 +2839,27 @@ def protocol_migration_gate(
     )
 
 
+def _rf_owner_ready_status_block(results: list[object]) -> bool:
+    if len(results) < 2:
+        return False
+    if not all(
+        isinstance(result, dict)
+        and result.get("ok") is True
+        and result.get("cmd") == "mesh status"
+        for result in results
+    ):
+        return False
+    previous, current = results[-2:]
+    if not (
+        rf_acceptance.mesh_owner_ready_snapshot(previous)
+        and rf_acceptance.mesh_owner_ready_snapshot(current)
+    ):
+        return False
+    previous_runs = previous["runtime"]["owner_maintenance_runs"]
+    current_runs = current["runtime"]["owner_maintenance_runs"]
+    return current_runs > previous_runs
+
+
 def remote_rf_gate(
     data: dict,
     path: Path | None,
@@ -2996,10 +3017,26 @@ def remote_rf_gate(
         for step in steps
         if isinstance(step, dict)
     ]
+    outbound_positions = [
+        index
+        for index, command in enumerate(commands)
+        if command == outbound_command
+    ]
+    outbound_index = (
+        outbound_positions[0] if len(outbound_positions) == 1 else -1
+    )
+    results = [
+        step.get("result", {}) if isinstance(step, dict) else {}
+        for step in steps
+    ]
+    status_results = (
+        results[8:outbound_index] if outbound_index >= 10 else []
+    )
+    owner_readiness_ok = _rf_owner_ready_status_block(status_results)
     structure_ok = (
-        len(steps) >= 17
+        len(steps) >= 19
         and all(isinstance(step, dict) for step in steps)
-        and commands[:10]
+        and commands[:8]
         == [
             "version",
             "identity status",
@@ -3009,9 +3046,15 @@ def remote_rf_gate(
             message_command,
             "packets",
             f"routes trace {fingerprint}",
-            outbound_command,
-            f"packets search {outbound_token}",
         ]
+        and outbound_index >= 10
+        and all(
+            command == "mesh status"
+            for command in commands[8:outbound_index]
+        )
+        and owner_readiness_ok
+        and commands[outbound_index : outbound_index + 2]
+        == [outbound_command, f"packets search {outbound_token}"]
         and commands[-6:]
         == [
             "packets",
@@ -3021,7 +3064,10 @@ def remote_rf_gate(
             f"routes trace {fingerprint}",
             "health",
         ]
-        and all(command == message_command for command in commands[10:-6])
+        and all(
+            command == message_command
+            for command in commands[outbound_index + 2 : -6]
+        )
         and commands.count(outbound_command) == 1
         and sum(
             command.strip().lower().startswith("mesh send dm ")
@@ -3033,10 +3079,6 @@ def remote_rf_gate(
             for command in commands
         )
     )
-    results = [
-        step.get("result", {}) if isinstance(step, dict) else {}
-        for step in steps
-    ]
     version = results[0] if len(results) > 0 else {}
     version_time = version.get("time") if isinstance(version, dict) else None
     protocol_tx_ready_before_rf = (
@@ -3051,8 +3093,14 @@ def remote_rf_gate(
     baseline_messages = results[5] if len(results) > 5 else {}
     baseline_packets = results[6] if len(results) > 6 else {}
     baseline_route = results[7] if len(results) > 7 else {}
-    outbound_result = results[8] if len(results) > 8 else {}
-    outbound_packets = results[9] if len(results) > 9 else {}
+    outbound_result = (
+        results[outbound_index] if outbound_index >= 0 else {}
+    )
+    outbound_packets = (
+        results[outbound_index + 1]
+        if outbound_index >= 0 and len(results) > outbound_index + 1
+        else {}
+    )
     final_messages = results[-4] if len(results) >= 4 else {}
     final_packets = results[-3] if len(results) >= 3 else {}
     final_route = results[-2] if len(results) >= 2 else {}
@@ -3273,6 +3321,12 @@ def remote_rf_gate(
         and flow.get("ok") is True
         and control_exact,
         "controlled_peer_contact_ready": contact_ok,
+        "outbound_send_exactly_once": commands.count(outbound_command) == 1,
+        "direct_send_exactly_once": sum(
+            command.strip().lower().startswith("mesh send dm ")
+            for command in commands
+        )
+        == 1,
         "outbound_dm": outbound_ok,
         "inbound_dm": inbound_ok,
         "ack_path": ack_ok,
@@ -3364,6 +3418,7 @@ def remote_rf_gate(
             "checks_ok": checks_ok,
             "derived_checks": derived_checks,
             "command_structure_ok": structure_ok,
+            "owner_readiness_ok": owner_readiness_ok,
             "raw_status_ok": raw_status_ok,
             "peer_flow_ok": flow.get("ok") is True,
             "control_exchange_ok": control_exact,
@@ -3444,10 +3499,26 @@ def rf_gate(
         for step in steps
         if isinstance(step, dict)
     ]
+    outbound_positions = [
+        index
+        for index, command in enumerate(commands)
+        if command == outbound_command
+    ]
+    outbound_index = (
+        outbound_positions[0] if len(outbound_positions) == 1 else -1
+    )
+    results = [
+        step.get("result", {}) if isinstance(step, dict) else {}
+        for step in steps
+    ]
+    status_results = (
+        results[8:outbound_index] if outbound_index >= 10 else []
+    )
+    owner_readiness_ok = _rf_owner_ready_status_block(status_results)
     structure_ok = (
-        len(steps) >= 17
+        len(steps) >= 19
         and all(isinstance(step, dict) for step in steps)
-        and commands[:10]
+        and commands[:8]
         == [
             "version",
             "identity status",
@@ -3457,9 +3528,15 @@ def rf_gate(
             message_command,
             "packets",
             f"routes trace {fingerprint}",
-            outbound_command,
-            f"packets search {outbound_token}",
         ]
+        and outbound_index >= 10
+        and all(
+            command == "mesh status"
+            for command in commands[8:outbound_index]
+        )
+        and owner_readiness_ok
+        and commands[outbound_index : outbound_index + 2]
+        == [outbound_command, f"packets search {outbound_token}"]
         and commands[-6:]
         == [
             "packets",
@@ -3469,7 +3546,10 @@ def rf_gate(
             f"routes trace {fingerprint}",
             "health",
         ]
-        and all(command == message_command for command in commands[10:-6])
+        and all(
+            command == message_command
+            for command in commands[outbound_index + 2 : -6]
+        )
         and commands.count(outbound_command) == 1
         and sum(
             command.strip().lower().startswith("mesh send dm ")
@@ -3481,10 +3561,6 @@ def rf_gate(
             for command in commands
         )
     )
-    results = [
-        step.get("result", {}) if isinstance(step, dict) else {}
-        for step in steps
-    ]
     version = results[0] if len(results) > 0 else {}
     version_time = version.get("time") if isinstance(version, dict) else None
     protocol_tx_ready_before_rf = (
@@ -3499,8 +3575,14 @@ def rf_gate(
     baseline_messages = results[5] if len(results) > 5 else {}
     baseline_packets = results[6] if len(results) > 6 else {}
     baseline_route = results[7] if len(results) > 7 else {}
-    outbound_result = results[8] if len(results) > 8 else {}
-    outbound_packets = results[9] if len(results) > 9 else {}
+    outbound_result = (
+        results[outbound_index] if outbound_index >= 0 else {}
+    )
+    outbound_packets = (
+        results[outbound_index + 1]
+        if outbound_index >= 0 and len(results) > outbound_index + 1
+        else {}
+    )
     final_messages = results[-4] if len(results) >= 4 else {}
     final_packets = results[-3] if len(results) >= 3 else {}
     final_route = results[-2] if len(results) >= 2 else {}
@@ -3639,6 +3721,12 @@ def rf_gate(
         "controlled_peer_observed": raw_status_ok and peer_flow_ok,
         "controlled_peer_status_connected": raw_status_ok and peer_flow_ok,
         "controlled_peer_contact_ready": contact_ok,
+        "outbound_send_exactly_once": commands.count(outbound_command) == 1,
+        "direct_send_exactly_once": sum(
+            command.strip().lower().startswith("mesh send dm ")
+            for command in commands
+        )
+        == 1,
         "outbound_dm": outbound_ok,
         "inbound_dm": inbound_ok,
         "ack_path": ack_ok,
@@ -3707,6 +3795,7 @@ def rf_gate(
             "checks_ok": checks_ok,
             "derived_checks": derived_checks,
             "command_structure_ok": structure_ok,
+            "owner_readiness_ok": owner_readiness_ok,
             "raw_status_ok": raw_status_ok,
             "peer_flow_ok": peer_flow_ok,
             "contact_setup_ok": contact_ok,
