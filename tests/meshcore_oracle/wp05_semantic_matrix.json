@@ -532,6 +532,7 @@
     "main/storage/retained_blob_store.h": "e7da30658e4490adec17daede16088b9748b02d9ff34edc204d4faca512c5498",
     "main/storage/storage_status.h": "ee8b6ab5afabaef050a26d816ac32c06f1ebf0877836dd057bdf222e2f4fe4fd",
     "tests/native/esp_nvs_stubs.c": "a101adfcb640eeffe32d039a9ad4a8ae775a959eabd45d05d53ce75a2a1375ec",
+    "tests/native/retained_blob_store_nvs_adapter.c": "1ce2e404a01074240941efe8453d55fd683bbb2e1216555bbd26e07962a9f128",
     "tests/native/mbedtls_md_stub.c": "db5f82347ce2e70303a71a7b8dc0cae4c7de237e3a353605845763f6e61bda52",
     "tests/native/meshcore_admin_dispatch_test.c": "dec46a4f0dc6736ab487f6773efec7d971cf348064d30160b2ece0a433deb423",
     "tests/native/meshcore_ack_completion_test.c": "152d878857e11211086027d7884ccc5728f107c817758c7ff652dadcf1292f5f",

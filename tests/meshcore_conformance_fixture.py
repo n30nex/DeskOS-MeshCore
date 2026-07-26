@@ -74,6 +74,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/mesh/node_store.h",
         "main/mesh/store_lock.h",
         "tests/native/esp_nvs_stubs.c",
+        "tests/native/retained_blob_store_nvs_adapter.c",
         "tests/native/mbedtls_md_stub.c",
         "tests/native/mock_esp_nvs.h",
         "tests/native/store_behavior_test.c",

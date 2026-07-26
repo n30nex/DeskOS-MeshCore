@@ -218,8 +218,8 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         dependency_verification,
     )
     assert source_verification["verified"] is True
-    assert dependency_verification["dependency_count"] == 73
-    assert dependency_verification["translation_unit_count"] == 38
+    assert dependency_verification["dependency_count"] == 74
+    assert dependency_verification["translation_unit_count"] == 39
     assert dependency_verification["dependencies"] == sorted(
         conformance.EXPECTED_WP05_SOURCE_PATHS
     )
