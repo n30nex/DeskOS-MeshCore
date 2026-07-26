@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from artifact_metadata import git_metadata
     from core_smoke_d1l import CORE_RELEASE_PROFILE, resolve_core_target
     from d1l_serial_target import POSIX_D1L_TARGET, validate_snapshot
     from produce_rc1_bounded_physical_receipt_d1l import (
@@ -31,6 +32,7 @@ try:
     from scroll_probe_d1l import crashlog_has_crash_like_entries
     from smoke_d1l import exact_commit, open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.artifact_metadata import git_metadata
     from scripts.core_smoke_d1l import CORE_RELEASE_PROFILE, resolve_core_target
     from scripts.d1l_serial_target import POSIX_D1L_TARGET, validate_snapshot
     from scripts.produce_rc1_bounded_physical_receipt_d1l import (
@@ -541,6 +543,8 @@ def build_transcript(
     crashlog: dict[str, Any],
     target_before: dict[str, Any],
     target_after: dict[str, Any],
+    runner_commit: str,
+    runner_source_clean: bool,
     expected_commit: str,
     actions_run: str,
     workflow_run_attempt: str,
@@ -605,6 +609,8 @@ def build_transcript(
         "port": POSIX_D1L_TARGET,
         "d1l_target": target_before,
         "d1l_target_after": target_after,
+        "runner_commit": runner_commit,
+        "runner_source_clean": runner_source_clean,
         "expected_firmware_commit": expected_commit,
         "github_actions_run": actions_run,
         "workflow_run_attempt": workflow_run_attempt,
@@ -702,6 +708,8 @@ def _resolve_pi_target(port_lister: Callable[[], Any]) -> dict[str, Any]:
 
 def run_acceptance(
     *,
+    runner_commit: str,
+    runner_source_clean: bool,
     expected_commit: str,
     actions_run: str,
     workflow_run_attempt: str,
@@ -1001,6 +1009,8 @@ def run_acceptance(
         crashlog=final_crashlog,
         target_before=target_before,
         target_after=target_after,
+        runner_commit=runner_commit,
+        runner_source_clean=runner_source_clean,
         expected_commit=expected_commit,
         actions_run=actions_run,
         workflow_run_attempt=workflow_run_attempt,
@@ -1044,6 +1054,7 @@ def write_transcript_atomic(path: Path, transcript: dict[str, Any]) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument(
         "--port",
         default=POSIX_D1L_TARGET,
@@ -1098,6 +1109,16 @@ def main(argv: list[str] | None = None) -> int:
         expected_commit = exact_expected_commit(
             args.expected_firmware_commit
         )
+        source = git_metadata(args.root.resolve())
+        if not (
+            source.get("commit") == expected_commit
+            and source.get("dirty") is False
+            and source.get("dirty_entries") == []
+        ):
+            raise AcceptanceFailure(
+                "runner_source_mismatch",
+                "Map acceptance must run from the exact clean candidate",
+            )
         actions_run = positive_decimal(
             args.github_actions_run, "github actions run"
         )
@@ -1105,6 +1126,8 @@ def main(argv: list[str] | None = None) -> int:
             args.workflow_run_attempt, "workflow run attempt"
         )
         transcript = run_acceptance(
+            runner_commit=source["commit"],
+            runner_source_clean=True,
             expected_commit=expected_commit,
             actions_run=actions_run,
             workflow_run_attempt=workflow_run_attempt,

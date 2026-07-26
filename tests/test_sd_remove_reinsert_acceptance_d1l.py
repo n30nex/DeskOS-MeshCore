@@ -446,6 +446,8 @@ def valid_report() -> dict:
         "firmware_identity": True,
         "strict_evidence": True,
         "physical_observed": True,
+        "dry_run": False,
+        "simulated": False,
         "manual_only": False,
         "operator_ack_required": True,
         "operator_ack_timeout_sec": accept.OPERATOR_ACK_TIMEOUT_SEC,

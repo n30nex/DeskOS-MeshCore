@@ -30,8 +30,10 @@ The remaining RC1 work is one release-evidence path:
 4. run the bounded boot/UI, advert/Public, DM/ACK, PATH/TRACE/Ping, Admin,
    Wi-Fi reconnect, SD write/remount/degraded, and Map
    download/offline-revisit gate;
-5. collect one consolidated physical UI confirmation and publish only when
-   the final fail-closed audit binds every receipt to the same artifact.
+5. retain the operator-completed physical display/touch/keyboard/scroll
+   acceptance, collect the automated 12-surface navigation receipt on the
+   final exact artifact, and publish only when the fail-closed audit binds
+   every receipt to that artifact.
 
 No soak is required. Built-in OSM remains attributed and
 visible-current-view-only; authorized-provider prefetch pauses while
@@ -280,7 +282,7 @@ Stage 5 closes only when host state-machine tests and current-commit hardware st
 
 ### Stage 6 - Complete hardware acceptance
 
-1. Full RF/DM/channel/PATH/trace acceptance with an official client or controlled second radio. Every automated transmission is confined to `#test` or a targeted DM; COM11 may act only as the independent Discord-bot radio peer and must never be opened as the D1L serial port. Default Public is not an automation target.
+1. Full RF/DM/channel/PATH/trace acceptance with an official client or controlled second radio. Automated transmission is confined to `#test` or a targeted DM except for the single tokenized final-gate Public send explicitly authorized with `--authorize-public-tx`; COM11 may act only as the independent Discord-bot radio peer and must never be opened as the D1L serial port.
 2. SD FAT32 matrix: no card, runtime removal, non-FAT32/unformatted, representative 8/16/32GB FAT32 cards, RP2040 unavailable/timeout/malformed response, fallback/recovery, electrical evidence, and atomic-write/power-loss behavior.
 3. Guided fresh-operator install for ESP32 plus RP2040 artifacts, flashing order, FAT32 preparation, validation, recovery, and checksums.
 4. Physical review of every enabled page/action: pixels, touch targets, scrolling, keyboard, modal return, brightness, RX-active redraw, and actionable errors.

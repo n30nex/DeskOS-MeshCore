@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -789,6 +790,36 @@ def test_dry_run_is_serial_only_and_read_only_after_reboot():
     assert "reboot" in report["commands"]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
     assert not any("setup confirm" in command for command in report["commands"])
+
+
+def test_exact_candidate_report_rejects_runner_source_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    expected = "a" * 40
+    wrong = "b" * 40
+    report = {
+        "mode": "hardware",
+        "expected_firmware_commit": expected,
+    }
+
+    def stamp_wrong_source(payload, _root):
+        payload["commit"] = wrong
+        payload["git"] = {
+            "commit": wrong,
+            "status_ok": True,
+            "dirty": False,
+            "dirty_entries": [],
+        }
+
+    monkeypatch.setattr(
+        remount_accept, "stamp_report", stamp_wrong_source
+    )
+    output = tmp_path / "sd-remount.json"
+
+    with pytest.raises(ValueError, match="exact clean candidate"):
+        remount_accept.write_report(report, output)
+
+    assert not output.exists()
 
 
 def test_slow_sd_operations_get_bounded_long_timeouts(monkeypatch):

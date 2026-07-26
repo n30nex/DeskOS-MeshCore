@@ -660,7 +660,11 @@ def _machine_source_payload(
             return any(rejected(child) for child in value)
         return False
 
-    if not payload or rejected(payload):
+    if (
+        not payload
+        or payload.get("kind") != PHYSICAL_SOURCE_KINDS.get(role)
+        or rejected(payload)
+    ):
         return False
     mode = payload.get("mode")
     physical = payload.get("physical_observed")
@@ -672,12 +676,15 @@ def _machine_source_payload(
             and payload.get("simulated") is False
             and payload.get("simulation") is not True
             and payload.get("source_inspection") is not True
-            and payload.get("manual_only") is not True
+            and payload.get("manual_only") is False
         )
     if role == "ui":
         return (
             mode == "hardware"
             and physical is True
+            and payload.get("dry_run") is False
+            and payload.get("simulated") is False
+            and payload.get("manual_only") is False
             and payload.get("manual_touch") is False
         )
     if role == "rf":
@@ -688,7 +695,7 @@ def _machine_source_payload(
             and payload.get("simulated") is False
             and payload.get("simulation") is not True
             and payload.get("source_inspection") is not True
-            and payload.get("manual_only") is not True
+            and payload.get("manual_only") is False
         )
     if role in {"protocol", "map"}:
         return (
@@ -708,6 +715,7 @@ def _machine_source_payload(
             and truth.get("simulated") is False
             and truth.get("dry_run") is False
             and truth.get("source_inspection") is False
+            and payload.get("manual_only") is False
         )
     if role in {"sd", "sd_degraded"}:
         commit = exact_commit(candidate.get("firmware_commit"))
@@ -789,6 +797,7 @@ def physical_evidence_contract(
 
         source_paths: set[str] = set()
         source_hashes: set[str] = set()
+        source_payloads: dict[str, dict[str, Any]] = {}
         for role, expected_kind in PHYSICAL_SOURCE_KINDS.items():
             row = sources.get(role)
             if not exact_keys(row, frozenset({"path", "sha256", "kind"})):
@@ -804,16 +813,48 @@ def physical_evidence_contract(
             ):
                 return False, None
             path = safe_package_file(physical_evidence.parent, path_text)
+            payload = load_json(path) if path is not None else {}
             if (
                 path is None
                 or sha256_file(path) != digest
                 or not _machine_source_payload(
-                    role, load_json(path), candidate
+                    role, payload, candidate
                 )
             ):
                 return False, None
             source_paths.add(path_text)
             source_hashes.add(digest)
+            source_payloads[role] = payload
+
+        try:
+            from produce_rc1_bounded_physical_receipt_d1l import (
+                EvidenceError,
+                VALIDATORS,
+            )
+        except ImportError:  # pragma: no cover - package import path used by pytest
+            try:
+                from scripts.produce_rc1_bounded_physical_receipt_d1l import (
+                    EvidenceError,
+                    VALIDATORS,
+                )
+            except ImportError:
+                return False, None
+        if (
+            set(VALIDATORS) != set(PHYSICAL_SOURCE_KINDS)
+            or not all(callable(validator) for validator in VALIDATORS.values())
+        ):
+            return False, None
+        semantic_outcomes: dict[str, bool | int] = {}
+        try:
+            for role in PHYSICAL_SOURCE_KINDS:
+                derived = VALIDATORS[role](source_payloads[role], candidate)
+                if set(semantic_outcomes).intersection(derived):
+                    return False, None
+                semantic_outcomes.update(derived)
+        except (EvidenceError, KeyError, OSError, TypeError, ValueError):
+            return False, None
+        if semantic_outcomes != receipt.get("outcomes"):
+            return False, None
         return True, sha256_file(physical_evidence)
     except (OSError, RuntimeError, TypeError, ValueError):
         return False, None

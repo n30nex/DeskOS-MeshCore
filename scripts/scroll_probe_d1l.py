@@ -299,9 +299,14 @@ def dry_run_report(
     commands.extend(["ui status", "health", "crashlog"])
     return {
         "schema": 1,
+        "kind": "scroll_probe_d1l",
         "mode": "dry-run",
         "ok": True,
         "hardware_required": False,
+        "physical_observed": False,
+        "dry_run": True,
+        "simulated": False,
+        "manual_only": False,
         "explicit_port_required": True,
         "manual_touch": manual_touch,
         "dwell_sec": dwell_sec,
@@ -461,11 +466,15 @@ def _core_identity_failure_report(
     )
     return {
         "schema": 2,
+        "kind": "scroll_probe_d1l",
         "mode": "hardware",
         "ok": False,
         "closure_eligible": False,
         "hardware_required": True,
         "physical_observed": True,
+        "dry_run": False,
+        "simulated": False,
+        "manual_only": False,
         "identity_preflight_only": True,
         "port": port,
         "d1l_target": d1l_target,
@@ -805,7 +814,11 @@ def run_scroll_probe(
         "schema": (
             2 if release_profile == CORE_RELEASE_PROFILE else 1
         ),
+        "kind": "scroll_probe_d1l",
         "mode": "hardware",
+        "dry_run": False,
+        "simulated": False,
+        "manual_only": False,
         "port": port,
         "baud": baud,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),

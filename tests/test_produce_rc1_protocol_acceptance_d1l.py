@@ -35,6 +35,7 @@ OPERATIONS = (
     "trace_request",
     "trace_result",
     "peer_before",
+    "public_tx_authorization",
     "public_send",
     "public_tx_record",
     "peer_after_public",
@@ -262,6 +263,13 @@ def protocol_transcript() -> dict:
             "routes trace status", PEER_FP, 101, False
         ),
         "peer_before": peer_capture(channel=10, dm=5),
+        "public_tx_authorization": {
+            "schema": 1,
+            "ok": True,
+            "authorized": True,
+            "source": "cli_flag",
+            "bounded_public_tx_count": 1,
+        },
         "public_send": {
             "schema": 1,
             "ok": True,
@@ -431,6 +439,7 @@ def protocol_transcript() -> dict:
         "trace_request": f"routes trace contact {PEER_FP}",
         "trace_result": "routes trace status",
         "peer_before": "controlled-peer status capture",
+        "public_tx_authorization": "operator flag --authorize-public-tx",
         "public_send": f"mesh send public {PUBLIC_OUT}",
         "public_tx_record": f"packets search {PUBLIC_OUT}",
         "peer_after_public": "controlled-peer status capture",
@@ -465,6 +474,8 @@ def protocol_transcript() -> dict:
         "port": gate.POSIX_D1L_TARGET,
         "d1l_target": {},
         "d1l_target_after": {},
+        "runner_commit": COMMIT,
+        "runner_source_clean": True,
         "expected_firmware_commit": COMMIT,
         "github_actions_run": RUN,
         "workflow_run_attempt": ATTEMPT,
@@ -521,6 +532,10 @@ def test_machine_transcript_closes_the_protocol_gate(
                 {"tag": "path_0000002A"}
             ),
         ),
+        (
+            "public_tx_authorization",
+            lambda response: response.update({"authorized": False}),
+        ),
     ],
 )
 def test_machine_transcript_rejects_unproven_claims(
@@ -553,11 +568,37 @@ def test_machine_transcript_never_contains_the_admin_password(
         validate(transcript, monkeypatch)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("runner_commit", "b" * 40),
+        ("runner_source_clean", False),
+    ],
+)
+def test_machine_transcript_rejects_wrong_runner_source(
+    field: str,
+    value,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    transcript = protocol_transcript()
+    transcript[field] = value
+
+    with pytest.raises(gate.EvidenceError):
+        validate(transcript, monkeypatch)
+
+
 def test_zero_byte_admin_password_file_is_valid(tmp_path: Path):
     password_file = tmp_path / "admin-password"
     password_file.write_bytes(b"")
 
     assert runner.load_admin_password(password_file) == ""
+
+
+def test_public_tx_requires_explicit_operator_authorization():
+    with pytest.raises(runner.ProtocolAcceptanceError):
+        runner.require_public_tx_authorization(False)
+
+    assert runner.require_public_tx_authorization(True) is None
 
 
 def test_admin_login_failure_never_exposes_wire_password(
@@ -595,5 +636,6 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     assert "socket.gethostname() != PI_HOST" in source
     assert "port=POSIX_D1L_TARGET" in source
     assert '"manual_only": False' in source
+    assert "--authorize-public-tx" in source
     assert "validate_protocol(transcript, candidate)" in source
     assert "--dry-run" not in source

@@ -627,6 +627,7 @@ def _base_report(
         "ok": False,
         "acceptance_passed": False,
         "feature_evidence_eligible": False,
+        "rc1_gate_eligible": False,
         "release_gate_eligible": False,
         "truth": {
             "physical_observed": False,
@@ -638,6 +639,7 @@ def _base_report(
         "physical_observed": False,
         "simulated": mode == "simulation",
         "dry_run": mode == "dry-run",
+        "manual_only": False,
         "hardware_required": True,
         "hardware_transport": None,
         "d1l_target": None,
@@ -1479,6 +1481,7 @@ def write_report(report: dict, path: Path | None = None) -> Path:
         out = ROOT / out
     stamp_report(report, ROOT)
     report["feature_evidence_eligible"] = validate_completed_report(report)
+    report["rc1_gate_eligible"] = report["feature_evidence_eligible"] is True
     report["release_gate_eligible"] = False
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(

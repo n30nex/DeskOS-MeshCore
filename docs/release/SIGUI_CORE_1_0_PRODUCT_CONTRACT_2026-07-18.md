@@ -62,8 +62,10 @@ an RC1 claim; use `contacts import <meshcore-uri>` over USB.
 - Remote mutations require the exact authenticated target/session and local
   confirmation. Sensitive input is redacted, not persistently retained or
   logged, and wiped from volatile confirmation buffers.
-- DeskOS never forwards third-party MeshCore traffic. Release automation never
-  transmits on the default Public channel.
+- DeskOS never forwards third-party MeshCore traffic. Release automation may
+  transmit only the single tokenized final-gate Public message after the
+  operator explicitly supplies `--authorize-public-tx`; every other automated
+  path remains Public-silent.
 - BLE companion transport, contact/channel QR sharing, and signed
   OTA/update/recovery product workflows are deferred to 1.5 / RC2 and must
   remain unavailable in RC1.
@@ -97,7 +99,9 @@ Actions artifact:
 6. Wi-Fi reconnect;
 7. SD write/remount plus missing/unusable-card degraded notice;
 8. authorized-provider Map download and offline cache revisit;
-9. consolidated physical display/touch/keyboard confirmation.
+9. automated 12-surface navigation on the exact artifact, retaining the
+   operator's already-completed display/touch/keyboard/scroll acceptance
+   without repeating a manual campaign.
 
 No soak is required. Any unexpected reboot, artifact mismatch, destructive SD
 operation, missing required workflow or unconfirmed security-sensitive
@@ -333,7 +337,9 @@ When conditional qualification fails:
 
 - D1L is non-forwarding.
 - Default region is USA/Canada.
-- Automated default Public transmission is prohibited during validation.
+- Uncontrolled or implicit automated default Public transmission is prohibited.
+  The current final gate permits exactly one tokenized send only after explicit
+  `--authorize-public-tx` operator consent.
 - Controlled DM or a configured private `#test` channel is used for RF proof.
 - Direct messages must have truthful queued/sent/acknowledged/retrying/failed state.
 - No malformed, unauthenticated, duplicate, or replayed payload may create a visible duplicate or incorrect ACK.

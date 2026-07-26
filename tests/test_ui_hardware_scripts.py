@@ -753,11 +753,19 @@ def test_active_release_docs_keep_ui_acceptance_on_exact_candidate():
     ).split("## Historical", 1)[0]
 
     assert "boot/UI" in roadmap
-    assert "one consolidated physical UI confirmation" in roadmap
+    assert "operator-completed physical display/touch/keyboard/scroll" in roadmap
+    assert "automated 12-surface navigation receipt" in roadmap
     assert "boot/five-root UI" in checklist
-    assert "one consolidated physical display/touch/keyboard review" in checklist
+    assert (
+        "operator accepted the physical display/touch/keyboard/scroll"
+        in checklist
+    )
     assert "boot and five-root navigation" in test_plan
-    assert "display, touch,\n   keyboard" in test_plan
+    assert (
+        "operator's completed physical display/touch/keyboard/scroll"
+        in test_plan
+    )
+    assert "automated 12-surface navigation receipt" in test_plan
     assert "same exact commit" in test_plan
     assert "No soak" in test_plan
 

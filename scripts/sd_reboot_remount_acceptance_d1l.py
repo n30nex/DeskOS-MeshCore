@@ -196,8 +196,13 @@ def dry_run_report(
     strict_evidence = expected_firmware_commit is not None
     return {
         "schema": 1,
+        "kind": "sd_reboot_remount_acceptance_d1l",
         "mode": "dry-run",
         "hardware_required": False,
+        "physical_observed": False,
+        "dry_run": True,
+        "simulated": False,
+        "manual_only": False,
         "token": token,
         "fingerprint": fingerprint_for_token(token),
         "commands": command_plan(
@@ -1163,7 +1168,12 @@ def run_acceptance(
 
     report = {
         "schema": 1,
+        "kind": "sd_reboot_remount_acceptance_d1l",
         "mode": "hardware",
+        "physical_observed": True,
+        "dry_run": False,
+        "simulated": False,
+        "manual_only": False,
         "port": port,
         "baud": baud,
         "token": token,
@@ -1334,6 +1344,23 @@ def run_acceptance(
 def write_report(report: dict, out_path: Path | None) -> Path:
     root = Path(__file__).resolve().parents[1]
     stamp_report(report, root)
+    expected_commit = report.get("expected_firmware_commit")
+    git = report.get("git")
+    if (
+        report.get("mode") == "hardware"
+        and isinstance(expected_commit, str)
+        and (
+            report.get("commit") != expected_commit
+            or not isinstance(git, dict)
+            or git.get("commit") != expected_commit
+            or git.get("status_ok") is not True
+            or git.get("dirty") is not False
+            or git.get("dirty_entries") != []
+        )
+    ):
+        raise ValueError(
+            "SD reboot/remount acceptance must run from the exact clean candidate"
+        )
     if out_path is None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         out_path = root / "artifacts" / "sd-reboot-remount" / f"d1l-sd-reboot-remount-{stamp}.json"

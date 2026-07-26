@@ -3037,6 +3037,7 @@ def dry_run_report(
         }
     return {
         "schema": RF_FULL_ACCEPTANCE_SCHEMA,
+        "kind": "rf_full_acceptance",
         "mode": "dry-run-rf-full-acceptance",
         "hardware_required": False,
         "physical_observed": False,
@@ -3044,6 +3045,7 @@ def dry_run_report(
         "simulated": False,
         "simulation": False,
         "source_inspection": False,
+        "manual_only": False,
         "execution_complete": False,
         "closure_eligible": False,
         "dm_rf_tx": False,
@@ -3462,6 +3464,7 @@ def build_report(
     report_ok = all(checks.values())
     return {
         "schema": RF_FULL_ACCEPTANCE_SCHEMA,
+        "kind": "rf_full_acceptance",
         "mode": "rf-full-acceptance",
         "hardware_required": True,
         "physical_observed": True,
@@ -3469,6 +3472,7 @@ def build_report(
         "simulated": False,
         "simulation": False,
         "source_inspection": False,
+        "manual_only": False,
         "execution_complete": True,
         "closure_eligible": report_ok,
         "dm_rf_tx": bool(
@@ -3790,6 +3794,7 @@ def _run_hardware_reserved(
                 )
             return {
                 "schema": RF_FULL_ACCEPTANCE_SCHEMA,
+                "kind": "rf_full_acceptance",
                 "mode": "rf-full-acceptance",
                 "hardware_required": True,
                 "physical_observed": True,
@@ -3797,6 +3802,7 @@ def _run_hardware_reserved(
                 "simulated": False,
                 "simulation": False,
                 "source_inspection": False,
+                "manual_only": False,
                 "execution_complete": False,
                 "closure_eligible": False,
                 "dm_rf_tx": False,

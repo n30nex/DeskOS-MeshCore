@@ -20,6 +20,17 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.verify_checksums import verify_sha256_manifest
 
 try:
+    from rf_full_acceptance_d1l import (
+        LOCAL_PEER_EVIDENCE_SOURCE,
+        remote_peer_report_shape_ok as pinned_peer_report_shape_ok,
+    )
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.rf_full_acceptance_d1l import (
+        LOCAL_PEER_EVIDENCE_SOURCE,
+        remote_peer_report_shape_ok as pinned_peer_report_shape_ok,
+    )
+
+try:
     from meshcore_conformance_d1l import (
         CANONICAL_EVIDENCE_PROFILE,
         canonicalize_release_report,
@@ -136,7 +147,14 @@ REQUIRED_SCROLL_SURFACES = {
     "map_cache": "map",
 }
 REQUIRED_SCROLL_SCREENS = set(REQUIRED_SCROLL_SURFACES)
-SCROLL_MOVEMENT_OPTIONAL = {"home", "map", "map_options", "map_location", "map_cache"}
+SCROLL_MOVEMENT_OPTIONAL = {
+    "home",
+    "storage",
+    "map",
+    "map_options",
+    "map_location",
+    "map_cache",
+}
 REQUIRED_COMPOSE_CAPTURE_TARGETS = {
     "public",
     "public-long",
@@ -1967,6 +1985,13 @@ def controlled_peer_evidence_ok(
             and peer_port is None
             and expected_peer is None
         )
+    if source == LOCAL_PEER_EVIDENCE_SOURCE:
+        return (
+            require_status
+            and peer_port is None
+            and expected_peer is None
+            and pinned_peer_report_shape_ok(data)
+        )
     if source != "explicit_peer_status":
         return False
     return (
@@ -2084,7 +2109,10 @@ def full_rf_acceptance_ok(
         if isinstance(data.get("controlled_peer"), dict)
         else None
     )
-    require_status = source == "explicit_peer_status"
+    require_status = source in {
+        "explicit_peer_status",
+        LOCAL_PEER_EVIDENCE_SOURCE,
+    }
     tokens = [
         data.get("outbound_token"),
         data.get("inbound_token"),
@@ -2649,6 +2677,7 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
 def strict_reboot_remount_evidence_ok(
     data: dict, expected_commit: str | None
 ) -> bool:
+    require_runner_source = expected_commit is not None
     commit = expected_commit or data.get("expected_firmware_commit")
     if not isinstance(commit, str) or re.fullmatch(r"[0-9a-fA-F]{40}", commit) is None:
         return False
@@ -2741,8 +2770,25 @@ def strict_reboot_remount_evidence_ok(
     final_persistence = dict(
         zip(persistence_plan, results[-len(persistence_plan) :])
     )
+    git = data.get("git")
     return (
         exact_full_commit(data.get("expected_firmware_commit"), commit)
+        and (
+            not require_runner_source
+            or (
+                data.get("kind") == "sd_reboot_remount_acceptance_d1l"
+                and data.get("physical_observed") is True
+                and data.get("dry_run") is False
+                and data.get("simulated") is False
+                and data.get("manual_only") is False
+                and exact_full_commit(data.get("commit"), commit)
+                and isinstance(git, dict)
+                and exact_full_commit(git.get("commit"), commit)
+                and git.get("status_ok") is True
+                and git.get("dirty") is False
+                and git.get("dirty_entries") == []
+            )
+        )
         and exact_full_commit(data.get("pre_device_build_commit"), commit)
         and exact_full_commit(data.get("device_build_commit"), commit)
         and data.get("firmware_identity_required") is True

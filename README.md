@@ -72,7 +72,9 @@ Mesh advertise. Lists and detail sheets scroll on the device.
 
 - DeskOS is a client and does not forward MeshCore packets.
 - Read, navigation, search, refresh and automated UI acceptance are RF-silent.
-- Release automation never transmits on the default Public channel.
+- Release automation transmits on the default Public channel only for the
+  single tokenized RC1 hardware gate when the operator explicitly supplies
+  `--authorize-public-tx`; all other automated validation remains Public-silent.
 - Observer is off until configured and enabled; it never publishes message
   text, contacts, keys, or forwarding traffic.
 - Server mutations require the exact authenticated target/session and a second
@@ -142,9 +144,16 @@ grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
 Follow the package README for its exact file names and acceptance command.
 Never flash another Pi serial device. Never format SD.
 
+That package helper is for an ordinary post-release install. It is not the
+closing path for `v1.0.0`; the production candidate must follow the
+[authoritative RC1 release execution](docs/RC1_RELEASE_EXECUTION_D1L.md),
+including its bootstrap and retained-reflash receipts, bounded eight-source
+gate, final audit, exact tag and checksummed release assets.
+
 ## Documentation
 
 - [DeskOS 1.0 / RC1 user guide](docs/USER_GUIDE_D1L.md)
+- [Authoritative RC1 release execution](docs/RC1_RELEASE_EXECUTION_D1L.md)
 - [Current RC1 product contract](docs/release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md)
 - [Install/recovery history](docs/FLASH_RECOVERY_D1L.md)
 - [Historical 24-hour status ledger](docs/release/24H_STATUS.md)
