@@ -144,10 +144,10 @@ void app_main(void)
         esp_err_t rp2040_ret = d1l_rp2040_bridge_init();
         d1l_storage_status_note_rp2040(rp2040_ret);
         if (rp2040_ret == ESP_OK) {
-            esp_err_t sd_probe_ret = d1l_storage_boot_prepare(
+            esp_err_t sd_probe_ret = d1l_storage_status_refresh(
                 D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
             if (sd_probe_ret != ESP_OK && sd_probe_ret != ESP_ERR_TIMEOUT) {
-                ESP_LOGW(TAG, "boot SD prepare failed: %s",
+                ESP_LOGW(TAG, "boot SD status refresh failed: %s",
                          esp_err_to_name(sd_probe_ret));
             }
         } else {

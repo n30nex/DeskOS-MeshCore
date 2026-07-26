@@ -1085,12 +1085,10 @@ static void storage_manager_run_once_owned(void)
         ret = d1l_storage_status_mount(remount_requested ?
                                        D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS :
                                        D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
-        if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
-            esp_err_t poll_ret = poll_mount_pending();
-            if (poll_ret != ESP_OK && ret == ESP_OK) {
-                ret = poll_ret;
-            }
-        }
+        /* Routine manager work is asynchronous. A mount-pending reply is
+         * observed again on the next bounded pass instead of holding bridge
+         * quiescence for the full 30-second boot polling budget. Explicit
+         * serial remount acceptance retains its blocking deadline path. */
         if (ret == ESP_ERR_TIMEOUT && manual_remount_requested &&
             !manual_reset_requested && !auto_reset_performed &&
             remount_timeout_needs_bridge_reset()) {
