@@ -5922,8 +5922,7 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
                 &contact.out_path_state, now_ms,
                 settings_snapshot.path_hash_bytes, &selection) ||
             selection.route != D1L_MESHCORE_ROUTE_DIRECT ||
-            selection.reason !=
-                D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN) {
+            selection.reason != D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN) {
             secure_zero_bytes(contact_public_key,
                               sizeof(contact_public_key));
             return ESP_ERR_INVALID_STATE;

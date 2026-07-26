@@ -45,7 +45,7 @@ def test_nodes_expose_finder_and_confirmed_retained_clear() -> None:
     assert 'nodes_create_button(summary, "Find"' in nodes
     assert 'nodes_create_button(summary, "Clear"' in nodes
     assert '"Find Nearby"' in phase1
-    assert '"Zero-hop RF only."' in phase1
+    assert "Zero-hop RF only." in phase1
     assert "Discovery keys are unverified until a signed advert is received." in phase1
     assert "d1l_app_model_find_contact_by_public_key(" in phase1
     assert "d1l_app_model_discover_nearby()" in phase1
