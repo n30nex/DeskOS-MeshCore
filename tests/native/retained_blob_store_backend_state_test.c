@@ -1067,7 +1067,7 @@ static void test_release_profile_sd_admission(void)
     assert(d1l_retained_blob_store_nvs_ready());
     assert(d1l_release_feature_available(
         D1L_RELEASE_FEATURE_RETAINED_NVS));
-    assert(d1l_retained_blob_store_is_available(
+    assert(!d1l_retained_blob_store_is_available(
         D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES));
 
     static const struct {
@@ -1205,9 +1205,9 @@ static void test_first_use_initializes_only_new_retained_region(void)
            first_nvs_event(TEST_NVS_EVENT_INIT_PARTITION));
     assert(first_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) <
            first_nvs_event(TEST_NVS_EVENT_SET_DEDICATED));
-    assert_nvs_blob(true, "d1l_messages", "public",
+    assert(find_nvs_entry(true, "d1l_messages", "public") == NULL);
+    assert_nvs_blob(false, "d1l_messages", "public",
                     legacy_blob, sizeof(legacy_blob));
-    assert(find_nvs_entry(false, "d1l_messages", "public") == NULL);
 }
 
 static void test_first_marker_recovers_init_power_loss_window(void)
