@@ -198,6 +198,8 @@ def verify_core_package(
     package_root = github_run_dir / "d1l-release-package"
     package = _inside(package_dir, package_root, "Core release package")
     manifests = sorted(package.rglob("SHA256SUMS.txt"))
+    if not verify_checksum_tree(package):
+        raise ValueError("Core package checksum tree is incomplete or invalid")
     expected_manifests = {
         package / "SHA256SUMS.txt",
         *(
@@ -205,11 +207,6 @@ def verify_core_package(
             for name in EXPECTED_RP2040_ARTIFACT_NAMES
         ),
     }
-    if set(manifests) != expected_manifests or not verify_checksum_tree(package):
-        raise ValueError(
-            "Core package must have the complete valid root and RP2040 "
-            "SHA256SUMS.txt manifests"
-        )
     manifest_path = package / "manifest.json"
     manifest = _load_json(manifest_path, "Core release manifest")
     workflow = manifest.get("workflow")
@@ -310,6 +307,11 @@ def verify_core_package(
     if not required_truth:
         raise ValueError(
             "Core package manifest commit/run/profile/conditional-SD truth mismatch"
+        )
+    if set(manifests) != expected_manifests:
+        raise ValueError(
+            "Core package must have the complete valid root and RP2040 "
+            "SHA256SUMS.txt manifests"
         )
     if not (package / "rp2040").is_dir() or (package / "update").exists():
         raise ValueError(
