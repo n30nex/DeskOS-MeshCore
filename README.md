@@ -1,19 +1,20 @@
 # MeshCore DeskOS for SenseCAP Indicator D1L
 
 MeshCore DeskOS is a touch-first, non-forwarding MeshCore desk client for the
-Seeed SenseCAP Indicator D1L. The production candidate now builds the
-`full_feature` profile with conditional SD history:
+Seeed SenseCAP Indicator D1L. The production 1.0 / RC1 candidate builds the
+`core_1_0` profile with conditional SD history:
 
 ```text
-D1L_RELEASE_PROFILE=full_feature
+D1L_RELEASE_PROFILE=core_1_0
 D1L_SD_HISTORY_MODE=conditional
 ```
 
-The firmware feature implementation is complete for this profile. Public
-release remains fail-closed until the exact commit built by GitHub Actions is
-checksum-verified, flashed to the qualified D1L, and its automated device,
-reboot, storage, and controlled-peer acceptance receipts pass. Source tests,
-simulator images, predecessor binaries, and dry runs are not release evidence.
+The agreed RC1 firmware surface is implemented in source. Public release
+remains fail-closed until the exact commit is built by GitHub Actions, the
+downloaded package and provenance are checksum-verified, that exact artifact
+is flashed to the qualified D1L, and the bounded device acceptance receipt
+passes. Source tests, simulator images, predecessor binaries, local firmware
+builds, and dry runs are not release evidence.
 
 The current D1L is attached to Raspberry Pi 5 host `neopi5`
 (`192.168.0.24`). Its only authorized release identity is:
@@ -27,35 +28,35 @@ Do not substitute a raw `/dev/ttyUSB*` name or a stale Windows COM assignment.
 
 ## Production feature set
 
-| Area | Full Feature production surface |
+| Area | DeskOS 1.0 / RC1 production surface |
 |---|---|
 | Hardware | 480×480 display, touch, button, SX1262 radio, backlight and power/status truth |
 | Messaging | Public and multi-channel messaging, DMs, unread state, delivery/retry truth and retained history |
-| Contacts and nodes | Verified contacts, QR import/export, rename/favorite/mute/delete, heard nodes, role detail and signed location markers |
-| Network tools | Packet terminal, filters/search/raw detail, signal/routes and explicit user TRACE/PATH tools |
-| Map | Built-in attributed OpenStreetMap source, manual or authenticated-companion center, visible-current-view tile cache and signed peer markers |
-| Connectivity | User-controlled Wi-Fi and bonded encrypted BLE companion transport |
-| Companion protocol | Official core initial-sync, contact/channel, messaging, time, advert, radio and battery/storage commands |
-| Server administration | Authenticated repeater and room login/status; room login starts with a no-history cursor; two exact allowlisted mutations require local confirmation |
+| Contacts and nodes | Verified contacts, USB MeshCore URI import, rename/favorite/mute/delete, up to 512 retained heard nodes, role detail and signed advert-location markers |
+| Network tools | Finder, repeater Ping, contact PATH/TRACE, packet terminal, filters/search/raw detail, signal and route evidence |
+| Map | Built-in attributed OpenStreetMap visible-view cache plus authorized-provider background prefetch around the device and signed nodes within 200 km |
+| Connectivity | User-controlled multiple saved Wi-Fi profiles; BLE companion transport is deferred to RC2 |
+| Server administration | Authenticated repeater/room login, status, telemetry, neighbours, ACL, bounded CLI, room posts, logout and locally confirmed mutations |
 | Observer | Opt-in `mqtts://` TLS observer, QoS 1/PUBACK accounting, bounded queue and optional center location |
-| Storage | Internal NVS fallback plus optional FAT32 SD/RP2040 retained history, exports and map cache |
-| Updates | Ed25519-signed local SD/OTA bundle, exact signer identity, image hash, anti-rollback sequence, dual-slot boot and rollback |
+| Storage | Externally prepared FAT32 SD/RP2040 primary history, exports and map cache, with visible degraded operation when SD is unavailable |
+| Deferred to 1.5 / RC2 | BLE companion transport, contact/channel QR sharing, and signed OTA/update/recovery product workflows |
 | Device UX | Brightness, timeout, night/high-contrast modes, notification pulse/quiet modes, curated glyph palette and service sheets |
-| Support | Structured event terminal, diagnostics, crashlog, health, safe reboot, guarded factory reset and USB recovery |
+| Support | Structured event terminal, diagnostics, crashlog, health, guarded reboot/factory reset and normal non-erasing USB flashing |
 
-The D1L has no onboard GPS. A map center comes only from an explicit local
-entry or an authenticated bonded companion. Peer pins require signed advert
-coordinates and truthful time/age validation.
+The D1L has no onboard GPS. Map centers on an explicitly configured device
+location. Peer pins require signed advert coordinates and truthful time/age
+validation.
 
-The BLE companion surface intentionally rejects remote reboot, factory reset,
-and private-key import/export. Optional channel-datagram extensions are not
-advertised. Those exclusions protect device ownership and secrets; normal
-companion setup, synchronization, channel/contact management, messaging,
-location, advert and radio operations are available.
+Built-in OpenStreetMap Standard access is visible-current-view-only: one 3×3
+tile plan at one zoom per visible generation, with attribution and completed
+tile reuse from SD. Background/offline download is available only through an
+installed HTTPS provider manifest that explicitly authorizes offline storage
+and background prefetch. Background prefetch pauses while the interactive Map
+is open.
 
 ## Navigation
 
-The full-feature dock contains:
+The RC1 dock contains:
 
 1. Home
 2. Messages
@@ -63,10 +64,9 @@ The full-feature dock contains:
 4. Map
 5. Tools
 
-Tools groups Packets, Diagnostics, Terminal, Wi-Fi, Bluetooth, Observer, SD
-Card, Map options, Signed update, Display, Notifications, Identity, About,
-Radio, Server admin, and Mesh advertise. Lists and detail sheets scroll on the
-device; the automated UI probe covers required scrollable surfaces.
+Tools groups Packets, Diagnostics, Terminal, Wi-Fi, Observer, SD Card, Map
+options, Display, Notifications, Identity, About, Radio, Server admin, and
+Mesh advertise. Lists and detail sheets scroll on the device.
 
 ## Safety and privacy
 
@@ -75,17 +75,31 @@ device; the automated UI probe covers required scrollable surfaces.
 - Release automation never transmits on the default Public channel.
 - Observer is off until configured and enabled; it never publishes message
   text, contacts, keys, or forwarding traffic.
-- Server mutations are limited to `clear stats` and `advert.zerohop`, require
-  an authenticated session, and require a second local confirmation within
-  five seconds.
+- Server mutations require the exact authenticated target/session and a second
+  local confirmation. Sensitive input is not persistently retained or logged;
+  volatile confirmation buffers are wiped.
 - Users prepare FAT32 SD cards on a computer. There is no device-side SD
-  formatting path. Missing or unusable media falls back to NVS where defined.
-- Normal project flashing is non-erasing. The full recovery image is
-  destructive and requires typed confirmation.
+  formatting path. Missing or unusable media enters a visible live-only RF
+  chat mode; retained history is not silently redirected into default NVS.
+- Default NVS remains a bounded configuration, identity, boot/recovery and
+  diagnostic store, not the retained-history authority.
+- Normal project flashing is non-erasing. OTA/update/recovery product
+  workflows are deferred to 1.5 / RC2.
 
-The compatibility `core_1_0` profile remains in source for narrow recovery
-builds. In that profile SD history is disabled, NVS is authoritative, and the
-RP2040 payload is omitted; it is not the current production candidate.
+Prepare an already-formatted 32GB-or-larger FAT32 card without formatting,
+deleting, or overwriting files:
+
+```powershell
+python .\scripts\prepare_deskos_sd.py --target E:\ --apply
+```
+
+The checked-in payload is under `sdcard/deskos`. Run the command without
+`--apply` for a read-only plan. Optional preloaded tiles require an explicit
+provider manifest granting offline storage; the public OpenStreetMap Standard
+tile service is interactive-cache only and must not be bulk downloaded.
+
+The provider manifest is optional for a normal card. It is required only for
+authorized background/offline Map downloads.
 
 ## Build and release policy
 
@@ -93,20 +107,21 @@ Release firmware is built only by `.github/workflows/d1l-ci.yml` with the
 pinned ESP-IDF 5.5.4 toolchain. Local workstations may run source/host tests
 but do not produce release firmware.
 
-The required source gate is:
+During development, run only the focused tests for the changed slice and the
+relevant generated-document/package checks. The exact GitHub Actions run owns
+the complete release build and gate:
 
 ```powershell
-python -m pytest tests -q
-python .\scripts\completion_ledger.py validate --check-generated
-python .\scripts\completion_pack_manifest.py check
+python -m pytest <focused-test-files> -q
 git diff --check
 ```
 
-The exact Actions run must produce a source-bound full-feature package,
-checksums, provenance, SBOM, MeshCore conformance evidence, RP2040 bridge
-payload, and Ed25519-signed update bundle. Package metadata records the exact
-repository, commit, workflow run, run attempt, release profile, SD mode and
-security sequence.
+The exact Actions run must produce a source-bound `core_1_0` package,
+checksums, provenance, SBOM, MeshCore conformance evidence, and the
+conditional-SD RP2040 bridge payload. Package metadata records the exact
+repository, commit, workflow run, run attempt, release profile and SD mode.
+Only this downloaded and verified package may be used for final hardware
+acceptance.
 
 ## Flash the current device
 
@@ -129,9 +144,10 @@ Never flash another Pi serial device. Never format SD.
 
 ## Documentation
 
-- [Full Feature user guide](docs/USER_GUIDE_D1L.md)
-- [Flash and recovery](docs/FLASH_RECOVERY_D1L.md)
-- [Current release status](docs/release/24H_STATUS.md)
+- [DeskOS 1.0 / RC1 user guide](docs/USER_GUIDE_D1L.md)
+- [Current RC1 product contract](docs/release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md)
+- [Install/recovery history](docs/FLASH_RECOVERY_D1L.md)
+- [Historical 24-hour status ledger](docs/release/24H_STATUS.md)
 - [Known limitations and security boundaries](docs/KNOWN_LIMITATIONS.md)
 - [Acceptance plan](docs/TEST_PLAN_D1L.md)
 - [MeshCore conformance](docs/MESHCORE_CONFORMANCE.md)

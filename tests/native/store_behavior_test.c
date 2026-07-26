@@ -11,6 +11,7 @@
 #include "mesh/meshcore_packet_hash.h"
 #include "mesh/node_store.h"
 #include "mock_esp_nvs.h"
+#include "storage/retained_blob_store.h"
 
 #define NODE_NAMESPACE "d1l_nodes"
 #define NODE_KEY "heard"
@@ -18,6 +19,77 @@
 #define CONTACT_KEY "contacts"
 #define LEGACY_ALIAS_LEN 24U
 #define LEGACY_TYPE_LEN 8U
+#define NODE_SD_BLOB_MAX (128U * 1024U)
+
+static uint8_t s_node_sd_blob[NODE_SD_BLOB_MAX];
+static size_t s_node_sd_blob_len;
+static esp_err_t s_node_sd_fail_next_write;
+
+static void native_store_reset(void)
+{
+    mock_nvs_reset();
+    memset(s_node_sd_blob, 0, sizeof(s_node_sd_blob));
+    s_node_sd_blob_len = 0U;
+    s_node_sd_fail_next_write = ESP_OK;
+}
+
+#define mock_nvs_reset native_store_reset
+
+static void mock_node_sd_fail_next_write(esp_err_t error)
+{
+    s_node_sd_fail_next_write = error;
+}
+
+bool d1l_retained_blob_store_backend_state(
+    d1l_retained_blob_store_id_t store_id,
+    d1l_retained_blob_store_backend_state_t *out_state)
+{
+    if (store_id != D1L_RETAINED_BLOB_STORE_NODES || !out_state) {
+        return false;
+    }
+    out_state->enabled = true;
+    out_state->generation = 1U;
+    return true;
+}
+
+esp_err_t d1l_retained_blob_store_read_sd_primary(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    void *dst, size_t *len_inout)
+{
+    if (store_id != D1L_RETAINED_BLOB_STORE_NODES || !key || !dst ||
+        !len_inout || strcmp(key, "nodes_v1") != 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_node_sd_blob_len == 0U) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (*len_inout < s_node_sd_blob_len) {
+        *len_inout = s_node_sd_blob_len;
+        return ESP_ERR_INVALID_SIZE;
+    }
+    memcpy(dst, s_node_sd_blob, s_node_sd_blob_len);
+    *len_inout = s_node_sd_blob_len;
+    return ESP_OK;
+}
+
+esp_err_t d1l_retained_blob_store_write_sd_primary_guarded(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    const void *src, size_t len, uint32_t expected_generation)
+{
+    if (store_id != D1L_RETAINED_BLOB_STORE_NODES || !key || !src ||
+        strcmp(key, "nodes_v1") != 0 || expected_generation != 1U ||
+        len == 0U || len > sizeof(s_node_sd_blob)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_node_sd_fail_next_write != ESP_OK) {
+        const esp_err_t failure = s_node_sd_fail_next_write;
+        s_node_sd_fail_next_write = ESP_OK;
+        return failure;
+    }
+    memcpy(s_node_sd_blob, src, len);
+    s_node_sd_blob_len = len;
+    return ESP_OK;
+}
 
 static const char KEY_HEX[] =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -366,11 +438,11 @@ static void test_node_v3_to_v4_migration(void)
     assert(strcmp(node.type, "unknown") == 0);
     assert(!node.location_valid);
 
+    assert(stats.persistence_dirty);
+    assert(d1l_node_store_flush() == ESP_OK);
     node_blob_v4_t current = {0};
     assert(mock_nvs_copy_blob(NODE_NAMESPACE, NODE_KEY, &current,
-                              sizeof(current)) == sizeof(current));
-    assert(current.schema == 4U);
-    assert(current.count == 3U);
+                              sizeof(current)) == 0U);
     assert(d1l_node_store_init() == ESP_OK);
     assert(d1l_node_store_find_by_fingerprint("3333333333333333", &node));
     assert(strcmp(node.type, "unknown") == 0);
@@ -1010,6 +1082,7 @@ static void test_node_reachability_is_boot_local_and_wrap_safe(void)
 
     /* Reload models a new boot: history remains visible, but prior uptime is
      * not allowed to make the node live in the new monotonic epoch. */
+    assert(d1l_node_store_flush() == ESP_OK);
     assert(d1l_node_store_init() == ESP_OK);
     memset(&view, 0, sizeof(view));
     assert(d1l_node_store_query(&query, &view, 1U) == 1U);
@@ -1103,46 +1176,31 @@ static void test_stale_advert_and_location_preservation(void)
            ESP_ERR_INVALID_ARG);
 }
 
-static void test_node_nvs_failure_rolls_back_and_retry_succeeds(void)
+static void test_node_sd_failure_keeps_live_data_and_retry_succeeds(void)
 {
     mock_nvs_reset();
     assert(d1l_node_store_init() == ESP_OK);
-    const d1l_node_store_stats_t empty_stats = d1l_node_store_stats();
-    const uint32_t empty_generation = d1l_node_store_marker_generation();
 
     bool stale = true;
-    mock_nvs_fail_next_set(ESP_FAIL);
-    assert(upsert_node(200U, "Retry Node", true, 43427977, -80316478,
-                       &stale) == ESP_FAIL);
-    assert(!stale);
-    assert(!d1l_node_store_find_by_fingerprint("abcdef0123456789", NULL));
-    assert_node_stats_equal(d1l_node_store_stats(), empty_stats);
-    assert(d1l_node_store_marker_generation() == empty_generation);
-
-    stale = true;
     assert(upsert_node(200U, "Retry Node", true, 43427977, -80316478,
                        &stale) == ESP_OK);
     assert(!stale);
     d1l_node_entry_t baseline = {0};
     assert(d1l_node_store_find_by_fingerprint("abcdef0123456789", &baseline));
-    const d1l_node_store_stats_t baseline_stats = d1l_node_store_stats();
-    const uint32_t baseline_generation = d1l_node_store_marker_generation();
-
-    mock_timer_set_us(3000000);
-    mock_nvs_fail_next_set(ESP_FAIL);
-    stale = true;
-    assert(upsert_node(201U, "Changed", true, 44000000, -81000000,
-                       &stale) == ESP_FAIL);
-    assert(!stale);
+    mock_node_sd_fail_next_write(ESP_FAIL);
+    assert(d1l_node_store_flush() == ESP_FAIL);
     d1l_node_entry_t after = {0};
     assert(d1l_node_store_find_by_fingerprint("abcdef0123456789", &after));
     assert(memcmp(&after, &baseline, sizeof(after)) == 0);
-    assert_node_stats_equal(d1l_node_store_stats(), baseline_stats);
-    assert(d1l_node_store_marker_generation() == baseline_generation);
+    assert(d1l_node_store_stats().persistence_dirty);
 
+    mock_timer_set_us(
+        (int64_t)(D1L_NODE_STORE_PERSIST_MIN_INTERVAL_MS + 1U) * 1000LL);
+    assert(d1l_node_store_flush() == ESP_OK);
     assert(d1l_node_store_init() == ESP_OK);
     assert(d1l_node_store_find_by_fingerprint("abcdef0123456789", &after));
     assert(memcmp(&after, &baseline, sizeof(after)) == 0);
+
     stale = true;
     assert(upsert_node(201U, "Changed", true, 44000000, -81000000,
                        &stale) == ESP_OK);
@@ -1150,6 +1208,56 @@ static void test_node_nvs_failure_rolls_back_and_retry_succeeds(void)
     assert(d1l_node_store_find_by_fingerprint("abcdef0123456789", &after));
     assert(after.advert_timestamp == 201U);
     assert(strcmp(after.name, "Changed") == 0);
+}
+
+static void test_located_nodes_are_retained_until_explicit_clear(void)
+{
+    mock_nvs_reset();
+    assert(d1l_node_store_init() == ESP_OK);
+
+    char first_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char first_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    for (uint32_t id = 1U; id <= D1L_NODE_STORE_CAPACITY; ++id) {
+        char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+        char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+        make_public_key(key, id);
+        fingerprint_from_key(fingerprint, key);
+        if (id == 1U) {
+            memcpy(first_key, key, sizeof(first_key));
+            memcpy(first_fingerprint, fingerprint, sizeof(first_fingerprint));
+        }
+        bool stale = true;
+        assert(d1l_node_store_upsert_advert(
+                   fingerprint, key, "Mapped", 'C', -72, 45, 1U, 2U, id,
+                   true, 43000000 + (int32_t)id,
+                   -80000000 - (int32_t)id, &stale) == ESP_OK);
+        assert(!stale);
+    }
+
+    const d1l_node_store_stats_t full = d1l_node_store_stats();
+    assert(full.count == D1L_NODE_STORE_CAPACITY);
+    char overflow_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char overflow_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(overflow_key, D1L_NODE_STORE_CAPACITY + 1U);
+    fingerprint_from_key(overflow_fingerprint, overflow_key);
+    bool stale = true;
+    assert(d1l_node_store_upsert_advert(
+               overflow_fingerprint, overflow_key, "Overflow", 'C', -70, 40,
+               1U, 2U, D1L_NODE_STORE_CAPACITY + 1U, true, 44000000,
+               -81000000, &stale) == ESP_ERR_NO_MEM);
+    assert(!stale);
+    assert(!d1l_node_store_find_by_fingerprint(overflow_fingerprint, NULL));
+    assert_node_stats_equal(d1l_node_store_stats(), full);
+
+    assert(d1l_node_store_upsert_advert(
+               first_fingerprint, first_key, "Mapped Updated", 'C', -60, 60,
+               1U, 2U, D1L_NODE_STORE_CAPACITY + 2U, false, 0, 0,
+               &stale) == ESP_OK);
+    assert(!stale);
+    d1l_node_entry_t updated = {0};
+    assert(d1l_node_store_find_by_fingerprint(first_fingerprint, &updated));
+    assert(updated.location_valid);
+    assert(strcmp(updated.name, "Mapped Updated") == 0);
 }
 
 static d1l_meshcore_advert_admission_receipt_t admit_verified_advert(
@@ -2193,7 +2301,8 @@ int main(void)
     test_oversized_future_contact_schema_is_preserved_fail_closed();
     test_node_reachability_is_boot_local_and_wrap_safe();
     test_stale_advert_and_location_preservation();
-    test_node_nvs_failure_rolls_back_and_retry_succeeds();
+    test_node_sd_failure_keeps_live_data_and_retry_succeeds();
+    test_located_nodes_are_retained_until_explicit_clear();
     test_d1l_first_zero_timestamp_accepted();
     test_d1l_equal_timestamp_rejected_non_mutating();
     test_d1l_older_timestamp_rejected_non_mutating();

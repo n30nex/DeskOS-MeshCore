@@ -695,6 +695,18 @@ esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value,
     return ESP_OK;
 }
 
+esp_err_t nvs_get_u8(nvs_handle_t handle, const char *key, uint8_t *out_value)
+{
+    size_t length = sizeof(*out_value);
+    return out_value ? nvs_get_blob(handle, key, out_value, &length)
+                     : ESP_ERR_INVALID_ARG;
+}
+
+esp_err_t nvs_set_u8(nvs_handle_t handle, const char *key, uint8_t value)
+{
+    return nvs_set_blob(handle, key, &value, sizeof(value));
+}
+
 esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key)
 {
     test_nvs_handle_t *context = get_nvs_handle(handle);
@@ -1055,7 +1067,7 @@ static void test_release_profile_sd_admission(void)
     assert(d1l_retained_blob_store_nvs_ready());
     assert(d1l_release_feature_available(
         D1L_RELEASE_FEATURE_RETAINED_NVS));
-    assert(d1l_retained_blob_store_is_available(
+    assert(!d1l_retained_blob_store_is_available(
         D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES));
 
     static const struct {
@@ -1110,7 +1122,7 @@ static void test_release_profile_sd_admission(void)
     assert_all_states(false, 0U);
     assert(strcmp(d1l_retained_blob_store_backend_name(
                       D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES),
-                  "nvs") == 0);
+                  "volatile") == 0);
     assert(d1l_retained_blob_store_write_sd_primary(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
                payload, sizeof(payload)) == ESP_ERR_INVALID_STATE);
@@ -1120,19 +1132,27 @@ static void test_release_profile_sd_admission(void)
     assert(d1l_retained_blob_store_write(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
                payload, sizeof(payload)) == ESP_OK);
-    assert_nvs_blob(true, "d1l_messages", "public",
-                    payload, sizeof(payload));
 #if EXPECT_PROFILE_SD_ENABLED
+    test_sd_file_t *file =
+        find_sd_file("stores/messages/public/public.bin");
+    assert(file);
+    assert(file->length == sizeof(payload));
+    assert(memcmp(file->data, payload, sizeof(payload)) == 0);
+    assert(find_nvs_entry(true, "d1l_messages", "public") == NULL);
     assert(s_rename_count > 0U);
-#else
-    assert(s_sd_event_count == 0U);
-#endif
 
     assert(d1l_retained_blob_store_read(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
                readback, &readback_len) == ESP_OK);
     assert(readback_len == sizeof(payload));
     assert(memcmp(readback, payload, sizeof(payload)) == 0);
+#else
+    assert(s_sd_event_count == 0U);
+    assert(find_nvs_entry(true, "d1l_messages", "public") == NULL);
+    assert(d1l_retained_blob_store_read(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               readback, &readback_len) == ESP_ERR_NOT_FOUND);
+#endif
 
     assert(d1l_retained_blob_store_erase(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
@@ -1185,9 +1205,9 @@ static void test_first_use_initializes_only_new_retained_region(void)
            first_nvs_event(TEST_NVS_EVENT_INIT_PARTITION));
     assert(first_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) <
            first_nvs_event(TEST_NVS_EVENT_SET_DEDICATED));
-    assert_nvs_blob(true, "d1l_messages", "public",
+    assert(find_nvs_entry(true, "d1l_messages", "public") == NULL);
+    assert_nvs_blob(false, "d1l_messages", "public",
                     legacy_blob, sizeof(legacy_blob));
-    assert(find_nvs_entry(false, "d1l_messages", "public") == NULL);
 }
 
 static void test_first_marker_recovers_init_power_loss_window(void)
@@ -1285,8 +1305,8 @@ static void test_populated_version_one_upgrade_survives_finalize_failures(void)
     for (size_t i = 0U; i < sizeof(stores) / sizeof(stores[0]); ++i) {
         assert_nvs_blob(true, stores[i].namespace_name, stores[i].key,
                         payload, sizeof(payload));
-        assert(find_nvs_entry(false, stores[i].namespace_name,
-                              stores[i].key) == NULL);
+        assert_nvs_blob(false, stores[i].namespace_name, stores[i].key,
+                        payload, sizeof(payload));
     }
 
     s_sentinel_commit_result = ESP_OK;
@@ -1451,9 +1471,9 @@ static void test_nonblank_unowned_region_requires_external_initialization(void)
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 1U);
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 1U);
     assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 2U);
-    assert_nvs_blob(true, "d1l_messages", "public",
+    assert(find_nvs_entry(true, "d1l_messages", "public") == NULL);
+    assert_nvs_blob(false, "d1l_messages", "public",
                     legacy_blob, sizeof(legacy_blob));
-    assert(find_nvs_entry(false, "d1l_messages", "public") == NULL);
     assert(find_nvs_entry(false, "d1l_ret_meta", "initialized") != NULL);
 }
 
@@ -1621,7 +1641,7 @@ static void test_sentinel_commit_failure_is_retryable_and_fail_closed(void)
     assert(d1l_retained_blob_store_nvs_ready());
 }
 
-static void test_partition_init_proactively_migrates_known_legacy_key(void)
+static void test_partition_init_keeps_known_legacy_key_read_only(void)
 {
     static const char legacy_blob[] = "boot-time public history";
 
@@ -1633,15 +1653,14 @@ static void test_partition_init_proactively_migrates_known_legacy_key(void)
     assert(d1l_retained_blob_store_nvs_ready());
     assert(d1l_retained_blob_store_nvs_error() == ESP_OK);
     assert(d1l_retained_blob_store_nvs_migration_error() == ESP_OK);
-    assert(d1l_retained_blob_store_nvs_migrated_keys() == 1U);
-    assert_nvs_blob(true, "d1l_messages", "public",
+    assert(d1l_retained_blob_store_nvs_migrated_keys() == 0U);
+    assert(find_nvs_entry(true, "d1l_messages", "public") == NULL);
+    assert_nvs_blob(false, "d1l_messages", "public",
                     legacy_blob, sizeof(legacy_blob));
-    assert(find_nvs_entry(false, "d1l_messages", "public") == NULL);
-    assert(first_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) <
-           first_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY));
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY) == 0U);
 }
 
-static void test_divergent_upgrade_copies_fail_closed(void)
+static void test_sd_only_legacy_read_prefers_dedicated_without_mutation(void)
 {
     static const char dedicated_blob[] = "candidate retained value";
     static const char legacy_blob[] = "newer downgrade value";
@@ -1657,14 +1676,13 @@ static void test_divergent_upgrade_copies_fail_closed(void)
     seed_nvs_blob(false, "d1l_messages", "public",
                   legacy_blob, sizeof(legacy_blob));
 
-    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
-    assert(!d1l_retained_blob_store_nvs_ready());
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_ready());
     assert(d1l_retained_blob_store_nvs_error() == ESP_OK);
-    assert(d1l_retained_blob_store_nvs_migration_error() ==
-           ESP_ERR_INVALID_STATE);
+    assert(d1l_retained_blob_store_nvs_migration_error() == ESP_OK);
     assert(strcmp(d1l_retained_blob_store_backend_name(
                       D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES),
-                  "unavailable") == 0);
+                  "volatile") == 0);
     assert(!d1l_retained_blob_store_is_available(
         D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES));
     assert_nvs_blob(true, "d1l_messages", "public",
@@ -1673,7 +1691,9 @@ static void test_divergent_upgrade_copies_fail_closed(void)
                     legacy_blob, sizeof(legacy_blob));
     assert(d1l_retained_blob_store_read_nvs_fallback(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
-               readback, &readback_len) == ESP_ERR_INVALID_STATE);
+               readback, &readback_len) == ESP_OK);
+    assert(readback_len == sizeof(dedicated_blob));
+    assert(memcmp(readback, dedicated_blob, sizeof(dedicated_blob)) == 0);
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY) == 0U);
 
     clear_nvs_case();
@@ -1686,10 +1706,11 @@ static void test_divergent_upgrade_copies_fail_closed(void)
     assert(d1l_retained_blob_store_nvs_ready());
     assert(strcmp(d1l_retained_blob_store_backend_name(
                       D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES),
-                  "nvs") == 0);
-    assert(d1l_retained_blob_store_is_available(
+                  "volatile") == 0);
+    assert(!d1l_retained_blob_store_is_available(
         D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES));
-    assert(find_nvs_entry(false, "d1l_messages", "public") == NULL);
+    assert_nvs_blob(false, "d1l_messages", "public",
+                    dedicated_blob, sizeof(dedicated_blob));
 }
 
 static void test_dedicated_read_precedes_legacy(void)
@@ -1718,7 +1739,7 @@ static void test_dedicated_read_precedes_legacy(void)
                     legacy_blob, sizeof(legacy_blob));
 }
 
-static void test_legacy_read_migrates_after_dedicated_miss(void)
+static void test_legacy_read_remains_read_only_after_dedicated_miss(void)
 {
     static const char legacy_blob[] = "legacy packet ring";
     char readback[64] = {0};
@@ -1733,57 +1754,59 @@ static void test_legacy_read_migrates_after_dedicated_miss(void)
                readback, &readback_len) == ESP_OK);
     assert(readback_len == sizeof(legacy_blob));
     assert(memcmp(readback, legacy_blob, sizeof(legacy_blob)) == 0);
-    assert_nvs_blob(true, "d1l_packets", "ring",
+    assert(find_nvs_entry(true, "d1l_packets", "ring") == NULL);
+    assert_nvs_blob(false, "d1l_packets", "ring",
                     legacy_blob, sizeof(legacy_blob));
-    assert(find_nvs_entry(false, "d1l_packets", "ring") == NULL);
 
     const size_t dedicated_open = first_nvs_event(TEST_NVS_EVENT_OPEN_DEDICATED);
     const size_t legacy_open = first_nvs_event(TEST_NVS_EVENT_OPEN_LEGACY);
     const size_t legacy_get = first_nvs_event(TEST_NVS_EVENT_GET_LEGACY);
-    const size_t dedicated_set = first_nvs_event(TEST_NVS_EVENT_SET_DEDICATED);
-    const size_t dedicated_commit =
-        first_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED);
-    const size_t legacy_erase = first_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY);
     assert(dedicated_open < legacy_open);
     assert(legacy_open <= legacy_get);
-    assert(legacy_get < dedicated_set);
-    assert(dedicated_set < dedicated_commit);
-    assert(dedicated_commit < legacy_erase);
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY) == 0U);
     assert(count_nvs_event(TEST_NVS_EVENT_SET_LEGACY) == 0U);
 }
 
-static void test_dedicated_write_reclaims_legacy_only_after_commit(void)
+static void test_sd_only_retirement_erases_legacy_without_history_write(void)
 {
     static const char legacy_blob[] = "old dms";
     static const char new_blob[] = "new dms";
 
     clear_nvs_case();
-    seed_nvs_blob(false, "d1l_dms", "messages_v2",
+    reset_sd_files();
+    seed_nvs_blob(false, "d1l_dms", "threads",
                   legacy_blob, sizeof(legacy_blob));
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
 
-    assert(d1l_retained_blob_store_write_nvs_fallback(
-               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "messages_v2",
+    assert(d1l_retained_blob_store_write(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
                new_blob, sizeof(new_blob)) == ESP_OK);
-    assert_nvs_blob(true, "d1l_dms", "messages_v2",
-                    new_blob, sizeof(new_blob));
-    assert(find_nvs_entry(false, "d1l_dms", "messages_v2") == NULL);
-    assert(first_nvs_event(TEST_NVS_EVENT_OPEN_DEDICATED) == 0U);
-    assert(first_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) <
-           first_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY));
-    assert(count_nvs_event(TEST_NVS_EVENT_SET_LEGACY) == 0U);
+    test_sd_file_t *sd_blob =
+        find_sd_file("stores/messages/dm/threads.bin");
+    assert(sd_blob);
+    assert(sd_blob->length == sizeof(new_blob));
+    assert(memcmp(sd_blob->data, new_blob, sizeof(new_blob)) == 0);
+    assert(find_nvs_entry(true, "d1l_dms", "threads") == NULL);
+    assert(find_nvs_entry(false, "d1l_dms", "threads") == NULL);
+    assert(find_nvs_entry(false, "d1l_ret_meta", "sd_dm_v1") != NULL);
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_LEGACY) == 1U);
 
-    /* A failed dedicated commit must leave the only committed legacy copy
-     * intact and must not even attempt the destructive legacy erase. */
+    /* A failed retirement-marker commit must leave the only legacy copy
+     * intact and must not attempt the destructive history erase. */
     clear_nvs_case();
-    seed_nvs_blob(false, "d1l_dms", "messages_v2",
+    seed_nvs_blob(false, "d1l_contacts", "contacts",
                   legacy_blob, sizeof(legacy_blob));
-    s_dedicated_commit_result = ESP_FAIL;
-    assert(d1l_retained_blob_store_write_nvs_fallback(
-               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "messages_v2",
+    s_sentinel_commit_result = ESP_FAIL;
+    assert(d1l_retained_blob_store_write(
+               D1L_RETAINED_BLOB_STORE_CONTACTS, "contacts",
                new_blob, sizeof(new_blob)) == ESP_FAIL);
-    assert_nvs_blob(false, "d1l_dms", "messages_v2",
+    assert_nvs_blob(false, "d1l_contacts", "contacts",
                     legacy_blob, sizeof(legacy_blob));
-    assert(find_nvs_entry(true, "d1l_dms", "messages_v2") == NULL);
+    assert(find_nvs_entry(true, "d1l_contacts", "contacts") == NULL);
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY) == 0U);
 }
 
@@ -1819,7 +1842,8 @@ static void test_erase_clears_dedicated_and_legacy_copies(void)
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY) == 1U);
 }
 
-static void test_nvs_capacity_and_write_amplification_telemetry(void)
+static void __attribute__((unused))
+test_nvs_capacity_and_write_amplification_telemetry(void)
 {
     static const char public_blob[] = "telemetry public";
     static const char dm_blob[] = "telemetry dm";
@@ -1894,7 +1918,8 @@ static void test_nvs_capacity_and_write_amplification_telemetry(void)
     s_nvs_stats_result = ESP_OK;
 }
 
-static void test_unchanged_nvs_fallback_write_skips_flash_commit(void)
+static void __attribute__((unused))
+test_unchanged_nvs_fallback_write_skips_flash_commit(void)
 {
     static const char original[] = "same retained snapshot";
     static const char replacement[] = "new! retained snapshot";
@@ -1952,7 +1977,8 @@ static void test_unchanged_nvs_fallback_write_skips_flash_commit(void)
     assert(telemetry.write_bytes_committed == sizeof(original) * 2U);
 }
 
-static void test_nvs_unchanged_compare_failure_fails_safe_to_write(void)
+static void __attribute__((unused))
+test_nvs_unchanged_compare_failure_fails_safe_to_write(void)
 {
     static const char retained[] = "retained snapshot";
     d1l_retained_blob_store_nvs_telemetry_t telemetry = {0};
@@ -1996,7 +2022,8 @@ static void test_nvs_unchanged_compare_failure_fails_safe_to_write(void)
     assert(telemetry.write_bytes_committed == sizeof(retained) * 3U);
 }
 
-static void test_partition_init_failure_never_falls_back_or_resurrects(void)
+static void __attribute__((unused))
+test_partition_init_failure_never_falls_back_or_resurrects(void)
 {
     static const char dedicated_blob[] = "dedicated current";
     static const char legacy_blob[] = "legacy stale";
@@ -2336,6 +2363,67 @@ static void test_factory_reset_sd_recovery_end_to_end(void)
                D1L_RETAINED_BLOB_STORE_PACKET_LOG,
                packet_backend.generation, &ready) == ESP_OK);
     assert(ready);
+
+    /* Node history, contacts, and read cursors use the same exact lineage
+     * recovery path and their own firmware-owned filenames. */
+    static const struct {
+        d1l_retained_blob_store_id_t store_id;
+        d1l_factory_reset_sd_store_t reset_store;
+        const char *key;
+        const char *data_path;
+        const char *temp_path;
+        const char *marker_path;
+    } remaining_stores[] = {
+        {
+            D1L_RETAINED_BLOB_STORE_NODES,
+            D1L_FACTORY_RESET_SD_STORE_NODES,
+            "nodes_v1",
+            "stores/nodes/nodes_v1.bin",
+            "stores/nodes/nodes_v1.tmp",
+            "stores/nodes/reset_lineage_v1.bin",
+        },
+        {
+            D1L_RETAINED_BLOB_STORE_CONTACTS,
+            D1L_FACTORY_RESET_SD_STORE_CONTACTS,
+            "contacts",
+            "stores/contacts/contacts.bin",
+            "stores/contacts/contacts.tmp",
+            "stores/contacts/reset_lineage_v1.bin",
+        },
+        {
+            D1L_RETAINED_BLOB_STORE_READ_STATE,
+            D1L_FACTORY_RESET_SD_STORE_READ_STATE,
+            "state",
+            "stores/read_state/state.bin",
+            "stores/read_state/state.tmp",
+            "stores/read_state/reset_lineage_v1.bin",
+        },
+    };
+    for (size_t i = 0U;
+         i < sizeof(remaining_stores) / sizeof(remaining_stores[0]); ++i) {
+        seed_sd_file(remaining_stores[i].data_path, stale, sizeof(stale));
+        seed_sd_file(remaining_stores[i].temp_path, stale, sizeof(stale));
+        d1l_retained_blob_store_backend_state_t backend = {0};
+        assert(d1l_retained_blob_store_backend_state(
+            remaining_stores[i].store_id, &backend));
+        assert(d1l_retained_blob_store_write_sd_primary_guarded(
+                   remaining_stores[i].store_id,
+                   remaining_stores[i].key,
+                   replacement, sizeof(replacement),
+                   backend.generation) == ESP_OK);
+        assert(find_sd_file(remaining_stores[i].data_path));
+        assert(!find_sd_file(remaining_stores[i].temp_path));
+        assert_exact_marker(remaining_stores[i].marker_path,
+                            remaining_stores[i].reset_store,
+                            reset_generation);
+        assert(assert_reset_lineage(
+                   remaining_stores[i].reset_store, false) ==
+               reset_generation);
+        assert(d1l_retained_blob_store_sd_media_lineage_ready(
+                   remaining_stores[i].store_id,
+                   backend.generation, &ready) == ESP_OK);
+        assert(ready);
+    }
 }
 
 int main(int argc, char **argv)
@@ -2429,16 +2517,12 @@ int main(int argc, char **argv)
     test_anchor_commit_failure_is_retryable_and_fail_closed();
     test_marker_flash_failures_are_retryable_and_ordered();
     test_sentinel_commit_failure_is_retryable_and_fail_closed();
-    test_partition_init_proactively_migrates_known_legacy_key();
-    test_divergent_upgrade_copies_fail_closed();
+    test_partition_init_keeps_known_legacy_key_read_only();
+    test_sd_only_legacy_read_prefers_dedicated_without_mutation();
     test_dedicated_read_precedes_legacy();
-    test_legacy_read_migrates_after_dedicated_miss();
-    test_dedicated_write_reclaims_legacy_only_after_commit();
+    test_legacy_read_remains_read_only_after_dedicated_miss();
+    test_sd_only_retirement_erases_legacy_without_history_write();
     test_erase_clears_dedicated_and_legacy_copies();
-    test_nvs_capacity_and_write_amplification_telemetry();
-    test_unchanged_nvs_fallback_write_skips_flash_commit();
-    test_nvs_unchanged_compare_failure_fails_safe_to_write();
-    test_partition_init_failure_never_falls_back_or_resurrects();
     test_factory_reset_sd_recovery_end_to_end();
 
     puts("native retained backend generation and NVS partition: ok");

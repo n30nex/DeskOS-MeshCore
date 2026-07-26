@@ -146,21 +146,24 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         "windows": "flash_project.ps1",
         "posix": "flash_project.sh",
     }
-    assert install["normal_install_port"] == "COM12"
+    stable_posix = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+    assert install["normal_install_port"] == stable_posix
     assert install["normal_install_targets"] == {
         "windows": {
-            "requested_path": "COM12",
-            "target_kind": "windows_com",
+            "requested_path": None,
+            "target_kind": "windows_com_operator_supplied",
             "vid": 0x1A86,
             "pid": 0x7523,
+            "qualifying": False,
+            "explicit_operator_port_required": True,
+            "port_probe_forbidden": True,
         },
         "posix": {
-            "requested_path": (
-                "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
-            ),
+            "requested_path": stable_posix,
             "target_kind": "posix_by_id",
             "vid": 0x1A86,
             "pid": 0x7523,
+            "qualifying": True,
         },
     }
     assert install["target_policy"] == {
@@ -168,6 +171,11 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         "resolved_tty_observational_only": True,
         "hardware_identity_required": True,
         "raw_posix_tty_forbidden": True,
+        "qualification_platform": "posix",
+        "qualification_target": stable_posix,
+        "windows_manual_non_qualifying": True,
+        "windows_explicit_operator_port_required": True,
+        "windows_port_probe_forbidden": True,
     }
     assert install["recovery_platform"] == "windows_only"
     assert install["posix_recovery_script"] is None
@@ -214,12 +222,17 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     guide = (
         package / "docs" / "CORE_INSTALL_RECOVERY.md"
     ).read_text(encoding="ascii")
-    assert "Windows D1L flashing requires COM12" in ps1
+    assert "NON-QUALIFYING MANUAL WINDOWS INSTALL" in ps1
+    assert "Parameter(Mandatory=$true)" in ps1
     assert "flash_project.py" in ps1
-    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in sh
+    assert stable_posix in sh
     assert os.access(package / "flash_project.sh", os.X_OK)
     assert "/dev/ttyUSB<number>" in guide
-    assert "No POSIX recovery wrapper is shipped" in guide
+    assert stable_posix in guide
+    assert "non-qualifying manual convenience" in guide
+    assert "No POSIX recovery wrapper is shipped" in " ".join(guide.split())
+    for generated_text in (ps1, runner_text, recovery, guide):
+        assert "COM12" not in generated_text
     assert_actions_identity(
         guide,
         run_id="123456789",
@@ -242,13 +255,14 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         commands.append(command)
         return 0
 
+    manual_windows_port = "COM37"
     windows = runner.run_flash(
-        "COM12",
+        manual_windows_port,
         package_root=package,
         platform_name="nt",
         port_lister=lambda: [
             {
-                "device": "COM12",
+                "device": manual_windows_port,
                 "vid": 0x1A86,
                 "pid": 0x7523,
                 "hwid": "USB VID:PID=1A86:7523",
@@ -257,9 +271,12 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         command_runner=record_command,
     )
     windows_command = windows["command"]
-    assert windows_command[windows_command.index("--port") + 1] == "COM12"
+    assert windows_command[windows_command.index("--port") + 1] == (
+        manual_windows_port
+    )
+    assert windows["target"]["qualification_route"] is False
+    assert windows["target"]["operator_supplied"] is True
 
-    stable_posix = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
     raw_tty = "/dev/ttyUSB2"
     posix_hooks = {
         "exists": lambda path: path in {stable_posix, raw_tty},
@@ -290,9 +307,9 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     def esptool_must_not_run(*_args, **_kwargs):
         pytest.fail("esptool command ran after a rejected package or target")
 
-    with pytest.raises(ValueError, match="forbidden"):
+    with pytest.raises(ValueError, match="present exactly once"):
         runner.run_flash(
-            "COM11",
+            "COM38",
             package_root=package,
             platform_name="nt",
             port_lister=lambda: [],
@@ -304,12 +321,12 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     ):
         with pytest.raises(ValueError, match=expected_error):
             runner.run_flash(
-                "COM12",
+                manual_windows_port,
                 package_root=package,
                 platform_name="nt",
                 port_lister=lambda: [
                     {
-                        "device": "COM12",
+                        "device": manual_windows_port,
                         "vid": wrong_vid,
                         "pid": wrong_pid,
                         "hwid": "wrong adapter",
@@ -337,12 +354,15 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         "Actions run\n`123456789`, run attempt\n`1`"
         in readme_text
     )
+    assert stable_posix in readme_text
+    assert "non-qualifying manual convenience" in readme_text
+    assert "COM12" not in readme_text
     original_readme = readme_path.read_bytes()
     readme_path.write_bytes(original_readme + b"tampered\n")
     try:
         with pytest.raises(ValueError, match="SHA256 mismatch"):
             runner.run_flash(
-                "COM12",
+                manual_windows_port,
                 package_root=package,
                 platform_name="nt",
                 port_lister=lambda: [],
@@ -391,6 +411,12 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         for capability in truth["unavailable_capabilities"]
     ]
     assert capability_payload["full_feature_release_ready"] is False
+    evidence_payload = package_release_d1l.load_required_json_object(
+        package / manifest["release_evidence_index"]["path"],
+        "Core release evidence index",
+    )
+    assert "scripts/rc1_release_gate_audit_d1l.py" in evidence_payload["note"]
+    assert "scripts/core_release_gate_audit_d1l.py" not in evidence_payload["note"]
 
     monkeypatch.setattr(
         core_release_gate_audit_d1l,
@@ -519,6 +545,58 @@ def test_core_supported_optional_package_requires_paired_rp2040(
             release_profile="core_1_0",
             sd_history_mode="supported_optional",
         )
+
+
+def test_rc1_conditional_capability_truth_matches_production_surface():
+    truth = package_release_d1l.core_capability_truth("conditional")
+
+    for capability in (
+        "sd_history",
+        "map",
+        "wifi_user_control",
+        "multi_channel_management",
+        "admin",
+        "observer_mqtt",
+        "mutable_terminal",
+        "location",
+        "user_trace",
+    ):
+        assert capability in truth["supported_capabilities"]
+        assert capability not in truth["unavailable_capabilities"]
+
+    assert truth["unavailable_capabilities"] == [
+        "usb_recovery",
+        "ble",
+        "signed_update",
+        "advanced_qr_emoji",
+    ]
+    assert truth["sd_history_state"] == "runtime_conditional_sd_primary"
+    assert truth["storage_authority"] == "sd_primary_live_only_without_sd"
+
+
+def test_sd_preparation_bundle_is_packaged_without_format_authority(tmp_path):
+    script = tmp_path / "scripts" / "prepare_deskos_sd.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/usr/bin/env python3\n", encoding="ascii")
+    manifest = tmp_path / "sdcard" / "deskos" / "manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('{"schema":1}\n', encoding="ascii")
+    package = tmp_path / "package"
+    package.mkdir()
+
+    receipt = package_release_d1l.copy_sd_preparation_bundle(tmp_path, package)
+
+    assert receipt["script"] == "scripts/prepare_deskos_sd.py"
+    assert receipt["bundle_root"] == "sdcard"
+    assert receipt["minimum_card_bytes"] == 28_000_000_000
+    assert receipt["filesystem"] == "FAT32"
+    assert receipt["formats_sd"] is False
+    assert (package / receipt["script"]).is_file()
+    assert (package / "sdcard" / "deskos" / "manifest.json").is_file()
+    assert {row["path"] for row in receipt["files"]} == {
+        "scripts/prepare_deskos_sd.py",
+        "sdcard/deskos/manifest.json",
+    }
 
 
 def test_core_package_requires_exact_actions_run(tmp_path, monkeypatch):

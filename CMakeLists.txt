@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(D1L_RELEASE_PROFILE "full_feature" CACHE STRING
+set(D1L_RELEASE_PROFILE "core_1_0" CACHE STRING
     "Immutable DeskOS release profile")
 set_property(CACHE D1L_RELEASE_PROFILE PROPERTY STRINGS
     development

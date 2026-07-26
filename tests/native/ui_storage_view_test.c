@@ -13,10 +13,13 @@ static d1l_ui_storage_view_input_t base_input(void)
         .sd_state = "no_card",
         .sd_filesystem = "unknown",
         .setup_action = "insert_card",
-        .message_store_backend = "nvs",
-        .dm_store_backend = "nvs",
-        .packet_log_backend = "nvs",
-        .route_store_backend = "nvs",
+        .message_store_backend = "volatile",
+        .dm_store_backend = "volatile",
+        .packet_log_backend = "volatile",
+        .route_store_backend = "volatile",
+        .node_store_backend = "volatile",
+        .contact_store_backend = "volatile",
+        .read_state_backend = "volatile",
         .map_tile_backend = "unavailable",
         .export_backend = "usb",
     };
@@ -28,22 +31,31 @@ static void test_no_card_truth(void)
     d1l_ui_storage_view_model_t view;
     assert(d1l_ui_storage_view(&input, &view));
     assert(d1l_ui_storage_view_model_is_valid(&view));
-    assert(strcmp(view.hero.state, "No SD card") == 0);
-    assert(strcmp(view.hero.detail, "Internal storage is active.") == 0);
+    assert(strcmp(view.hero.state, "Live mesh only") == 0);
+    assert(strcmp(view.hero.detail,
+                  "SD unavailable; history is not saved.") == 0);
+    assert(strcmp(view.hero.guidance,
+                  "RF transmit, receive, and chat remain available.") == 0);
     assert(strcmp(view.card_summary, "No card inserted") == 0);
-    assert(strcmp(view.data_summary, "Internal") == 0);
+    assert(strcmp(view.data_summary, "Live only; history not saved") == 0);
     assert(strcmp(view.card.filesystem, "Not available") == 0);
     assert(strcmp(view.card.capacity, "Not reported") == 0);
     assert(strcmp(view.card.free_space, "Not reported") == 0);
     assert(strcmp(view.card.readiness, "No card") == 0);
     assert(view.location_count == D1L_UI_STORAGE_LOCATION_COUNT);
     assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_MESSAGES].value,
-                  "Internal") == 0);
+                  "Live only - not saved") == 0);
+    assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_NODES].value,
+                  "Live only - not saved") == 0);
+    assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_CONTACTS].value,
+                  "Live only - not saved") == 0);
+    assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_READ_STATE].value,
+                  "Live only - not saved") == 0);
     assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_MAP_TILES].value,
                   "Unavailable") == 0);
     assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_EXPORTS].value,
                   "USB only") == 0);
-    assert(!view.needs_attention);
+    assert(view.needs_attention);
 }
 
 static void test_ready_sd_truth(void)
@@ -58,10 +70,13 @@ static void test_ready_sd_truth(void)
     input.sd_state = "ready";
     input.sd_filesystem = "fatfs";
     input.setup_action = "none";
-    input.message_store_backend = "mixed";
+    input.message_store_backend = "sd";
     input.dm_store_backend = "sd";
-    input.packet_log_backend = "mixed";
+    input.packet_log_backend = "sd";
     input.route_store_backend = "sd";
+    input.node_store_backend = "sd";
+    input.contact_store_backend = "sd";
+    input.read_state_backend = "sd";
     input.map_tile_backend = "sd_map_tiles_ready";
     input.export_backend = "sd_diagnostic_exports_ready";
 
@@ -69,15 +84,21 @@ static void test_ready_sd_truth(void)
     assert(d1l_ui_storage_view(&input, &view));
     assert(strcmp(view.hero.state, "SD card ready") == 0);
     assert(strcmp(view.hero.guidance,
-                  "Saved data stays mirrored internally.") == 0);
+                  "Live history is written to SD.") == 0);
     assert(strcmp(view.card.state, "Ready") == 0);
     assert(strcmp(view.card.filesystem, "FAT32") == 0);
     assert(strcmp(view.card.capacity, "32.0 GB") == 0);
     assert(strcmp(view.card.free_space, "1 MB") == 0);
     assert(strcmp(view.card.readiness, "Ready") == 0);
-    assert(strcmp(view.data_summary, "SD + internal") == 0);
+    assert(strcmp(view.data_summary, "SD card") == 0);
     assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_MESSAGES].value,
-                  "SD + internal backup") == 0);
+                  "SD card") == 0);
+    assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_NODES].value,
+                  "SD card") == 0);
+    assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_CONTACTS].value,
+                  "SD card") == 0);
+    assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_READ_STATE].value,
+                  "SD card") == 0);
     assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_MAP_TILES].value,
                   "SD card") == 0);
     assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_EXPORTS].value,
@@ -94,6 +115,13 @@ static void test_reconnect_and_degraded_truth(void)
     input.data_enabled = true;
     input.setup_action = "wait_for_storage_reconnect";
     input.sd_filesystem = "fat32";
+    input.message_store_backend = "sd";
+    input.dm_store_backend = "sd";
+    input.packet_log_backend = "sd";
+    input.route_store_backend = "sd";
+    input.node_store_backend = "sd";
+    input.contact_store_backend = "sd";
+    input.read_state_backend = "sd";
 
     d1l_ui_storage_view_model_t view;
     assert(d1l_ui_storage_view(&input, &view));
@@ -110,7 +138,7 @@ static void test_reconnect_and_degraded_truth(void)
     assert(strcmp(view.card.state, "Card needs attention") == 0);
     assert(strcmp(view.data_summary, "SD; backup issue") == 0);
     assert(strcmp(view.locations[D1L_UI_STORAGE_LOCATION_MESSAGES].value,
-                  "SD; backup degraded") == 0);
+                  "SD issue") == 0);
     assert(view.needs_attention);
 }
 
@@ -124,7 +152,7 @@ static void test_fail_closed_card_truth(void)
     input.sd_filesystem = "exfat";
     input.setup_action = "prepare_fat32_on_computer";
     assert(d1l_ui_storage_view(&input, &view));
-    assert(strcmp(view.hero.state, "Card needs FAT32") == 0);
+    assert(strcmp(view.hero.state, "Live mesh only") == 0);
     assert(strcmp(view.card.state, "FAT32 card required") == 0);
     assert(strcmp(view.card.filesystem, "FAT32 required") == 0);
     assert(strcmp(view.card.readiness, "Needs FAT32") == 0);
@@ -133,7 +161,7 @@ static void test_fail_closed_card_truth(void)
     input.sd_state = "bridge_reported";
     input.setup_action = "inspect_rp2040_sd_mount_error_firmware_path";
     assert(d1l_ui_storage_view(&input, &view));
-    assert(strcmp(view.hero.state, "Card needs attention") == 0);
+    assert(strcmp(view.hero.state, "Live mesh only") == 0);
     assert(strcmp(view.card.readiness, "Needs attention") == 0);
     assert(view.needs_attention);
 }
@@ -166,6 +194,12 @@ static void test_release_profile_filters_only_unavailable_map_location(void)
         D1L_UI_STORAGE_LOCATION_PACKETS));
     assert(d1l_ui_storage_location_available(
         D1L_UI_STORAGE_LOCATION_ROUTES));
+    assert(d1l_ui_storage_location_available(
+        D1L_UI_STORAGE_LOCATION_NODES));
+    assert(d1l_ui_storage_location_available(
+        D1L_UI_STORAGE_LOCATION_CONTACTS));
+    assert(d1l_ui_storage_location_available(
+        D1L_UI_STORAGE_LOCATION_READ_STATE));
     assert(d1l_ui_storage_location_available(
         D1L_UI_STORAGE_LOCATION_EXPORTS));
     assert(d1l_ui_storage_location_available(

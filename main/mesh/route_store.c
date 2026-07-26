@@ -1409,6 +1409,16 @@ esp_err_t d1l_route_store_clear_target(const char *target)
         s_persistence_coalesced_count++;
     }
     d1l_store_lock_give(&s_store_lock);
+    if (changed) {
+        const esp_err_t retire_ret =
+            d1l_retained_blob_store_erase_nvs_fallback(
+                D1L_ROUTE_STORE_ID, D1L_ROUTE_STORE_V2_KEY);
+        if (retire_ret != ESP_OK) {
+            return retire_ret;
+        }
+        (void)d1l_retained_blob_store_erase_nvs_fallback(
+            D1L_ROUTE_STORE_ID, D1L_ROUTE_STORE_LEGACY_KEY);
+    }
     return ESP_OK;
 }
 

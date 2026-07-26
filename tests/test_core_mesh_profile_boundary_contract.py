@@ -72,7 +72,9 @@ def test_core_reconciliation_compacts_public_rows_and_never_mutates_private_entr
     )
     assert "d1l_channel_message_reconcile();" in app_main
     assert app_model.count("d1l_channel_message_reconcile();") >= 2
-    profile = reconcile.index("d1l_release_profile_is_core()")
+    profile = reconcile.index(
+        "D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT"
+    )
     append = reconcile.index("s_channel_rows[admitted_row_count++]")
     handoff = reconcile.index("d1l_channel_store_reconcile_retained_rows(")
     assert profile < append < handoff

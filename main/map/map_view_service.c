@@ -11,6 +11,7 @@
 
 #include "comms/connectivity_manager.h"
 #include "map/map_png_decoder.h"
+#include "map/map_tile_provider.h"
 #include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
 
@@ -32,9 +33,25 @@ typedef struct {
     uint8_t *compressed;
     uint16_t *decoded_tile;
     int64_t backoff_until_us;
+    bool force_reload_next_acquire;
 } map_service_t;
 
 static map_service_t s_map;
+
+static void set_provider_locked(const d1l_map_tile_provider_t *provider)
+{
+    if (!provider) {
+        return;
+    }
+    s_map.status.provider_configured = provider->configured;
+    s_map.status.background_prefetch_permitted =
+        provider->background_prefetch_permitted;
+    s_map.status.provider_max_zoom = provider->max_zoom;
+    snprintf(s_map.status.source_id, sizeof(s_map.status.source_id), "%s",
+             provider->source_id);
+    snprintf(s_map.status.attribution, sizeof(s_map.status.attribution), "%s",
+             provider->attribution);
+}
 
 static void set_message_locked(const char *phase, const char *message)
 {
@@ -332,8 +349,26 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
         }
         xSemaphoreGive(s_map.lock);
     }
-    if ((!sd_ready && !wait_for_sd_cache(generation, &storage)) ||
-        !publish_initial_frame(plan, generation)) {
+    if (!sd_ready && !wait_for_sd_cache(generation, &storage)) {
+        return;
+    }
+    const esp_err_t provider_ret =
+        d1l_map_tile_provider_refresh(&storage);
+    if (provider_ret != ESP_OK) {
+        note_failure(
+            generation, "provider_config",
+            "The SD map provider configuration is invalid");
+        return;
+    }
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
+    if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (s_map.status.generation == generation) {
+            set_provider_locked(&provider);
+        }
+        xSemaphoreGive(s_map.lock);
+    }
+    if (!publish_initial_frame(plan, generation)) {
         return;
     }
 
@@ -362,6 +397,12 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
         } else {
             if (tile_result.cancelled || !generation_continue(&generation)) {
                 break;
+            }
+            if (!tile_result.provider_allowed) {
+                note_failure(
+                    generation, "provider_preloaded_only",
+                    "This SD map source has no network download URL");
+                continue;
             }
             if (rate_limit_active(generation) || !wait_for_wifi(generation)) {
                 break;
@@ -552,6 +593,9 @@ esp_err_t d1l_map_view_service_init(void)
     s_map.status.current_view_only = true;
     s_map.status.public_rf_tx = false;
     s_map.status.formats_sd = false;
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_builtin(&provider);
+    set_provider_locked(&provider);
     set_message_locked("idle", "Open Map to load the current view");
     if (xTaskCreate(map_worker, "d1l_map", D1L_MAP_WORKER_STACK_BYTES, NULL,
                     D1L_MAP_WORKER_PRIORITY, &s_map.worker) != pdPASS) {
@@ -595,7 +639,10 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
                            s_map.plan.zoom == plan.zoom &&
                            s_map.plan.width == plan.width &&
                            s_map.plan.height == plan.height;
-    if (same_plan && (s_map.status.visible || completed_frame_locked())) {
+    const bool force_reload = s_map.force_reload_next_acquire;
+    s_map.force_reload_next_acquire = false;
+    if (!force_reload && same_plan &&
+        (s_map.status.visible || completed_frame_locked())) {
         s_map.status.visible = true;
         if (completed_frame_locked()) {
             s_map.status.worker_running = false;
@@ -616,6 +663,9 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
     s_map.status.current_view_only = true;
     s_map.status.public_rf_tx = false;
     s_map.status.formats_sd = false;
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
+    set_provider_locked(&provider);
     s_map.status.generation = generation;
     s_map.status.lat_e7 = plan.lat_e7;
     s_map.status.lon_e7 = plan.lon_e7;
@@ -628,6 +678,17 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
     *out_generation = generation;
     xTaskNotifyGive(s_map.worker);
     return ESP_OK;
+}
+
+void d1l_map_view_service_force_reload_next_acquire(void)
+{
+    if (!s_map.lock) {
+        return;
+    }
+    if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        s_map.force_reload_next_acquire = true;
+        xSemaphoreGive(s_map.lock);
+    }
 }
 
 void d1l_map_view_service_release_visible(uint32_t generation)

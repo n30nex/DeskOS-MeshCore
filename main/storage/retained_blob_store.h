@@ -6,13 +6,16 @@
 
 #include "esp_err.h"
 
-#define D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE "SD degraded; using internal fallback"
+#define D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE "SD degraded; history is live-only until storage recovers"
 
 typedef enum {
     D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES = 0,
     D1L_RETAINED_BLOB_STORE_DM_MESSAGES,
     D1L_RETAINED_BLOB_STORE_ROUTES,
     D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+    D1L_RETAINED_BLOB_STORE_NODES,
+    D1L_RETAINED_BLOB_STORE_CONTACTS,
+    D1L_RETAINED_BLOB_STORE_READ_STATE,
     D1L_RETAINED_BLOB_STORE_COUNT,
 } d1l_retained_blob_store_id_t;
 

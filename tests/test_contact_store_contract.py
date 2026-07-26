@@ -37,7 +37,7 @@ def c_function(source: str, signature: str) -> str:
     raise AssertionError(f"unterminated function: {signature}")
 
 
-def test_contact_store_is_bounded_and_nvs_backed():
+def test_contact_store_is_bounded_and_sd_first():
     header = read("main/mesh/contact_store.h")
     source = read("main/mesh/contact_store.c")
     cmake = read("main/CMakeLists.txt")
@@ -74,10 +74,14 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "contact schema v5 layout changed" in source
     assert "contact schema v6 layout changed" in source
     assert "contact schema v7 layout changed" in source
-    assert 'D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"' in source
     assert 'D1L_CONTACT_STORE_KEY "contacts"' in source
-    assert "nvs_get_blob" in source
-    assert "nvs_set_blob" in source
+    assert '#include "storage/retained_blob_store.h"' in source
+    assert "D1L_RETAINED_BLOB_STORE_CONTACTS" in source
+    assert "d1l_retained_blob_store_read(" in source
+    assert "d1l_retained_blob_store_write(" in source
+    assert "d1l_retained_blob_store_erase(" in source
+    assert "nvs_get_blob" not in source
+    assert "nvs_set_blob" not in source
     assert "static d1l_contact_store_blob_t s_blob_scratch" in source
     assert "static d1l_contact_store_blob_t s_rollback_scratch" in source
     assert "persist_store_or_rollback" in source
@@ -163,7 +167,8 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "nvs_erase_key" not in init
     assert "ESP_ERR_NOT_SUPPORTED" in init
     assert "ESP_ERR_INVALID_STATE" in init
-    assert "nvs_erase_key(handle, D1L_CONTACT_STORE_KEY)" in clear
+    assert "d1l_retained_blob_store_erase(" in clear
+    assert "D1L_RETAINED_BLOB_STORE_CONTACTS" in clear
 
 
 def test_contacts_can_promote_heard_nodes_by_fingerprint():

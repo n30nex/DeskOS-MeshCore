@@ -98,6 +98,27 @@ static void test_storage_and_map_fail_closed_states(void)
     assert(strcmp(view.map_status, "Needs FAT32") == 0);
 }
 
+static void test_missing_sd_reports_live_only_restrictions(void)
+{
+    d1l_ui_home_view_input_t input = {
+        .node_count = 3U,
+        .map_location_set = true,
+        .storage_setup_action = "insert_card",
+        .node_store_backend = "unavailable",
+    };
+    d1l_ui_home_view_model_t view;
+    d1l_ui_home_view(&input, &view);
+
+    assert(strcmp(view.network_status, "3 nearby | history not saved") == 0);
+    assert(strcmp(view.sd_value, "live only") == 0);
+    assert(strcmp(view.sd_compact_value, "Live only") == 0);
+    assert(strcmp(view.attention_value, "Limited") == 0);
+    assert(view.storage_needs_attention);
+    assert(view.attention_required);
+    assert(view.network_status_color == 0xFBBF24U);
+    assert(view.sd_value_color == 0xF87171U);
+}
+
 static void test_connecting_unavailable_and_mesh_error_states_are_explicit(void)
 {
     d1l_ui_home_view_input_t input = {
@@ -279,6 +300,7 @@ int main(void)
     test_default_view_is_bounded_and_truthful();
     test_ready_view_owns_all_rendered_strings();
     test_storage_and_map_fail_closed_states();
+    test_missing_sd_reports_live_only_restrictions();
     test_unread_count_saturates_instead_of_wrapping();
     test_muted_unread_stays_separate_from_attention_count();
     test_release_profile_strips_hidden_sd_failures();

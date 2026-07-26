@@ -25,14 +25,12 @@ try:
         EXPECTED_PID,
         EXPECTED_VID,
         POSIX_D1L_TARGET,
-        WINDOWS_D1L_TARGET,
     )
 except ModuleNotFoundError:
     from scripts.d1l_serial_target import (
         EXPECTED_PID,
         EXPECTED_VID,
         POSIX_D1L_TARGET,
-        WINDOWS_D1L_TARGET,
     )
 
 if __package__:
@@ -110,9 +108,17 @@ EXPECTED_BSP_PATCHES = (
 EXPECTED_BSP_SUBMODULE = Path("third_party/sensecap_indicator_esp32")
 RELEASE_DOC_SPECS = [
     ("docs/USER_GUIDE_D1L.md", "USER_GUIDE_D1L.md"),
-    ("docs/DEVELOPER_GUIDE_D1L.md", "DEVELOPER_GUIDE_D1L.md"),
-    ("docs/FLASH_RECOVERY_D1L.md", "FLASH_RECOVERY_D1L.md"),
-    ("docs/RP2040_SD_BRIDGE_FLASH_D1L.md", "RP2040_SD_BRIDGE_FLASH_D1L.md"),
+    (
+        "docs/DESKOS_MESHCORE_FEATURE_PARITY.md",
+        "DESKOS_MESHCORE_FEATURE_PARITY.md",
+    ),
+    ("docs/KNOWN_LIMITATIONS.md", "KNOWN_LIMITATIONS.md"),
+    ("docs/D1L_SD_CARD_GUIDED_INSTALL.md", "D1L_SD_CARD_GUIDED_INSTALL.md"),
+    ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
+    (
+        "docs/release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md",
+        "SIGUI_CORE_1_0_PRODUCT_CONTRACT.md",
+    ),
 ]
 RP2040_ARTIFACT_NAMES = [
     "rp2040-sd-bridge-firmware",
@@ -159,22 +165,21 @@ CORE_SUPPORTED_CAPABILITIES_BASE = (
     "identity",
     "retained_nvs",
     "diagnostics",
-    "usb_recovery",
     "time_truth",
-)
-CORE_UNAVAILABLE_CAPABILITIES_BASE = (
     "map",
     "wifi_user_control",
-    "ble",
     "multi_channel_management",
     "admin",
     "observer_mqtt",
-    "signed_update",
     "mutable_terminal",
     "location",
-    "advanced_qr_emoji",
     "user_trace",
-    "notification_system",
+)
+CORE_UNAVAILABLE_CAPABILITIES_BASE = (
+    "usb_recovery",
+    "ble",
+    "signed_update",
+    "advanced_qr_emoji",
 )
 FULL_FEATURE_SUPPORTED_CAPABILITIES = (
     "board_initialization",
@@ -291,24 +296,24 @@ def core_capability_truth(sd_history_mode: str) -> dict:
         raise ValueError(f"Unsupported SD history mode: {sd_history_mode}")
     supported = list(CORE_SUPPORTED_CAPABILITIES_BASE)
     unavailable = list(CORE_UNAVAILABLE_CAPABILITIES_BASE)
-    if sd_history_mode == "supported_optional":
+    if sd_history_mode != "disabled":
         supported.append("sd_history")
-        sd_state = "qualified_optional"
+        sd_state = (
+            "qualified_sd_primary"
+            if sd_history_mode == "supported_optional"
+            else "runtime_conditional_sd_primary"
+        )
     else:
         unavailable.append("sd_history")
-        sd_state = (
-            "disabled_nvs_authoritative"
-            if sd_history_mode == "disabled"
-            else "conditional_unqualified"
-        )
+        sd_state = "disabled_nvs_authoritative"
     return {
         "supported_capabilities": supported,
         "unavailable_capabilities": unavailable,
         "sd_history_state": sd_state,
         "storage_authority": (
             "nvs"
-            if sd_history_mode in {"disabled", "conditional"}
-            else "nvs_with_qualified_optional_sd_history"
+            if sd_history_mode == "disabled"
+            else "sd_primary_live_only_without_sd"
         ),
     }
 
@@ -647,19 +652,20 @@ def package_inventory_payloads(
                 "work_packages": [],
                 "blockers": [],
                 "core_evidence_requirements": [
-                    "exact_actions_candidate",
+                    "exact_actions_core_1_0_candidate",
                     "checksums_provenance_sbom",
-                    "exact_com12_flash",
-                    "core_smoke_ui_reboot_persistence",
-                    "controlled_rf_dm",
-                    "sd_decision",
-                    "active_60m_idle_30m_soak",
-                    "install_recovery_review",
-                    "zero_core_p0_and_critical_p1",
+                    "stable_pi5_by_id_non_erasing_flash",
+                    "boot_ui_navigation_and_boot_advert_public",
+                    "dm_ack_path_trace_ping",
+                    "repeater_login_authenticated_query",
+                    "wifi_reconnect",
+                    "sd_write_remount_and_degraded_mode",
+                    "authorized_map_download_offline_cache_revisit",
+                    "zero_rc1_release_blockers",
                 ],
                 "note": (
                     "Packaging does not evaluate Core release readiness. "
-                    "scripts/core_release_gate_audit_d1l.py evaluates exact "
+                    "scripts/rc1_release_gate_audit_d1l.py evaluates exact "
                     "candidate evidence separately."
                 ),
             }
@@ -1265,6 +1271,48 @@ def copy_release_docs(root: Path, package_dir: Path) -> list[dict]:
     return copied
 
 
+def copy_sd_preparation_bundle(root: Path, package_dir: Path) -> dict:
+    sources = (
+        root / "scripts" / "prepare_deskos_sd.py",
+        root / "sdcard",
+    )
+    for source in sources:
+        if not source.exists() or is_link_or_reparse(source):
+            raise FileNotFoundError(
+                f"Missing or unsafe SD preparation source: {source}"
+            )
+
+    files = [
+        sources[0],
+        *sorted(path for path in sources[1].rglob("*") if path.is_file()),
+    ]
+    copied = []
+    for source in files:
+        if is_link_or_reparse(source):
+            raise ValueError(f"SD preparation source must not be linked: {source}")
+        relative = source.relative_to(root)
+        destination = package_dir / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        copied.append(
+            {
+                "path": relative.as_posix(),
+                "size": destination.stat().st_size,
+                "sha256": sha256_file(destination),
+            }
+        )
+
+    return {
+        "schema": 1,
+        "script": "scripts/prepare_deskos_sd.py",
+        "bundle_root": "sdcard",
+        "minimum_card_bytes": 28_000_000_000,
+        "filesystem": "FAT32",
+        "formats_sd": False,
+        "files": copied,
+    }
+
+
 def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list[dict]:
     if artifact_root is None:
         return []
@@ -1701,7 +1749,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 
-WINDOWS_D1L_TARGET = __WINDOWS_TARGET__
 POSIX_D1L_TARGET = __POSIX_TARGET__
 EXPECTED_VID = __EXPECTED_VID__
 EXPECTED_PID = __EXPECTED_PID__
@@ -1711,6 +1758,7 @@ FLASH_SIZE = __FLASH_SIZE__
 FLASH_FREQ = __FLASH_FREQ__
 FLASH_PLAN = __FLASH_PLAN__
 _CHECKSUM_ROW = re.compile(r"([0-9A-Fa-f]{64})  \./(.+)\Z")
+_WINDOWS_COM_PORT = re.compile(r"COM[1-9][0-9]*\Z", re.IGNORECASE)
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -1813,8 +1861,7 @@ def _load_resolver(root: Path) -> types.ModuleType:
     module.__file__ = str(path)
     exec(compile(source, str(path), "exec"), module.__dict__)
     if (
-        module.WINDOWS_D1L_TARGET != WINDOWS_D1L_TARGET
-        or module.POSIX_D1L_TARGET != POSIX_D1L_TARGET
+        module.POSIX_D1L_TARGET != POSIX_D1L_TARGET
         or module.EXPECTED_VID != EXPECTED_VID
         or module.EXPECTED_PID != EXPECTED_PID
     ):
@@ -1828,6 +1875,81 @@ def _default_port_lister() -> list[Any]:
     except ImportError as exc:
         raise ValueError("pyserial is required to identify the D1L target") from exc
     return list(list_ports.comports())
+
+
+def _row_value(row: object, field: str) -> Any:
+    if isinstance(row, dict):
+        return row.get(field)
+    return getattr(row, field, None)
+
+
+def _windows_platform(platform_name: str | None) -> bool:
+    value = os.name if platform_name is None else platform_name
+    if not isinstance(value, str):
+        raise ValueError("platform_name must be text")
+    normalized = value.strip().lower()
+    if normalized in {"nt", "win32", "windows"}:
+        return True
+    if normalized in {"posix", "linux", "darwin"}:
+        return False
+    raise ValueError(f"unsupported serial-target platform: {value!r}")
+
+
+def _manual_windows_target(
+    requested_port: str,
+    *,
+    port_lister: Callable[[], list[Any]],
+) -> dict[str, Any]:
+    if not isinstance(requested_port, str) or not requested_port.strip():
+        raise ValueError("Windows manual install requires an explicit COM port")
+    if any(
+        ord(char) < 0x20 or ord(char) == 0x7F
+        for char in requested_port
+    ):
+        raise ValueError("Windows COM port contains a control character")
+    canonical = requested_port.strip().upper()
+    if canonical.startswith("\\\\.\\"):
+        canonical = canonical[4:]
+    if not _WINDOWS_COM_PORT.fullmatch(canonical):
+        raise ValueError(
+            "Windows manual install requires an explicit canonical COM port"
+        )
+    try:
+        rows = list(port_lister())
+    except Exception as exc:
+        raise ValueError("serial target enumeration failed") from exc
+    matches = [
+        row
+        for row in rows
+        if str(_row_value(row, "device") or "").strip().upper() == canonical
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "the explicitly requested Windows COM port must be present exactly once"
+        )
+    row = matches[0]
+    vid = _row_value(row, "vid")
+    pid = _row_value(row, "pid")
+    if type(vid) is not int or vid != EXPECTED_VID:
+        raise ValueError(
+            f"D1L VID must be 0x{EXPECTED_VID:04X}; got {vid!r}"
+        )
+    if type(pid) is not int or pid != EXPECTED_PID:
+        raise ValueError(
+            f"D1L PID must be 0x{EXPECTED_PID:04X}; got {pid!r}"
+        )
+    return {
+        "schema": 1,
+        "kind": "d1l_manual_windows_target",
+        "target_kind": "windows_com_operator_supplied",
+        "requested_path": canonical,
+        "resolved_tty": canonical,
+        "vid": vid,
+        "pid": pid,
+        "hwid": _row_value(row, "hwid"),
+        "qualification_route": False,
+        "operator_supplied": True,
+    }
 
 
 def run_flash(
@@ -1850,17 +1972,31 @@ def run_flash(
         raise ValueError("Linked/reparse package root rejected")
     root = raw_root.resolve(strict=True)
     verify_complete_package(root)
-    resolver = resolver_module or _load_resolver(root)
-    hooks = dict(resolver_hooks or {})
-    snapshot = resolver.resolve_target(
-        port,
-        port_lister=port_lister or _default_port_lister,
-        platform_name=platform_name,
-        **hooks,
-    )
-    resolver.validate_snapshot(snapshot, snapshot["requested_path"])
+    list_ports = port_lister or _default_port_lister
+    if _windows_platform(platform_name):
+        if resolver_hooks:
+            raise ValueError(
+                "resolver hooks are not accepted for manual Windows install"
+            )
+        snapshot = _manual_windows_target(
+            port,
+            port_lister=list_ports,
+        )
+    else:
+        resolver = resolver_module or _load_resolver(root)
+        hooks = dict(resolver_hooks or {})
+        snapshot = resolver.resolve_target(
+            port,
+            port_lister=list_ports,
+            platform_name=platform_name,
+            **hooks,
+        )
+        resolver.validate_snapshot(snapshot, snapshot["requested_path"])
     authorized_port = snapshot["requested_path"]
-    if authorized_port not in {WINDOWS_D1L_TARGET, POSIX_D1L_TARGET}:
+    if snapshot["target_kind"] == "windows_com_operator_supplied":
+        if not _WINDOWS_COM_PORT.fullmatch(authorized_port):
+            raise ValueError("Resolver returned an invalid Windows COM port")
+    elif authorized_port != POSIX_D1L_TARGET:
         raise ValueError("Resolver returned an unauthorized D1L target")
     if validate_only:
         return {"target": snapshot, "command": None}
@@ -1915,7 +2051,6 @@ if __name__ == "__main__":
     raise SystemExit(main())
 '''
     replacements = {
-        "__WINDOWS_TARGET__": repr(WINDOWS_D1L_TARGET),
         "__POSIX_TARGET__": repr(POSIX_D1L_TARGET),
         "__EXPECTED_VID__": str(EXPECTED_VID),
         "__EXPECTED_PID__": str(EXPECTED_PID),
@@ -1978,11 +2113,12 @@ def write_flash_scripts(
         ps_project.write_text(
             "\n".join(
                 (
-                    "param([string]$Port = $env:D1L_PORT)",
+                    "param([Parameter(Mandatory=$true)][string]$Port)",
                     '$ErrorActionPreference = "Stop"',
-                    'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+                    'if ([string]::IsNullOrWhiteSpace($Port)) { throw "Pass the operator-confirmed D1L COM port with -Port." }',
                     "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
-                    f'if ($ValidatedPort -ne "{WINDOWS_D1L_TARGET}") {{ throw "Core 1.0 Windows D1L flashing requires {WINDOWS_D1L_TARGET}." }}',
+                    'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
+                    'Write-Warning "NON-QUALIFYING MANUAL WINDOWS INSTALL: release qualification must use the Pi 5 stable by-id route."',
                     "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
                     "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort",
                     'if ($LASTEXITCODE -ne 0) { throw "Project flash failed with exit code $LASTEXITCODE" }',
@@ -2015,11 +2151,12 @@ def write_flash_scripts(
 
         ps_full = package_dir / "flash_full_8mb.ps1"
         ps_full_lines = [
-            "param([string]$Port = $env:D1L_PORT)",
+            "param([Parameter(Mandatory=$true)][string]$Port)",
             '$ErrorActionPreference = "Stop"',
-            'if ([string]::IsNullOrWhiteSpace($Port)) { throw "No D1L port supplied. Set D1L_PORT or pass -Port." }',
+            'if ([string]::IsNullOrWhiteSpace($Port)) { throw "Pass the operator-confirmed D1L COM port with -Port." }',
             "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
-            f'if ($ValidatedPort -ne "{WINDOWS_D1L_TARGET}") {{ throw "Core 1.0 Windows recovery requires {WINDOWS_D1L_TARGET}." }}',
+            'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
+            'Write-Warning "NON-QUALIFYING MANUAL WINDOWS RECOVERY: this route cannot satisfy release qualification."',
             "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
             *powershell_checksum_guard_lines(),
             "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --validate-only",
@@ -2135,13 +2272,14 @@ def write_supported_features(
         )
     elif sd_history_mode == "supported_optional":
         sd_text = (
-            "SD history is an optional supported capability only for the paired "
+            "SD is the qualified primary retained-data store for the paired "
             "artifacts in this exact package."
         )
     else:
         sd_text = (
-            "SD history is conditional and unqualified, so it is not a supported "
-            "Core release capability."
+            "SD is the primary retained-data store when the paired bridge and "
+            "prepared FAT32 card are ready. Without SD, DeskOS remains in "
+            "visible live-only RF chat mode."
         )
     path.write_text(
         f"""# MeshCore DeskOS D1L Core 1.0 Supported Features
@@ -2167,13 +2305,16 @@ SD history mode: `{sd_history_mode}`
 {unavailable_lines}
 
 Unavailable capabilities are intentionally hidden or rejected before side
-effects. Map, Wi-Fi, BLE, OTA, multi-channel management, administration,
-Observer/MQTT, and location are deferred.
+effects. BLE companion transport, signed update/recovery, advanced QR sharing,
+and the on-device USB recovery service are deferred to 1.5 / RC2. The package
+still contains a checksum-verified host-side factory recovery image.
 
 ## Current known limitations
 
-- SD history is `{sd_history_mode}`; when disabled, retained Core data uses NVS.
-- Updates and recovery are USB-only. OTA and signed SD update are unavailable.
+- SD history is `{sd_history_mode}`. In the production conditional mode, SD is
+  primary and missing/unusable media produces visible live-only operation.
+- Signed OTA/SD update and the on-device USB recovery service are unavailable.
+  A checksum-verified host-side factory recovery image remains in the package.
 - The Full Feature profile is not release-ready and is not represented by this
   package.
 
@@ -2219,18 +2360,21 @@ SD history mode: `{sd_history_mode}`
 
 ## Before installing
 
-1. Use one of the two supported stable targets:
-   - Windows: `{WINDOWS_D1L_TARGET}`
-   - POSIX/Pi 5: `{POSIX_D1L_TARGET}`
+1. Release qualification uses only the Pi 5 stable target:
+   `{POSIX_D1L_TARGET}`.
 2. The device must report USB VID:PID `{EXPECTED_VID:04X}:{EXPECTED_PID:04X}`.
 3. On POSIX, `/dev/ttyUSB<number>` is observational evidence only. Never pass
    a raw tty path to a package flash command.
-4. Never use COM8, COM11, COM16, or COM29 for the ESP32 Core install.
+4. Windows install/recovery is a non-qualifying manual convenience. The
+   operator must pass the exact COM port explicitly; the package never chooses
+   or guesses a Windows port and rejects any device without the exact VID:PID.
 5. The generated entrypoint verifies every file against `SHA256SUMS.txt` and
    rejects missing, extra, linked, duplicate, or mismatched files.
-6. Read `SUPPORTED_FEATURES.md`. Map, Wi-Fi, BLE, OTA, multi-channel
-   management, administration, Observer/MQTT, and location are unavailable.
+6. Read `SUPPORTED_FEATURES.md`. BLE companion transport, signed OTA/recovery,
+   and advanced QR sharing are unavailable in RC1.
 7. Never format an SD card on the device.
+8. Prepare a FAT32 card with `scripts/prepare_deskos_sd.py`; the checked-in
+   payload is under `sdcard/`.
 
 ## Normal non-erasing USB install
 
@@ -2240,20 +2384,24 @@ and preserves unrelated NVS regions. Both wrappers invoke the package-root
 `flash_project.py`, which verifies the complete checksum inventory, resolves
 the exact USB identity, and gives esptool only the stable requested target.
 
-### Windows
-
-```powershell
-$PackageRoot = (Get-Location).Path
-$env:D1L_PORT = "{WINDOWS_D1L_TARGET}"
-& (Join-Path $PackageRoot "flash_project.ps1") -Port {WINDOWS_D1L_TARGET}
-```
-
-### POSIX / Raspberry Pi 5
+### Qualifying POSIX / Raspberry Pi 5
 
 ```sh
 export D1L_PORT="{POSIX_D1L_TARGET}"
 ./flash_project.sh
 ```
+
+### Non-qualifying manual Windows install
+
+```powershell
+$PackageRoot = (Get-Location).Path
+$OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
+& (Join-Path $PackageRoot "flash_project.ps1") -Port $OperatorPort
+```
+
+This Windows helper verifies only the explicitly supplied port and its exact
+VID:PID `{EXPECTED_VID:04X}:{EXPECTED_PID:04X}`. It never scans for a fallback
+port and cannot produce release-qualification evidence.
 
 After flashing, query `version` and `health`. Require the exact commit above,
 `release_profile=core_1_0`, and the exact SD history mode above before using
@@ -2263,14 +2411,15 @@ any evidence from the device.
 
 Try the normal project flash first. The full 8MB recovery image is a last
 resort: it can overwrite settings, contacts, messages, and other retained
-state. Core recovery is Windows-only. No POSIX recovery wrapper is shipped.
-`flash_full_8mb.ps1` verifies the complete checksum inventory and the COM12
-USB identity before it asks the operator to type `FULL-FLASH-COM12`.
+state. Core recovery is Windows-only, manual, and non-qualifying. No POSIX
+recovery wrapper is shipped. `flash_full_8mb.ps1` verifies the complete
+checksum inventory plus the explicitly supplied port's exact USB identity
+before it asks for port-bound confirmation.
 
 ```powershell
 $PackageRoot = (Get-Location).Path
-$env:D1L_PORT = "{WINDOWS_D1L_TARGET}"
-& (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port {WINDOWS_D1L_TARGET}
+$OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
+& (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port $OperatorPort
 ```
 
 Re-verify `version`, `health`, display, touch, and retained-state expectations
@@ -2338,7 +2487,10 @@ def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -
                 "SD history is qualified optional and is bound to the paired "
                 "RP2040 artifacts in this package."
                 if sd_mode == "supported_optional"
-                else "SD history remains conditional and is not release-qualified."
+                else (
+                    "SD is primary when the paired bridge and prepared FAT32 "
+                    "card are ready; otherwise DeskOS is visibly live-only."
+                )
             )
         )
         readme.write_text(
@@ -2369,9 +2521,10 @@ SD history mode: `{sd_mode}`
 
 {unavailable_lines}
 
-Unavailable means hidden or rejected before side effects. Map, Wi-Fi, BLE,
-OTA, multi-channel management, administration, Observer/MQTT, and location
-are explicitly deferred.
+Unavailable means hidden or rejected before side effects. BLE companion
+transport, signed OTA/recovery, advanced QR sharing, and the on-device USB
+recovery service are explicitly deferred to 1.5 / RC2. The package still
+contains a checksum-verified host-side factory recovery image.
 
 ## SHA-256 values
 
@@ -2386,15 +2539,9 @@ performs the same inventory and USB identity checks before its warning.
 
 Normal project flashing writes the exact Actions-built bootloader, partition
 table, and app at their ESP-IDF offsets without erasing unrelated NVS regions.
-It accepts exactly `COM12` on Windows or
-`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` on POSIX, and requires
+Release qualification uses exactly
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` on the Pi 5 and requires
 VID:PID `1A86:7523`.
-
-```powershell
-$PackageRoot = (Get-Location).Path
-$env:D1L_PORT = "COM12"
-& (Join-Path $PackageRoot "flash_project.ps1") -Port COM12
-```
 
 ```sh
 export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
@@ -2402,7 +2549,32 @@ export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
 ```
 
 On POSIX, `/dev/ttyUSB<number>` is observational only and is never an
-authorized open target. Never use COM8, COM11, COM16, or COM29.
+authorized open target.
+
+The Windows wrapper is a non-qualifying manual convenience. It requires an
+operator-supplied `-Port`, verifies that exact enumerated port has VID:PID
+`1A86:7523`, and never chooses or probes a default port:
+
+```powershell
+$PackageRoot = (Get-Location).Path
+$OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
+& (Join-Path $PackageRoot "flash_project.ps1") -Port $OperatorPort
+```
+
+## Prepare the SD card
+
+Use a 32GB-class or larger FAT32 card. The preparation command is read-only
+unless `--apply` is supplied, never formats or deletes files, and verifies
+every copied byte:
+
+```sh
+python scripts/prepare_deskos_sd.py --target <mounted-card-root>
+python scripts/prepare_deskos_sd.py --target <mounted-card-root> --apply
+```
+
+The checked-in payload is under `sdcard/`. Optional offline tiles require a
+separate provider manifest that explicitly permits offline storage and
+background prefetch.
 
 ## Recovery
 
@@ -2560,7 +2732,8 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 {rp2040_contents}
 - `update/d1l-update.bin` is the application image for development update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
-- `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.
+- `docs/` contains the current RC1 user guide, feature-parity matrix,
+  limitations, SD-card setup, attributions, and product contract.
 - `notices/` contains the project license, third-party notices, source audit notes, attributions, and the verbatim orlp Ed25519 zlib license for public distribution.
 - `evidence/` contains deterministic projections of current-commit MeshCore wire-envelope and signed-advert runtime receipts when supplied by CI. Their manifest entries bind the raw Actions receipt hashes; neither projection alone closes WP-04 or issue #65.
 - `{manifest['build_inputs']['path']}` records the exact build-input lock copied into package metadata.
@@ -2725,7 +2898,7 @@ def create_release_package(
     notice_files = copy_notice_files(root, package_dir)
     release_docs = (
         []
-        if release_profile == CORE_RELEASE_PROFILE
+        if release_profile == CORE_RELEASE_PROFILE and sd_history_mode == "disabled"
         else copy_release_docs(root, package_dir)
     )
     if release_profile == CORE_RELEASE_PROFILE and sd_history_mode == "disabled":
@@ -2736,11 +2909,11 @@ def create_release_package(
         )
     if (
         release_profile == CORE_RELEASE_PROFILE
-        and sd_history_mode == "supported_optional"
+        and sd_history_mode != "disabled"
         and not rp2040_artifacts
     ):
         raise ValueError(
-            "Core supported_optional SD requires the exact paired RP2040 artifacts"
+            "Core SD support requires the exact paired RP2040 artifacts"
         )
     scripts = write_flash_scripts(
         root,
@@ -2751,7 +2924,7 @@ def create_release_package(
         release_profile=release_profile,
     )
     if release_profile == CORE_RELEASE_PROFILE:
-        release_docs = [
+        release_docs.append(
             write_core_install_recovery_guide(
                 package_dir,
                 source_commit=expected_commit,
@@ -2759,7 +2932,14 @@ def create_release_package(
                 actions_run_attempt=str(workflow["run_attempt"]),
                 sd_history_mode=sd_history_mode,
             )
-        ]
+        )
+
+    sd_preparation = (
+        copy_sd_preparation_bundle(root, package_dir)
+        if release_profile == CORE_RELEASE_PROFILE
+        and sd_history_mode != "disabled"
+        else None
+    )
 
     manifest = {
         "schema": (
@@ -2788,6 +2968,7 @@ def create_release_package(
         "full_flash_image": full_image,
         "debug_files": debug_files,
         "release_docs": release_docs,
+        "sd_preparation": sd_preparation,
         "notice_files": notice_files,
         "scripts": scripts,
         "notes": [
@@ -2814,6 +2995,8 @@ def create_release_package(
                 "sd_history_state": capability_truth["sd_history_state"],
                 "storage_authority": capability_truth["storage_authority"],
                 "full_feature_release_ready": False,
+                "core_release_ready": False,
+                "ready_for_public_release": False,
                 "install_recovery_guide": {
                     "schema": CORE_INSTALL_CONTRACT_SCHEMA,
                     "usb_only": True,
@@ -2822,19 +3005,23 @@ def create_release_package(
                         "windows": "flash_project.ps1",
                         "posix": "flash_project.sh",
                     },
-                    "normal_install_port": WINDOWS_D1L_TARGET,
+                    "normal_install_port": POSIX_D1L_TARGET,
                     "normal_install_targets": {
                         "windows": {
-                            "requested_path": WINDOWS_D1L_TARGET,
-                            "target_kind": "windows_com",
+                            "requested_path": None,
+                            "target_kind": "windows_com_operator_supplied",
                             "vid": EXPECTED_VID,
                             "pid": EXPECTED_PID,
+                            "qualifying": False,
+                            "explicit_operator_port_required": True,
+                            "port_probe_forbidden": True,
                         },
                         "posix": {
                             "requested_path": POSIX_D1L_TARGET,
                             "target_kind": "posix_by_id",
                             "vid": EXPECTED_VID,
                             "pid": EXPECTED_PID,
+                            "qualifying": True,
                         },
                     },
                     "target_policy": {
@@ -2842,6 +3029,11 @@ def create_release_package(
                         "resolved_tty_observational_only": True,
                         "hardware_identity_required": True,
                         "raw_posix_tty_forbidden": True,
+                        "qualification_platform": "posix",
+                        "qualification_target": POSIX_D1L_TARGET,
+                        "windows_manual_non_qualifying": True,
+                        "windows_explicit_operator_port_required": True,
+                        "windows_port_probe_forbidden": True,
                     },
                     "normal_install_preserves_unrelated_nvs": True,
                     "normal_install_package_root_only": True,

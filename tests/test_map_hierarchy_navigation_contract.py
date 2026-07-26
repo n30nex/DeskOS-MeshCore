@@ -134,23 +134,22 @@ def test_map_probe_rejects_clear_setup_action():
 
 
 def test_map_docs_define_the_bounded_interactive_policy_and_probe_safety():
-    docs = "\n".join(
-        read(path)
-        for path in (
-            "docs/UI_SPEC_480x480_DARK.md",
-            "docs/TEST_PLAN_D1L.md",
-            "docs/RELEASE_CHECKLIST.md",
-            "docs/USER_GUIDE_D1L.md",
-        )
-    )
+    guide = read("docs/USER_GUIDE_D1L.md")
+    test_plan = read("docs/TEST_PLAN_D1L.md").split("## Historical", 1)[0]
+    attributions = read("docs/ATTRIBUTIONS.md")
 
-    assert "map -> map_options -> map_location or map_cache" in docs.lower()
-    assert "map|map_options|map_location|map_cache" in docs
-    assert "visible current-view 3x3" in docs
-    assert "one zoom" in docs
-    assert "cache/reuse" in docs
-    assert "no background" in docs
-    assert "no area download" in docs
-    assert "probes never request map tiles" in docs.lower()
-    assert "(c) OpenStreetMap contributors" in docs
-    assert "COM12" in docs
+    assert "visible current-view 3×3" in guide
+    assert "at one zoom per visible generation" in guide
+    assert "Completed tiles are reused from SD" in guide
+    assert "Read-only Map probes" in guide
+    assert "never request tiles" in guide
+    assert "Authorized-provider background prefetch" in guide
+    assert "signed nodes no farther" in guide
+    assert "200 km" in guide
+    assert "8–18" in guide
+    assert "at most 60%" in guide
+    assert "at least 8 GiB" in guide
+    assert "(c) OpenStreetMap contributors" in guide
+    assert "background download requires an explicitly authorized provider" in test_plan
+    assert "example manifest intentionally uses a non-routable placeholder" in attributions
+    assert "must not be pointed at OpenStreetMap Standard" in attributions

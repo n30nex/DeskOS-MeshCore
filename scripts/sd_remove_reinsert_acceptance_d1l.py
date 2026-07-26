@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Fail-closed physical SD remove/reinsert acceptance for MeshCore DeskOS D1L.
 
-The operator only removes or reinserts the card when prompted.  The runner never
-waits for Enter, never opens the RP2040 USB port or UF2 volume, never formats the
-card, and never sends Public or DM RF traffic.
+The runner performs one bounded no-soak cycle.  Each physical card action needs
+an explicit, timed operator acknowledgement.  It never opens the RP2040 USB
+port or UF2 volume, formats the card, erases NVS, or sends Public or DM RF
+traffic.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import argparse
 import json
 import os
 import re
+import select
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,8 +65,22 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 KIND = "d1l_sd_remove_reinsert_source"
-REQUIRED_CYCLES = 10
+REQUIRED_CYCLES = 1
 STORE_NAMES = ("messages", "dm", "routes", "packets")
+HISTORY_BACKEND_FIELDS = (
+    "message_store_backend",
+    "dm_store_backend",
+    "route_store_backend",
+    "packet_log_backend",
+    "node_store_backend",
+    "contact_store_backend",
+    "read_state_backend",
+)
+SD_MODE = "sd"
+VOLATILE_NO_CARD_MODE = "volatile_no_card"
+LIVE_ONLY_EVIDENCE_MODE = "live_only_no_card"
+EXPECTED_RELEASE_PROFILE = "core_1_0"
+EXPECTED_SD_HISTORY_MODE = "conditional"
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
 RETAINED_CANARY_TIMEOUT_SEC = 180.0
 SD_OPERATION_TIMEOUT_SEC = 120.0
@@ -71,6 +88,12 @@ PERSISTENCE_POLL_ATTEMPTS = 30
 PERSISTENCE_POLL_INTERVAL_SEC = 1.0
 STATE_POLL_INTERVAL_SEC = 1.0
 STATE_WAIT_SEC = 120.0
+OPERATOR_ACK_TIMEOUT_SEC = 120.0
+MAX_OPERATOR_ACK_TIMEOUT_SEC = 300.0
+OPERATOR_ACK_TOKENS = {
+    "remove": "removed",
+    "reinsert": "reinserted",
+}
 
 
 def cycle_token(base: str, cycle: int, phase: str) -> str:
@@ -113,8 +136,7 @@ def storage_mode_matches(result: dict | None, mode: str) -> bool:
         return False
     manager = result.get("manager")
     sd = result.get("sd")
-    retained_nvs = result.get("retained_nvs")
-    expected_backend = "sd" if mode == "sd" else "nvs"
+    expected_backend = "sd" if mode == SD_MODE else "volatile"
     common = (
         result.get("ok") is True
         and result.get("cmd") == "storage status"
@@ -126,14 +148,14 @@ def storage_mode_matches(result: dict | None, mode: str) -> bool:
         and sd.get("rp2040_protocol_supported") is True
         and sd.get("status_stale") is False
         and sd.get("presence_stale") is False
-        and result.get("message_store_backend") == expected_backend
-        and result.get("dm_store_backend") == expected_backend
-        and result.get("route_store_backend") == expected_backend
-        and result.get("packet_log_backend") == expected_backend
+        and all(
+            result.get(field) == expected_backend
+            for field in HISTORY_BACKEND_FIELDS
+        )
     )
     if not common:
         return False
-    if mode == "sd":
+    if mode == SD_MODE:
         return (
             manager.get("state") == "READY_SD"
             and sd.get("state") == "ready"
@@ -144,20 +166,22 @@ def storage_mode_matches(result: dict | None, mode: str) -> bool:
             and sd.get("atomic_rename") is True
         )
     return (
-        mode == "nvs_no_card"
+        mode == VOLATILE_NO_CARD_MODE
         and manager.get("state") == "NO_CARD"
         and sd.get("state") == "no_card"
         and sd.get("present") is False
         and sd.get("mounted") is False
         and sd.get("data_root_ready") is False
-        and isinstance(retained_nvs, dict)
-        and retained_nvs.get("marker_ready") is True
-        and retained_nvs.get("markers_complete") is True
-        and retained_nvs.get("anchor_ready") is True
-        and retained_nvs.get("sentinel_ready") is True
-        and retained_nvs.get("ready") is True
-        and retained_nvs.get("init_error") == "ESP_OK"
-        and retained_nvs.get("migration_error") == "ESP_OK"
+        and result.get("data_backend") == "volatile"
+        and result.get("live_mesh_without_sd") == [
+            "rf_tx",
+            "rf_rx",
+            "chat",
+        ]
+        and result.get("setup_required") is True
+        and result.get("setup_action") == "insert_card"
+        and isinstance(result.get("note"), str)
+        and "history is not saved" in result["note"].lower()
     )
 
 
@@ -195,8 +219,9 @@ def retained_canary_metadata(
 ) -> dict | None:
     if not isinstance(result, dict):
         return None
-    expected_backend = "sd" if mode == "sd" else "nvs"
-    expected_mode = "sd" if mode == "sd" else "nvs_no_card"
+    expected_backend = "sd" if mode == SD_MODE else "volatile"
+    expected_mode = SD_MODE if mode == SD_MODE else VOLATILE_NO_CARD_MODE
+    history_persisted = mode == SD_MODE
     backends = result.get("backends")
     generations = result.get("backend_generations")
     if (
@@ -205,6 +230,7 @@ def retained_canary_metadata(
         or result.get("token") != token
         or result.get("fingerprint") != fingerprint_for_token(token)
         or result.get("backend_mode") != expected_mode
+        or result.get("history_persisted") is not history_persisted
         or result.get("storage_manager_quiesced") is not True
         or result.get("retained_worker_quiesced") is not True
         or result.get("public_rf_tx") is not False
@@ -336,8 +362,10 @@ def persistence_generations(results: dict[str, dict]) -> dict[str, int] | None:
 
 
 def persistence_snapshot_clean(results: dict[str, dict], token: str, mode: str) -> bool:
-    sd_required = mode == "sd"
-    deferred_sd_sync = mode == "nvs_no_card"
+    if mode != SD_MODE:
+        return False
+    sd_required = True
+    deferred_sd_sync = False
     fingerprint = fingerprint_for_token(token)
     route = results.get("routes")
     route_persistence = route.get("persistence") if isinstance(route, dict) else None
@@ -393,18 +421,68 @@ class SessionAbort(RuntimeError):
         self.detail = detail or code
 
 
+def read_operator_ack(action: str, timeout_sec: float) -> str | None:
+    """Read one bounded acknowledgement from the Pi terminal."""
+    try:
+        ready, _, _ = select.select(
+            [sys.stdin],
+            [],
+            [],
+            timeout_sec,
+        )
+    except (OSError, TypeError, ValueError):
+        return None
+    if not ready:
+        return None
+    value = sys.stdin.readline()
+    return value.strip().lower() if value else None
+
+
 class EventSession:
-    def __init__(self, ser, timeout: float, events: list[dict]):
+    def __init__(
+        self,
+        ser,
+        timeout: float,
+        events: list[dict],
+        *,
+        operator_ack_timeout_sec: float,
+        operator_ack_reader: Callable[[str, float], str | None],
+    ):
         self.ser = ser
         self.timeout = timeout
         self.events = events
+        self.operator_ack_timeout_sec = operator_ack_timeout_sec
+        self.operator_ack_reader = operator_ack_reader
 
     def prompt(self, cycle: int, phase: str, action: str, message: str) -> None:
-        print(message, flush=True)
-        self.events.append({
+        expected = OPERATOR_ACK_TOKENS[action]
+        prompt = (
+            f"{message}. Type {expected.upper()} and press Enter within "
+            f"{self.operator_ack_timeout_sec:g} seconds"
+        )
+        print(prompt, flush=True)
+        event = {
             "sequence": len(self.events) + 1, "kind": "prompt", "cycle": cycle,
-            "phase": phase, "action": action, "message": message,
-        })
+            "phase": phase, "action": action, "message": prompt,
+            "expected_ack": expected,
+            "ack_timeout_sec": self.operator_ack_timeout_sec,
+            "acknowledged": False,
+            "ack_result": "pending",
+        }
+        self.events.append(event)
+        received = self.operator_ack_reader(
+            action,
+            self.operator_ack_timeout_sec,
+        )
+        normalized = received.strip().lower() if isinstance(received, str) else None
+        if normalized is None:
+            event["ack_result"] = "timeout"
+            raise SessionAbort("operator_ack_timeout", phase, action)
+        if normalized != expected:
+            event["ack_result"] = "mismatch"
+            raise SessionAbort("operator_ack_mismatch", phase, action)
+        event["acknowledged"] = True
+        event["ack_result"] = "accepted"
 
     def command(self, cycle: int, phase: str, command: str, timeout: float | None = None) -> dict:
         result = send_console_command(self.ser, command, timeout or self.timeout)
@@ -477,14 +555,32 @@ def run_canary_bundle(
     readbacks = run_readbacks(session, cycle, f"{phase}_readback", token)
     if not retained_readbacks_pass(readbacks, token, canary, mode):
         raise SessionAbort("retained_readback_failed", f"{phase}_readback", token)
-    persistence, attempts_used = run_persistence_poll(
-        session, cycle, f"{phase}_persistence", token, mode,
-        attempts=persistence_attempts, interval_sec=persistence_interval_sec,
-    )
+    metadata = retained_canary_metadata(canary, token, mode)
+    if metadata is None:
+        raise SessionAbort("retained_canary_failed", f"{phase}_canary", token)
+    if mode == SD_MODE:
+        persistence, attempts_used = run_persistence_poll(
+            session, cycle, f"{phase}_persistence", token, mode,
+            attempts=persistence_attempts,
+            interval_sec=persistence_interval_sec,
+        )
+        generations = persistence_generations(persistence)
+        evidence_mode = SD_MODE
+    else:
+        persistence = None
+        attempts_used = 0
+        generations = metadata["generations"]
+        evidence_mode = LIVE_ONLY_EVIDENCE_MODE
     return {
-        "token": token, "mode": mode, "canary": canary, "readbacks": readbacks,
-        "persistence": persistence, "persistence_attempts_used": attempts_used,
-        "generations": persistence_generations(persistence), "ok": True,
+        "token": token,
+        "mode": evidence_mode,
+        "storage_mode": mode,
+        "canary": canary,
+        "readbacks": readbacks,
+        "persistence": persistence,
+        "persistence_attempts_used": attempts_used,
+        "generations": generations,
+        "ok": True,
     }
 
 
@@ -507,6 +603,30 @@ def crashlog_unchanged(before: dict | None, after: dict | None) -> bool:
     )
 
 
+def degraded_notice_visible(
+    no_card_samples: object,
+    ui_probe: object,
+) -> bool:
+    if (
+        not isinstance(no_card_samples, list)
+        or len(no_card_samples) != 2
+        or not all(
+            storage_mode_matches(sample, VOLATILE_NO_CARD_MODE)
+            for sample in no_card_samples
+        )
+        or not isinstance(ui_probe, dict)
+    ):
+        return False
+    return (
+        ui_probe.get("ok") is True
+        and ui_probe.get("cmd") == "ui scroll-probe"
+        and ui_probe.get("surface") == "storage"
+        and ui_probe.get("tab") == "settings"
+        and ui_probe.get("surface_supported") is True
+        and ui_probe.get("target_found") is True
+    )
+
+
 def run_cycle(
     session: EventSession, cycle: int, base_token: str,
     initial_nonce: int, initial_crashlog: dict,
@@ -518,51 +638,79 @@ def run_cycle(
         for phase in ("before", "absent", "after")
     }
     baseline = poll_stable_state(
-        session, cycle, "baseline_ready_poll", "sd",
+        session, cycle, "baseline_ready_poll", SD_MODE,
         wait_sec=state_wait_sec, interval_sec=state_interval_sec,
     )
     before = run_canary_bundle(
-        session, cycle, "before_remove", tokens["before"], "sd",
+        session, cycle, "before_remove", tokens["before"], SD_MODE,
         persistence_attempts=persistence_attempts,
         persistence_interval_sec=persistence_interval_sec,
     )
 
     session.prompt(cycle, "prompt_remove", "remove", f"Cycle {cycle}/{REQUIRED_CYCLES}: REMOVE SD NOW")
     no_card = poll_stable_state(
-        session, cycle, "no_card_poll", "nvs_no_card",
+        session, cycle, "no_card_poll", VOLATILE_NO_CARD_MODE,
         wait_sec=state_wait_sec, interval_sec=state_interval_sec,
     )
+    notice_probe = session.command(
+        cycle,
+        "degraded_notice_probe",
+        "ui scroll-probe storage",
+        max(session.timeout, 15.0),
+    )
     absent = run_canary_bundle(
-        session, cycle, "absent", tokens["absent"], "nvs_no_card",
+        session,
+        cycle,
+        "absent",
+        tokens["absent"],
+        VOLATILE_NO_CARD_MODE,
         persistence_attempts=persistence_attempts,
         persistence_interval_sec=persistence_interval_sec,
     )
+    absent["degraded_notice_visible"] = degraded_notice_visible(
+        no_card,
+        notice_probe,
+    )
+    absent["degraded_notice"] = {
+        "storage_status": no_card[-1],
+        "ui_probe": notice_probe,
+        "live_mesh_without_sd": no_card[-1].get(
+            "live_mesh_without_sd"
+        ),
+    }
+    if absent["degraded_notice_visible"] is not True:
+        raise SessionAbort(
+            "degraded_notice_not_visible",
+            "degraded_notice_probe",
+            str(cycle),
+        )
 
     session.prompt(cycle, "prompt_reinsert", "reinsert", f"Cycle {cycle}/{REQUIRED_CYCLES}: REINSERT SD NOW")
     ready = poll_stable_state(
-        session, cycle, "ready_poll", "sd",
+        session, cycle, "ready_poll", SD_MODE,
         wait_sec=state_wait_sec, interval_sec=state_interval_sec,
     )
 
-    earlier_readbacks = {
-        "before": run_readbacks(session, cycle, "prewrite_readback_before", tokens["before"]),
-        "absent": run_readbacks(session, cycle, "prewrite_readback_absent", tokens["absent"]),
-    }
-    if (
-        not retained_readbacks_pass(earlier_readbacks["before"], tokens["before"], before["canary"], "sd")
-        or not retained_readbacks_pass(earlier_readbacks["absent"], tokens["absent"], absent["canary"], "nvs_no_card")
-    ):
-        raise SessionAbort("prewrite_readback_failed", "prewrite_readback", str(cycle))
-    reconcile, reconcile_attempts = run_persistence_poll(
-        session, cycle, "prewrite_reconcile", tokens["absent"], "sd",
-        attempts=persistence_attempts, interval_sec=persistence_interval_sec,
+    retained_before = run_readbacks(
+        session,
+        cycle,
+        "post_reinsert_readback_before",
+        tokens["before"],
     )
-    reconcile_generations = persistence_generations(reconcile)
-    if not generations_changed(absent["generations"], reconcile_generations):
-        raise SessionAbort("backend_generation_not_changed", "prewrite_reconcile", str(cycle))
+    if not retained_readbacks_pass(
+        retained_before,
+        tokens["before"],
+        before["canary"],
+        SD_MODE,
+    ):
+        raise SessionAbort(
+            "post_reinsert_readback_failed",
+            "post_reinsert_readback_before",
+            str(cycle),
+        )
 
     after = run_canary_bundle(
-        session, cycle, "after_reinsert", tokens["after"], "sd",
+        session, cycle, "after_reinsert", tokens["after"], SD_MODE,
         persistence_attempts=persistence_attempts,
         persistence_interval_sec=persistence_interval_sec,
     )
@@ -591,12 +739,7 @@ def run_cycle(
         "cycle": cycle, "tokens": tokens, "baseline_ready_samples": baseline,
         "before_remove": before, "no_card_samples": no_card, "absent": absent,
         "ready_samples": ready,
-        "prewrite": {
-            "earlier_readbacks": earlier_readbacks, "reconcile": reconcile,
-            "reconcile_attempts_used": reconcile_attempts,
-            "reconcile_generations": reconcile_generations,
-            "generation_changed": True, "gate_passed": True,
-        },
+        "post_reinsert_readback_before": retained_before,
         "after_reinsert": after,
         "post_canaries": {"file": file_result, "map": map_result, "export": export_result},
         "health": health, "crashlog": crashlog, "ok": True,
@@ -608,7 +751,7 @@ def _allowed_command(command: str) -> bool:
     prefixes = (
         "storage retained-canary ", "messages public search ", "messages dm ",
         "routes trace ", "packets search ", "storage map-tile-canary ",
-        "storage export-canary ",
+        "storage export-canary ", "ui scroll-probe ",
     )
     return command in exact or command.startswith(prefixes)
 
@@ -625,19 +768,32 @@ def validate_report(report: dict, *, require_final: bool = True) -> bool:
     expected_commit = exact_commit(report.get("expected_firmware_commit"))
     port = report.get("port")
     git = report.get("git")
+    version = report.get("version")
+    ack_timeout = report.get("operator_ack_timeout_sec")
     if (
         report.get("schema") != 1 or report.get("kind") != KIND
         or report.get("mode") != "hardware" or expected_commit is None
-        or not firmware_identity_matches(report.get("version"), expected_commit)
+        or not firmware_identity_matches(version, expected_commit)
+        or not isinstance(version, dict)
+        or version.get("release_profile") != EXPECTED_RELEASE_PROFILE
+        or version.get("sd_history_mode") != EXPECTED_SD_HISTORY_MODE
         or report.get("firmware_identity") is not True
         or not isinstance(port, str) or not port.strip()
         or port.strip().upper() in {f"COM{number}" for number in (8, 11, 29)}
         or type(report.get("baud")) is not int or report.get("baud") <= 0
         or report.get("strict_evidence") is not True
+        or report.get("physical_observed") is not True
+        or report.get("manual_only") is not False
+        or report.get("operator_ack_required") is not True
+        or not isinstance(ack_timeout, (int, float))
+        or isinstance(ack_timeout, bool)
+        or ack_timeout <= 0
+        or ack_timeout > MAX_OPERATOR_ACK_TIMEOUT_SEC
         or report.get("cycles_required") != REQUIRED_CYCLES
         or report.get("cycles_completed") != REQUIRED_CYCLES
         or report.get("public_rf_tx") is not False or report.get("dm_rf_tx") is not False
         or report.get("formats_sd") is not False
+        or report.get("erases_nvs") is not False
     ):
         return False
     if require_final and (
@@ -659,10 +815,17 @@ def validate_report(report: dict, *, require_final: bool = True) -> bool:
             result = event.get("result")
             if not isinstance(command, str) or not _allowed_command(command) or not isinstance(result, dict):
                 return False
-            if _terminal_result(result) or result.get("public_rf_tx") is True or result.get("dm_rf_tx") is True or result.get("formats_sd") is True or result.get("format_performed") is True:
+            if result.get("ok") is not True or _terminal_result(result) or result.get("public_rf_tx") is True or result.get("dm_rf_tx") is True or result.get("formats_sd") is True or result.get("format_performed") is True:
                 return False
         elif event.get("kind") == "prompt":
-            if event.get("action") not in {"remove", "reinsert"}:
+            action = event.get("action")
+            if (
+                action not in OPERATOR_ACK_TOKENS
+                or event.get("expected_ack") != OPERATOR_ACK_TOKENS[action]
+                or event.get("ack_timeout_sec") != ack_timeout
+                or event.get("acknowledged") is not True
+                or event.get("ack_result") != "accepted"
+            ):
                 return False
         else:
             return False
@@ -686,33 +849,75 @@ def validate_report(report: dict, *, require_final: bool = True) -> bool:
         absent = cycle.get("absent")
         after = cycle.get("after_reinsert")
         if not (_stable_samples(cycle.get("baseline_ready_samples"), "sd")
-                and _stable_samples(cycle.get("no_card_samples"), "nvs_no_card")
+                and _stable_samples(
+                    cycle.get("no_card_samples"),
+                    VOLATILE_NO_CARD_MODE,
+                )
                 and _stable_samples(cycle.get("ready_samples"), "sd")):
             return False
-        for bundle, token, mode in (
-            (before, tokens["before"], "sd"),
-            (absent, tokens["absent"], "nvs_no_card"),
-            (after, tokens["after"], "sd"),
+        for bundle, token in (
+            (before, tokens["before"]),
+            (after, tokens["after"]),
         ):
             if (
                 not isinstance(bundle, dict) or bundle.get("ok") is not True
-                or bundle.get("token") != token or bundle.get("mode") != mode
-                or retained_canary_metadata(bundle.get("canary"), token, mode) is None
-                or not retained_readbacks_pass(bundle.get("readbacks", {}), token, bundle.get("canary"), mode)
-                or not persistence_snapshot_clean(bundle.get("persistence", {}), token, mode)
+                or bundle.get("token") != token
+                or bundle.get("mode") != SD_MODE
+                or bundle.get("storage_mode") != SD_MODE
+                or retained_canary_metadata(
+                    bundle.get("canary"), token, SD_MODE
+                )
+                is None
+                or not retained_readbacks_pass(
+                    bundle.get("readbacks", {}),
+                    token,
+                    bundle.get("canary"),
+                    SD_MODE,
+                )
+                or not persistence_snapshot_clean(
+                    bundle.get("persistence", {}),
+                    token,
+                    SD_MODE,
+                )
                 or bundle.get("generations") != persistence_generations(bundle.get("persistence", {}))
             ):
                 return False
-        prewrite = cycle.get("prewrite")
-        earlier = prewrite.get("earlier_readbacks") if isinstance(prewrite, dict) else None
         if (
-            not isinstance(prewrite, dict) or prewrite.get("gate_passed") is not True
-            or prewrite.get("generation_changed") is not True or not isinstance(earlier, dict)
-            or not retained_readbacks_pass(earlier.get("before", {}), tokens["before"], before["canary"], "sd")
-            or not retained_readbacks_pass(earlier.get("absent", {}), tokens["absent"], absent["canary"], "nvs_no_card")
-            or not persistence_snapshot_clean(prewrite.get("reconcile", {}), tokens["absent"], "sd")
-            or prewrite.get("reconcile_generations") != persistence_generations(prewrite.get("reconcile", {}))
-            or not generations_changed(absent.get("generations"), prewrite.get("reconcile_generations"))
+            not isinstance(absent, dict)
+            or absent.get("ok") is not True
+            or absent.get("token") != tokens["absent"]
+            or absent.get("mode") != LIVE_ONLY_EVIDENCE_MODE
+            or absent.get("storage_mode") != VOLATILE_NO_CARD_MODE
+            or absent.get("persistence") is not None
+            or absent.get("persistence_attempts_used") != 0
+            or retained_canary_metadata(
+                absent.get("canary"),
+                tokens["absent"],
+                VOLATILE_NO_CARD_MODE,
+            )
+            is None
+            or not retained_readbacks_pass(
+                absent.get("readbacks", {}),
+                tokens["absent"],
+                absent.get("canary"),
+                VOLATILE_NO_CARD_MODE,
+            )
+            or absent.get("degraded_notice_visible") is not True
+            or not isinstance(absent.get("degraded_notice"), dict)
+            or not degraded_notice_visible(
+                cycle.get("no_card_samples"),
+                absent["degraded_notice"].get("ui_probe"),
+            )
+            or absent["degraded_notice"].get("storage_status")
+            != cycle["no_card_samples"][-1]
+            or absent["degraded_notice"].get("live_mesh_without_sd")
+            != ["rf_tx", "rf_rx", "chat"]
+            or not retained_readbacks_pass(
+                cycle.get("post_reinsert_readback_before", {}),
+                tokens["before"],
+                before.get("canary"),
+                SD_MODE,
+            )
         ):
             return False
         post = cycle.get("post_canaries")
@@ -727,8 +932,10 @@ def validate_report(report: dict, *, require_final: bool = True) -> bool:
         cycle_events = [event for event in events if event.get("cycle") == index]
         phases = [event.get("phase") for event in cycle_events]
         required_order = [
-            "before_remove_canary", "prompt_remove", "no_card_poll", "absent_canary",
-            "prompt_reinsert", "ready_poll", "prewrite_reconcile", "after_reinsert_canary",
+            "before_remove_canary", "prompt_remove", "no_card_poll",
+            "degraded_notice_probe", "absent_canary", "prompt_reinsert",
+            "ready_poll",
+            "post_reinsert_readback_before", "after_reinsert_canary",
             "post_file_canary", "post_map_canary", "post_export_canary", "post_health",
             "post_crashlog",
         ]
@@ -747,7 +954,18 @@ def run_acceptance(
     state_interval_sec: float = STATE_POLL_INTERVAL_SEC,
     persistence_attempts: int = PERSISTENCE_POLL_ATTEMPTS,
     persistence_interval_sec: float = PERSISTENCE_POLL_INTERVAL_SEC,
+    operator_ack_timeout_sec: float = OPERATOR_ACK_TIMEOUT_SEC,
+    operator_ack_reader: Callable[
+        [str, float], str | None
+    ] = read_operator_ack,
 ) -> dict:
+    if (
+        not isinstance(operator_ack_timeout_sec, (int, float))
+        or isinstance(operator_ack_timeout_sec, bool)
+        or operator_ack_timeout_sec <= 0
+        or operator_ack_timeout_sec > MAX_OPERATOR_ACK_TIMEOUT_SEC
+    ):
+        raise ValueError("operator acknowledgement timeout is out of bounds")
     try:
         import serial
     except ImportError as exc:
@@ -760,12 +978,23 @@ def run_acceptance(
         "expected_firmware_commit": expected_firmware_commit,
         "cycles_required": REQUIRED_CYCLES, "cycles_completed": 0,
         "strict_evidence": True,
+        "physical_observed": True,
+        "manual_only": False,
+        "operator_ack_required": True,
+        "operator_ack_timeout_sec": operator_ack_timeout_sec,
         "public_rf_tx": False, "dm_rf_tx": False, "formats_sd": False,
+        "erases_nvs": False,
         "events": events, "cycles": cycles, "ok": False,
     }
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
-        session = EventSession(ser, timeout, events)
+        session = EventSession(
+            ser,
+            timeout,
+            events,
+            operator_ack_timeout_sec=operator_ack_timeout_sec,
+            operator_ack_reader=operator_ack_reader,
+        )
         try:
             version = session.command(0, "initial_version", "version")
             health = session.command(0, "initial_health", "health")
@@ -774,7 +1003,16 @@ def run_acceptance(
             report.update({
                 "version": version, "initial_health": health, "initial_crashlog": crashlog,
                 "initial_boot_nonce": nonce,
-                "firmware_identity": firmware_identity_matches(version, expected_firmware_commit),
+                "firmware_identity": (
+                    firmware_identity_matches(
+                        version,
+                        expected_firmware_commit,
+                    )
+                    and version.get("release_profile")
+                    == EXPECTED_RELEASE_PROFILE
+                    and version.get("sd_history_mode")
+                    == EXPECTED_SD_HISTORY_MODE
+                ),
             })
             if report["firmware_identity"] is not True or nonce is None or crashlog.get("ok") is not True:
                 raise SessionAbort("initial_identity_or_health_failed", "initial", "version/health/crashlog")
@@ -797,7 +1035,11 @@ def run_acceptance(
 
 
 def dry_run_report(
-    expected_firmware_commit: str, base_token: str, *, strict_evidence: bool = False
+    expected_firmware_commit: str,
+    base_token: str,
+    *,
+    strict_evidence: bool = False,
+    operator_ack_timeout_sec: float = OPERATOR_ACK_TIMEOUT_SEC,
 ) -> dict:
     return {
         "schema": 1, "kind": KIND, "mode": "dry-run", "hardware_required": True,
@@ -809,15 +1051,24 @@ def dry_run_report(
             "storage retained-canary <unique-token>",
             "messages public search <unique-token>",
             "messages dm <derived-fingerprint>", "routes trace <derived-fingerprint>",
-            "packets search <unique-token>", "routes", "storage filecanary",
+            "packets search <unique-token>", "routes",
+            "ui scroll-probe storage", "storage filecanary",
             "storage map-tile-canary <unique-token>",
             "storage export-canary <unique-token>",
         ],
-        "operator_actions": ["REMOVE SD NOW", "REINSERT SD NOW"],
-        "automatic_polling": True, "waits_for_enter": False,
-        "noninteractive": True,
+        "operator_actions": [
+            "REMOVE SD NOW; type REMOVED",
+            "REINSERT SD NOW; type REINSERTED",
+        ],
+        "automatic_polling": True,
+        "operator_ack_required": True,
+        "operator_ack_timeout_sec": operator_ack_timeout_sec,
+        "operator_ack_tokens": dict(OPERATOR_ACK_TOKENS),
+        "waits_for_enter": True,
+        "noninteractive": False,
         "rp2040_usb_used": False, "uf2_volume_used": False,
         "public_rf_tx": False, "dm_rf_tx": False, "formats_sd": False,
+        "erases_nvs": False,
         "ok": True,
     }
 
@@ -833,6 +1084,11 @@ def main() -> int:
     parser.add_argument("--state-poll-interval-sec", type=float, default=STATE_POLL_INTERVAL_SEC)
     parser.add_argument("--persistence-poll-attempts", type=int, default=PERSISTENCE_POLL_ATTEMPTS)
     parser.add_argument("--persistence-poll-interval-sec", type=float, default=PERSISTENCE_POLL_INTERVAL_SEC)
+    parser.add_argument(
+        "--operator-ack-timeout-sec",
+        type=float,
+        default=OPERATOR_ACK_TIMEOUT_SEC,
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--strict-evidence", action="store_true")
     parser.add_argument("--out")
@@ -841,10 +1097,19 @@ def main() -> int:
         parser.error("--expected-firmware-commit must be a full 40-character SHA")
     if not TOKEN_RE.fullmatch(args.token):
         parser.error("--token must be 1-15 chars: A-Z a-z 0-9 _ . -")
+    if not (
+        0 < args.operator_ack_timeout_sec
+        <= MAX_OPERATOR_ACK_TIMEOUT_SEC
+    ):
+        parser.error(
+            "--operator-ack-timeout-sec must be greater than 0 and no "
+            f"more than {MAX_OPERATOR_ACK_TIMEOUT_SEC:g}"
+        )
     if args.dry_run:
         report = dry_run_report(
             args.expected_firmware_commit, args.token,
             strict_evidence=args.strict_evidence,
+            operator_ack_timeout_sec=args.operator_ack_timeout_sec,
         )
     else:
         if not args.port:
@@ -855,6 +1120,7 @@ def main() -> int:
             state_interval_sec=args.state_poll_interval_sec,
             persistence_attempts=args.persistence_poll_attempts,
             persistence_interval_sec=args.persistence_poll_interval_sec,
+            operator_ack_timeout_sec=args.operator_ack_timeout_sec,
         )
     root = Path(__file__).resolve().parents[1]
     stamp_report(report, root)

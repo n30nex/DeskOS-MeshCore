@@ -105,7 +105,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
                 "cmd": "version",
                 "build_commit": "a" * 40,
                 "release_profile": "core_1_0",
-                "sd_history_mode": "disabled",
+                "sd_history_mode": "conditional",
                 "time": {
                     "protocol_tx_ready": True,
                     "protocol_tx_block": "none",
@@ -230,7 +230,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
     assert report["checks"]["protocol_tx_ready_before_rf"] is True
     assert report["checks"]["exact_candidate"] is True
     assert report["device_release_profile"] == "core_1_0"
-    assert report["device_sd_history_mode"] == "disabled"
+    assert report["device_sd_history_mode"] == "conditional"
 
     same_prefix_wrong_key = (
         rf_accept.DEFAULT_D1L_PUBLIC_KEY[:16]
@@ -625,14 +625,20 @@ def test_rf_report_cannot_use_later_ready_version_to_override_first_block():
 
 
 @pytest.mark.parametrize(
-    ("ready", "block"),
+    ("ready", "block", "sd_history_mode", "protocol_ready"),
     [
-        (False, "none"),
-        (True, "legacy_protocol_lower_bound_unconfirmed"),
+        (False, "none", "conditional", False),
+        (
+            True,
+            "legacy_protocol_lower_bound_unconfirmed",
+            "conditional",
+            False,
+        ),
+        (True, "none", "disabled", True),
     ],
 )
-def test_rf_hardware_preflight_stops_before_any_rf_when_protocol_blocked(
-    tmp_path, monkeypatch, ready, block
+def test_rf_hardware_preflight_stops_before_rf_for_invalid_candidate(
+    tmp_path, monkeypatch, ready, block, sd_history_mode, protocol_ready
 ):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
@@ -668,7 +674,7 @@ def test_rf_hardware_preflight_stops_before_any_rf_when_protocol_blocked(
             "build_commit": "a" * 40,
             "idf": "v5.5.4",
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
+            "sd_history_mode": sd_history_mode,
             "time": {
                 "protocol_tx_ready": ready,
                 "protocol_tx_block": block,
@@ -702,7 +708,7 @@ def test_rf_hardware_preflight_stops_before_any_rf_when_protocol_blocked(
     assert report["ok"] is False
     assert report["dm_rf_tx"] is False
     assert report["public_rf_tx"] is False
-    assert report["checks"]["protocol_tx_ready_before_rf"] is False
+    assert report["checks"]["protocol_tx_ready_before_rf"] is protocol_ready
     assert report["d1l_target"]["requested_path"] == "COM12"
     assert report["d1l_target_after"]["requested_path"] == "COM12"
     assert report["target_identity_continuity_ok"] is True
@@ -825,7 +831,7 @@ def test_rf_rejects_wrong_full_d1l_key_before_peer_io_or_mutation(
                 "build_commit": "a" * 40,
                 "idf": "v5.5.4",
                 "release_profile": "core_1_0",
-                "sd_history_mode": "disabled",
+                "sd_history_mode": "conditional",
                 "time": {
                     "protocol_tx_ready": True,
                     "protocol_tx_block": "none",
@@ -921,7 +927,7 @@ def test_rf_rejects_target_drift_before_peer_capture(
             "build_commit": "a" * 40,
             "idf": "v5.5.4",
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
+            "sd_history_mode": "conditional",
             "time": {
                 "protocol_tx_ready": False,
                 "protocol_tx_block": (
@@ -1036,7 +1042,7 @@ def test_rf_opens_stable_posix_path_and_allows_tty_renumber(
             "build_commit": "a" * 40,
             "idf": "v5.5.4",
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
+            "sd_history_mode": "conditional",
             "time": {
                 "protocol_tx_ready": False,
                 "protocol_tx_block": (
@@ -3060,7 +3066,7 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
         "build_commit": "a" * 40,
         "idf": "v5.5.4",
         "release_profile": "core_1_0",
-        "sd_history_mode": "disabled",
+        "sd_history_mode": "conditional",
         "time": {
             "protocol_tx_ready": True,
             "protocol_tx_block": "none",
@@ -3123,7 +3129,7 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
                 "cmd": "health",
                 "build_commit": "a" * 40,
                 "release_profile": "core_1_0",
-                "sd_history_mode": "disabled",
+                "sd_history_mode": "conditional",
                 "board_ready": True,
                 "ui_ready": True,
             },

@@ -1,5 +1,12 @@
 # SIGUI Audit Pack Validation Report
 
+> **HISTORICAL GENERATED-EVIDENCE REPORT — NOT CURRENT RELEASE AUTHORITY.**
+> This report is retained for the exact commits and receipts it names. Do not
+> infer current capability, port, SD/NVS, test or release state from it. Use
+> the [project README](../../README.md), [RC1 user guide](../USER_GUIDE_D1L.md),
+> [RC1 test plan](../TEST_PLAN_D1L.md), and
+> [SD-card guide](../D1L_SD_CARD_GUIDED_INSTALL.md).
+
 **Validated:** 2026-07-16 (PRs #177-#182 canonical PR and exact-main semantic/software/artifact gates banked; retained-DM migration, full WP-05/WP-06, RF, physical, and release acceptance remain open)
 
 **Live merged main:** `de0bb75bd91146f0dc9896540d12c71889d7766b` through PR #182; exact-main Actions `29548300732` strict-pass and are admitted to this pack

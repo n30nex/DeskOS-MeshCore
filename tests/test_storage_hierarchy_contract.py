@@ -97,6 +97,12 @@ def test_storage_retained_sd_degradation_is_copied_into_touch_snapshot():
         "snapshot->storage_retained_backup_degraded = storage.retained_backup_degraded;"
         in snapshot_copy
     )
+    assert "const char *node_store_backend;" in snapshot_struct
+    assert "snapshot->node_store_backend = storage.node_store_backend;" in snapshot_copy
+    assert "const char *contact_store_backend;" in snapshot_struct
+    assert "snapshot->contact_store_backend = storage.contact_store_backend;" in snapshot_copy
+    assert "const char *read_state_backend;" in snapshot_struct
+    assert "snapshot->read_state_backend = storage.read_state_backend;" in snapshot_copy
 
 
 def test_storage_touch_ui_prioritizes_all_attention_states():
@@ -145,11 +151,11 @@ def test_storage_touch_ui_prioritizes_all_attention_states():
     )
     assert 'state = "Card reader reconnecting";' in hero
     assert '"Last confirmed SD remains active briefly."' in hero
-    assert '"Internal fallback takes over if status retries fail."' in hero
+    assert '"History becomes live-only if status retries fail."' in hero
     assert "accent = COLOR_RED;" in hero
 
 
-def test_storage_hero_distinguishes_retained_fallback_from_card_errors():
+def test_storage_hero_distinguishes_live_only_mode_from_card_errors():
     source = read("main/ui/ui_storage_view.c")
     hero = function_slice(
         source,
@@ -167,16 +173,18 @@ def test_storage_hero_distinguishes_retained_fallback_from_card_errors():
     assert backup < retained < general_attention < ready
 
     backup_branch = hero[backup:retained]
-    assert 'guidance = "Internal backup needs attention.";' in backup_branch
-    assert 'detail = "Internal saved-data storage is unavailable.";' in backup_branch
+    assert 'state = "Saved storage needs attention";' in backup_branch
+    assert 'detail = "SD saved-data access reported an error.";' in backup_branch
+    assert 'guidance = "See USB diagnostics before relying on saved history.";' in backup_branch
 
     retained_branch = hero[retained:general_attention]
     assert 'state = "SD needs attention";' in retained_branch
-    assert 'guidance = "Saved data remains available.";' in retained_branch
+    assert 'detail = "History is live only until SD recovers.";' in retained_branch
+    assert 'guidance = "RF transmit, receive, and chat remain available.";' in retained_branch
 
     media_branch = hero[general_attention:hero.index('if (text_equals(input->setup_action, "bridge_unavailable"))')]
     assert 'state = "Card needs attention";' in media_branch
-    assert 'detail = "Internal storage is active.";' in media_branch
+    assert 'detail = "History is live only.";' in media_branch
     assert 'guidance = "Technical details are available over USB.";' in media_branch
 
 
@@ -201,9 +209,9 @@ def test_storage_backup_degradation_redraws_and_avoids_false_internal_claims():
 
     assert "snapshot->storage_retained_backup_degraded" in generation
     assert "storage_retained_backup_degraded" in equality
-    assert '"SD; backup degraded"' in friendly
-    assert '"Internal issue"' in friendly
-    assert '"Unavailable"' in friendly
+    assert '"SD issue"' in friendly
+    assert '"Live only - not saved"' in friendly
+    assert '"Legacy internal"' in friendly
 
 
 def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():
@@ -224,12 +232,16 @@ def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():
         "dm_store_backend",
         "packet_log_backend",
         "route_store_backend",
+        "node_store_backend",
+        "contact_store_backend",
+        "read_state_backend",
         "map_tile_backend",
         "export_backend",
     ):
         assert f"input->{backend}" in summary
-    assert summary.count("backend_uses_sd(") == 6
-    assert 'uses_sd ? "SD + internal" : "Internal"' in summary
+    assert summary.count("backend_uses_sd(") == 9
+    assert 'return uses_sd ? "SD card" : "Live only";' in summary
+    assert '"Live only; history not saved"' in summary
     assert "sd_pending_store_migration" not in uses_sd
 
 
@@ -315,38 +327,20 @@ def test_storage_simulator_declares_matching_safe_pages_and_scroll_contract():
         assert f'"{action}"' in simulator
 
 
-def test_release_docs_record_pr61_storage_proof_and_keep_map_hardware_proof_open():
-    docs = "\n".join(
-        read(path)
-        for path in (
-            "README.md",
-            "docs/ROADMAP.md",
-            "docs/RELEASE_CHECKLIST.md",
-            "docs/KNOWN_LIMITATIONS.md",
-            "docs/USER_GUIDE_D1L.md",
-            "docs/TEST_PLAN_D1L.md",
-        )
-    )
-    for evidence in (
-        "PR #60",
-        "0b138be",
-        "29068006554",
-        "29068007961",
-        "63DE54FB",
-        "FD538D71",
-        "5C41EE08",
-    ):
-        assert evidence in docs
-    for evidence in (
-        "PR #61",
-        "4d9f384",
-        "29081187314",
-        "29081214738",
-        "9878ADFB",
-        "77726394",
-        "42619B0E",
-    ):
-        assert evidence in docs
-    assert "Map hierarchy" in docs
-    assert "exact Actions/COM12" in docs
-    assert "Map hardware-proven" not in docs
+def test_release_docs_define_current_storage_and_map_acceptance():
+    readme = read("README.md")
+    guide = read("docs/USER_GUIDE_D1L.md")
+    checklist = read("docs/RELEASE_CHECKLIST.md")
+    test_plan = read("docs/TEST_PLAN_D1L.md").split("## Historical", 1)[0]
+
+    for doc in (readme, guide, checklist, test_plan):
+        assert "core_1_0" in doc
+        assert "conditional" in doc
+        assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in doc
+
+    assert "SD as the primary store" in guide
+    assert "Degraded mode keeps basic live RF" in guide
+    assert "SD-primary retained data" in checklist
+    assert "authorized Map download/offline revisit" in checklist
+    assert "one consolidated physical" in checklist
+    assert "No soak is required" in checklist

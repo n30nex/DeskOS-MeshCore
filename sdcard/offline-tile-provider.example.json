@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "source_id": "replace-with-provider-id",
+  "attribution": "Replace with the provider-required attribution",
+  "license_url": "https://example.invalid/offline-map-license",
+  "offline_storage_permitted": true,
+  "background_prefetch_permitted": true,
+  "network_url_template": "https://tiles.example.invalid/{z}/{x}/{y}.png",
+  "tile_template": "z{z}/x{x}/y{y}.png",
+  "max_zoom": 14,
+  "average_tile_bytes": 65536,
+  "minimum_request_interval_ms": 250
+}

@@ -178,10 +178,30 @@ static void nodes_render_role_count(lv_obj_t *parent,
     }
 }
 
-static void nodes_render_summary(lv_obj_t *parent,
+static void nodes_dispatch_global_event_cb(lv_event_t *event)
+{
+    d1l_ui_nodes_action_binding_t *binding = event ?
+        (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) : NULL;
+    if (!binding || !binding->controller ||
+        !binding->controller->action_handler) {
+        return;
+    }
+    const d1l_ui_nodes_action_event_t action_event = {
+        .action = binding == &binding->controller->find_nearby ?
+            D1L_UI_NODES_ACTION_FIND_NEARBY :
+            D1L_UI_NODES_ACTION_CLEAR_HEARD,
+        .contact = NULL,
+        .node = NULL,
+    };
+    binding->controller->action_handler(
+        &action_event, binding->controller->action_context);
+}
+
+static void nodes_render_summary(d1l_ui_nodes_controller_t *controller,
+                                 lv_obj_t *parent,
                                  const d1l_ui_nodes_view_model_t *view_model)
 {
-    if (!parent || !view_model) {
+    if (!controller || !parent || !view_model) {
         return;
     }
     lv_obj_t *summary = nodes_create_panel(parent, 18, 16, 424, 104);
@@ -207,10 +227,22 @@ static void nodes_render_summary(lv_obj_t *parent,
              view_model->contact_count == 1U ? "" : "s");
     lv_obj_t *contact_label = nodes_create_label(summary, contacts, 0xA7F3D0);
     if (contact_label) {
-        nodes_set_dot_width(contact_label, 180);
+        nodes_set_dot_width(contact_label, 112);
         lv_obj_set_style_text_align(contact_label, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_pos(contact_label, 232, 14);
+        lv_obj_set_pos(contact_label, 164, 14);
     }
+    controller->find_nearby = (d1l_ui_nodes_action_binding_t) {
+        .controller = controller,
+    };
+    controller->clear_heard = (d1l_ui_nodes_action_binding_t) {
+        .controller = controller,
+    };
+    nodes_create_button(summary, "Find", 286, 6, 58, 44,
+                        nodes_dispatch_global_event_cb,
+                        &controller->find_nearby);
+    nodes_create_button(summary, "Clear", 350, 6, 62, 44,
+                        nodes_dispatch_global_event_cb,
+                        &controller->clear_heard);
 
     nodes_render_role_count(summary, 12, "Chat", view_model->role_counts.chat_companion,
                             0x5EEAD4);
@@ -425,7 +457,7 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
     controller->action_handler = action_handler;
     controller->action_context = action_context;
 
-    nodes_render_summary(parent, &controller->rendered);
+    nodes_render_summary(controller, parent, &controller->rendered);
 
     int y = 136;
     if (controller->rendered.contact_row_count > 0U) {
@@ -490,6 +522,8 @@ void d1l_ui_nodes_deactivate(d1l_ui_nodes_controller_t *controller)
     memset(&controller->rendered, 0, sizeof(controller->rendered));
     memset(controller->contact_rows, 0, sizeof(controller->contact_rows));
     memset(controller->node_rows, 0, sizeof(controller->node_rows));
+    memset(&controller->find_nearby, 0, sizeof(controller->find_nearby));
+    memset(&controller->clear_heard, 0, sizeof(controller->clear_heard));
     controller->action_handler = NULL;
     controller->action_context = NULL;
 }

@@ -31,11 +31,11 @@ def api_fixture(*, unsafe: bool = False):
         "workflow_run_attempt": RUN_ATTEMPT,
         "repository": "n30nex/SIGUI",
         "workflow": "d1l-ci",
-        "event": "workflow_dispatch",
-        "include_sd_bridge": False,
-        "scope_reason": "esp32_only",
+        "event": "push",
+        "include_sd_bridge": True,
+        "scope_reason": "rc1_sd_paths",
         "release_profile": "core_1_0",
-        "sd_history_mode": "disabled",
+        "sd_history_mode": "conditional",
     }
     archives = {}
     rows = []
@@ -65,7 +65,7 @@ def api_fixture(*, unsafe: bool = False):
                 "workflow_run": {
                     "id": int(RUN_ID),
                     "head_sha": COMMIT,
-                    "head_branch": "release/24h-core",
+                    "head_branch": "main",
                 },
             }
         )
@@ -74,8 +74,8 @@ def api_fixture(*, unsafe: bool = False):
         "status": "completed",
         "conclusion": "success",
         "head_sha": COMMIT,
-        "head_branch": "release/24h-core",
-        "event": "workflow_dispatch",
+        "head_branch": "main",
+        "event": "push",
         "path": ".github/workflows/d1l-ci.yml",
         "name": "d1l-ci",
         "run_attempt": int(RUN_ATTEMPT),
@@ -135,7 +135,7 @@ def test_capture_downloads_api_bound_archives_and_revalidates(
     assert [row["name"] for row in verified["artifacts"]] == list(
         capture.EXPECTED_ACTIONS_ARTIFACTS
     )
-    assert len(list((run_dir / "_archives").glob("*.zip"))) == 5
+    assert len(list((run_dir / "_archives").glob("*.zip"))) == 8
 
     marker = (
         run_dir

@@ -26,7 +26,7 @@ static void test_exact_center_and_pan_offsets(void)
     d1l_map_projection_view_t view =
         test_view(43427977, -80316478, 10U);
     d1l_map_projected_point_t point = {0};
-    for (uint8_t zoom = 8U; zoom <= 14U; ++zoom) {
+    for (uint8_t zoom = 8U; zoom <= 18U; ++zoom) {
         view.zoom = zoom;
         assert(d1l_map_point_project_e6(
             &view, 43427977, -80316478, &point));
@@ -115,7 +115,7 @@ static void test_latitude_clipping_and_invalid_inputs(void)
 
     view.zoom = 7U;
     assert(!d1l_map_point_project_e6(&view, 0, 0, &point));
-    view.zoom = 15U;
+    view.zoom = 19U;
     assert(!d1l_map_point_project_e6(&view, 0, 0, &point));
     view.zoom = 8U;
     view.viewport_width = 0U;

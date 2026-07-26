@@ -46,6 +46,9 @@
 #include "mesh/meshcore_service.h"
 #include "mesh/user_text.h"
 #include "map/map_png_decoder.h"
+#include "map/map_prefetch_plan.h"
+#include "map/map_prefetch_service.h"
+#include "map/map_tile_provider.h"
 #include "map/map_view_service.h"
 #include "platform/time_service.h"
 #include "storage/export_store.h"
@@ -352,6 +355,12 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "map tiles status", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_EXACT(
+        "map acceptance status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_EXACT(
+        "map acceptance open", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_EXACT(
         "storage map-policy", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_TOKEN(
@@ -463,6 +472,12 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         D1L_RELEASE_FEATURE_ADMIN),
     D1L_RELEASE_RULE_EXACT(
         "repeaters", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_EXACT(
+        "repeater ping status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "repeater ping", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_ADMIN),
     D1L_RELEASE_RULE_EXACT(
         "admin status", D1L_RELEASE_COMMAND_READ_ONLY,
@@ -837,20 +852,6 @@ static bool enforce_release_command_policy(
         return false;
     }
 
-    if (d1l_release_profile_is_core()) {
-        if (d1l_usb_command_equals(
-                command, "packets clear", sizeof("packets clear") - 1U)) {
-            release_unsupported_result(
-                command, D1L_RELEASE_FEATURE_PACKETS);
-            return false;
-        }
-        if (d1l_usb_command_equals(
-                command, "nodes clear", sizeof("nodes clear") - 1U)) {
-            release_unsupported_result(
-                command, D1L_RELEASE_FEATURE_NODES);
-            return false;
-        }
-    }
     const d1l_release_command_rule_t *rule = release_command_rule(command);
     if (d1l_release_profile_is_core() && rule &&
         rule->feature == D1L_RELEASE_FEATURE_SD_HISTORY &&
@@ -979,6 +980,9 @@ static void print_retained_nvs_telemetry_json(
     printf(",\"packets\":");
     print_retained_nvs_store_telemetry_json(
         &telemetry->stores[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    printf(",\"nodes\":");
+    print_retained_nvs_store_telemetry_json(
+        &telemetry->stores[D1L_RETAINED_BLOB_STORE_NODES]);
     printf("}}");
 }
 
@@ -2449,6 +2453,27 @@ static void cmd_mesh_status(void)
            d1l_meshcore_route_selection_reason_name(
                (d1l_meshcore_route_selection_reason_t)status.dm_route_last_reason),
            (unsigned long)status.dm_route_last_path_age_ms);
+    printf(
+        ",\"advert_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,"
+        "\"boot_queued\":%lu,\"boot_done\":%lu,\"boot_failed\":%lu,"
+        "\"last_boot\":%s,\"last_flood\":%s,\"last_node_name\":",
+        (unsigned long)status.advert_tx_queued,
+        (unsigned long)status.advert_tx_done,
+        (unsigned long)status.advert_tx_failed,
+        (unsigned long)status.boot_advert_tx_queued,
+        (unsigned long)status.boot_advert_tx_done,
+        (unsigned long)status.boot_advert_tx_failed,
+        bool_json(status.last_advert_boot),
+        bool_json(status.last_advert_flood));
+    print_json_string(status.last_advert_node_name);
+    printf(",\"last_public_key_prefix\":");
+    print_json_string(status.last_advert_public_key_prefix);
+    printf(",\"boot_flood\":%s,\"boot_node_name\":",
+           bool_json(status.boot_advert_flood));
+    print_json_string(status.boot_advert_node_name);
+    printf(",\"boot_public_key_prefix\":");
+    print_json_string(status.boot_advert_public_key_prefix);
+    printf("}");
     printf(",\"runtime\":{\"owner\":\"meshcore_service\",\"callback_boundary\":\"copy_timestamp_enqueue\",\"command_queue_depth\":%lu,\"command_queue_high_water\":%lu,\"priority_queue_depth\":%lu,\"priority_queue_high_water\":%lu,\"event_queue_depth\":%lu,\"event_queue_high_water\":%lu,\"queue_drops\":%lu,\"callback_event_drops\":%lu,\"command_queue_saturation\":%lu,\"priority_queue_saturation\":%lu,\"fairness_forced_commands\":%lu,\"priority_burst_high_water\":%lu,\"priority_burst_bound\":%u,\"owner_maintenance_runs\":%lu,\"terminal_recovery_dispatches\":%lu,\"heartbeat\":%lu,\"stack_free_words\":%lu,\"last_event_monotonic_us\":%llu}",
            (unsigned long)status.runtime_command_queue_depth,
            (unsigned long)status.runtime_command_queue_high_water,
@@ -2559,7 +2584,9 @@ static void cmd_mesh_send_public(const char *line)
         return;
     }
     ok_begin("mesh send public");
-    printf(",\"queued\":true}\n");
+    printf(",\"queued\":true,\"text\":");
+    print_json_string(text);
+    printf("}\n");
 }
 
 static void cmd_companion_status(void)
@@ -2906,15 +2933,24 @@ static void cmd_storage_status(void)
            (unsigned long)status.sd_mount_error,
            (unsigned long)status.sd_mount_data,
            esp_err_to_name(status.last_error), bool_json(status.data_enabled));
-    print_json_string(status.data_backend ? status.data_backend : "nvs");
+    print_json_string(status.data_backend ? status.data_backend : "volatile");
     printf(",\"message_store_backend\":");
-    print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
+    print_json_string(status.message_store_backend ? status.message_store_backend : "volatile");
     printf(",\"dm_store_backend\":");
-    print_json_string(status.dm_store_backend ? status.dm_store_backend : "nvs");
+    print_json_string(status.dm_store_backend ? status.dm_store_backend : "volatile");
     printf(",\"packet_log_backend\":");
-    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "volatile");
     printf(",\"route_store_backend\":");
-    print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
+    print_json_string(status.route_store_backend ? status.route_store_backend : "volatile");
+    printf(",\"node_store_backend\":");
+    print_json_string(status.node_store_backend ?
+                          status.node_store_backend : "volatile");
+    printf(",\"contact_store_backend\":");
+    print_json_string(status.contact_store_backend ?
+                          status.contact_store_backend : "volatile");
+    printf(",\"read_state_backend\":");
+    print_json_string(status.read_state_backend ?
+                          status.read_state_backend : "volatile");
     printf(",\"map_tile_backend\":");
     print_json_string(
         map_available && status.map_tile_backend ?
@@ -2981,25 +3017,45 @@ static void cmd_storage_status(void)
     printf(",\"packets\":");
     print_retained_sd_store_json(
         &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    printf(",\"nodes\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_NODES]);
+    printf(",\"contacts\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_CONTACTS]);
+    printf(",\"read_state\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_READ_STATE]);
     printf("}}");
     printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
-    print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
+    print_json_string(status.message_store_backend ? status.message_store_backend : "volatile");
     printf(",\"dm\":");
-    print_json_string(status.dm_store_backend ? status.dm_store_backend : "nvs");
+    print_json_string(status.dm_store_backend ? status.dm_store_backend : "volatile");
     printf(",\"packets\":");
-    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "volatile");
     printf(",\"routes\":");
-    print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
-    printf(",\"contacts\":\"nvs\",\"read_state\":\"nvs\",\"crashlog\":\"nvs\",\"map_tiles\":");
+    print_json_string(status.route_store_backend ? status.route_store_backend : "volatile");
+    printf(",\"nodes\":");
+    print_json_string(status.node_store_backend ?
+                          status.node_store_backend : "volatile");
+    printf(",\"contacts\":");
+    print_json_string(status.contact_store_backend ?
+                          status.contact_store_backend : "volatile");
+    printf(",\"read_state\":");
+    print_json_string(status.read_state_backend ?
+                          status.read_state_backend : "volatile");
+    printf(",\"crashlog\":\"nvs\",\"map_tiles\":");
     print_json_string(
         map_available && status.map_tile_backend ?
             status.map_tile_backend : "unavailable");
     printf(",\"exports\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
-    printf("},\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
+    printf("},\"node_history_requires_sd\":true,"
+           "\"live_mesh_without_sd\":[\"rf_tx\",\"rf_rx\",\"chat\"],"
+           "\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
            bool_json(status.setup_required), bool_json(status.setup_supported));
     print_json_string(status.setup_action ? status.setup_action : "not_available");
-    printf(",\"fallback\":\"nvs\",\"note\":");
+    printf(",\"fallback\":\"per_store\",\"note\":");
     print_json_string(status.note ? status.note : "");
     printf("}\n");
 }
@@ -3285,12 +3341,20 @@ static void cmd_map_tiles_status(void)
     }
     ok_begin("map tiles status");
     printf(",\"source\":");
-    print_json_string(D1L_MAP_TILE_SOURCE_ID);
+    print_json_string(status.source_id[0] ?
+                      status.source_id : D1L_MAP_TILE_SOURCE_ID);
     printf(",\"render_style\":");
     print_json_string(D1L_MAP_RENDER_STYLE_ID);
     printf(",\"attribution\":");
-    print_json_string(D1L_MAP_TILE_ATTRIBUTION);
-    printf(",\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"decode_total_us\":%lu,\"decode_max_us\":%lu,\"decode_samples\":%u,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
+    print_json_string(status.attribution[0] ?
+                      status.attribution : D1L_MAP_TILE_ATTRIBUTION);
+    printf(",\"provider_configured\":%s,"
+           "\"background_prefetch_permitted\":%s,"
+           "\"provider_max_zoom\":%u,"
+           "\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"decode_total_us\":%lu,\"decode_max_us\":%lu,\"decode_samples\":%u,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
+           bool_json(status.provider_configured),
+           bool_json(status.background_prefetch_permitted),
+           (unsigned)status.provider_max_zoom,
            bool_json(status.initialized), bool_json(status.visible),
            bool_json(status.worker_running), bool_json(status.frame_ready),
            bool_json(status.sd_cache_ready), bool_json(status.wifi_connected),
@@ -3311,6 +3375,149 @@ static void cmd_map_tiles_status(void)
     printf(",\"public_rf_tx\":false,\"formats_sd\":false}\n");
 }
 
+static void cmd_map_acceptance_status(void)
+{
+    d1l_settings_t settings = {0};
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_storage_status_t storage = {0};
+    d1l_map_prefetch_status_t prefetch = {0};
+    d1l_map_tile_provider_t provider = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    d1l_connectivity_status(&connectivity);
+    d1l_storage_status(&storage);
+    const bool sd_ready = d1l_map_tile_store_sd_ready(&storage);
+    const esp_err_t provider_refresh = sd_ready ?
+        d1l_map_tile_provider_refresh(&storage) : ESP_ERR_NOT_SUPPORTED;
+    d1l_map_tile_provider_snapshot(&provider);
+    d1l_map_prefetch_service_status(&prefetch);
+
+    const bool provider_https =
+        strncmp(provider.url_template, "https://", 8U) == 0;
+    const bool osm_standard =
+        d1l_map_tile_provider_uses_osm_standard(&provider);
+    const bool authorized_provider =
+        provider_refresh == ESP_OK && provider.configured &&
+        provider.network_fetch_allowed && provider_https &&
+        provider.offline_storage_permitted &&
+        provider.background_prefetch_permitted && !osm_standard;
+    const bool nodes_accounted =
+        prefetch.nodes_included + prefetch.nodes_outside_radius ==
+        prefetch.nodes_seen;
+
+    ok_begin("map acceptance status");
+    printf(",\"configured\":%s,\"authorized_provider\":%s,"
+           "\"provider_refresh_ok\":%s,\"provider_refresh_code\":",
+           bool_json(provider.configured),
+           bool_json(authorized_provider),
+           bool_json(provider_refresh == ESP_OK));
+    print_json_string(esp_err_to_name(provider_refresh));
+    printf(",\"source_id\":");
+    print_json_string(provider.source_id);
+    printf(",\"network_url_redacted\":true,"
+           "\"https\":%s,\"network_fetch_allowed\":%s,"
+           "\"offline_storage_permitted\":%s,"
+           "\"background_prefetch_permitted\":%s,"
+           "\"osm_standard_endpoint\":%s,\"attribution\":",
+           bool_json(provider_https),
+           bool_json(provider.network_fetch_allowed),
+           bool_json(provider.offline_storage_permitted),
+           bool_json(provider.background_prefetch_permitted),
+           bool_json(osm_standard));
+    print_json_string(provider.attribution);
+    printf(",\"license_url\":");
+    print_json_string(provider.license_url);
+    printf(",\"provider_max_zoom\":%u,"
+           "\"minimum_request_interval_ms\":%lu,"
+           "\"average_tile_bytes\":%lu,\"device_location\":{"
+           "\"set\":%s,\"lat_e7\":%ld,\"lon_e7\":%ld,\"source\":",
+           (unsigned)provider.max_zoom,
+           (unsigned long)provider.minimum_request_interval_ms,
+           (unsigned long)provider.average_tile_bytes,
+           bool_json(settings.map_location_set),
+           (long)settings.map_lat_e7, (long)settings.map_lon_e7);
+    print_json_string(map_location_source_name(&settings));
+    printf("},\"wifi\":{\"setting_enabled\":%s,\"profile_saved\":%s,"
+           "\"connected\":%s,\"state\":",
+           bool_json(connectivity.wifi_enabled_setting),
+           bool_json(connectivity.wifi_profile_saved),
+           bool_json(connectivity.wifi_connected));
+    print_json_string(connectivity.wifi_state ?
+                      connectivity.wifi_state : "off");
+    printf("},\"sd\":{\"ready\":%s,\"capacity_kb\":%lu,"
+           "\"free_kb\":%lu,\"backend\":",
+           bool_json(sd_ready), (unsigned long)storage.capacity_kb,
+           (unsigned long)storage.free_kb);
+    print_json_string(storage.map_tile_backend ?
+                      storage.map_tile_backend : "unavailable");
+    printf("},\"node_radius_km\":%.0f,\"nodes_accounted\":%s,"
+           "\"node_markers\":{\"generation\":%lu,\"seen\":%u,"
+           "\"included\":%u,\"outside_radius\":%u},"
+           "\"prefetch\":{\"initialized\":%s,\"running\":%s,"
+           "\"eligible\":%s,\"complete\":%s,"
+           "\"paused_for_visible_map\":%s,\"location_set\":%s,"
+           "\"wifi_connected\":%s,\"sd_ready\":%s,"
+           "\"provider_configured\":%s,"
+           "\"background_prefetch_permitted\":%s,"
+           "\"storage_reserve_reached\":%s,"
+           "\"selected_max_zoom\":%u,\"total_tiles\":%" PRIu64 ","
+           "\"visited_tiles\":%" PRIu64 ",\"cached_tiles\":%" PRIu64 ","
+           "\"network_requests\":%" PRIu64 ","
+           "\"downloaded_tiles\":%" PRIu64 ",\"failed_tiles\":%" PRIu64 ","
+           "\"downloaded_bytes\":%" PRIu64 ","
+           "\"estimated_bytes\":%" PRIu64 ","
+           "\"allocation_bytes\":%" PRIu64 ",\"source_id\":",
+           D1L_MAP_PREFETCH_NODE_RADIUS_KM,
+           bool_json(nodes_accounted),
+           (unsigned long)prefetch.marker_generation,
+           (unsigned)prefetch.nodes_seen,
+           (unsigned)prefetch.nodes_included,
+           (unsigned)prefetch.nodes_outside_radius,
+           bool_json(prefetch.initialized), bool_json(prefetch.running),
+           bool_json(prefetch.eligible), bool_json(prefetch.complete),
+           bool_json(prefetch.paused_for_visible_map),
+           bool_json(prefetch.location_set),
+           bool_json(prefetch.wifi_connected),
+           bool_json(prefetch.sd_ready),
+           bool_json(prefetch.provider_configured),
+           bool_json(prefetch.background_prefetch_permitted),
+           bool_json(prefetch.storage_reserve_reached),
+           (unsigned)prefetch.selected_max_zoom,
+           prefetch.total_tiles, prefetch.visited_tiles,
+           prefetch.cached_tiles, prefetch.network_requests,
+           prefetch.downloaded_tiles, prefetch.failed_tiles,
+           prefetch.downloaded_bytes, prefetch.estimated_bytes,
+           prefetch.allocation_bytes);
+    print_json_string(prefetch.source_id);
+    printf(",\"phase\":");
+    print_json_string(prefetch.phase);
+    printf(",\"message\":");
+    print_json_string(prefetch.message);
+    printf("},\"network_requests\":%" PRIu64 ","
+           "\"downloaded_tiles\":%" PRIu64 ","
+           "\"public_rf_tx\":false,\"formats_sd\":false,"
+           "\"arbitrary_url_accepted\":false,"
+           "\"arbitrary_location_accepted\":false}\n",
+           prefetch.network_requests, prefetch.downloaded_tiles);
+}
+
+static void cmd_map_acceptance_open(void)
+{
+    const esp_err_t ret = d1l_ui_phase1_request_map_acceptance();
+    if (ret != ESP_OK) {
+        err_result("map acceptance open", esp_err_to_name(ret),
+                   "close overlays and complete onboarding before Map acceptance");
+        return;
+    }
+    ok_begin("map acceptance open");
+    printf(",\"requested_tab\":\"map\",\"pending\":true,"
+           "\"configured_current_view_only\":true,"
+           "\"configured_device_center\":true,"
+           "\"forced_sd_reload\":true,"
+           "\"arbitrary_url_accepted\":false,"
+           "\"arbitrary_location_accepted\":false,"
+           "\"public_rf_tx\":false,\"formats_sd\":false}\n");
+}
+
 static void print_storage_setup_payload(const d1l_storage_status_t *status)
 {
     printf(",\"available\":%s,\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
@@ -3320,8 +3527,8 @@ static void print_storage_setup_payload(const d1l_storage_status_t *status)
     print_json_string(status->setup_action ? status->setup_action : "not_available");
     printf(",\"needs_fat32\":%s,\"will_format\":false,\"format_requested\":false,\"format_performed\":false,\"policy\":\"no_device_format\",\"data_backend\":",
            bool_json(status->sd_needs_fat32));
-    print_json_string(status->data_backend ? status->data_backend : "nvs");
-    printf(",\"fallback\":\"nvs\",\"note\":");
+    print_json_string(status->data_backend ? status->data_backend : "volatile");
+    printf(",\"fallback\":\"volatile\",\"note\":");
     print_json_string(status->note ? status->note : "");
     printf("}\n");
 }
@@ -3338,9 +3545,9 @@ static void print_storage_filecanary_error(const char *step,
     printf(",\"sd_state\":");
     print_json_string(status && status->sd_state ? status->sd_state : "unknown");
     printf(",\"data_backend\":");
-    print_json_string(status && status->data_backend ? status->data_backend : "nvs");
+    print_json_string(status && status->data_backend ? status->data_backend : "volatile");
     printf(",\"packet_log_backend\":");
-    print_json_string(status && status->packet_log_backend ? status->packet_log_backend : "nvs");
+    print_json_string(status && status->packet_log_backend ? status->packet_log_backend : "volatile");
     printf(",\"file_op\":");
     print_json_string(file && file->op[0] ? file->op : "");
     printf(",\"file_error\":");
@@ -3485,9 +3692,18 @@ static void cmd_storage_filecanary(void)
     print_json_string(tmp_path);
     printf(",\"bytes\":%u,\"write_tmp\":true,\"read_tmp\":true,\"rename_replace\":true,\"stat_final\":true,\"read_final\":true,\"delete_final\":true,\"stat_deleted\":true,\"data_backend\":",
            (unsigned)payload_len);
-    print_json_string(status.data_backend ? status.data_backend : "nvs");
+    print_json_string(status.data_backend ? status.data_backend : "volatile");
     printf(",\"packet_log_backend\":");
-    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "volatile");
+    printf(",\"node_store_backend\":");
+    print_json_string(status.node_store_backend ?
+                          status.node_store_backend : "volatile");
+    printf(",\"contact_store_backend\":");
+    print_json_string(status.contact_store_backend ?
+                          status.contact_store_backend : "volatile");
+    printf(",\"read_state_backend\":");
+    print_json_string(status.read_state_backend ?
+                          status.read_state_backend : "volatile");
     printf(",\"note\":\"Serial-only RP2040 SD file-operation canary passed; no Public RF or format command was used\"}\n");
 }
 
@@ -3500,11 +3716,14 @@ static bool storage_retained_history_sd_ready(const d1l_storage_status_t *status
 {
     return status &&
            status->data_enabled &&
-           text_equals(status->data_backend, "mixed") &&
+           text_equals(status->data_backend, "sd") &&
            text_equals(status->message_store_backend, "sd") &&
            text_equals(status->dm_store_backend, "sd") &&
            text_equals(status->route_store_backend, "sd") &&
            text_equals(status->packet_log_backend, "sd") &&
+           text_equals(status->node_store_backend, "sd") &&
+           text_equals(status->contact_store_backend, "sd") &&
+           text_equals(status->read_state_backend, "sd") &&
            status->sd_present &&
            status->sd_mounted &&
            status->sd_data_root_ready &&
@@ -3516,7 +3735,7 @@ static bool storage_retained_history_sd_ready(const d1l_storage_status_t *status
            status->path_max >= D1L_RP2040_FILE_PATH_MAX;
 }
 
-static bool storage_retained_history_nvs_no_card_ready(
+static bool storage_retained_history_volatile_no_card_ready(
     const d1l_storage_status_t *status)
 {
     return status &&
@@ -3530,15 +3749,14 @@ static bool storage_retained_history_nvs_no_card_ready(
            !status->sd_mounted &&
            !status->sd_data_root_ready &&
            !status->bridge_status_stale &&
-           text_equals(status->message_store_backend, "nvs") &&
-           text_equals(status->dm_store_backend, "nvs") &&
-           text_equals(status->route_store_backend, "nvs") &&
-           text_equals(status->packet_log_backend, "nvs") &&
-           d1l_retained_blob_store_nvs_ready() &&
-           d1l_retained_blob_store_nvs_marker_ready() &&
-           d1l_retained_blob_store_nvs_markers_complete() &&
-           d1l_retained_blob_store_nvs_anchor_ready() &&
-           d1l_retained_blob_store_nvs_sentinel_ready();
+           text_equals(status->data_backend, "volatile") &&
+           text_equals(status->message_store_backend, "volatile") &&
+           text_equals(status->dm_store_backend, "volatile") &&
+           text_equals(status->route_store_backend, "volatile") &&
+           text_equals(status->packet_log_backend, "volatile") &&
+           text_equals(status->node_store_backend, "volatile") &&
+           text_equals(status->contact_store_backend, "volatile") &&
+           text_equals(status->read_state_backend, "volatile");
 }
 
 static bool retained_canary_backend_generations(
@@ -4026,16 +4244,24 @@ static bool build_diagnostic_export_payload(const char *token,
                             "\"storage\":{\"sd_state\":\"%s\",\"data_backend\":\"%s\","
                             "\"export_backend\":\"%s\",\"message_store_backend\":\"%s\","
                             "\"dm_store_backend\":\"%s\",\"route_store_backend\":\"%s\","
-                            "\"packet_log_backend\":\"%s\",\"map_tile_backend\":\"%s\","
+                            "\"packet_log_backend\":\"%s\",\"node_store_backend\":\"%s\","
+                            "\"contact_store_backend\":\"%s\",\"read_state_backend\":\"%s\","
+                            "\"map_tile_backend\":\"%s\","
                             "\"file_ops\":%s,\"atomic_rename\":%s},",
                             token,
                             status->sd_state ? status->sd_state : "unknown",
-                            status->data_backend ? status->data_backend : "nvs",
+                            status->data_backend ? status->data_backend : "volatile",
                             status->export_backend ? status->export_backend : "serial",
-                            status->message_store_backend ? status->message_store_backend : "nvs",
-                            status->dm_store_backend ? status->dm_store_backend : "nvs",
-                            status->route_store_backend ? status->route_store_backend : "nvs",
-                            status->packet_log_backend ? status->packet_log_backend : "nvs",
+                            status->message_store_backend ? status->message_store_backend : "volatile",
+                            status->dm_store_backend ? status->dm_store_backend : "volatile",
+                            status->route_store_backend ? status->route_store_backend : "volatile",
+                            status->packet_log_backend ? status->packet_log_backend : "volatile",
+                            status->node_store_backend ?
+                                status->node_store_backend : "volatile",
+                            status->contact_store_backend ?
+                                status->contact_store_backend : "volatile",
+                            status->read_state_backend ?
+                                status->read_state_backend : "volatile",
                             status->map_tile_backend ? status->map_tile_backend : "unavailable",
                             bool_json(status->file_ops_supported),
                             bool_json(status->atomic_rename_supported))) {
@@ -4429,18 +4655,24 @@ static bool build_data_export_payload(const char *token,
                             "\"storage\":{\"sd_state\":\"%s\",\"data_backend\":\"%s\","
                             "\"export_backend\":\"%s\",\"stores\":{\"messages\":\"%s\","
                             "\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\","
-                            "\"contacts\":\"onboard\",\"nodes\":\"onboard\","
-                            "\"read_state\":\"onboard\",\"map_tiles\":\"%s\"},"
+                            "\"contacts\":\"%s\",\"nodes\":\"%s\","
+                            "\"read_state\":\"%s\",\"map_tiles\":\"%s\"},"
                             "\"file_ops\":%s,\"atomic_rename\":%s},"
                             "\"limits\":{\"payload_max\":%u,\"sample_max\":%u},",
                             token,
                             status->sd_state ? status->sd_state : "unknown",
-                            status->data_backend ? status->data_backend : "nvs",
+                            status->data_backend ? status->data_backend : "volatile",
                             status->export_backend ? status->export_backend : "serial",
-                            status->message_store_backend ? status->message_store_backend : "nvs",
-                            status->dm_store_backend ? status->dm_store_backend : "nvs",
-                            status->route_store_backend ? status->route_store_backend : "nvs",
-                            status->packet_log_backend ? status->packet_log_backend : "nvs",
+                            status->message_store_backend ? status->message_store_backend : "volatile",
+                            status->dm_store_backend ? status->dm_store_backend : "volatile",
+                            status->route_store_backend ? status->route_store_backend : "volatile",
+                            status->packet_log_backend ? status->packet_log_backend : "volatile",
+                            status->contact_store_backend ?
+                                status->contact_store_backend : "volatile",
+                            status->node_store_backend ?
+                                status->node_store_backend : "volatile",
+                            status->read_state_backend ?
+                                status->read_state_backend : "volatile",
                             status->map_tile_backend ? status->map_tile_backend : "unavailable",
                             bool_json(status->file_ops_supported),
                             bool_json(status->atomic_rename_supported),
@@ -4850,16 +5082,16 @@ static void cmd_storage_retained_canary(const char *line)
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     const bool sd_backend_mode = storage_retained_history_sd_ready(&status);
-    const bool nvs_no_card_backend_mode =
-        storage_retained_history_nvs_no_card_ready(&status);
+    const bool volatile_no_card_backend_mode =
+        storage_retained_history_volatile_no_card_ready(&status);
     uint32_t backend_generations[D1L_RETAINED_BLOB_STORE_COUNT] = {0};
-    if ((!sd_backend_mode && !nvs_no_card_backend_mode) ||
+    if ((!sd_backend_mode && !volatile_no_card_backend_mode) ||
         !retained_canary_backend_generations(
             sd_backend_mode, backend_generations)) {
         d1l_route_store_worker_quiesce_end();
         d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", "SD_RETAINED_HISTORY_NOT_READY",
-                   "requires either ready RP2040 SD backends or an explicit fresh NO_CARD state with ready retained NVS");
+                   "requires either ready RP2040 SD backends or an explicit fresh NO_CARD live-only state");
         return;
     }
 
@@ -4937,17 +5169,24 @@ static void cmd_storage_retained_canary(const char *line)
            (unsigned long)dm_seq,
            (unsigned long)route_seq,
            (unsigned long)packet_seq);
-    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"backend_mode\":\"%s\",\"public_rf_tx\":false,\"dm_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\"}",
-           sd_backend_mode ? "sd" : "nvs_no_card",
+    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"backend_mode\":\"%s\",\"history_persisted\":%s,\"public_rf_tx\":false,\"dm_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\",\"nodes\":\"%s\",\"contacts\":\"%s\",\"read_state\":\"%s\"}",
+           sd_backend_mode ? "sd" : "volatile_no_card",
+           bool_json(sd_backend_mode),
            status.message_store_backend,
            status.dm_store_backend,
            status.route_store_backend,
-           status.packet_log_backend);
-    printf(",\"backend_generations\":{\"messages\":%lu,\"dm\":%lu,\"routes\":%lu,\"packets\":%lu}",
+           status.packet_log_backend,
+           status.node_store_backend,
+           status.contact_store_backend,
+           status.read_state_backend);
+    printf(",\"backend_generations\":{\"messages\":%lu,\"dm\":%lu,\"routes\":%lu,\"packets\":%lu,\"nodes\":%lu,\"contacts\":%lu,\"read_state\":%lu}",
            (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES],
            (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_DM_MESSAGES],
            (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_ROUTES],
-           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PACKET_LOG],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_NODES],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_CONTACTS],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_READ_STATE]);
     printf(",\"note\":\"Synthetic retained-history canary rows appended without Public or DM RF or a format command\"}\n");
 }
 
@@ -5614,7 +5853,8 @@ static void cmd_messages_read(const char *line)
 static void cmd_nodes(void)
 {
     d1l_node_store_stats_t stats = d1l_node_store_stats();
-    const bool include_location = !d1l_release_profile_is_core();
+    const bool include_location = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_LOCATION);
     const uint32_t marker_generation = include_location ?
         d1l_node_store_marker_generation() : 0U;
     static d1l_node_view_t entries[8] EXT_RAM_BSS_ATTR;
@@ -6722,11 +6962,11 @@ static void cmd_routes_trace_contact(const char *line)
            D1L_MESHCORE_TRACE_COOLDOWN_MS);
 }
 
-static void cmd_routes_trace_status(void)
+static void cmd_trace_status(const char *command)
 {
     if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
         release_unavailable_status(
-            "routes trace status", D1L_RELEASE_FEATURE_USER_TRACE);
+            command, D1L_RELEASE_FEATURE_USER_TRACE);
         return;
     }
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
@@ -6745,7 +6985,7 @@ static void cmd_routes_trace_status(void)
             "Route summary store rejected the result but packet preview retention succeeded" :
             "Route summary and packet preview retention both failed";
 
-    ok_begin("routes trace status");
+    ok_begin(command);
     printf(",\"counters\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"no_response\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_correlation_code_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu},\"pending\":{\"active\":%s,\"expired\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hash_bytes\":%u,\"path_hops\":%u,\"path_hashes_hex\":",
            (unsigned long)status.trace_tx_queued,
            (unsigned long)status.trace_rx_matched,
@@ -6790,13 +7030,107 @@ static void cmd_routes_trace_status(void)
         printf("%s%d", i ? "," : "",
                (int)trace.last_path_snrs_quarter_db[i]);
     }
-    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,\"route_summary_durable_verified\":false,\"packet_preview_retained\":%s,\"per_hop_complete\":false,\"packet_preview_bytes\":%u},\"correlation_scope\":\"tag_opaque_correlation_code_immutable_contact_loop\",\"last_detail_scope\":\"boot_local\",\"timeout_ms\":%u,\"flags_zero_direct_only\":false,\"trace_flags_supported\":[0,1,2,3],\"trace_wire_hash_bytes_supported\":[1,2,4,8],\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":false,\"contact_trace_path_hash_bytes_supported\":[1,2],\"contact_route_hash_bytes_rejected\":[3],\"hardware_verified\":false,\"note\":\"%s; timeout transitions to no_response under owner maintenance; cooldown is bounded after matched or no_response; full per-hop detail is boot-local; two-byte contact TRACE and wider wire parsing remain hardware-unverified\"}\n",
+    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},"
+           "\"fingerprint\":\"%s\",\"zero_hop\":%s,\"matched\":%s,"
+           "\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,"
+           "\"route_summary_durable_verified\":false,"
+           "\"packet_preview_retained\":%s,\"per_hop_complete\":false,"
+           "\"packet_preview_bytes\":%u},"
+           "\"correlation_scope\":\"tag_opaque_correlation_code_immutable_contact_loop\","
+           "\"last_detail_scope\":\"boot_local\",\"timeout_ms\":%u,"
+           "\"flags_zero_direct_only\":false,"
+           "\"trace_flags_supported\":[0,1,2,3],"
+           "\"trace_wire_hash_bytes_supported\":[1,2,4,8],"
+           "\"requires_current_boot_proven_contact_path\":true,"
+           "\"contact_trace_supported\":true,"
+           "\"operator_path_accepted\":false,\"one_byte_hash_only\":false,"
+           "\"contact_trace_path_hash_bytes_supported\":[1,2],"
+           "\"contact_route_hash_bytes_rejected\":[3],"
+           "\"hardware_verified\":false,"
+           "\"note\":\"%s; timeout transitions to no_response under owner "
+           "maintenance; cooldown is bounded after matched or no_response; "
+           "full per-hop detail is boot-local; two-byte contact TRACE and "
+           "wider wire parsing remain hardware-unverified\"}\n",
            trace.last_rssi_dbm, trace.last_radio_snr_quarter_db,
+           trace.target_fingerprint, bool_json(trace.zero_hop_ping),
+           bool_json(
+               trace.last_result_valid &&
+               trace.last_attempt_outcome == D1L_MESHCORE_TRACE_OUTCOME_MATCHED),
            bool_json(trace.last_retention_attempted),
            bool_json(trace.last_route_summary_accepted),
            bool_json(trace.last_packet_preview_retained),
            D1L_PACKET_LOG_RAW_PREVIEW_BYTES,
            D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS, retention_note);
+}
+
+static void cmd_routes_trace_status(void)
+{
+    cmd_trace_status("routes trace status");
+}
+
+static void cmd_repeater_ping(const char *line)
+{
+    const char *arg = line + strlen("repeater ping ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result(
+            "repeater ping", "INVALID_FINGERPRINT",
+            "usage: repeater ping <16-hex-fingerprint>");
+        return;
+    }
+    const char *tail = arg + strlen(fingerprint);
+    while (*tail == ' ') {
+        tail++;
+    }
+    if (*tail != '\0') {
+        err_result(
+            "repeater ping", "INVALID_FINGERPRINT",
+            "usage: repeater ping <16-hex-fingerprint>");
+        return;
+    }
+
+    const esp_err_t ret =
+        d1l_meshcore_service_ping_repeater(fingerprint);
+    if (ret != ESP_OK) {
+        const char *code = esp_err_to_name(ret);
+        const char *detail =
+            ret == ESP_ERR_NOT_FOUND ?
+                "exact canonical repeater contact not found" :
+            ret == ESP_ERR_NOT_SUPPORTED ?
+                "target is not a repeater or its identity width is unsupported" :
+            ret == ESP_ERR_NOT_FINISHED ?
+                "one TRACE or repeater Ping is already pending; poll repeater ping status" :
+            ret == ESP_ERR_NOT_ALLOWED ?
+                "repeater Ping cooldown is active; poll repeater ping status" :
+            ret == ESP_ERR_INVALID_STATE ?
+                "repeater contact, identity, radio, or trace state is not ready" :
+                "could not queue the zero-hop repeater Ping";
+        if (ret == ESP_ERR_NOT_FINISHED) {
+            code = "PING_PENDING";
+        } else if (ret == ESP_ERR_NOT_ALLOWED) {
+            code = "PING_COOLDOWN";
+        }
+        err_result("repeater ping", code, detail);
+        return;
+    }
+
+    d1l_meshcore_trace_snapshot_t trace = {0};
+    d1l_meshcore_service_trace_snapshot(&trace);
+    ok_begin("repeater ping");
+    printf(
+        ",\"fingerprint\":\"%s\",\"queued\":true,\"pending\":%s,"
+        "\"tag\":%lu,\"zero_hop\":true,\"targeted_trace_rf_tx\":true,"
+        "\"public_rf_tx\":false,\"status_command\":\"repeater ping status\"}\n",
+        fingerprint, bool_json(trace.pending),
+        (unsigned long)trace.pending_tag);
+}
+
+static void cmd_repeater_ping_status(void)
+{
+    cmd_trace_status("repeater ping status");
 }
 
 static void cmd_routes_trace(const char *line)
@@ -8138,7 +8472,9 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    if (d1l_release_profile_is_core()) {
+    if (d1l_release_profile_is_core() &&
+        !d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
         print_release_profile_fields();
         printf(",\"commands\":[\"help\",\"version\",\"board\","
                "\"settings get\",\"settings reset\","
@@ -8194,8 +8530,10 @@ static void cmd_help(void)
                "\"factory-reset-status\",\"factory-reset-confirm\"],"
                "\"unavailable_status_commands\":[\"wifi status\","
                "\"ble status\",\"map center\",\"map tiles status\","
+               "\"map acceptance status\","
                "\"channels\",\"routes trace status\",\"roomservers\","
-               "\"repeaters\"],\"unavailable_features\":[\"map\","
+               "\"repeaters\",\"repeater ping status\"],"
+               "\"unavailable_features\":[\"map\","
                "\"wifi_user_control\",\"ble\","
                "\"multi_channel_management\",\"admin\","
                "\"observer_mqtt\",\"signed_update\","
@@ -8229,6 +8567,7 @@ static void cmd_help(void)
            "\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\","
            "\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\","
            "\"map center set <lat> <lon>\",\"map center clear\",\"map tiles status\","
+           "\"map acceptance status\",\"map acceptance open\","
            "\"mesh status\",\"companion status\",\"rp2040 status\","
            "\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\","
            "\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\","
@@ -8256,7 +8595,9 @@ static void cmd_help(void)
            "\"routes reset <fingerprint>\",\"routes clear\",\"packets\","
            "\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\","
            "\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\","
-           "\"roomservers\",\"repeaters\",\"admin status\","
+           "\"roomservers\",\"repeaters\","
+           "\"repeater ping <fingerprint>\",\"repeater ping status\","
+           "\"admin status\","
            "\"admin login <fingerprint> <password|<empty>>\",\"admin refresh\","
            "\"admin telemetry\",\"admin neighbours [offset]\","
            "\"admin access-list\","
@@ -8604,6 +8945,10 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_map_center_clear();
     } else if (strcmp(line, "map tiles status") == 0) {
         cmd_map_tiles_status();
+    } else if (strcmp(line, "map acceptance status") == 0) {
+        cmd_map_acceptance_status();
+    } else if (strcmp(line, "map acceptance open") == 0) {
+        cmd_map_acceptance_open();
     } else if (strcmp(line, "settings onboarding status") == 0) {
         cmd_settings_onboarding_status();
     } else if (strncmp(line, "settings onboarding complete ", 29) == 0) {
@@ -8777,6 +9122,11 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_roomservers();
     } else if (strcmp(line, "repeaters") == 0) {
         cmd_repeaters();
+    } else if (strcmp(line, "repeater ping status") == 0) {
+        cmd_repeater_ping_status();
+    } else if (strncmp(line, "repeater ping ",
+                       strlen("repeater ping ")) == 0) {
+        cmd_repeater_ping(line);
     } else if (strcmp(line, "admin status") == 0) {
         cmd_admin_status("admin status");
     } else if (strncmp(line, "admin login ",

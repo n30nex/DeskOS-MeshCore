@@ -17,6 +17,8 @@ typedef struct {
     bool wifi_connected;
     bool rate_limited;
     bool current_view_only;
+    bool provider_configured;
+    bool background_prefetch_permitted;
     bool public_rf_tx;
     bool formats_sd;
     uint32_t generation;
@@ -29,6 +31,7 @@ typedef struct {
     uint16_t width;
     uint16_t height;
     uint8_t zoom;
+    uint8_t provider_max_zoom;
     uint8_t planned_tiles;
     uint8_t attempted_tiles;
     uint8_t cache_hits;
@@ -37,6 +40,8 @@ typedef struct {
     uint8_t rendered_tiles;
     uint8_t failed_tiles;
     uint8_t decode_samples;
+    char source_id[25];
+    char attribution[65];
     char phase[24];
     char message[80];
 } d1l_map_view_status_t;
@@ -59,6 +64,7 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
                                                uint16_t width,
                                                uint16_t height,
                                                uint32_t *out_generation);
+void d1l_map_view_service_force_reload_next_acquire(void);
 void d1l_map_view_service_release_visible(uint32_t generation);
 void d1l_map_view_service_status(d1l_map_view_status_t *out_status);
 esp_err_t d1l_map_view_service_acquire_frame(uint32_t after_revision,

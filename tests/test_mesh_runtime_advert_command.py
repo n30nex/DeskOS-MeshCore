@@ -26,12 +26,13 @@ def test_advert_is_a_bounded_mesh_runtime_command():
     )
     adapter = body(
         source,
-        "esp_err_t d1l_meshcore_service_request_advert(bool flood)",
+        "static esp_err_t meshcore_service_request_advert",
         "static esp_err_t meshcore_service_send_channel_owned",
     )
 
     assert "D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT" in source
     assert "bool flood;" in source
+    assert "bool boot_advert;" in source
     assert "case D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT:" in task
     assert "meshcore_service_handle_send_advert(&cmd)" in task
     assert "s_status.rejected_commands++" in task
@@ -63,6 +64,9 @@ def test_advert_is_a_bounded_mesh_runtime_command():
 
     assert ".type = D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT" in adapter
     assert ".flood = flood" in adapter
+    assert ".boot_advert = boot_advert" in adapter
+    assert "meshcore_service_request_advert(flood, false)" in adapter
+    assert "meshcore_service_request_advert(flood, true)" in adapter
     assert "meshcore_service_send_command(" in adapter
     for forbidden in (
         "d1l_meshcore_service_ensure_identity",
@@ -81,10 +85,34 @@ def test_boot_announces_signed_identity_after_rx_is_queued():
     source = read("main/app_main.c")
     rx = source.index("d1l_meshcore_service_start_rx_async()")
     success = source.index("if (mesh_rx_ret != ESP_OK)", rx)
-    advert = source.index("d1l_meshcore_service_request_advert(true)", success)
+    advert = source.index(
+        "d1l_meshcore_service_request_boot_advert(true)", success
+    )
 
     assert rx < success < advert
     assert "MeshCore boot advert failed" in source[advert:]
+
+
+def test_boot_advert_status_is_machine_observable():
+    header = read("main/mesh/meshcore_service.h")
+    service = read("main/mesh/meshcore_service.c")
+    console = read("main/comms/usb_console.c")
+
+    for field in (
+        "boot_advert_tx_queued",
+        "boot_advert_tx_done",
+        "boot_advert_tx_failed",
+        "boot_advert_public_key_prefix",
+        "boot_advert_node_name",
+        "boot_advert_flood",
+    ):
+        assert field in header
+        assert field in service
+    assert '\\"boot_queued\\"' in console
+    assert '\\"boot_done\\"' in console
+    assert '\\"boot_failed\\"' in console
+    assert '\\"boot_public_key_prefix\\"' in console
+    assert '\\"boot_node_name\\"' in console
 
 
 def test_deferred_packet_log_admission_never_waits_on_storage_owner():

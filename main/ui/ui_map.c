@@ -5,10 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "map/map_marker_truth.h"
 #include "map/map_point_projection.h"
+#include "map/map_prefetch_service.h"
+#include "map/map_tile_provider.h"
 #include "map/map_view_service.h"
 #include "map/map_viewport_truth_transition.h"
 #include "mesh/node_store.h"
@@ -32,8 +35,8 @@
 #define MAP_DRAG_THRESHOLD_PIXELS 24
 #define MAP_DRAG_MAX_X_PIXELS ((int32_t)MAP_VIEWPORT_WIDTH / 3)
 #define MAP_DRAG_MAX_Y_PIXELS ((int32_t)MAP_VIEWPORT_HEIGHT / 3)
-#define MAP_MARKER_QUERY_LIMIT 32U
-#define MAP_MARKER_DISPLAY_LIMIT 8U
+#define MAP_MARKER_QUERY_LIMIT D1L_NODE_SD_HISTORY_CAPACITY
+#define MAP_MARKER_LABEL_LIMIT 8U
 #define MAP_MARKER_DOT_DIAMETER 14
 #define MAP_MARKER_HIT_RADIUS 22
 #define MAP_MARKER_LABEL_WIDTH 112
@@ -64,6 +67,7 @@ static uint32_t s_viewport_generation;
 static uint32_t s_viewport_revision;
 static uint32_t s_viewport_suppression_depth;
 static bool s_viewport_suppress_next_acquire;
+static bool s_viewport_acceptance_reset_pending;
 static bool s_viewport_allocation_failed;
 static portMUX_TYPE s_viewport_lease_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint16_t *s_viewport_pixels;
@@ -85,10 +89,14 @@ static lv_obj_t *s_viewport_center_button;
 static lv_obj_t *s_viewport_center_source_label;
 static lv_obj_t *s_viewport_pin_truth_label;
 static d1l_ui_map_open_node_detail_cb_t s_viewport_open_node_detail;
-static d1l_node_marker_t s_viewport_marker_candidates[MAP_MARKER_QUERY_LIMIT];
-static d1l_ui_map_marker_hit_t s_viewport_marker_hits[MAP_MARKER_DISPLAY_LIMIT];
-static d1l_ui_map_marker_rect_t s_viewport_marker_bounds[MAP_MARKER_DISPLAY_LIMIT];
+static d1l_node_marker_t
+    s_viewport_marker_candidates[MAP_MARKER_QUERY_LIMIT] EXT_RAM_BSS_ATTR;
+static d1l_ui_map_marker_hit_t
+    s_viewport_marker_hits[MAP_MARKER_QUERY_LIMIT] EXT_RAM_BSS_ATTR;
+static d1l_ui_map_marker_rect_t
+    s_viewport_marker_bounds[MAP_MARKER_LABEL_LIMIT];
 static size_t s_viewport_marker_count;
+static size_t s_viewport_marker_label_count;
 static uint32_t s_viewport_marker_store_generation;
 static uint32_t s_viewport_marker_frame_generation;
 static uint32_t s_viewport_marker_context_generation;
@@ -319,11 +327,18 @@ static const char *map_sd_status(const d1l_app_snapshot_t *snapshot)
 
 static uint8_t map_zoom_clamp(uint8_t zoom)
 {
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
+    uint8_t maximum = D1L_MAP_VIEW_MAX_ZOOM;
+    if (provider.max_zoom >= D1L_MAP_VIEW_MIN_ZOOM &&
+        provider.max_zoom < maximum) {
+        maximum = provider.max_zoom;
+    }
     if (zoom < D1L_MAP_VIEW_MIN_ZOOM) {
         return D1L_MAP_VIEW_MIN_ZOOM;
     }
-    if (zoom > D1L_MAP_VIEW_MAX_ZOOM) {
-        return D1L_MAP_VIEW_MAX_ZOOM;
+    if (zoom > maximum) {
+        return maximum;
     }
     return zoom;
 }
@@ -348,6 +363,25 @@ static void map_viewport_sync_position(const d1l_app_snapshot_t *snapshot)
     if (s_viewport_position_initialized &&
         s_viewport_saved_lat_e7 == snapshot->map_lat_e7 &&
         s_viewport_saved_lon_e7 == snapshot->map_lon_e7) {
+        return;
+    }
+    s_viewport_saved_lat_e7 = snapshot->map_lat_e7;
+    s_viewport_saved_lon_e7 = snapshot->map_lon_e7;
+    s_viewport_lat_e7 = snapshot->map_lat_e7;
+    s_viewport_lon_e7 = snapshot->map_lon_e7;
+    s_viewport_zoom = map_zoom_clamp(snapshot->map_tile_zoom);
+    s_viewport_position_initialized = true;
+}
+
+static void map_viewport_apply_acceptance_reset(
+    const d1l_app_snapshot_t *snapshot)
+{
+    bool pending;
+    portENTER_CRITICAL(&s_viewport_lease_lock);
+    pending = s_viewport_acceptance_reset_pending;
+    s_viewport_acceptance_reset_pending = false;
+    portEXIT_CRITICAL(&s_viewport_lease_lock);
+    if (!pending || !map_center_available(snapshot)) {
         return;
     }
     s_viewport_saved_lat_e7 = snapshot->map_lat_e7;
@@ -462,6 +496,7 @@ static void map_viewport_foreground_overlays(void)
 static void map_viewport_reset_marker_state(void)
 {
     s_viewport_marker_count = 0U;
+    s_viewport_marker_label_count = 0U;
     s_viewport_marker_store_generation = 0U;
     s_viewport_marker_frame_generation = 0U;
     s_viewport_marker_rendered_context_generation = 0U;
@@ -651,7 +686,7 @@ static bool map_marker_placement_allowed(const d1l_ui_map_marker_rect_t *bounds)
             return false;
         }
     }
-    for (size_t i = 0; i < s_viewport_marker_count; ++i) {
+    for (size_t i = 0; i < s_viewport_marker_label_count; ++i) {
         if (map_marker_rects_intersect(bounds, &s_viewport_marker_bounds[i])) {
             return false;
         }
@@ -683,6 +718,7 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
 
     lv_obj_clean(s_viewport_marker_layer);
     s_viewport_marker_count = 0U;
+    s_viewport_marker_label_count = 0U;
     memset(s_viewport_marker_hits, 0, sizeof(s_viewport_marker_hits));
     memset(s_viewport_marker_bounds, 0, sizeof(s_viewport_marker_bounds));
 
@@ -697,8 +733,7 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         .pan_x_pixels = 0,
         .pan_y_pixels = 0,
     };
-    for (size_t i = 0; i < candidate_count &&
-         s_viewport_marker_count < MAP_MARKER_DISPLAY_LIMIT; ++i) {
+    for (size_t i = 0; i < candidate_count; ++i) {
         d1l_map_marker_truth_t truth = {0};
         if (!d1l_map_marker_truth_evaluate(
                 &s_viewport_marker_candidates[i],
@@ -722,11 +757,9 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
             .x2 = label_x + MAP_MARKER_LABEL_WIDTH,
             .y2 = label_y + MAP_MARKER_LABEL_HEIGHT,
         };
-        /* A marker is never shown without its below-marker name. Newest
-         * advert locations win deterministic collisions and exclusions. */
-        if (!map_marker_placement_allowed(&bounds)) {
-            continue;
-        }
+        const bool label_allowed =
+            s_viewport_marker_label_count < MAP_MARKER_LABEL_LIMIT &&
+            map_marker_placement_allowed(&bounds);
 
         lv_obj_t *dot = lv_obj_create(s_viewport_marker_layer);
         if (!dot) {
@@ -743,6 +776,16 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         lv_obj_set_style_pad_all(dot, 0, 0);
         lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
+        const size_t shown = s_viewport_marker_count++;
+        s_viewport_marker_hits[shown].screen_x = point.screen_x;
+        s_viewport_marker_hits[shown].screen_y = point.screen_y;
+        map_copy_bounded_text(s_viewport_marker_hits[shown].fingerprint,
+                              sizeof(s_viewport_marker_hits[shown].fingerprint),
+                              s_viewport_marker_candidates[i].fingerprint);
+        if (!label_allowed) {
+            continue;
+        }
+
         char display_name[MAP_MARKER_NAME_MAX_CHARS + 1U];
         map_marker_display_name(&s_viewport_marker_candidates[i], display_name,
                                 sizeof(display_name));
@@ -754,7 +797,6 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         lv_obj_t *name = map_label(s_viewport_marker_layer, marker_label,
                                    MAP_COLOR_TEXT);
         if (!name) {
-            lv_obj_del(dot);
             continue;
         }
         lv_label_set_long_mode(name, LV_LABEL_LONG_WRAP);
@@ -768,13 +810,7 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         lv_obj_set_style_pad_ver(name, 1, 0);
         lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-        const size_t shown = s_viewport_marker_count++;
-        s_viewport_marker_bounds[shown] = bounds;
-        s_viewport_marker_hits[shown].screen_x = point.screen_x;
-        s_viewport_marker_hits[shown].screen_y = point.screen_y;
-        map_copy_bounded_text(s_viewport_marker_hits[shown].fingerprint,
-                              sizeof(s_viewport_marker_hits[shown].fingerprint),
-                              s_viewport_marker_candidates[i].fingerprint);
+        s_viewport_marker_bounds[s_viewport_marker_label_count++] = bounds;
     }
 
     s_viewport_marker_store_generation = marker_generation;
@@ -929,6 +965,16 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
         detail = "Keep Wi-Fi connected, then reopen Map.";
         color = MAP_COLOR_WARN;
         show_overlay = true;
+    } else if (strcmp(status->phase, "provider_config") == 0) {
+        title = "Map source needs attention";
+        detail = "Check the offline provider file on the SD card.";
+        color = MAP_COLOR_WARN;
+        show_overlay = true;
+    } else if (strcmp(status->phase, "provider_preloaded_only") == 0) {
+        title = "Tile is not preloaded";
+        detail = "Add this area to the SD card or configure an authorized download source.";
+        color = MAP_COLOR_WARN;
+        show_overlay = true;
     } else if (status->failed_tiles > 0U && !status->frame_ready) {
         title = "Map unavailable";
         detail = "Tiles could not be loaded. Check Wi-Fi and the SD card.";
@@ -1039,19 +1085,29 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
         }
     }
     if (s_viewport_attribution_label) {
+        lv_label_set_text(
+            s_viewport_attribution_label,
+            status->provider_configured && status->attribution[0] != '\0' ?
+                status->attribution : "(c) OpenStreetMap contributors");
         lv_obj_move_foreground(s_viewport_attribution_label);
     }
 }
 
 static void map_viewport_update_controls(void)
 {
+    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_snapshot(&provider);
+    const uint8_t maximum =
+        provider.max_zoom >= D1L_MAP_VIEW_MIN_ZOOM &&
+                provider.max_zoom < D1L_MAP_VIEW_MAX_ZOOM ?
+            provider.max_zoom : D1L_MAP_VIEW_MAX_ZOOM;
     if (s_viewport_zoom_label) {
         char zoom[8];
         snprintf(zoom, sizeof(zoom), "z%u", (unsigned)s_viewport_zoom);
         lv_label_set_text(s_viewport_zoom_label, zoom);
     }
     if (s_viewport_zoom_in_button) {
-        if (s_viewport_zoom >= D1L_MAP_VIEW_MAX_ZOOM) {
+        if (s_viewport_zoom >= maximum) {
             lv_obj_add_state(s_viewport_zoom_in_button, LV_STATE_DISABLED);
         } else {
             lv_obj_clear_state(s_viewport_zoom_in_button, LV_STATE_DISABLED);
@@ -1216,11 +1272,13 @@ static void map_viewport_drag_event_cb(lv_event_t *event)
 static void map_viewport_zoom_in_event_cb(lv_event_t *event)
 {
     (void)event;
-    if (s_viewport_zoom >= D1L_MAP_VIEW_MAX_ZOOM) {
+    const uint8_t next_zoom = map_zoom_clamp(
+        (uint8_t)(s_viewport_zoom + 1U));
+    if (next_zoom <= s_viewport_zoom) {
         return;
     }
     const uint8_t old_zoom = s_viewport_zoom;
-    ++s_viewport_zoom;
+    s_viewport_zoom = next_zoom;
     if (!map_viewport_request_interactive_view()) {
         s_viewport_zoom = old_zoom;
     }
@@ -1467,6 +1525,7 @@ void d1l_ui_map_render(lv_obj_t *parent,
         return;
     }
     map_viewport_sync_position(snapshot);
+    map_viewport_apply_acceptance_reset(snapshot);
     d1l_ui_map_viewport_release();
     /* Rendering runs on the UI task, so it owns marker hit/cache mutation.
      * Cross-task release only invalidates the lease. */
@@ -1715,6 +1774,8 @@ static void map_render_options_root(lv_obj_t *parent,
                                     const d1l_app_snapshot_t *snapshot,
                                     const d1l_ui_map_callbacks_t *callbacks)
 {
+    d1l_map_prefetch_status_t prefetch = {0};
+    d1l_map_prefetch_service_status(&prefetch);
     map_render_header(parent, "Map options", "Location and cache", "Back to Map",
                       callbacks->close_options);
     map_menu_row(parent, 68, "Set location", map_location_status(snapshot),
@@ -1738,7 +1799,10 @@ static void map_render_options_root(lv_obj_t *parent,
     lv_obj_t *policy = map_panel(parent, 16, 280, 448, 80);
     if (policy) {
         lv_obj_t *text = map_label(policy,
-            "Tiles download only while Map is open. Reopening the same area uses the saved copy.",
+            prefetch.provider_configured &&
+                    prefetch.background_prefetch_permitted ?
+                "The local node area downloads in the background. Opening Map always has priority." :
+                "Built-in tiles download only while Map is open. Offline prefetch needs an authorized SD source.",
             MAP_COLOR_MUTED);
         map_label_wrap(text, 418);
         if (text) {
@@ -1755,10 +1819,33 @@ static void map_render_cache_status(lv_obj_t *parent,
                       callbacks->back_to_options);
     d1l_map_view_status_t view_status = {0};
     d1l_map_view_service_status(&view_status);
+    d1l_map_prefetch_status_t prefetch = {0};
+    d1l_map_prefetch_service_status(&prefetch);
     char map_view_value[32];
     uint32_t map_view_color = MAP_COLOR_MUTED;
-    map_saved_area_status(&view_status, map_view_value, sizeof(map_view_value),
-                          &map_view_color);
+    map_saved_area_status(&view_status, map_view_value,
+                          sizeof(map_view_value), &map_view_color);
+    char prefetch_value[40];
+    uint32_t prefetch_color = MAP_COLOR_MUTED;
+    if (prefetch.complete) {
+        snprintf(prefetch_value, sizeof(prefetch_value), "Ready through z%u",
+                 (unsigned)prefetch.selected_max_zoom);
+        prefetch_color = MAP_COLOR_GOOD;
+    } else if (prefetch.running) {
+        snprintf(prefetch_value, sizeof(prefetch_value), "%llu / %llu tiles",
+                 (unsigned long long)prefetch.visited_tiles,
+                 (unsigned long long)prefetch.total_tiles);
+        prefetch_color = MAP_COLOR_INFO;
+    } else if (prefetch.paused_for_visible_map) {
+        snprintf(prefetch_value, sizeof(prefetch_value), "%s", "Paused for Map");
+        prefetch_color = MAP_COLOR_INFO;
+    } else if (prefetch.phase[0] != '\0') {
+        snprintf(prefetch_value, sizeof(prefetch_value), "%s", prefetch.phase);
+        prefetch_color =
+            prefetch.eligible ? MAP_COLOR_INFO : MAP_COLOR_WARN;
+    } else {
+        snprintf(prefetch_value, sizeof(prefetch_value), "%s", "Starting");
+    }
 
     lv_obj_t *panel = map_panel(parent, 16, 64, 448, 324);
     if (!panel) {
@@ -1770,16 +1857,32 @@ static void map_render_cache_status(lv_obj_t *parent,
                           snapshot->map_tile_cache_ready ? MAP_COLOR_GOOD : MAP_COLOR_WARN);
     map_render_status_row(panel, 144, "Location", map_location_status(snapshot),
                           snapshot->map_location_set ? MAP_COLOR_GOOD : MAP_COLOR_WARN);
-    map_render_status_row(panel, 208, "Map view", map_view_value, map_view_color);
+    map_render_status_row(panel, 208, "Map view", map_view_value,
+                          map_view_color);
 
-    lv_obj_t *built_in = map_label(panel, "OpenStreetMap is built in.", MAP_COLOR_MUTED);
+    char source_status[96];
+    if (view_status.provider_configured) {
+        snprintf(source_status, sizeof(source_status), "%s - %s",
+                 view_status.source_id[0] != '\0' ?
+                    view_status.source_id : "SD provider",
+                 prefetch_value);
+    } else {
+        snprintf(source_status, sizeof(source_status), "%s",
+                 "Built-in OpenStreetMap - interactive cache only");
+    }
+    lv_obj_t *built_in = map_label(
+        panel, source_status,
+        view_status.provider_configured ? prefetch_color : MAP_COLOR_MUTED);
     if (built_in) {
         map_label_dot(built_in, 420);
         lv_obj_set_style_text_align(built_in, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(built_in, 12, 274);
     }
-    lv_obj_t *attribution = map_label(panel, "(c) OpenStreetMap contributors",
-                                      MAP_COLOR_DETAIL);
+    lv_obj_t *attribution = map_label(
+        panel,
+        view_status.provider_configured && view_status.attribution[0] != '\0' ?
+            view_status.attribution : "(c) OpenStreetMap contributors",
+        MAP_COLOR_DETAIL);
     if (attribution) {
         map_label_dot(attribution, 420);
         lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_CENTER, 0);
@@ -2184,6 +2287,14 @@ void d1l_ui_map_viewport_release(void)
     if (generation != 0U) {
         d1l_map_view_service_release_visible(generation);
     }
+}
+
+void d1l_ui_map_viewport_prepare_acceptance(void)
+{
+    portENTER_CRITICAL(&s_viewport_lease_lock);
+    s_viewport_acceptance_reset_pending = true;
+    portEXIT_CRITICAL(&s_viewport_lease_lock);
+    d1l_ui_map_viewport_release();
 }
 
 void d1l_ui_map_viewport_prepare_cover(void)

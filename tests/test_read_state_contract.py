@@ -27,10 +27,14 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "d1l_read_state_dm_entry_is_unread" in header
     assert "d1l_read_state_copy_dm_threads" in header
 
-    assert 'D1L_READ_STATE_NAMESPACE "d1l_read"' in source
     assert 'D1L_READ_STATE_KEY "state"' in source
-    assert "nvs_get_blob" in source
-    assert "nvs_set_blob" in source
+    assert '#include "storage/retained_blob_store.h"' in source
+    assert "D1L_RETAINED_BLOB_STORE_READ_STATE" in source
+    assert "d1l_retained_blob_store_read(" in source
+    assert "d1l_retained_blob_store_write(" in source
+    assert "d1l_retained_blob_store_erase(" in source
+    assert "nvs_get_blob" not in source
+    assert "nvs_set_blob" not in source
     assert "static d1l_message_entry_t s_message_scratch" in source
     assert "static d1l_dm_entry_t s_dm_scratch" in source
     assert "D1L_READ_STATE_VISIBLE_DM_CAPACITY (D1L_DM_STORE_CAPACITY + 1U)" in source

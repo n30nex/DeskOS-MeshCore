@@ -21,7 +21,7 @@ def test_map_ui_uses_bounded_core_viewport_and_visible_attribution():
     assert '#include "ui_chrome.h"' in source
     assert "D1L_MAP_VIEW_DEFAULT_ZOOM 10U" in math_header
     assert "D1L_MAP_VIEW_MIN_ZOOM 8U" in math_header
-    assert "D1L_MAP_VIEW_MAX_ZOOM 14U" in math_header
+    assert "D1L_MAP_VIEW_MAX_ZOOM 18U" in math_header
     assert "s_viewport_zoom = D1L_MAP_VIEW_DEFAULT_ZOOM" in source
     assert "MAP_VIEWPORT_WIDTH 478U" in source
     assert "MAP_VIEWPORT_HEIGHT (D1L_UI_DOCKED_CONTENT_HEIGHT - 2U)" in source
@@ -121,8 +121,8 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
     assert "d1l_map_math_pan_center" in released
     assert "map_viewport_request_interactive_view()" in released
 
-    assert "D1L_MAP_VIEW_MAX_ZOOM" in zoom_in
-    assert "++s_viewport_zoom" in zoom_in
+    assert "map_zoom_clamp" in zoom_in
+    assert "s_viewport_zoom + 1U" in zoom_in
     assert "map_viewport_request_interactive_view()" in zoom_in
     assert "D1L_MAP_VIEW_MIN_ZOOM" in zoom_out
     assert "--s_viewport_zoom" in zoom_out
@@ -213,8 +213,8 @@ def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():
 
     assert '#include "map/map_point_projection.h"' in source
     assert '#include "mesh/node_store.h"' in source
-    assert "MAP_MARKER_QUERY_LIMIT 32U" in source
-    assert "MAP_MARKER_DISPLAY_LIMIT 8U" in source
+    assert "MAP_MARKER_QUERY_LIMIT D1L_NODE_SD_HISTORY_CAPACITY" in source
+    assert "MAP_MARKER_LABEL_LIMIT 8U" in source
     assert "MAP_MARKER_HIT_RADIUS 22" in source
     assert "d1l_node_store_marker_generation()" in marker_refresh
     assert "d1l_node_store_copy_markers(" in marker_refresh
@@ -224,7 +224,13 @@ def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():
     assert "map_copy_bounded_text(" in marker_refresh
     assert "LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE" in marker_refresh
     assert "label_y = point.screen_y + dot_radius + MAP_MARKER_LABEL_GAP" in marker_refresh
-    assert "s_viewport_marker_count < MAP_MARKER_DISPLAY_LIMIT" in marker_refresh
+    assert "for (size_t i = 0; i < candidate_count; ++i)" in marker_refresh
+    assert "s_viewport_marker_count++" in marker_refresh
+    assert (
+        "s_viewport_marker_label_count < MAP_MARKER_LABEL_LIMIT"
+        in marker_refresh
+    )
+    assert "if (!label_allowed)" in marker_refresh
     assert "d1l_map_view_service_acquire_visible" not in marker_refresh
     assert "d1l_map_view_service_acquire_frame" not in marker_refresh
     assert "memcpy(s_viewport_pixels" not in marker_refresh
@@ -444,6 +450,9 @@ def test_storage_and_wifi_transitions_refresh_non_map_ui_without_tearing_down_ma
 
     assert "content_generation_text_equal(left->storage_sd_state" in generation_equal
     assert "content_generation_text_equal(left->storage_setup_action" in generation_equal
+    assert "node_store_backend" in generation_struct
+    assert ".node_store_backend = snapshot->node_store_backend" in generation_builder
+    assert "content_generation_text_equal(left->node_store_backend" in generation_equal
     assert "snapshot->map_tile_cache_ready" not in map_input
     assert "snapshot->wifi_connected" not in map_input
     map_branch = changed.split("} else {", 1)[0]
@@ -568,10 +577,14 @@ def test_map_options_is_a_quiet_two_row_menu():
     assert options.count("map_menu_row(") == 2
     assert 'map_panel(parent, 16, 280, 448, 80)' in options
     assert (
-        '"Tiles download only while Map is open. Reopening the same area uses the saved copy."'
+        '"The local node area downloads in the background. Opening Map always has priority."'
         in options
     )
-    assert '"Built-in map"' not in options
+    assert (
+        '"Built-in tiles download only while Map is open. Offline prefetch needs an authorized SD source."'
+        in options
+    )
+    assert "background_prefetch_permitted" in options
     assert "Choose a location and review" not in options
 
 
@@ -598,7 +611,9 @@ def test_map_cache_status_is_read_only_and_reports_saved_work_honestly():
     assert "d1l_map_view_service_status(&view_status);" in cache_page
     assert "d1l_map_view_service_acquire_visible" not in cache_page
     assert "d1l_map_view_service_acquire_frame" not in cache_page
-    assert '"OpenStreetMap is built in."' in cache_page
+    assert '"Built-in OpenStreetMap - interactive cache only"' in cache_page
+    assert "view_status.provider_configured" in cache_page
+    assert "prefetch.selected_max_zoom" in cache_page
     assert '"(c) OpenStreetMap contributors"' in cache_page
     assert 'map_render_header(parent, "Cache status", "Read-only readiness", "Back"' in cache_page
 

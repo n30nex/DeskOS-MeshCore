@@ -2,36 +2,50 @@
 
 ## Current production finish line (2026-07-25)
 
-Feature implementation for the `full_feature` profile is 100% complete in the
-active worktree. The only remaining production work is evidence execution:
+DeskOS 1.0 / RC1 uses `core_1_0` with `conditional` SD support. The agreed RC1
+surface is implemented in source:
 
-1. finish the source-bound manifests and focused/full host gates;
-2. commit and push one immutable candidate;
-3. require the exact-SHA `d1l-ci` run and Ed25519-signed package to pass;
-4. download and verify that exact artifact;
-5. flash the current D1L on Pi 5 using only
-   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with
+- retained identity and boot advert;
+- Public/custom channels and DMs with truthful ACK/retry state;
+- contacts, up to 512 retained heard nodes, Finder, repeater Ping and contact
+  PATH/TRACE;
+- configured-location Map with signed node adverts, multiple Wi-Fi profiles
+  and authorized-provider background prefetch;
+- SD-primary retained history plus visible live-only RF degraded mode;
+- radio/device settings, packets, diagnostics, Observer;
+- full repeater/room login, status, telemetry, neighbours, ACL, bounded CLI,
+  room posts, logout and locally confirmed mutations.
+
+BLE companion transport, contact/channel QR sharing and signed
+OTA/update/recovery product workflows are deferred to 1.5 / RC2.
+
+The remaining RC1 work is one release-evidence path:
+
+1. freeze one immutable commit and require its exact-SHA GitHub Actions build;
+2. download and verify the exact `core_1_0`/`conditional` package, checksum
+   tree, inventory, provenance and SBOM;
+3. flash that exact artifact on Pi 5 `neopi5` using only
+   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after verifying
    `VID:PID 1a86:7523`;
-6. run automated post-flash, reboot/persistence, storage and non-Public RF
-   acceptance;
-7. collect one consolidated physical UI confirmation and publish only if the
-   final fail-closed audit is green.
+4. run the bounded boot/UI, advert/Public, DM/ACK, PATH/TRACE/Ping, Admin,
+   Wi-Fi reconnect, SD write/remount/degraded, and Map
+   download/offline-revisit gate;
+5. collect one consolidated physical UI confirmation and publish only when
+   the final fail-closed audit binds every receipt to the same artifact.
 
-Implementation complete includes BLE companion core protocol, Wi-Fi, Map,
-multi-channel messaging, verified contacts/QR, TRACE, repeater and room
-administration with no-history room login and locally confirmed mutations,
-TLS/QoS1 Observer, structured terminal/event log, display and notification
-preferences, and signed dual-slot local update with anti-rollback/rollback.
+No soak is required. Built-in OSM remains attributed and
+visible-current-view-only; authorized-provider prefetch pauses while
+interactive Map is open. Missing/unusable SD never redirects retained history
+into default NVS.
 
-The D1L has no onboard GPS. Map center requires an explicit user-set center or
-authenticated companion provenance; peer markers require signed peer-advert
-coordinates. Read-only automation does not transmit on Public RF. SD remains
-FAT32-only, conditional, non-formatting and backed by bounded NVS fallback.
+## Historical development roadmap
 
-The previous percentage snapshot below is retained as historical planning
-evidence. It is not the current implementation score or device route.
-
-This was the earlier production roadmap. The release definition and blocker analysis in [KRAB'S THOUGHTS](KRABSTHOUGHTS.MD) are incorporated here; the audit remains the detailed rationale, while this file preserves the earlier ordered execution plan.
+Everything below this heading is retained as planning and predecessor-evidence
+history. Old percentages, feature matrices, Full Feature/BLE/OTA claims,
+COM-port routes, built-in Map policy, NVS fallback and soak requirements are
+superseded and are not current RC1 scope or release instructions. The release
+definition and blocker analysis in [KRAB'S THOUGHTS](KRABSTHOUGHTS.MD) remain
+useful historical rationale.
 
 **Production release completion: 74% at the last strict-verified checkpoint; current fail-closed live score 64% (`64.2962962963%` raw).** Capability implementation is 80% (`80.3703703704%` raw), while final release-gate closure remains 0 of 11. The live score excludes automated-acceptance credit until current-main artifacts are downloaded and checksum-verified. These are reproducible reporting estimates, not release waivers; the firmware is not ready to tag or publish.
 
@@ -39,7 +53,7 @@ Live merged `main` is `bd6ea0e685442d8a820766f4686395e50ca5397f` through PR #198
 
 The last fully downloaded and checksum-verified strict evidence bank remains predecessor `d24894268d877c09644d41bb45f23a795af8b93d` / Actions `29645992569`. It passed 1,292 host and 33 checksum tests, 1,008 wire vectors, 931 oracle checks, and 800,000 sanitizer fuzz runs with zero findings; all five ZIPs / 46 entries verified. Canonical verification-receipt SHA-256 is `6142a4cc372186e269e6b9d9d9bca5372136303779db2bf308c6cf793569129d`. Its exact audit remains `ready_for_public_release=false` with 6 pass / 30 fail, including 28 P0 and 2 P1 failures. Those artifact counts and checksums are not transferred to current main. Current main has green CI, but its full downloaded artifact bank, exact flash, physical RF/SD/UI/update evidence, and final soak are pending.
 
-## Current feature completion matrix
+### Historical feature completion matrix
 
 “Complete” here means merged implementation. Every row still needs the applicable frozen-candidate release evidence.
 
@@ -52,7 +66,7 @@ The last fully downloaded and checksum-verified strict evidence bank remains pre
 
 The complete 27-domain implemented-versus-required matrix and exact open-PR stack are in the [2026-07-18 release handoff](RELEASE_HANDOFF_2026-07-18.md).
 
-## Current UI screenshots
+### Historical UI screenshots
 
 These 480×480 captures were regenerated on 2026-07-18 from the current merged UI base `9edc22f`. They are host-simulator design/regression references, not device photos or physical release evidence.
 
@@ -62,7 +76,7 @@ These 480×480 captures were regenerated on 2026-07-18 from the current merged U
 | Map | TRACE | Tools / Settings |
 | <img src="screenshots/map.png" width="240" alt="Current SIGUI Map simulator"> | <img src="screenshots/route_trace_sheet.png" width="240" alt="Current SIGUI TRACE simulator"> | <img src="screenshots/settings.png" width="240" alt="Current SIGUI Tools and Settings simulator"> |
 
-## Frozen 1.0 Product Contract
+### Historical 1.0 product contract
 
 DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that a normal user can operate without a serial console.
 
@@ -75,7 +89,7 @@ DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that
 - Every enabled action must complete end to end or return an honest, actionable error. A working-looking dead end is a release defect.
 - Persisted invalid settings, missing radio/RP2040, failed Wi-Fi, no/bad SD media, and upgrade state must never cause a permanent boot loop.
 
-## Current P0 Release Blockers
+### Historical P0 release blockers
 
 | Blocker | Current State | Next Proof |
 |---|---|---|
@@ -85,7 +99,7 @@ DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that
 | Physical screenshots/review | Current simulator captures were regenerated from merged base `9edc22f` and are shown above. Historical COM12 framebuffer evidence remains predecessor-bound. | Capture exact-candidate device photos, framebuffer/pixel receipts, touch/scroll/focus/keyboard results, and manual UI review. |
 | Long soak | Short evidence exists. | Run 12-hour idle/listening soak on the release artifact. |
 
-## Non-Negotiable Release Rules
+### Historical release rules
 
 - Firmware builds are GitHub-Actions-only. Hardware proof uses the exact checksummed Actions artifact for the commit under test.
 - COM12 is the D1L ESP32/UI console and production RP2040 bridge control path.
@@ -99,7 +113,7 @@ DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that
 - Keep release evidence fail-closed and commit-matched. Host contracts, simulator pixels, a different SDK build, or an older hardware artifact cannot qualify the release candidate by implication.
 - One issue-sized slice at a time. Each P0 must name its code scope, host checks, Actions job, physical proof, RF/destructive constraints, artifact schema, and single closure condition.
 
-## Recently Closed P0 Evidence
+### Historical closed-P0 evidence
 
 - Durable multi-channel data-model boundary: PR #114 head `bc215d81926c2205ada8866cb7e56a5b61e78563` merged as `cfe0792909cb120b6d6f6bbc9f5b5d7bba34abd7`. Retained PR Actions `29362265022` and exact-main Actions `29363353046` strict-pass; the exact-main receipt SHA-256 is `ab5403f3d31041c0dfed36cca3edf1b6639efef8ded77256a8c4dafdc89e4a29`, and portable aggregate SHA-256 is `545e15878bfcfbb41e3c2f9255e857df44f8cfde2faec3e0dcc5080cf58f5b8b`. This banks the bounded persistent channel model only; runtime/UI messaging, interoperability, RF, physical, and WP-09 closure stay open.
 - Packet-feed controller boundary: PR #115 head `fe929fb5300824b440378e54de9af4b188e374b2` merged as `483e46f6fbe881d559788debda3306225e422d12`, sharing tree `a672ded6471b5f4b5fe9f9b140499705f0c39d8f`. Retained PR Actions `29363499611` and exact-main Actions `29364365425` strict-pass; the exact-main receipt SHA-256 is `0581fd6ac744b8cb347736a47e534d1f9912bda30c98c4b3d4e103481900d9a5`, and portable aggregate SHA-256 is `84ed2f4cf683252ed3cbc8b20c2db9d3de1dace4772818dadc1cbe1b813b655e`. This banks only the bounded controller/query-adapter extraction; remaining UI ownership and physical acceptance stay open.
@@ -154,14 +168,14 @@ DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that
 - Mesh Roles hierarchy proof: PR #60 / source `0b138be` passed Actions `29068006554` and `29068007961`; COM12 captured Mesh Roles (`63DE54FB`), Rooms (`FD538D71`), and Repeaters (`5C41EE08`) with exact firmware/host CRC matches and passing simulator diffs. The companion three-round all-tab/data-refresh probe had zero failures, empty crashlog, `public_rf_tx=false`, and `formats_sd=false`.
 - Compose/input keyboard proof: PR #35 / issue #2 captured all 12 release-blocking keyboard callers on COM12 from `fce5d82` / Actions `28727064923` using `ui_compose_keyboard_capture_d1l.py --targets all`. The artifact reports `ok=true`, `capture_count=12`, `public_rf_tx=false`, and `formats_sd=false` for Public/DM compose, Public search, Packet search, contact edit, onboarding, map location/provider, and Wi-Fi SSID/password.
 
-## Feature Direction
+### Historical feature direction
 
 - Keep MeshCore-first behavior. Public messages, DMs, routes, packet diagnostics, and retained history are the core release value.
 - Keep Wi-Fi, BLE, GPS, OTA, and live map tile browsing honest as experimental or pending until hardware-proven.
 - Keep SD FAT32-only. Users prepare FAT32 SD cards on a computer; there is no device-side SD formatting path. Non-FAT32 media must report guidance and retain NVS fallback.
 - Keep hardware validation autonomous where possible: COM12 for ESP32 app/console, COM16 for RP2040 USB/CDC/UF2. Do not use COM8, COM11, or COM29 for D1L validation.
 
-## Ordered Production Plan
+### Historical ordered production plan
 
 The order below supersedes the former screenshot-first queue. Platform integration comes first, then protocol correctness, runtime durability, and one frozen end-to-end qualification.
 
@@ -282,7 +296,7 @@ Stage 6 evidence must come from the same frozen release-candidate commit and art
 4. Run the final release gate and inspect every P0 result and referenced artifact.
 5. Tag 1.0 only when `ready_for_public_release=true`, every enabled touchscreen workflow is complete, official MeshCore peers observe correct behavior, and failures recover without serial intervention.
 
-## P0 Workstream Ledger
+### Historical P0 workstream ledger
 
 The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below are the independently closable roadmap units; existing GitHub issues must be updated or split so none of these requirements is hidden inside a broad evidence issue.
 
@@ -299,7 +313,7 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 | SD and role truthfulness | P0.17, P0.18 | #4, #11, #70, #78 | Full media/bridge/power/fallback matrix passes with no intermittent false no-card state; role pages expose only evidence-backed labels/actions. |
 | Frozen release qualification | P0.20 | #8, #71 | Current physical review, full RF, SD/electrical, idle and active soaks, package audit, and exact-tag gate are green. |
 
-## Immediate Work Queue
+### Historical work queue
 
 WP-01's narrow exact-pair proof remains banked. Live main is `bd6ea0e` through PR #198 with exact-main Actions `29651963484` passed; the last fully downloaded strict bank remains `d248942` / Actions `29645992569`. PR #197 has green checks but requires rebase before merge. Draft #199 has host/conformance proof but fails the Actions firmware build on missing NimBLE declarations and is not a supported feature. The immediate software order is: land #197; repair and complete BLE ownership; finish remaining WP-05/WP-06/WP-11 protocol/runtime/durability boundaries; then complete administration, Terminal/diagnostics, Map lifecycle, notifications/accessibility, observer decision, and signed update/recovery. Freeze one exact full ESP32+RP2040 candidate only after those features are complete, then run the batched RF/SD/UI/Wi-Fi/BLE/update/power/soak gates and tag only after the exact release audit is green.
 
@@ -323,7 +337,7 @@ The numbered carryover notes below retain detailed acceptance constraints; they 
 7. Finish #78 with physical removal/reinsertion proof on the exact ESP32/RP2040 pair, and finish #73 plus #63 physical Map control/cache/marker/touch/photo/power-cycle proof. These require manual card/touch actions and are not replaced by serial automation.
 8. Close #69 ownership/schema/time recovery, the remaining #6/#16 runtime boundaries, the full SD/card/Seeed/electrical/power-loss, cold/warm boot, RF, and UI matrices, and the 12-hour idle/listening plus mixed active soaks. The WP-02 integration baseline is tracked and fail-closed; freeze and audit the exact #71 release candidate, then collect the missing physical roles and final matrices on that same candidate before tagging 1.0.
 
-## Evidence Already Banked, Not Final Qualification
+### Historical evidence bank
 
 - Map/Wi-Fi branch `de79c9f` passes its Actions jobs and exact-COM12 boot-loop recovery, Wi-Fi enable/reconnect/reboot, bounded scan, internal/DMA telemetry, SD readiness, and ten-minute stability checks. Physical Map entry/download/cache proof is still open.
 - PR #64 head `15f2a9ed99541fa059445ff3d1b06a40b4c42bee` merged as `12d5470eca45ef6e86b6e15cf1822716e563a78e`; PR #80 head `ab3e7d82b6f3c4b38fd80d833e155aa941dee045` merged as `4ee07caf09906abdcebe8faccd95790dceb5fe88`; PR #84 head `e5d2f8a21a0cb32713a7c0b3796f1660abda788d` then merged as `17a948cf1ad23a5d2a89419039897943028f9bce`. Exact PR #84 main run `29294553135` passed 823 host plus 24 checksum-contract tests and strict-verified both emitted manifests / 36 entries; the complete integration run `29290978741` remains the 8-manifest / 78-entry RP2040-inclusive baseline. This closes software integration and artifact bookkeeping, not physical combined-candidate qualification.
@@ -331,7 +345,7 @@ The numbered carryover notes below retain detailed acceptance constraints; they 
 - Retained repair commit `a2695fb` and Actions run `29183542983` banked a checksum-verified COM12 flash, exact-commit smoke, and SD file-canary proof. Successor `91be531` / Actions `29185308761` proved one fully quiesced controlled `SW` reboot with healthy retained-worker margin, then safely cancelled a later reboot when a route SD write exposed the RP2040 cached false-`no_card` gate. Exact PR #80 source `092293f2311a24c9899bc9bf343ab014c4ba0411` subsequently banked the narrow WP-01 inserted-card, 10/10 removal/reinsert, 5/5 retained reboot, and 7,207.089-second active-storage proof. PR #80 is merged; this predecessor-bound proof does not close all of #69/#78 or replace the broader frozen-candidate card/filesystem/electrical/power-loss/final-soak matrices.
 - Existing COM12 UI hierarchy/pixel artifacts, SD canaries, and short soaks remain useful regression evidence, but they do not replace current-commit screenshots, the final SD/RF matrices, WP-19 Map lifecycle proof, or the frozen-candidate soak.
 
-## Validation Notes
+### Historical validation notes
 
 - The active UI boundary includes `ui_navigation.c`, `ui_chrome.c`, `ui_home.c`, `ui_settings.c`, `ui_keyboard.c`, `ui_screen.c`, and `ui_modal.c`; remaining refactors must close an ownership or runtime-safety boundary.
 - `tools/ui_simulator.py` provides deterministic 480x480 schema/pixel checks and must retain large-mesh coverage.
@@ -343,6 +357,6 @@ The numbered carryover notes below retain detailed acceptance constraints; they 
 - Automated RF uses only `#test` or targeted DMs through an independent peer such as the COM11 Discord Python bot. It never uses default Public, and COM11 is never opened as D1L serial.
 - Soak artifacts must retain their command manifest; a duration and health summary without the commands executed is not release evidence.
 
-## Active Docs
+### Historical active-doc list
 
 Use [docs/README.md](README.md) as the documentation index. Keep [README.md](../README.md), [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md), [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md), [TEST_PLAN_D1L.md](TEST_PLAN_D1L.md), and the release-gate schema aligned whenever scope or evidence changes.

@@ -1,5 +1,11 @@
 # Codex Goal Prompt For Iterative D1L Release Work
 
+> **SUPERSEDED AGENT PROMPT — DO NOT COPY OR EXECUTE.**
+> Its COM routing, validation scope and release finish line predate the current
+> RC1 contract. Start from the [project README](../README.md),
+> [RC1 user guide](USER_GUIDE_D1L.md), [RC1 test plan](TEST_PLAN_D1L.md), and
+> [SD-card guide](D1L_SD_CARD_GUIDED_INSTALL.md) instead.
+
 Copy this into the next Codex goal when you want another fast release-blocker
 cycle.
 

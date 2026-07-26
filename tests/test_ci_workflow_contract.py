@@ -84,7 +84,8 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "ui_tab_abuse_d1l.py" not in host
     assert "python ./scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache" in host
     assert "python ./tools/ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready" in host
-    assert "python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-dm-fingerprint 0123456789ABCDEF --active-dm-text test" in host
+    assert "soak_d1l.py" not in host
+    assert "storage_active_soak_d1l.py" not in host
     assert "--active-public-text test" not in host
     assert "python ./scripts/sd_file_canary_d1l.py --dry-run" in host
     assert "python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run" in host
@@ -109,10 +110,12 @@ def test_ci_detects_when_sd_bridge_scope_is_required():
     assert "include_sd_bridge:" in text
     assert "default: true" in text
     assert "include_sd_bridge=true" in job
-    assert "reason=full_feature_candidate" in job
+    assert "reason=rc1_candidate" in job
     assert "reason=manual_dispatch" in job
-    assert "reason=full_feature_sd_paths" in job
+    assert "reason=rc1_sd_paths" in job
     assert "core_sd_disabled" not in job
+    assert 'release_profile = "core_1_0"' in workflow_text()
+    assert 'release_profile = "full_feature"' not in workflow_text()
     dispatch = job.split(
         'if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]', 1
     )[1].split("else", 1)[0]
@@ -258,7 +261,6 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "cp .github/d1l-build-inputs.json artifacts/idf-migration/build-inputs.json" in job
     assert "espressif/idf:release-v5.1" not in job
     assert not re.search(r"container:\s*espressif/idf:(?:latest|release-v)", job)
-    assert "idf.py build" in job
     assert "name: Capture ESP-IDF migration state" in job
     assert "name: d1l-idf55-migration-state" in job
     assert "path: artifacts/idf-migration/**" in job
@@ -292,7 +294,13 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "path: artifacts/rp2040-release-inputs" in job
     assert "merge-multiple: false" in job
     assert "package_args=(--build-dir build --out-dir artifacts/release" in job
-    assert "--release-profile full_feature --sd-history-mode conditional" in job
+    assert "--release-profile core_1_0 --sd-history-mode conditional" in job
+    assert (
+        "idf.py -D D1L_RELEASE_PROFILE=core_1_0 "
+        "-D D1L_SD_HISTORY_MODE=conditional build"
+    ) in job
+    assert "D1L_UPDATE_SIGNING_KEY_PEM" not in job
+    assert "--update-signing-key" not in job
     assert '--meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON"' in job
     assert 'python scripts/package_release_d1l.py "${package_args[@]}"' in job
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job

@@ -140,6 +140,7 @@ static bool s_service_initialized;
 static bool s_radio_started;
 static volatile bool s_tx_busy;
 static volatile bool s_active_tx_ack_response;
+static bool s_active_advert_boot;
 static bool s_pending_channel_tx;
 static uint64_t s_pending_channel_id;
 static uint64_t s_pending_channel_operation_id;
@@ -158,7 +159,23 @@ static int s_trace_last_radio_snr_quarter_db;
 static bool s_trace_last_retention_attempted;
 static bool s_trace_last_route_summary_accepted;
 static bool s_trace_last_packet_preview_retained;
+static char s_trace_target_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static bool s_trace_zero_hop_ping;
 static d1l_store_lock_t s_trace_lock = D1L_STORE_LOCK_INITIALIZER;
+typedef struct {
+    d1l_meshcore_discovery_result_t result;
+    uint32_t received_at_ms;
+} d1l_meshcore_discovery_record_t;
+
+static d1l_meshcore_discovery_record_t
+    s_discovery_results[D1L_MESHCORE_DISCOVERY_MAX_RESULTS];
+static size_t s_discovery_result_count;
+static uint32_t s_discovery_generation;
+static uint32_t s_discovery_total_responses;
+static uint32_t s_discovery_tag;
+static uint32_t s_discovery_started_ms;
+static bool s_discovery_active;
+static d1l_store_lock_t s_discovery_lock = D1L_STORE_LOCK_INITIALIZER;
 static uint32_t s_runtime_command_queue_high_water;
 static uint32_t s_runtime_priority_queue_high_water;
 static uint32_t s_runtime_event_queue_high_water;
@@ -303,6 +320,7 @@ typedef enum {
     D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
     D1L_MESHCORE_SERVICE_CMD_SEND_DM,
     D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT,
+    D1L_MESHCORE_SERVICE_CMD_DISCOVER_NEARBY,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_QUERY,
@@ -325,6 +343,7 @@ typedef struct {
     uint16_t delay_ms;
     bool ack_response;
     bool flood;
+    bool boot_advert;
     char advert_pub_prefix[17];
     char advert_node_name[D1L_NODE_NAME_LEN];
     uint8_t advert_path_hash_bytes;
@@ -332,6 +351,7 @@ typedef struct {
     char dm_text[D1L_MESSAGE_TEXT_LEN];
     bool dm_path_probe;
     char trace_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    bool trace_zero_hop_ping;
     char admin_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     d1l_meshcore_admin_mutation_t admin_mutation;
     d1l_meshcore_admin_query_t admin_query;
@@ -4155,6 +4175,104 @@ static bool meshcore_service_expire_trace_if_due(uint32_t now_ms)
     return expired;
 }
 
+static void discovery_generation_advance_locked(void)
+{
+    s_discovery_generation++;
+    if (s_discovery_generation == 0U) {
+        s_discovery_generation = 1U;
+    }
+}
+
+static bool discovery_session_active_locked(uint32_t now_ms)
+{
+    return s_discovery_active &&
+           (uint32_t)(now_ms - s_discovery_started_ms) <
+               D1L_MESHCORE_DISCOVERY_SESSION_MS;
+}
+
+static void parse_rx_discovery_packet(const uint8_t *payload, uint16_t size,
+                                      int16_t rssi, int8_t snr)
+{
+    d1l_meshcore_wire_packet_t packet = {0};
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
+        packet.type != D1L_MESHCORE_PAYLOAD_CONTROL ||
+        packet.route != D1L_MESHCORE_ROUTE_DIRECT ||
+        packet.path_hops != 0U) {
+        return;
+    }
+
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    d1l_store_lock_take(&s_discovery_lock);
+    if (!discovery_session_active_locked(now_ms)) {
+        if (s_discovery_active) {
+            s_discovery_active = false;
+            discovery_generation_advance_locked();
+        }
+        d1l_store_lock_give(&s_discovery_lock);
+        return;
+    }
+
+    d1l_meshcore_discovery_wire_result_t wire = {0};
+    if (!d1l_meshcore_discovery_parse_response(
+            packet.payload, packet.payload_len, s_discovery_tag, &wire)) {
+        d1l_store_lock_give(&s_discovery_lock);
+        return;
+    }
+
+    char public_key_hex[65] = {0};
+    char fingerprint[17] = {0};
+    hex_prefix(public_key_hex, sizeof(public_key_hex), wire.public_key,
+               sizeof(wire.public_key));
+    hex_prefix(fingerprint, sizeof(fingerprint), wire.public_key, 8U);
+
+    size_t index = s_discovery_result_count;
+    for (size_t i = 0U; i < s_discovery_result_count; ++i) {
+        if (strcmp(s_discovery_results[i].result.public_key_hex,
+                   public_key_hex) == 0) {
+            index = i;
+            break;
+        }
+    }
+    if (index == s_discovery_result_count &&
+        s_discovery_result_count < D1L_MESHCORE_DISCOVERY_MAX_RESULTS) {
+        s_discovery_result_count++;
+    }
+    if (index >= D1L_MESHCORE_DISCOVERY_MAX_RESULTS) {
+        d1l_store_lock_give(&s_discovery_lock);
+        return;
+    }
+
+    d1l_meshcore_discovery_record_t *record = &s_discovery_results[index];
+    memset(record, 0, sizeof(*record));
+    record->result.node_type = wire.node_type;
+    snprintf(record->result.fingerprint,
+             sizeof(record->result.fingerprint), "%s", fingerprint);
+    snprintf(record->result.public_key_hex,
+             sizeof(record->result.public_key_hex), "%s", public_key_hex);
+    record->result.last_rssi_dbm = rssi;
+    record->result.local_snr_quarter_db = snr;
+    record->result.remote_snr_quarter_db = wire.remote_snr_quarter_db;
+    record->received_at_ms = now_ms;
+    if (s_discovery_total_responses < UINT32_MAX) {
+        s_discovery_total_responses++;
+    }
+    discovery_generation_advance_locked();
+    d1l_store_lock_give(&s_discovery_lock);
+
+    status_lock();
+    s_status.rx_packets++;
+    status_unlock();
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(note, sizeof(note), "nearby %.16s t=%u snrq=%d",
+             fingerprint, (unsigned)wire.node_type,
+             (int)wire.remote_snr_quarter_db);
+    if (!append_packet_log_deferred(
+            "rx", "node_discover_resp", rssi, snr, 1U, 0U, size,
+            payload, size, note)) {
+        ESP_LOGW(TAG, "packet log discovery response admission failed");
+    }
+}
+
 static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
                                   int16_t rssi, int8_t snr)
 {
@@ -4636,6 +4754,9 @@ static void meshcore_service_handle_radio_tx_done(
         event->tx_operation.kind == D1L_MESH_TX_OPERATION_ACK_RESPONSE;
     const bool dm_tx =
         event->tx_operation.kind == D1L_MESH_TX_OPERATION_DM;
+    const bool advert_tx =
+        event->tx_operation.kind == D1L_MESH_TX_OPERATION_ADVERT;
+    const bool boot_advert_tx = advert_tx && s_active_advert_boot;
 
     /* Re-arm RX before any retained-store work so a prompt peer ACK can be
      * copied into the radio event queue while the sole owner persists state. */
@@ -4643,6 +4764,13 @@ static void meshcore_service_handle_radio_tx_done(
     s_active_tx_ack_response = false;
     s_tx_busy = false;
     s_status.tx_packets++;
+    if (advert_tx) {
+        s_status.advert_tx_done++;
+        if (boot_advert_tx) {
+            s_status.boot_advert_tx_done++;
+        }
+        s_active_advert_boot = false;
+    }
     s_status.state = D1L_MESHCORE_SERVICE_READY;
     d1l_meshcore_start_rx();
 
@@ -4697,10 +4825,20 @@ static void meshcore_service_handle_radio_tx_timeout(
         event->tx_operation.kind == D1L_MESH_TX_OPERATION_ACK_RESPONSE;
     const bool dm_tx =
         event->tx_operation.kind == D1L_MESH_TX_OPERATION_DM;
+    const bool advert_tx =
+        event->tx_operation.kind == D1L_MESH_TX_OPERATION_ADVERT;
+    const bool boot_advert_tx = advert_tx && s_active_advert_boot;
 
     meshcore_radio_tx_operation_clear();
     s_active_tx_ack_response = false;
     s_tx_busy = false;
+    if (advert_tx) {
+        s_status.advert_tx_failed++;
+        if (boot_advert_tx) {
+            s_status.boot_advert_tx_failed++;
+        }
+        s_active_advert_boot = false;
+    }
     s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
     d1l_meshcore_start_rx();
 
@@ -4846,6 +4984,9 @@ static void meshcore_service_handle_radio_rx_done(
             break;
         case D1L_MESHCORE_PACKET_SEMANTIC_ADVERT:
             parse_rx_advert_packet(payload, size, rssi, snr);
+            break;
+        case D1L_MESHCORE_PACKET_SEMANTIC_CONTROL:
+            parse_rx_discovery_packet(payload, size, rssi, snr);
             break;
         case D1L_MESHCORE_PACKET_SEMANTIC_INVALID:
         default:
@@ -5095,6 +5236,9 @@ static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd
     if (!meshcore_radio_tx_operation_begin(operation_kind, NULL)) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (operation_kind == D1L_MESH_TX_OPERATION_ADVERT) {
+        s_active_advert_boot = cmd->boot_advert;
+    }
     if (operation_kind == D1L_MESH_TX_OPERATION_PUBLIC) {
         if (!s_pending_channel_tx || s_pending_channel_id == 0U ||
             !s_pending_channel_packet_hash_ready) {
@@ -5186,6 +5330,33 @@ static void meshcore_service_finalize_send_advert(
     if (!packet_retained) {
         ESP_LOGW(TAG, "packet log advert tx retention failed");
     }
+    status_lock();
+    s_status.advert_tx_queued++;
+    if (cmd->boot_advert) {
+        s_status.boot_advert_tx_queued++;
+    }
+    s_status.last_advert_boot = cmd->boot_advert;
+    s_status.last_advert_flood = cmd->flood;
+    snprintf(
+        s_status.last_advert_public_key_prefix,
+        sizeof(s_status.last_advert_public_key_prefix), "%s",
+        cmd->advert_pub_prefix);
+    snprintf(
+        s_status.last_advert_node_name,
+        sizeof(s_status.last_advert_node_name), "%s",
+        cmd->advert_node_name);
+    if (cmd->boot_advert) {
+        s_status.boot_advert_flood = cmd->flood;
+        snprintf(
+            s_status.boot_advert_public_key_prefix,
+            sizeof(s_status.boot_advert_public_key_prefix), "%s",
+            cmd->advert_pub_prefix);
+        snprintf(
+            s_status.boot_advert_node_name,
+            sizeof(s_status.boot_advert_node_name), "%s",
+            cmd->advert_node_name);
+    }
+    status_unlock();
 }
 
 static void finalize_pending_dm_radio_result(bool sent, esp_err_t error)
@@ -5667,6 +5838,75 @@ static esp_err_t meshcore_service_resolve_trace_contact(
     return ESP_OK;
 }
 
+static esp_err_t meshcore_service_handle_discover_nearby(void)
+{
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    d1l_store_lock_take(&s_discovery_lock);
+    if (discovery_session_active_locked(now_ms)) {
+        d1l_store_lock_give(&s_discovery_lock);
+        return ESP_ERR_NOT_FINISHED;
+    }
+    d1l_store_lock_give(&s_discovery_lock);
+
+    uint32_t tag = esp_random();
+    if (tag == 0U) {
+        tag = 1U;
+    }
+    uint8_t request[D1L_MESHCORE_DISCOVERY_REQUEST_BYTES] = {0};
+    if (!d1l_meshcore_discovery_build_request(tag, request)) {
+        return ESP_FAIL;
+    }
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
+    size_t raw_len = 0U;
+    const uint8_t header = (uint8_t)(
+        (D1L_MESHCORE_PAYLOAD_CONTROL << 2U) |
+        D1L_MESHCORE_ROUTE_DIRECT);
+    if (!d1l_meshcore_wire_write_prefix(
+            header, 0U, 0U, 0U, NULL, raw, sizeof(raw), &raw_len) ||
+        sizeof(raw) - raw_len < sizeof(request)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    memcpy(&raw[raw_len], request, sizeof(request));
+    raw_len += sizeof(request);
+    if (raw_len > UINT8_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    d1l_store_lock_take(&s_discovery_lock);
+    memset(s_discovery_results, 0, sizeof(s_discovery_results));
+    s_discovery_result_count = 0U;
+    s_discovery_total_responses = 0U;
+    s_discovery_tag = tag;
+    s_discovery_started_ms = now_ms;
+    s_discovery_active = true;
+    discovery_generation_advance_locked();
+    d1l_store_lock_give(&s_discovery_lock);
+
+    d1l_meshcore_service_cmd_t raw_cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+        .requested_tx_kind = D1L_MESH_TX_OPERATION_GENERIC,
+        .raw_len = (uint8_t)raw_len,
+    };
+    memcpy(raw_cmd.raw, raw, raw_len);
+    const esp_err_t ret = meshcore_service_handle_send_raw(&raw_cmd);
+    if (ret != ESP_OK) {
+        d1l_store_lock_take(&s_discovery_lock);
+        if (s_discovery_active && s_discovery_tag == tag) {
+            s_discovery_active = false;
+            discovery_generation_advance_locked();
+        }
+        d1l_store_lock_give(&s_discovery_lock);
+        return ret;
+    }
+
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(note, sizeof(note), "nearby tag=%08lX zero_hop=1",
+             (unsigned long)tag);
+    append_packet_log("tx", "node_discover_req", 0, 0, 1U, 0U,
+                      (uint16_t)raw_len, raw, raw_len, note);
+    return ESP_OK;
+}
+
 static esp_err_t meshcore_service_handle_send_trace_contact(
     const d1l_meshcore_service_cmd_t *cmd)
 {
@@ -5698,24 +5938,6 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
 
     d1l_settings_t settings_snapshot = {0};
     (void)d1l_settings_public_snapshot(&settings_snapshot);
-    const bool learned_this_boot = contact.out_path_valid &&
-        lookup_boot_route(contact.fingerprint, contact.out_path,
-                          contact.out_path_len,
-                          contact.out_path_state.generation);
-    d1l_meshcore_route_selection_t selection = {0};
-    if (!d1l_meshcore_route_select_canonical(
-            contact.out_path_valid, learned_this_boot,
-            contact.out_path, contact.out_path_len,
-            &contact.out_path_state, now_ms,
-            settings_snapshot.path_hash_bytes, &selection) ||
-        selection.route != D1L_MESHCORE_ROUTE_DIRECT ||
-        selection.reason != D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    const bool contact_forwards_trace =
-        strcmp(contact.type, "repeater") == 0 ||
-        strcmp(contact.type, "room") == 0;
     uint8_t contact_public_key[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
     if (!hex_to_bytes(contact_public_key, sizeof(contact_public_key),
                       contact.public_key_hex)) {
@@ -5723,10 +5945,47 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
         return ESP_ERR_INVALID_STATE;
     }
     d1l_meshcore_contact_trace_plan_t plan = {0};
-    const d1l_meshcore_contact_trace_plan_result_t plan_result =
-        d1l_meshcore_trace_plan_contact(
+    d1l_meshcore_contact_trace_plan_result_t plan_result =
+        D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
+    if (cmd->trace_zero_hop_ping) {
+        if (strcmp(contact.type, "repeater") != 0 ||
+            settings_snapshot.path_hash_bytes == 0U ||
+            settings_snapshot.path_hash_bytes >
+                D1L_MESHCORE_TRACE_MAX_CONTACT_HASH_BYTES) {
+            secure_zero_bytes(contact_public_key,
+                              sizeof(contact_public_key));
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+        plan.includes_contact = true;
+        plan.path_hash_bytes = settings_snapshot.path_hash_bytes;
+        plan.path_hops = 1U;
+        memcpy(plan.path_hashes, contact_public_key,
+               plan.path_hash_bytes);
+        plan_result = D1L_MESHCORE_CONTACT_TRACE_PLAN_OK;
+    } else {
+        const bool learned_this_boot = contact.out_path_valid &&
+            lookup_boot_route(contact.fingerprint, contact.out_path,
+                              contact.out_path_len,
+                              contact.out_path_state.generation);
+        d1l_meshcore_route_selection_t selection = {0};
+        if (!d1l_meshcore_route_select_canonical(
+                contact.out_path_valid, learned_this_boot,
+                contact.out_path, contact.out_path_len,
+                &contact.out_path_state, now_ms,
+                settings_snapshot.path_hash_bytes, &selection) ||
+            selection.route != D1L_MESHCORE_ROUTE_DIRECT ||
+            selection.reason != D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN) {
+            secure_zero_bytes(contact_public_key,
+                              sizeof(contact_public_key));
+            return ESP_ERR_INVALID_STATE;
+        }
+        const bool contact_forwards_trace =
+            strcmp(contact.type, "repeater") == 0 ||
+            strcmp(contact.type, "room") == 0;
+        plan_result = d1l_meshcore_trace_plan_contact(
             selection.path, selection.path_len, contact_forwards_trace,
             contact_public_key, &plan);
+    }
     secure_zero_bytes(contact_public_key, sizeof(contact_public_key));
     if (plan_result == D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH ||
         plan_result == D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY) {
@@ -5753,6 +6012,12 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
         &s_trace_tracker, tag, auth_code, plan.path_hash_bytes,
         plan.path_hashes,
         plan.path_hops, now_ms);
+    if (began) {
+        snprintf(s_trace_target_fingerprint,
+                 sizeof(s_trace_target_fingerprint), "%s",
+                 contact.fingerprint);
+        s_trace_zero_hop_ping = cmd->trace_zero_hop_ping;
+    }
     d1l_store_lock_give(&s_trace_lock);
     if (!began) {
         return ESP_ERR_INVALID_STATE;
@@ -5774,20 +6039,25 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
     }
 
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    snprintf(note, sizeof(note), "%.12s loop_hops=%u contact=%u",
+    snprintf(note, sizeof(note), "%.12s loop_hops=%u contact=%u ping=%u",
              contact.fingerprint, (unsigned)plan.path_hops,
-             plan.includes_contact ? 1U : 0U);
+             plan.includes_contact ? 1U : 0U,
+             cmd->trace_zero_hop_ping ? 1U : 0U);
     const esp_err_t route_ret =
         d1l_route_store_upsert_observation_volatile(
             contact.fingerprint,
             contact.alias[0] ? contact.alias : contact.fingerprint,
-            "trace_request", "direct", "tx", 0, 0, plan.path_hash_bytes,
+            cmd->trace_zero_hop_ping ? "ping_request" : "trace_request",
+            "direct", "tx", 0, 0, plan.path_hash_bytes,
             plan.path_hops, source.raw_len);
     if (route_ret != ESP_OK) {
         ESP_LOGW(TAG, "volatile contact TRACE request route failed: %s",
                  esp_err_to_name(route_ret));
     }
-    append_packet_log("tx", "trace_request", 0, 0, plan.path_hash_bytes,
+    append_packet_log("tx",
+                      cmd->trace_zero_hop_ping ? "ping_request" :
+                          "trace_request",
+                      0, 0, plan.path_hash_bytes,
                       plan.path_hops, source.raw_len, source.raw,
                       source.raw_len, note);
     status_lock();
@@ -6421,6 +6691,7 @@ static bool meshcore_service_command_requires_idle_tx(
     case D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT:
     case D1L_MESHCORE_SERVICE_CMD_SEND_DM:
     case D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT:
+    case D1L_MESHCORE_SERVICE_CMD_DISCOVER_NEARBY:
     case D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN:
     case D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS:
     case D1L_MESHCORE_SERVICE_CMD_ADMIN_QUERY:
@@ -6641,6 +6912,12 @@ static void meshcore_service_task(void *arg)
             break;
         case D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT:
             ret = meshcore_service_handle_send_trace_contact(&cmd);
+            if (ret != ESP_OK) {
+                s_status.rejected_commands++;
+            }
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_DISCOVER_NEARBY:
+            ret = meshcore_service_handle_discover_nearby();
             if (ret != ESP_OK) {
                 s_status.rejected_commands++;
             }
@@ -7053,7 +7330,18 @@ void d1l_meshcore_service_init(void)
         s_trace_last_retention_attempted = false;
         s_trace_last_route_summary_accepted = false;
         s_trace_last_packet_preview_retained = false;
+        s_trace_target_fingerprint[0] = '\0';
+        s_trace_zero_hop_ping = false;
         d1l_store_lock_give(&s_trace_lock);
+        d1l_store_lock_take(&s_discovery_lock);
+        memset(s_discovery_results, 0, sizeof(s_discovery_results));
+        s_discovery_result_count = 0U;
+        s_discovery_generation = 0U;
+        s_discovery_total_responses = 0U;
+        s_discovery_tag = 0U;
+        s_discovery_started_ms = 0U;
+        s_discovery_active = false;
+        d1l_store_lock_give(&s_discovery_lock);
         s_next_radio_tx_operation_id = 0U;
         meshcore_radio_tx_operation_clear();
         memset(s_callback_tx_history, 0, sizeof(s_callback_tx_history));
@@ -7081,6 +7369,7 @@ void d1l_meshcore_service_init(void)
     s_radio_started = false;
     s_tx_busy = false;
     s_active_tx_ack_response = false;
+    s_active_advert_boot = false;
     __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
     clear_pending_channel_tx();
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
@@ -7277,6 +7566,9 @@ void d1l_meshcore_service_trace_snapshot(
         snapshot.last_tag = s_trace_tracker.last_result.tag;
         snapshot.last_age_ms =
             (uint32_t)(now_ms - s_trace_tracker.completed_at_ms);
+        snapshot.last_round_trip_ms =
+            (uint32_t)(s_trace_tracker.completed_at_ms -
+                       s_trace_tracker.pending_started_ms);
         snapshot.last_path_hash_bytes =
             s_trace_tracker.last_result.path_hash_bytes;
         snapshot.last_path_hops = s_trace_tracker.last_result.path_hops;
@@ -7297,8 +7589,42 @@ void d1l_meshcore_service_trace_snapshot(
         snapshot.last_packet_preview_retained =
             s_trace_last_packet_preview_retained;
     }
+    snprintf(snapshot.target_fingerprint,
+             sizeof(snapshot.target_fingerprint), "%s",
+             s_trace_target_fingerprint);
+    snapshot.zero_hop_ping = s_trace_zero_hop_ping;
     d1l_store_lock_give(&s_trace_lock);
     *out_snapshot = snapshot;
+}
+
+void d1l_meshcore_service_discovery_snapshot(
+    d1l_meshcore_discovery_snapshot_t *out_snapshot)
+{
+    if (!out_snapshot) {
+        return;
+    }
+    memset(out_snapshot, 0, sizeof(*out_snapshot));
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    d1l_store_lock_take(&s_discovery_lock);
+    out_snapshot->generation = s_discovery_generation;
+    out_snapshot->active = discovery_session_active_locked(now_ms);
+    out_snapshot->tag = s_discovery_tag;
+    if (out_snapshot->active) {
+        const uint32_t elapsed = now_ms - s_discovery_started_ms;
+        out_snapshot->remaining_ms =
+            D1L_MESHCORE_DISCOVERY_SESSION_MS - elapsed;
+    }
+    out_snapshot->total_responses = s_discovery_total_responses;
+    out_snapshot->result_count = s_discovery_result_count;
+    if (out_snapshot->result_count > D1L_MESHCORE_DISCOVERY_MAX_RESULTS) {
+        out_snapshot->result_count = D1L_MESHCORE_DISCOVERY_MAX_RESULTS;
+    }
+    for (size_t i = 0U; i < out_snapshot->result_count; ++i) {
+        out_snapshot->results[i] = s_discovery_results[i].result;
+        out_snapshot->results[i].age_ms =
+            now_ms - s_discovery_results[i].received_at_ms;
+    }
+    d1l_store_lock_give(&s_discovery_lock);
 }
 
 void d1l_meshcore_service_admin_snapshot(
@@ -7508,15 +7834,26 @@ esp_err_t d1l_meshcore_service_admin_logout(void)
     return ret;
 }
 
-esp_err_t d1l_meshcore_service_request_advert(bool flood)
+static esp_err_t meshcore_service_request_advert(bool flood, bool boot_advert)
 {
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
         .requested_tx_kind = D1L_MESH_TX_OPERATION_ADVERT,
         .flood = flood,
+        .boot_advert = boot_advert,
     };
     return meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+}
+
+esp_err_t d1l_meshcore_service_request_advert(bool flood)
+{
+    return meshcore_service_request_advert(flood, false);
+}
+
+esp_err_t d1l_meshcore_service_request_boot_advert(bool flood)
+{
+    return meshcore_service_request_advert(flood, true);
 }
 
 static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
@@ -7960,7 +8297,30 @@ esp_err_t d1l_meshcore_service_reset_contact_route(
     return ESP_OK;
 }
 
-esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint)
+esp_err_t d1l_meshcore_service_discover_nearby(void)
+{
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_DISCOVER_NEARBY,
+    };
+    return meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+}
+
+void d1l_meshcore_service_clear_discovery_results(void)
+{
+    d1l_store_lock_take(&s_discovery_lock);
+    memset(s_discovery_results, 0, sizeof(s_discovery_results));
+    s_discovery_result_count = 0U;
+    s_discovery_total_responses = 0U;
+    s_discovery_tag = 0U;
+    s_discovery_started_ms = 0U;
+    s_discovery_active = false;
+    discovery_generation_advance_locked();
+    d1l_store_lock_give(&s_discovery_lock);
+}
+
+static esp_err_t meshcore_service_send_trace_command(
+    const char *fingerprint, bool zero_hop_ping)
 {
     if (!fingerprint ||
         strlen(fingerprint) != D1L_NODE_FINGERPRINT_LEN - 1U) {
@@ -7968,6 +8328,7 @@ esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint)
     }
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT,
+        .trace_zero_hop_ping = zero_hop_ping,
     };
     for (size_t i = 0U; i < D1L_NODE_FINGERPRINT_LEN - 1U; ++i) {
         const char value = meshcore_service_lower_hex(fingerprint[i]);
@@ -7980,6 +8341,16 @@ esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint)
     cmd.trace_fingerprint[D1L_NODE_FINGERPRINT_LEN - 1U] = '\0';
     return meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+}
+
+esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint)
+{
+    return meshcore_service_send_trace_command(fingerprint, false);
+}
+
+esp_err_t d1l_meshcore_service_ping_repeater(const char *fingerprint)
+{
+    return meshcore_service_send_trace_command(fingerprint, true);
 }
 
 const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state)

@@ -1,187 +1,173 @@
-# MeshCore DeskOS D1L Full Feature User Guide
+# MeshCore DeskOS D1L 1.0 / RC1 User Guide
 
-This guide covers the production `full_feature` firmware for the Seeed
-SenseCAP Indicator D1L. DeskOS is a non-forwarding MeshCore desk client: it
-receives and sends user-requested traffic but does not act as a repeater.
+This guide covers the production `core_1_0` firmware for the Seeed SenseCAP
+Indicator D1L. DeskOS is a non-forwarding MeshCore client: it sends and
+receives user-requested traffic but does not repeat other devices' traffic.
 
 ## First start
 
 1. Power on the D1L and complete onboarding.
-2. Set a device name and confirm the Canada/USA radio profile unless your
-   authorized region requires another supported setting.
-3. Open **Tools → Identity** and confirm the local identity is ready.
-4. Open **Tools → Diagnostics** and confirm board, radio, settings and retained
-   storage are healthy.
-5. Leave Wi-Fi, Bluetooth and Observer off until you need them.
+2. Set the device name and confirm the authorized radio profile.
+3. Open **Tools → Identity** and confirm the retained identity is ready.
+4. Insert a prepared FAT32 DeskOS SD card.
+5. Open **Tools → Storage** and confirm the card and data root are ready.
+6. Configure Wi-Fi if automatic Map downloads are wanted.
 
-The bottom dock is **Home**, **Messages**, **Nodes**, **Map**, and **Tools**.
-Swipe vertically in lists and long sheets. Home itself is a summary rather
-than a long scrolling page.
+The dock is **Home**, **Messages**, **Nodes**, **Map**, and **Tools**. Home is a
+summary page; lists and long sheets scroll vertically.
 
-## Messages and channels
+After MeshCore receive starts, DeskOS queues a signed flood advert for the
+retained device identity. This lets nearby clients attribute later Public
+messages instead of showing only `Unknown`.
 
-**Messages** opens the channel and direct-message views. Reading, scrolling,
-searching and refreshing are RF-silent. A transmission occurs only after an
-explicit Send, Advert, Trace or administration action.
+## Messages, channels and direct messages
 
-The fixed Public channel is always present. Full Feature also supports
-creating/importing channels, selecting an active channel, renaming compatible
-entries, exporting share URIs, and removing non-protected channels. The Public
-channel cannot be deleted.
+The Public channel is always present. DeskOS also supports custom channels:
+create or import, select, enable, rename, make default and remove with local
+confirmation. QR sharing is intentionally absent from RC1; URI import remains
+available.
 
-A Public packet's display name has the `sender_name_unverified` boundary. It
-never alias-matches into a DM destination. Direct-message compose requires the
-complete public key of the same retained, verified chat contact; heard-only,
-incomplete, mismatched and non-chat identities remain read-only.
+Public and channel views support send, receive, retained history, search and
+unread state. Public display names have the `sender_name_unverified` boundary.
+A displayed name never alias-matches into a direct-message destination.
+Direct-message compose requires the
+complete public key of a retained verified chat contact. Heard-only, truncated,
+mismatched and non-chat identities remain read-only.
 
 DM rows report queued, transmitted, acknowledged, retrying or failed state.
-Opening a thread or refreshing it never silently retries a failed draft.
+Opening or refreshing a thread does not silently retry a failed message.
 
-## Contacts, nodes, routes and packets
+## Contacts, Finder, Ping and TRACE
 
-Contact detail supports verified MeshCore QR import/export, rename,
-favorite/mute state and confirmed deletion. Unknown or malformed roles remain
-read-only.
+Contacts can be imported from the USB console with
+`contacts import <meshcore-uri>`. The touchscreen supports rename, favorite,
+mute and confirmed removal. Contact and channel QR sharing is deferred to RC2.
 
-**Nodes** shows heard peers and role-specific detail. Signed advert locations
-can appear as map markers only when their provenance and non-future age can be
-validated. Route and signal views expose retained evidence without inventing
-hop identity.
+From **Nodes**:
 
-**Tools → Packets** is a bounded terminal-style packet view with pause/resume,
-filters, search, packet detail and raw preview. **Trace** and path probes are
-explicit RF actions; ordinary inspection is silent.
+- **Find** sends a zero-hop discovery request and lists returned full keys,
+  role and there/back SNR. Finder results are unverified until a signed advert
+  is received and therefore are not automatically promoted to contacts.
+- **Ping** on a repeater sends a direct zero-hop TRACE.
+- **PATH/TRACE** on a verified contact displays pending, timeout, reply, RTT,
+  RSSI and hop SNR state.
+- **Clear** requires confirmation and removes the retained heard-node list.
+
+Ordinary inspection, scrolling, filtering and refresh are RF-silent.
+The retained list is bounded to 512 nodes. At capacity, only an unlocated
+least-recent entry may be replaced. A node with a valid signed-advert location
+stays on Map until you explicitly clear the node list; if all 512 entries are
+located, a new fingerprint is rejected rather than evicting a marker.
 
 ## Map
 
-The D1L has no onboard GPS. The GPS/location boundary is explicit: Map center is supplied by an explicit user-set
-center or an authenticated bonded companion. The source is stored and shown
-as `manual` or `authenticated_companion`; it is never inferred from the
-coordinates.
+The D1L has no onboard GPS. The GPS/location boundary is explicit: set the
+device location from the Map location workflow. DeskOS centers on that
+configured location and plots only valid signed peer-advert coordinates.
+Markers follow the bounded retained-node list and update when newer signed
+data replaces an advert.
 
-Use **Map → Map options → Set location or Cache status**. The map uses the
-built-in OpenStreetMap tile source and always displays
-`(c) OpenStreetMap contributors`. The bounded interactive policy is:
+Interactive Map supports one-finger pan, **-**, **+**, and **Center** from zoom
+8 through 18, limited by the selected provider.
+Completed tiles are reused from SD.
 
-- zoom 8 through 14, starting at 10;
-- one-finger pan and direct `-`, `+`, and **Center** controls;
-- a visible current-view 3x3 tile maximum;
-- at most one zoom request per visible generation;
-- cache/reuse of completed tiles;
-- no background prefetch and no area download.
+The built-in OpenStreetMap Standard source displays
+`(c) OpenStreetMap contributors` and fetches only the visible current-view 3×3
+at one zoom per visible generation while Map is open. Read-only Map probes
+never request tiles. Authorized-provider background prefetch pauses while the
+interactive Map is open and resumes after it closes.
 
-Map probes never request map tiles. Tile networking requires enabled,
-connected Wi-Fi, a trusted center, and ready SD-backed tile storage.
+Automatic download starts in the background only when all of these are true:
+
+- a device location is configured;
+- Wi-Fi is enabled and connected;
+- SD-backed Map storage is ready;
+- the installed provider manifest explicitly permits offline storage and
+  background prefetch.
+
+The download bounds include the device location and signed nodes no farther
+than 200 km, plus a small edge margin. DeskOS selects the highest zoom from
+8–18 that fits the provider and card budget. Map data may use at most 60% of
+the card and must leave at least 8 GiB outside the Map allocation. A provider
+without explicit prefetch permission remains visible-view-only.
+
+Provider attribution is shown on-device and must remain with distributed map
+data. Do not configure a service whose license or tile policy forbids offline
+storage or bulk/background retrieval.
 
 ## Wi-Fi
 
-Open **Tools → Connections → Wi-Fi**. Scan, save a station profile, connect or
-disconnect explicitly. Saved passwords are not printed by status, logs or
-exports. Wi-Fi and BLE share the device radio under an offline-first
-coexistence policy, so enabling one may stop the other.
+Open **Tools → Connections → Wi-Fi** to scan, save profiles, select one,
+delete one, connect, disconnect or re-enable automatic reconnect. Passwords
+are never printed by status, logs or exports.
 
-## Bluetooth companion
-
-Open **Tools → Connections → Bluetooth**, turn BLE on, tap **Pair**, and enter
-the six-digit PIN shown on the D1L in the companion app. A session is accepted
-only after encryption, authentication and bonding. **Forget** removes the
-bonded peer locally.
-
-The production companion core protocol supports:
-
-- app start and device query;
-- contact list and exact-contact lookup/removal;
-- channel read/write and non-protected channel deletion;
-- DM and channel messaging plus message synchronization;
-- device time read/write;
-- device name, advert and authenticated-companion location;
-- radio parameters, TX power and path-hash mode;
-- battery and storage status.
-
-Remote reboot, remote factory reset, and private-key import/export return a
-disabled response. Optional channel-datagram extensions are not advertised.
-These are deliberate ownership/security boundaries, not missing everyday
-companion functions.
-
-## Observer / MQTT
-
-Observer is opt-in. Configure it over the USB terminal with an `mqtts://`
-broker and a topic, then enable it from **Tools → Connections → Observer** or
-USB. TLS is mandatory. Publishing uses QoS 1 with PUBACK accounting and a
-bounded drop-oldest queue during outages.
-
-The payload contains device health/counters and, only when explicitly
-selected, the current manual/companion map center. It never publishes message
-text, keys, contacts or RF-forwarding data.
+Mesh messaging does not require Wi-Fi. If Wi-Fi is unavailable, cached Map
+tiles remain usable and RF chat continues.
 
 ## Repeater and room administration
 
-Open a repeater or room node, then **Admin**, or use **Tools → Advanced →
-Server admin**. Login requires the exact retained server fingerprint and its
-password. A room login starts at the no-history cursor, so old room traffic is
-not replayed into the session.
+Open a verified Repeater or Room node and choose **Admin**. Login uses the
+exact retained server key and a masked password; empty-password repeaters are
+supported. Leaving, logging out or switching targets clears volatile session
+authority.
 
-Status refresh is read-only. Production mutations are exactly:
+The on-device admin surface provides:
 
-- clear server statistics;
-- request a zero-hop advert.
+- login, logout, session state and selected route;
+- detailed status/counters and telemetry;
+- paged neighbours;
+- ACL query and confirmed ACL mutations;
+- bounded authenticated CLI request/reply;
+- device, radio and advert queries/mutations with local confirmation;
+- room posts and current-session transcript.
 
-Each requires an authenticated matching session and a second local tap within
-five seconds. Logout clears the session. DeskOS does not expose arbitrary raw
-server commands.
+Guest/admin role checks are enforced locally and by the remote response.
+Sensitive commands and passwords are not persistently retained or logged;
+sensitive replies are redacted and volatile confirmation input is wiped.
+Remote mutations require a second local confirmation.
 
-## Display, notifications and terminal
+## SD-first storage and degraded mode
 
-**Tools → Device → Display** controls brightness, screen timeout, night mode,
-high contrast and fixed UTC display offset. Touch wakes the backlight without
-also activating the control beneath it.
+DeskOS uses SD as the primary store for message history, contacts/nodes,
+routes, packets, Map tiles and exports. Default NVS holds bounded device,
+configuration, boot/recovery and diagnostic metadata, including identity,
+Wi-Fi, channel definitions, Observer configuration, display/time, crash and
+reset state. Retained history is not redirected there.
 
-**Notifications** cycles off, pulse and quiet-hours behavior. Repeated updates
-are deduplicated and the backlight pulse does not override an active local
-interaction.
+- The firmware never formats an SD card.
+- Prepare a 32GB-or-larger FAT32 card with the checked-in
+  `scripts/prepare_deskos_sd.py` workflow. A provider manifest is optional and
+  is required only for authorized background/offline Map download.
+- Foreign, non-FAT32 or unmountable media is preserved and reported.
+- A missing/unusable card activates a prominent degraded notice.
+- Degraded mode keeps basic live RF Public/channel/DM chat available in a
+  live-only session, but retained history, Map download/cache and exports are
+  unavailable.
+- DeskOS does not silently redirect history into default NVS.
 
-**Terminal** shows the 64-entry structured event ring with level, source, kind
-and bounded message. It never retains secrets or raw remote commands. Log
-clearing is locally confirmed.
+Use **Tools → Storage** before removing media or diagnosing a card.
 
-## SD storage
+## Diagnostics and Observer
 
-Full Feature uses conditional SD history through the D1L RP2040 bridge.
-Internal NVS remains the bounded fallback when the card or bridge is absent.
+**Tools → Packets** provides a bounded parsed packet list, filters, search,
+detail and raw preview. The event terminal provides a bounded structured log
+without credentials or remote command secrets. Basic board, radio, storage,
+Wi-Fi, Map and crash state is available under Diagnostics.
 
-- Users prepare FAT32 SD cards on a computer.
-- There is no device-side SD formatting path.
-- Non-FAT32, unmountable or foreign-lineage media are preserved and reported
-  without destructive repair.
-- Retained Public/DM/route/packet data and map/export data use the SD path only
-  when ownership and filesystem checks pass.
-- Never remove a card while a write is active; use the status page before
-  troubleshooting.
+Observer is optional and uses `mqtts://`, TLS, QoS 1 and a bounded queue. It
+may publish device health and explicitly enabled location state. It never
+publishes message text, keys, contacts or forwarded RF traffic.
 
-The compatibility Core profile has SD history disabled, uses NVS, and omits
-the RP2040 payload. It is not the current production candidate.
+## Deferred to 1.5 / RC2
 
-## Signed update
+The RC1 profile hides and rejects:
 
-The release package contains `d1l-update.bin`, `d1l-update.manifest`, and
-`d1l-update.sig`. Copy them to the package-documented `updates` directory on
-qualified storage, then open **Tools → Storage & maps → Signed update**.
+- BLE companion pairing and transport;
+- contact/channel QR sharing;
+- signed OTA/update and recovery workflows.
 
-DeskOS verifies the production Ed25519 signer, manifest, exact image SHA-256,
-image size, source commit and a strictly increasing security sequence before
-writing the inactive OTA slot. Installation and reboot each require local
-confirmation. The bootloader can roll back an unconfirmed image; a healthy
-boot confirms the running slot. A lower or equal security sequence is
-rejected.
-
-USB equivalents are:
-
-```text
-update status
-update install CONFIRM-SIGNED-UPDATE
-update cancel
-update reboot CONFIRM-REBOOT-UPDATE
-```
+Normal non-erasing flashing and bounded USB recovery diagnostics are separate
+from those deferred product workflows.
 
 ## Useful USB diagnostics
 
@@ -198,41 +184,37 @@ identity status
 storage status
 messages unread
 nodes
-packets
-signal
-ble status
-observer status
+routes trace status
+wifi status
+map tiles status
 admin status
+observer status
 terminal status
-update status
 crashlog
 ```
 
-`help` lists the complete allowlist. Commands that transmit, mutate remote
-state, clear evidence, reboot, update or factory-reset have explicit
-confirmation and release-profile gates.
+`help` lists the active allowlist. RF transmission, remote mutation, evidence
+clearing, reboot and factory reset require explicit actions or confirmation.
 
-## Install and recovery
+## Install and release evidence
 
-Release firmware is built only by GitHub Actions. Use the exact source-bound
-package and verify `SHA256SUMS.txt` before flashing. The current target is on
-Pi 5 host `neopi5` and must be selected only by:
+Production release firmware must come from the exact GitHub Actions run for
+the candidate commit, using `D1L_RELEASE_PROFILE=core_1_0` and
+`D1L_SD_HISTORY_MODE=conditional`. Verify its checksum tree, inventory and
+provenance before flashing. The current hardware is connected to Pi 5 host
+`neopi5` and must be selected only through:
 
 ```text
 /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
 VID:PID 1a86:7523
 ```
 
-Never substitute a raw `/dev/ttyUSB*` path or a stale Windows COM assignment.
-Normal project flashing is non-erasing. The full 8 MB recovery image can erase
-settings, identity, contacts, messages and logs and requires typed
-confirmation. See `FLASH_RECOVERY_D1L.md`.
+Never substitute `/dev/ttyUSB*` or a stale Windows COM assignment. Normal
+flashing must not erase NVS or format/touch SD.
 
-## Release evidence
-
-Firmware completeness and public-release authorization are different gates.
-The feature surface is implemented, but a release is authorized only after
-the exact Actions artifact, checksum/provenance/SBOM checks, exact-target
-flash, automated device acceptance, reboot/persistence, conditional SD,
-controlled-peer RF/DM/admin and final physical UI review all pass. Until then
-`full_feature_release_ready` remains false.
+Feature implementation and public-release authorization are separate. The
+release is ready only after the exact downloaded Actions artifact is flashed
+and that same commit/artifact passes the bounded
+boot/UI, advert/Public, DM/ACK, PATH/TRACE/Ping, admin, Wi-Fi reconnect, SD
+write/remount/degraded and Map download/cache-revisit checks. No soak is
+required for this release.

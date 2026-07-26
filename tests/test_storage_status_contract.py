@@ -10,7 +10,7 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_storage_status_service_is_boot_safe_and_nvs_fallback():
+def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     header = read("main/storage/storage_status.h")
     source = read("main/storage/storage_status.c")
     console = read("main/comms/usb_console.c")
@@ -76,7 +76,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
         "STATUS",
         "MOUNT",
         "READY_SD",
-        "READY_NVS",
+        "READY_VOLATILE",
         "NEEDS_FAT32",
         "NO_CARD",
         "ERROR_BACKOFF",
@@ -141,23 +141,35 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
     assert "D1L_RETAINED_BLOB_STORE_ROUTES" in source
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in source
+    assert "D1L_RETAINED_BLOB_STORE_NODES" in source
+    assert "node_store_backend" in header
+    assert "contact_store_backend" in header
+    assert "read_state_backend" in header
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_DM_MESSAGES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in source
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_NODES)" in source
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_CONTACTS)" in source
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_READ_STATE)" in source
     assert "refresh_retained_sd_health" in source
     assert "d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
     assert "d1l_retained_blob_store_any_sd_degraded()" in source
-    assert "d1l_retained_blob_store_nvs_ready()" in source
-    assert "nvs_mirror_last_error != ESP_OK" in source
+    assert "status->retained_backup_degraded = false;" in source
+    assert "Internal NVS is not a history mirror" in source
     assert "D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE" in source
     assert 'status->message_store_backend = "nvs"' not in source
     assert 'status->dm_store_backend = "nvs"' not in source
     assert 'status->route_store_backend = "nvs"' not in source
+    assert 'status->node_store_backend = "nvs"' not in source
+    assert 'status->contact_store_backend = "nvs"' not in source
+    assert 'status->read_state_backend = "nvs"' not in source
     assert "d1l_retained_blob_store_note_sd_backend(sd->data_ready" in source
     assert "sd->file_ops_supported" in source
     assert "sd->atomic_rename_supported" in source
-    assert 'status->data_backend = any_retained_sd ? "mixed" :' in source
+    assert 'status->data_backend = any_retained_sd ? "sd" : "volatile";' in source
+    assert 's_status.setup_action = "forced_volatile";' in source
+    assert "live RF and chat continue without saved history" in source
     assert '#include "storage/map_tile_store.h"' in source
     assert "d1l_map_tile_store_sd_ready(status)" in source
     assert '"sd_map_tiles_ready" : "unavailable"' in source
@@ -614,6 +626,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
         "message_store_backend",
         "packet_log_backend",
         "route_store_backend",
+        "contact_store_backend",
+        "read_state_backend",
         "map_tile_backend",
         "export_backend",
         "map_tile_cache_ready",
@@ -700,7 +714,9 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "no_device_format" in console
     assert "false" in console
     assert "ESP_ERR_NOT_SUPPORTED" in console
-    assert '\\"fallback\\":\\"nvs\\"' in console
+    assert '\\"fallback\\":\\"per_store\\"' in console
+    assert '\\"node_history_requires_sd\\":true' in console
+    assert '\\"live_mesh_without_sd\\":[\\"rf_tx\\",\\"rf_rx\\",\\"chat\\"]' in console
     assert "storage status" in SMOKE_COMMANDS
     assert "storage map-policy" in SMOKE_COMMANDS
     assert "storage setup" in SMOKE_COMMANDS
@@ -803,7 +819,8 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     runner = read("scripts/sd_file_canary_d1l.py")
     retained_runner = read("scripts/sd_retained_history_acceptance_d1l.py")
     docs = read("docs/TEST_PLAN_D1L.md")
-    runbook = read("docs/RP2040_SD_BRIDGE_FLASH_D1L.md")
+    active_plan = docs.split("## Historical", 1)[0]
+    install_guide = read("docs/D1L_SD_CARD_GUIDED_INSTALL.md")
 
     assert "cmd_storage_filecanary" in console
     assert "storage_filecanary_ready" in console
@@ -900,17 +917,15 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "setup confirm" not in retained_runner
     assert "COM11" not in retained_runner
     assert "COM29" not in retained_runner
-    assert "storage filecanary" in docs
-    assert "sd_retained_history_acceptance_d1l.py" in docs
-    assert "docs/RP2040_SD_BRIDGE_FLASH_D1L.md" in docs
-    assert "COM12" in runbook
-    assert "Do not use COM8, COM11, or COM29" in runbook
-    assert "Do not send Public RF" in runbook
-    assert "flash_d1l.ps1" in runbook
-    assert "flash_rp2040_sd_bridge_uf2.py" in runbook
-    assert "sd_retained_history_acceptance_d1l.py" in runbook
-    assert "--copy" in runbook
-    assert "deskos_sd_bridge.ino.uf2" in runbook
+    assert "SD write/remount and degraded" in active_plan
+    assert "No soak" in active_plan
+    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active_plan
+    assert "ID_VENDOR_ID=1a86" in active_plan
+    assert "ID_MODEL_ID=7523" in active_plan
+    assert "does not send RF" in install_guide
+    assert "does not silently redirect persistent histories to" in install_guide
+    assert "NVS" in install_guide
+    assert "does not send RF, erase NVS, flash firmware, or format storage" in install_guide
 
 
 def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
@@ -1041,7 +1056,10 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_map_tile_store_write_canary" in store_header
     assert "d1l_map_tile_store_check_canary" in store_header
     assert "z > D1L_MAP_TILE_ZOOM_MAX" in store_source
-    assert "build_tile_url(D1L_MAP_TILE_SOURCE_URL_TEMPLATE" in store_source
+    assert '#include "map/map_tile_provider.h"' in store_source
+    assert "build_tile_url(provider.url_template" in store_source
+    assert "d1l_map_tile_provider_path(" in store_source
+    assert "d1l_map_tile_provider_attribution_path(" in store_source
     assert '#include "esp_http_client.h"' in store_source
     assert '#include "esp_crt_bundle.h"' in store_source
     assert ".crt_bundle_attach = esp_crt_bundle_attach" in store_source
@@ -1055,9 +1073,8 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U" in store_source
     assert "3000U" not in store_source
     assert "D1L_MAP_TILE_USER_AGENT" in store_source
-    assert "map/tiles/attribution.json" in store_source
     assert '"map/tiles/openstreetmap/z%u/x%lu/y%lu.png"' in store_source
-    assert '"map/tiles/openstreetmap/z%u/x%lu/y%lu.tmp"' in store_source
+    assert 'memcpy(&result->tmp_path[path_length - 4U], ".tmp", 5U)' in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tmp" in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tile" in store_source
     assert "map_tile_cache_canary" in store_source
@@ -1100,44 +1117,45 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
 def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():
     board = read("third_party/sensecap_indicator_esp32/components/bsp/src/boards/sensecap_indicator_board.c")
     bsp_sd = read("third_party/sensecap_indicator_esp32/components/bsp/src/storage/bsp_sdcard.c")
-    roadmap = read("docs/ROADMAP.md")
+    readme = read("README.md")
 
     assert ".FUNC_SDMMC_EN =   (0)" in board
     assert ".FUNC_SDSPI_EN =       (0)" in board
     assert "return ESP_ERR_NOT_SUPPORTED" in bsp_sd
     assert ".format_if_mount_failed = false" in bsp_sd
-    assert "MicroSD support is handled by the RP2040 side" in roadmap
+    assert "FAT32 SD/RP2040 primary history" in readme
 
 
 def test_sd_validation_docs_do_not_require_public_rf_or_reserved_ports():
     validation = read("docs/D1L_SD_CARD_GUIDED_INSTALL.md")
 
     assert "mesh send public" not in validation
-    assert "Do not use `COM8`, `COM11`, or `COM29`" in validation
-    assert "COM7" not in validation
-    assert "flash_d1l" not in validation
-    assert "monitor_d1l" not in validation
-    assert "backup_flash" not in validation
-    assert "soak_d1l.py --active-public-text" not in validation
-    assert "probe_d1l_dm.py --bot-port" not in validation
-    assert "COM12" in validation
-    assert "COM16" in validation
+    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in validation
+    assert "`1a86:7523`" in validation
+    assert "raw `/dev/ttyUSB*` paths are never accepted" in validation
+    assert "does not send RF, erase NVS, flash firmware, or format storage" in validation
+    assert "COM12" not in validation
+    assert "COM16" not in validation
 
 
-def test_docs_keep_sd_backed_store_claims_pending_until_hardware_proof():
+def test_docs_define_sd_primary_storage_and_live_only_degraded_mode():
     readme = read("README.md")
     user_guide = read("docs/USER_GUIDE_D1L.md")
     limitations = read("docs/KNOWN_LIMITATIONS.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
 
-    for doc in [limitations, checklist]:
-        assert "retained stores" in doc or "Retained DeskOS stores" in doc or "Optional SD-card" in doc
-        assert "pending" in doc.lower() or "fallback" in doc.lower()
+    for doc in (readme, user_guide, limitations, checklist):
+        assert "core_1_0" in doc
+        assert "conditional" in doc
+        assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in doc
+        assert "1a86:7523" in doc
 
-    assert "SD-backed message/packet/route/export/map-tile stores" in checklist
-    assert "- [ ] Optional SD-card data storage implemented" in checklist
-    for core_doc in [readme, user_guide]:
-        assert "SD history" in core_doc
-        assert "disabled" in core_doc
-        assert "NVS" in core_doc
-        assert "RP2040 payload" in core_doc
+    for doc in (readme, user_guide, limitations):
+        assert "SD" in doc
+        assert "primary" in doc
+        assert "live-only" in doc
+        assert "default NVS" in doc
+
+    assert "SD-primary retained data" in checklist
+    assert "without silent default-NVS fallback" in checklist
+    assert "No soak is required" in checklist

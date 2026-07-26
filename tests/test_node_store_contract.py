@@ -10,40 +10,60 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_heard_node_store_is_bounded_and_nvs_backed():
+def test_heard_node_store_is_bounded_sd_primary_and_degrades_without_nvs_history():
     header = read("main/mesh/node_store.h")
     source = read("main/mesh/node_store.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
-    assert "D1L_NODE_RAM_ACTIVE_CAPACITY 64U" in header
+    assert "D1L_NODE_RAM_ACTIVE_CAPACITY 512U" in header
     assert "D1L_NODE_NVS_FALLBACK_CAPACITY 16U" in header
     assert "D1L_NODE_SD_HISTORY_CAPACITY 512U" in header
-    assert "D1L_NODE_STORE_CAPACITY D1L_NODE_RAM_ACTIVE_CAPACITY" in header
+    assert "D1L_NODE_STORE_CAPACITY D1L_NODE_SD_HISTORY_CAPACITY" in header
     assert "D1L_NODE_PUBLIC_KEY_HEX_LEN 65U" in header
     assert "D1L_HEARD_NODE_NAME_LEN 24U" in header
     assert "D1L_NODE_TYPE_LEN 9U" in header
-    assert "D1L_NODE_STORE_SCHEMA 4U" in source
+    assert "D1L_NODE_STORE_SCHEMA_V4 4U" in source
+    assert "D1L_NODE_STORE_SD_SCHEMA 5U" in source
     assert "D1L_NODE_STORE_SCHEMA_V3 3U" in source
     assert "D1L_NODE_STORE_SCHEMA_V2 2U" in source
     assert "D1L_NODE_STORE_LEGACY_CAPACITY D1L_NODE_NVS_FALLBACK_CAPACITY" in source
     assert "d1l_node_store_blob_v1_t" in source
     assert "d1l_node_store_blob_v2_t" in source
     assert "d1l_node_store_blob_v3_t" in source
+    assert "d1l_node_store_blob_v4_t" in source
+    assert "d1l_node_store_sd_blob_t" in source
     assert "migrate_v1_blob" in source
     assert "migrate_v2_blob" in source
     assert "migrate_v3_blob" in source
     assert "node schema v1 layout changed" in source
     assert "node schema v2/v3 layout changed" in source
     assert "entries[D1L_NODE_NVS_FALLBACK_CAPACITY]" in source
-    assert "D1L_NODE_NVS_FALLBACK_CAPACITY ?" in source
-    assert "blob->entries[out] = s_entries[best]" in source
+    assert "entries[D1L_NODE_SD_HISTORY_CAPACITY]" in source
     assert 'D1L_NODE_STORE_NAMESPACE "d1l_nodes"' in source
     assert 'D1L_NODE_STORE_KEY "heard"' in source
+    assert 'D1L_NODE_STORE_EPOCH_KEY "marker_epoch"' in source
+    assert 'D1L_NODE_STORE_SD_KEY "nodes_v1"' in source
     assert "nvs_get_blob" in source
-    assert "nvs_set_blob" in source
-    assert "static d1l_node_store_blob_t s_blob_scratch" in source
+    assert "nvs_set_blob" not in source
+    assert "nvs_set_u32(handle, D1L_NODE_STORE_EPOCH_KEY, epoch)" in source
+    assert (
+        "static d1l_node_store_sd_blob_t s_sd_blob_scratch "
+        "EXT_RAM_BSS_ATTR"
+    ) in source
+    assert "d1l_retained_blob_store_read_sd_primary(" in source
+    assert "d1l_retained_blob_store_write_sd_primary_guarded(" in source
+    assert "d1l_node_store_flush_if_due" in source
+    assert "note_persistence_dirty_locked(false, now_ms)" in source
+    upsert = source.split("esp_err_t d1l_node_store_upsert_advert", 1)[1].split(
+        "d1l_node_store_stats_t d1l_node_store_stats", 1
+    )[0]
+    assert "nvs_" not in upsert
+    assert "d1l_retained_blob_store_" not in upsert
     assert "find_by_fingerprint" in source
-    assert "oldest_index" in source
+    assert "oldest_unlocated_index" in source
+    assert "least_recent_unlocated_advert_index" in source
+    assert "if (s_entries[i].location_valid)" in source
+    assert "return ESP_ERR_NO_MEM;" in upsert
     assert '"mesh/node_store.c"' in cmake
     assert "d1l_node_store_init()" in app_main
 

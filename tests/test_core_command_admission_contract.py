@@ -10,7 +10,9 @@ def _help_profiles() -> tuple[str, str]:
     body = CONSOLE.split("static void cmd_help(void)", 1)[1].split(
         "static void release_factory_reset_quiesces(void)", 1
     )[0]
-    core_branch = body.split("if (d1l_release_profile_is_core()) {", 1)[1]
+    core_branch = body.split(
+        "if (d1l_release_profile_is_core() &&", 1
+    )[1]
     return tuple(core_branch.split("return;", 1))
 
 
@@ -158,22 +160,14 @@ def test_sd_mutations_are_admitted_before_dispatch_and_core_help_is_nvs_only():
     assert r"storage retained-canary <token>" not in core_help
 
 
-def test_core_packet_diagnostics_are_read_only_before_dispatch():
+def test_rc1_packet_clear_is_admitted_before_dispatch():
     enforcement = CONSOLE.split(
         "static bool enforce_release_command_policy(", 1
     )[1].split("static void print_hex_bytes_json(", 1)[0]
-    core_deny = enforcement.split(
-        "const d1l_release_command_rule_t *rule", 1
-    )[0]
-    assert "d1l_release_profile_is_core()" in core_deny
     assert (
         'command, "packets clear", sizeof("packets clear") - 1U'
-        in core_deny
+        not in enforcement
     )
-    assert (
-        "command, D1L_RELEASE_FEATURE_PACKETS" in core_deny
-    )
-    assert "return false;" in core_deny
     assert "d1l_packet_log_clear" not in enforcement
 
     handler = CONSOLE.split("static void handle_line(", 1)[1].split(
@@ -183,8 +177,7 @@ def test_core_packet_diagnostics_are_read_only_before_dispatch():
         'strcmp(line, "packets clear")'
     )
 
-    core_help, full_help = _help_profiles()
-    assert r"packets clear" not in core_help
+    _, full_help = _help_profiles()
     assert r"packets clear" in full_help
 
     clear_handler = CONSOLE.split("static void cmd_packets_clear(void)", 1)[
@@ -194,19 +187,13 @@ def test_core_packet_diagnostics_are_read_only_before_dispatch():
     assert 'ok_begin("packets clear")' in clear_handler
 
 
-def test_core_node_projection_is_read_only_and_has_no_location_claim():
+def test_rc1_node_projection_supports_clear_and_signed_location():
     enforcement = CONSOLE.split(
         "static bool enforce_release_command_policy(", 1
     )[1].split("static void print_hex_bytes_json(", 1)[0]
-    core_deny = enforcement.split(
-        "const d1l_release_command_rule_t *rule", 1
-    )[0]
     assert (
         'command, "nodes clear", sizeof("nodes clear") - 1U'
-        in core_deny
-    )
-    assert (
-        "command, D1L_RELEASE_FEATURE_NODES" in core_deny
+        not in enforcement
     )
     assert "d1l_node_store_clear" not in enforcement
 
@@ -217,14 +204,16 @@ def test_core_node_projection_is_read_only_and_has_no_location_claim():
         'strcmp(line, "nodes clear")'
     )
 
-    core_help, full_help = _help_profiles()
-    assert r"nodes clear" not in core_help
+    _, full_help = _help_profiles()
     assert r"nodes clear" in full_help
 
     nodes = CONSOLE.split("static void cmd_nodes(void)", 1)[1].split(
         "static void cmd_nodes_clear(void)", 1
     )[0]
-    assert "const bool include_location = !d1l_release_profile_is_core();" in nodes
+    assert (
+        "const bool include_location = d1l_release_feature_available(\n"
+        "        D1L_RELEASE_FEATURE_LOCATION);"
+    ) in nodes
     assert (
         "const uint32_t marker_generation = include_location ?\n"
         "        d1l_node_store_marker_generation() : 0U;"

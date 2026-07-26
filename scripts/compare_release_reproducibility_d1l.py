@@ -35,6 +35,7 @@ if __package__:
     )
     from .package_release_d1l import (
         FULL_FEATURE_PACKAGE_SCHEMA,
+        RELEASE_DOC_SPECS,
         git_info,
         package_inventory_payloads,
         validate_generated_package_metadata,
@@ -68,6 +69,7 @@ else:
     )
     from package_release_d1l import (  # type: ignore[no-redef]
         FULL_FEATURE_PACKAGE_SCHEMA,
+        RELEASE_DOC_SPECS,
         git_info,
         package_inventory_payloads,
         validate_generated_package_metadata,
@@ -369,10 +371,7 @@ def required_package_paths(source_commit: str, profile: str) -> set[str]:
         "SHA256SUMS.txt",
         "debug/meshcore_deskos_d1l.elf",
         "debug/meshcore_deskos_d1l.map",
-        "docs/DEVELOPER_GUIDE_D1L.md",
-        "docs/FLASH_RECOVERY_D1L.md",
-        "docs/RP2040_SD_BRIDGE_FLASH_D1L.md",
-        "docs/USER_GUIDE_D1L.md",
+        *(f"docs/{destination}" for _source, destination in RELEASE_DOC_SPECS),
         f"evidence/meshcore_conformance_{source_commit}.json",
         f"evidence/meshcore_signed_advert_runtime_{source_commit}.json",
         f"build_inputs_{source_commit}.json",

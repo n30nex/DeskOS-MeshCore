@@ -1,5 +1,12 @@
 # D1L Board Bring-Up
 
+> **HISTORICAL BOARD-BRING-UP PROCEDURE — NOT CURRENT RELEASE ROUTING.**
+> Preserve the hardware observations below, but do not use its COM assignments
+> or broad qualification sequence for RC1. Use the
+> [project README](../README.md), [RC1 user guide](USER_GUIDE_D1L.md),
+> [RC1 test plan](TEST_PLAN_D1L.md), and
+> [SD-card guide](D1L_SD_CARD_GUIDED_INSTALL.md).
+
 ## Phase 1 Order
 
 1. Boot serial log and `version`.

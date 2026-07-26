@@ -114,9 +114,14 @@ def write_fake_notices(root: Path) -> None:
     (root / "docs" / "ATTRIBUTIONS.md").write_text("attributions\n", encoding="ascii")
     (root / "docs" / "SOURCE_AUDIT_AND_ATTRIBUTION.md").write_text("source audit\n", encoding="ascii")
     (root / "docs" / "USER_GUIDE_D1L.md").write_text("user guide\n", encoding="ascii")
-    (root / "docs" / "DEVELOPER_GUIDE_D1L.md").write_text("developer guide\n", encoding="ascii")
-    (root / "docs" / "FLASH_RECOVERY_D1L.md").write_text("flash recovery\n", encoding="ascii")
-    (root / "docs" / "RP2040_SD_BRIDGE_FLASH_D1L.md").write_text("rp2040 guide\n", encoding="ascii")
+    (root / "docs" / "DESKOS_MESHCORE_FEATURE_PARITY.md").write_text("feature parity\n", encoding="ascii")
+    (root / "docs" / "KNOWN_LIMITATIONS.md").write_text("limitations\n", encoding="ascii")
+    (root / "docs" / "D1L_SD_CARD_GUIDED_INSTALL.md").write_text("sd setup\n", encoding="ascii")
+    release_docs = root / "docs" / "release"
+    release_docs.mkdir(exist_ok=True)
+    (release_docs / "SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md").write_text(
+        "product contract\n", encoding="ascii"
+    )
     overlay = root / "overlays" / "meshcore_ed25519_defined"
     overlay.mkdir(parents=True, exist_ok=True)
     (overlay / "license.txt").write_text("orlp zlib license\n", encoding="ascii")
@@ -445,9 +450,11 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     ]
     assert [item["path"] for item in manifest["release_docs"]] == [
         "docs/USER_GUIDE_D1L.md",
-        "docs/DEVELOPER_GUIDE_D1L.md",
-        "docs/FLASH_RECOVERY_D1L.md",
-        "docs/RP2040_SD_BRIDGE_FLASH_D1L.md",
+        "docs/DESKOS_MESHCORE_FEATURE_PARITY.md",
+        "docs/KNOWN_LIMITATIONS.md",
+        "docs/D1L_SD_CARD_GUIDED_INSTALL.md",
+        "docs/ATTRIBUTIONS.md",
+        "docs/SIGUI_CORE_1_0_PRODUCT_CONTRACT.md",
     ]
     assert [item["name"] for item in manifest["rp2040_artifacts"]] == [
         "rp2040-sd-bridge-firmware",
@@ -628,9 +635,14 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         nested_manifest = package_dir / "rp2040" / artifact["name"] / "SHA256SUMS.txt"
         assert verify_sha256_manifest(nested_manifest)
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
+    normalized_readme = " ".join(readme.split())
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
     assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
-    assert "`docs/` contains the user guide" in readme
+    assert (
+        "`docs/` contains the current RC1 user guide, feature-parity matrix, "
+        "limitations, SD-card setup, attributions, and product contract."
+        in normalized_readme
+    )
     assert "`notices/` contains the project license" in readme
     assert f"`sbom_{commit}.spdx.json` is the deterministic SPDX 2.3 SBOM" in readme
     assert f"`provenance_{commit}.json` is deterministic unsigned SLSA v1 provenance" in readme

@@ -21,6 +21,7 @@ def test_read_state_advances_only_the_selected_exact_cursor(tmp_path: Path) -> N
         "-I",
         str(ROOT / "main"),
         str(ROOT / "main/mesh/read_state.c"),
+        str(ROOT / "tests/native/retained_blob_store_nvs_adapter.c"),
         str(ROOT / "tests/native/read_state_cursor_invariants_test.c"),
         "-o",
         str(binary),

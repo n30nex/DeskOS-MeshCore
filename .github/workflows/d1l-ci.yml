@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
 
           include_sd_bridge=true
-          reason=full_feature_candidate
+          reason=rc1_candidate
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             if [[ "${{ inputs.include_sd_bridge }}" == "true" ]]; then
@@ -58,7 +58,7 @@ jobs:
             fi
 
             if grep -E '^(firmware/rp2040_sd_bridge/|firmware/rp2040_sd_smoke/|tools/rp2040_sd_protocol.py|scripts/(rp2040_|sd_).*_d1l.py|scripts/flash_rp2040_sd_bridge_uf2.py|tests/test_rp2040_sd_bridge_target.py|tests/test_storage_status_contract.py|docs/(SD_BRIDGE_PROTOCOL_D1L|RP2040_SD_BRIDGE_FLASH_D1L|D1L_SD_CARD_GUIDED_INSTALL)\.md)' changed-files.txt >/dev/null; then
-              reason=full_feature_sd_paths
+              reason=rc1_sd_paths
             fi
           fi
 
@@ -118,7 +118,7 @@ jobs:
             event = $env:GITHUB_EVENT_NAME
             include_sd_bridge = [System.Convert]::ToBoolean($env:D1L_INCLUDE_SD_BRIDGE)
             scope_reason = $env:D1L_SCOPE_REASON
-            release_profile = "full_feature"
+            release_profile = "core_1_0"
             sd_history_mode = "conditional"
           }
           $path = "artifacts/build-inputs/d1l-candidate-scope.json"
@@ -149,12 +149,6 @@ jobs:
 
       - name: UI scroll probe dry run
         run: python ./scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache
-
-      - name: Soak dry run
-        run: python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-dm-fingerprint 0123456789ABCDEF --active-dm-text test
-
-      - name: WP-01 storage-active soak dry run
-        run: python ./scripts/storage_active_soak_d1l.py --dry-run --expected-firmware-commit ${{ github.sha }}
 
       - name: SD file canary dry run
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
@@ -564,7 +558,7 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           . /opt/esp/idf/export.sh
-          idf.py build
+          idf.py -D D1L_RELEASE_PROFILE=core_1_0 -D D1L_SD_HISTORY_MODE=conditional build
 
       - name: Capture ESP-IDF migration state
         if: ${{ always() }}
@@ -619,19 +613,9 @@ jobs:
 
       - name: Package D1L release
         shell: bash
-        env:
-          D1L_UPDATE_SIGNING_KEY_PEM: ${{ secrets.D1L_UPDATE_SIGNING_KEY_PEM }}
         run: |
           set -euo pipefail
-          if [[ -z "${D1L_UPDATE_SIGNING_KEY_PEM:-}" ]]; then
-            printf 'D1L_UPDATE_SIGNING_KEY_PEM is required for full_feature packaging\n' >&2
-            exit 1
-          fi
-          umask 077
-          update_key_path="$RUNNER_TEMP/d1l-update-private.pem"
-          trap 'rm -f "$update_key_path"' EXIT
-          printf '%s' "$D1L_UPDATE_SIGNING_KEY_PEM" > "$update_key_path"
-          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --release-profile full_feature --sd-history-mode conditional --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON" --meshcore-signed-advert-runtime-json "$D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON" --update-signing-key "$update_key_path")
+          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --release-profile core_1_0 --sd-history-mode conditional --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON" --meshcore-signed-advert-runtime-json "$D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON")
           if [[ "${{ needs.change-filter.outputs.include_sd_bridge }}" == "true" ]]; then
             package_args+=(--rp2040-artifact-root artifacts/rp2040-release-inputs)
           fi

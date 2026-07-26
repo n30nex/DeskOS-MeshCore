@@ -160,9 +160,15 @@ def test_contact_sheet_carries_exact_identity_reason_instead_of_generic_role_cop
     assert "eligibility.reason" in selected
 
 
-def test_user_guide_documents_sender_identity_boundary() -> None:
+def test_user_guide_documents_sender_identity_and_usb_import_boundary() -> None:
     guide = read("docs/USER_GUIDE_D1L.md")
+    parity = read("docs/DESKOS_MESHCORE_FEATURE_PARITY.md")
+
     assert "sender_name_unverified" in guide
     assert "never alias-matches" in guide
     assert "complete public key" in guide
     assert "remain read-only" in guide
+    assert "Contacts can be imported from the USB console" in guide
+    assert "`contacts import <meshcore-uri>`" in guide
+    assert "Contact and channel QR sharing is deferred to RC2" in guide
+    assert "touchscreen URI import and QR sharing are not RC1 claims" in parity

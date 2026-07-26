@@ -180,6 +180,8 @@ def read_command_result(ser, command: str, timeout: float) -> dict:
 def expected_command_name(command: str) -> str:
     if command.startswith("messages public search "):
         return "messages public"
+    if command in {"routes trace status", "repeater ping status"}:
+        return command
     if command == "messages dm clear":
         return command
     for prefix in [
@@ -195,6 +197,9 @@ def expected_command_name(command: str) -> str:
         "mesh send dm ",
         "routes trace ",
         "routes probe ",
+        "routes telemetry ",
+        "repeater ping ",
+        "admin login ",
         "packets filter ",
         "packets search ",
         "packets raw ",

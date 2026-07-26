@@ -1,5 +1,12 @@
 # SIGUI Audit Evidence Index
 
+> **HISTORICAL EVIDENCE INDEX — NOT CURRENT RELEASE AUTHORITY.**
+> Entries apply only to the exact commits and artifacts they name. Current RC1
+> scope and validation are defined by the [project README](../../README.md),
+> [RC1 user guide](../USER_GUIDE_D1L.md),
+> [RC1 test plan](../TEST_PLAN_D1L.md), and
+> [SD-card guide](../D1L_SD_CARD_GUIDED_INSTALL.md).
+
 **Audit date:** 2026-07-12; live reconciliation refreshed 2026-07-18
 **Repository:** `n30nex/SIGUI`  
 **Purpose:** make the master roadmap traceable to the exact repository state inspected.

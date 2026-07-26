@@ -8,7 +8,7 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
+def test_retained_blob_store_keeps_history_sd_first_and_retires_legacy_nvs():
     header = read("main/storage/retained_blob_store.h")
     source = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
@@ -17,6 +17,9 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in header
     assert "D1L_RETAINED_BLOB_STORE_ROUTES" in header
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in header
+    assert "D1L_RETAINED_BLOB_STORE_NODES" in header
+    assert "D1L_RETAINED_BLOB_STORE_CONTACTS" in header
+    assert "D1L_RETAINED_BLOB_STORE_READ_STATE" in header
     assert "d1l_retained_blob_store_backend_name" in header
     assert "d1l_retained_blob_store_init" in header
     assert "d1l_retained_blob_store_nvs_ready" in header
@@ -73,15 +76,51 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert 'D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"' in source
     assert 'D1L_RETAINED_ROUTE_NAMESPACE "d1l_routes"' in source
     assert 'D1L_RETAINED_PACKET_LOG_NAMESPACE "d1l_packets"' in source
+    assert 'D1L_RETAINED_CONTACT_NAMESPACE "d1l_contacts"' in source
+    assert 'D1L_RETAINED_READ_STATE_NAMESPACE "d1l_read"' in source
     assert 'D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR "stores/messages/public"' in source
     assert 'D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"' in source
     assert 'D1L_RETAINED_ROUTE_SD_DIR "stores/routes"' in source
     assert 'D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"' in source
+    assert 'D1L_RETAINED_NODE_SD_DIR "stores/nodes"' in source
+    assert 'D1L_RETAINED_CONTACT_SD_DIR "stores/contacts"' in source
+    assert 'D1L_RETAINED_READ_STATE_SD_DIR "stores/read_state"' in source
     assert '.name = "public_messages"' in source
     assert '.name = "dm_messages"' in source
     assert '.name = "routes"' in source
     assert '.name = "packet_log"' in source
-    assert 'return s_retained_nvs_ready ? "nvs" : "unavailable";' in source
+    assert '.name = "nodes"' in source
+    assert '.name = "contacts"' in source
+    assert '.name = "read_state"' in source
+    node_config = source.split(
+        ".id = D1L_RETAINED_BLOB_STORE_NODES", 1
+    )[1].split("},", 1)[0]
+    assert ".nvs_namespace = NULL" in node_config
+    assert ".nvs_fallback_allowed = false" in node_config
+    for store_id in (
+        "D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES",
+        "D1L_RETAINED_BLOB_STORE_DM_MESSAGES",
+        "D1L_RETAINED_BLOB_STORE_ROUTES",
+        "D1L_RETAINED_BLOB_STORE_PACKET_LOG",
+        "D1L_RETAINED_BLOB_STORE_CONTACTS",
+        "D1L_RETAINED_BLOB_STORE_READ_STATE",
+    ):
+        store_config = source.split(f".id = {store_id}", 1)[1].split("},", 1)[0]
+        assert ".nvs_fallback_allowed = false" in store_config
+        assert ".legacy_retired_key =" in store_config
+    for retirement_key in (
+        '"sd_pub_v1"',
+        '"sd_dm_v1"',
+        '"sd_route_v1"',
+        '"sd_pkt_v1"',
+        '"sd_contacts_v1"',
+        '"sd_read_v1"',
+    ):
+        assert retirement_key in source
+    assert (
+        "config->nvs_fallback_allowed && s_retained_nvs_ready"
+        in source
+    )
     assert "s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "s_store_backend_generation[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "s_store_state_mux" in source
@@ -185,7 +224,13 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "nvs_erase_key(handle, key)" in source
     assert "nvs_commit(handle)" in source
     assert "ESP_ERR_NVS_NOT_FOUND" in source
-    assert "note_nvs_mirror_failure(config, nvs_write_blob(config, key, src, len))" in source
+    assert "retire_legacy_blob_after_sd_commit(config, key)" in source
+    assert "mark_legacy_blob_retired(config)" in source
+    assert "load_legacy_retired_state(&s_store_configs[i])" in source
+    assert (
+        'return config->nvs_fallback_allowed && s_retained_nvs_ready ?\n'
+        '        "nvs" : "volatile";'
+    ) in source
     assert "d1l_retained_blob_store_write_split" in source
     assert "const bool has_primary = primary_src && primary_len > 0" in source
     assert "const bool has_fallback = fallback_src && fallback_len > 0" in source
@@ -193,7 +238,10 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "nvs_write_blob(config, key, nvs_src, nvs_len)" in source
     assert "note_nvs_mirror_failure(config, nvs_ret)" in source
     assert "return ESP_OK;" in source
-    assert "return nvs_ret == ESP_OK ? ESP_OK : sd_ret;" in source
+    assert (
+        "return config->nvs_fallback_allowed && nvs_ret == ESP_OK ?\n"
+        "        ESP_OK : sd_ret;"
+    ) in source
     assert "return sd_ret == ESP_ERR_NOT_FOUND ? nvs_ret : sd_ret;" in source
 
 
@@ -206,18 +254,27 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert "D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in storage_status
     assert "D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in storage_status
     assert "D1L_RETAINED_BLOB_STORE_ROUTES" in storage_status
+    assert "D1L_RETAINED_BLOB_STORE_NODES" in storage_status
+    assert "D1L_RETAINED_BLOB_STORE_CONTACTS" in storage_status
+    assert "D1L_RETAINED_BLOB_STORE_READ_STATE" in storage_status
     assert "sd->file_ops_supported" in storage_status
     assert "sd->atomic_rename_supported" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_DM_MESSAGES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in storage_status
-    assert 'status->data_backend = any_retained_sd ? "mixed" :' in storage_status
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_NODES)" in storage_status
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_CONTACTS)" in storage_status
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_READ_STATE)" in storage_status
+    assert 'status->data_backend = any_retained_sd ? "sd" : "volatile";' in storage_status
     assert '"retained_history_sd_enabled"' in storage_status
     assert 'status->message_store_backend = "nvs"' not in storage_status
     assert 'status->dm_store_backend = "nvs"' not in storage_status
     assert 'status->route_store_backend = "nvs"' not in storage_status
     assert 'status->packet_log_backend = "nvs"' not in storage_status
+    assert 'status->node_store_backend = "nvs"' not in storage_status
+    assert 'status->contact_store_backend = "nvs"' not in storage_status
+    assert 'status->read_state_backend = "nvs"' not in storage_status
     assert "d1l_retained_blob_store_backend_state(" in packet_log
     assert "d1l_retained_blob_store_read_sd_primary(" in packet_log
     assert "d1l_retained_blob_store_read_nvs_fallback(" in packet_log
@@ -231,24 +288,19 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert "d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
 
 
-def test_release_docs_require_external_provenance_for_ambiguous_retained_bytes():
-    developer = read("docs/DEVELOPER_GUIDE_D1L.md")
+def test_release_docs_define_sd_primary_without_history_nvs_fallback():
+    readme = read("README.md")
+    user_guide = read("docs/USER_GUIDE_D1L.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
-    roadmap = read("docs/ROADMAP.md")
-    test_plan = read("docs/TEST_PLAN_D1L.md")
     limitations = read("docs/KNOWN_LIMITATIONS.md")
-    combined = "\n".join([developer, checklist, roadmap, test_plan, limitations])
 
-    assert "external_init_required=true" in combined
-    assert "markers_complete=true" in combined
-    assert "prepare_retained_nvs_upgrade_d1l.py" in developer
-    assert "prepare_retained_nvs_upgrade_d1l.py" in checklist
-    assert "prepare_retained_nvs_upgrade_d1l.py" in test_plan
-    assert "firmware neither probes nor erases ambiguous nonblank bytes" in checklist
-    assert "firmware must not delete it automatically" in test_plan
-    assert "direct scoped first-upgrade erase" not in combined
-    assert "triple absence directly" not in combined
-    assert "storage status.retained_nvs.telemetry" in combined
-    assert 'scope="boot_runtime_api_calls"' in combined
-    assert "physical_flash_cycles_measured=false" in combined
-    assert "API-level" in combined
+    for doc in (readme, user_guide, checklist, limitations):
+        assert "core_1_0" in doc
+        assert "conditional" in doc
+
+    assert "SD as the primary store" in user_guide
+    assert "Retained history is not redirected there" in user_guide
+    assert "does not silently redirect history into default NVS" in user_guide
+    assert "Degraded mode keeps basic live RF Public/channel/DM chat" in user_guide
+    assert "firmware never formats it" in limitations
+    assert "without silent default-NVS fallback" in checklist

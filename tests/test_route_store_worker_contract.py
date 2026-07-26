@@ -28,11 +28,13 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_packet_log_flush_if_due()" in worker
     assert "d1l_route_store_flush_if_due()" in worker
     assert "d1l_contact_store_flush_if_due()" in worker
+    assert "d1l_node_store_flush_if_due()" in worker
     assert "d1l_message_store_flush()" in worker
     assert "d1l_dm_store_flush()" in worker
     assert "d1l_packet_log_flush()" in worker
     assert "d1l_route_store_flush()" in worker
     assert "d1l_contact_store_flush()" in worker
+    assert "d1l_node_store_flush()" in worker
     assert "request_id" in worker
     assert "s_result_request_id" in worker
     assert "deadline_us" in worker

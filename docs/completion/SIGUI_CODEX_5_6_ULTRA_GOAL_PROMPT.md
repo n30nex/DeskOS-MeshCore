@@ -1,5 +1,12 @@
 # Codex 5.6 Ultra Goal Prompt — Finish SIGUI to Production and Full Feature Completion
 
+> **SUPERSEDED AGENT PROMPT — DO NOT COPY OR EXECUTE.**
+> Its Full Feature stop condition, port rules, evidence matrix and soak
+> requirements predate the current RC1 contract. Start from the
+> [project README](../../README.md), [RC1 user guide](../USER_GUIDE_D1L.md),
+> [RC1 test plan](../TEST_PLAN_D1L.md), and
+> [SD-card guide](../D1L_SD_CARD_GUIDED_INSTALL.md).
+
 You are the lead implementation agent for `n30nex/SIGUI`, the MeshCore DeskOS firmware for the Seeed SenseCAP Indicator D1L.
 
 Your mission is to take the repository from its current unfinished state to:

@@ -44,7 +44,7 @@ def test_current_view_planner_accepts_bounded_zoom_and_stays_at_most_three_by_th
 
     assert "D1L_MAP_VIEW_DEFAULT_ZOOM 10U" in header
     assert "D1L_MAP_VIEW_MIN_ZOOM 8U" in header
-    assert "D1L_MAP_VIEW_MAX_ZOOM 14U" in header
+    assert "D1L_MAP_VIEW_MAX_ZOOM 18U" in header
     assert "D1L_MAP_VIEW_MAX_TILES 9U" in header
     assert (
         "zoom >= D1L_MAP_VIEW_MIN_ZOOM && zoom <= D1L_MAP_VIEW_MAX_ZOOM"
@@ -291,7 +291,7 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
         "esp_err_t d1l_map_tile_store_write_canary",
     )
 
-    assert "attribution_metadata_present()" in read_cache
+    assert "attribution_metadata_present(&result)" in read_cache
     assert "d1l_map_tile_png_valid(buffer, result.bytes)" in read_cache
     assert "result.cache_hit = true" in read_cache
     assert "const uint32_t expected_size = file.size" in read_cache
@@ -303,9 +303,11 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
         "d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true"
     )
     assert fetch.index("d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true") < fetch.index(
-        "write_attribution_metadata(&result)"
+        "write_attribution_metadata(&provider, &result)"
     )
-    metadata_failure = fetch.split("ret = write_attribution_metadata(&result);", 1)[1].split(
+    metadata_failure = fetch.split(
+        "ret = write_attribution_metadata(&provider, &result);", 1
+    )[1].split(
         'download_step(&result, "ok"', 1
     )[0]
     assert "d1l_rp2040_bridge_file_delete(result.path" in metadata_failure
@@ -344,7 +346,7 @@ def test_same_visible_or_complete_hidden_plan_reuses_frame_without_worker_replay
         "esp_err_t d1l_map_view_service_acquire_visible",
         "void d1l_map_view_service_release_visible",
     )
-    identical = acquire.split("if (same_plan &&", 1)[1].split(
+    identical = acquire.split("if (!force_reload && same_plan &&", 1)[1].split(
         "uint32_t generation", 1
     )[0]
     completed = body(

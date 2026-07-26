@@ -66,6 +66,9 @@ typedef struct {
     const char *dm_store_backend;
     const char *packet_log_backend;
     const char *route_store_backend;
+    const char *node_store_backend;
+    const char *contact_store_backend;
+    const char *read_state_backend;
     const char *map_tile_backend;
     const char *export_backend;
     const char *setup_action;

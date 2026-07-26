@@ -1,5 +1,13 @@
 # MeshCore DeskOS D1L Full Feature — Production Status
 
+> **SUPERSEDED HISTORICAL EVIDENCE LEDGER — NOT RELEASE AUTHORITY.**
+> This file preserves earlier Full Feature/minimal-Core checkpoints. Its
+> profile, capability, COM-port, SD/NVS, recovery and soak statements are not
+> current RC1 instructions and must not be used to build, flash, test or tag a
+> release. Use the [project README](../../README.md), [RC1 user guide](../USER_GUIDE_D1L.md),
+> [RC1 test plan](../TEST_PLAN_D1L.md), and
+> [SD-card guide](../D1L_SD_CARD_GUIDED_INSTALL.md).
+
 ## Current continuation (2026-07-25)
 
 | Field | Current value |

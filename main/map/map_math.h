@@ -10,7 +10,7 @@
 #define D1L_MAP_VIEW_MAX_TILES 9U
 #define D1L_MAP_VIEW_DEFAULT_ZOOM 10U
 #define D1L_MAP_VIEW_MIN_ZOOM 8U
-#define D1L_MAP_VIEW_MAX_ZOOM 14U
+#define D1L_MAP_VIEW_MAX_ZOOM 18U
 
 typedef struct {
     uint8_t zoom;

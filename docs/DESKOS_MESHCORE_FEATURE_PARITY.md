@@ -1,75 +1,73 @@
 # DeskOS MeshCore Feature Parity
 
-This is the production feature gate for the SenseCAP Indicator D1L DeskOS
-firmware. A feature is not complete merely because a protocol handler exists:
-it must be reachable on the device, show truthful state, survive its expected
-lifecycle, and pass focused Pi 5 plus exact-candidate hardware acceptance.
+This is the production feature contract for the SenseCAP Indicator D1L
+DeskOS 1.0 / RC1 firmware. `Ready` means the current source has an on-device
+workflow and focused software coverage. It does not replace the final
+exact-candidate hardware gate.
 
-## Comparison baseline
+## RC1 client surface
 
-The audit on 2026-07-25 compares DeskOS with:
+| Capability | RC1 status | DeskOS workflow |
+|---|---|---|
+| Local identity and boot advert | Ready | A signed flood advert is queued after MeshCore RX starts so nearby clients can attribute later messages to the retained D1L identity. |
+| Public and custom channels | Ready | Create/import, select, enable, rename, make default, send/receive, search, unread state and confirmed removal. |
+| Direct messages | Ready | Exact verified contact keys, direct/flood route selection, ACK correlation, bounded retry and terminal delivery state. |
+| Contacts | Ready | USB `contacts import <meshcore-uri>` plus on-device rename, favorite, mute and confirmed removal. Heard-only or incomplete identities remain read-only; touchscreen URI import and QR sharing are not RC1 claims. |
+| Heard nodes and roles | Ready | Signed adverts populate at most 512 retained Chat, Repeater, Room, Sensor and Unknown rows without role inference. Capacity may replace only an unlocated least-recent entry; valid signed-location markers remain until the user explicitly clears the list. |
+| Finder | Ready | Zero-hop discovery lists unverified full keys and SNR evidence without promoting them to contacts until a signed advert arrives. |
+| Ping, PATH and TRACE | Ready | Repeater Ping is zero-hop TRACE; contact PATH/TRACE exposes pending, timeout, reply, RTT, RSSI and hop SNR state. |
+| Map and node positions | Ready | Centers on the configured device location and plots retained nodes with valid signed advert coordinates. Built-in OSM is attributed, visible-current-view-only, and limited to one 3×3 plan at one zoom per visible generation. |
+| Automatic map download | Ready | On connected Wi-Fi and qualified SD storage, an explicitly authorized provider may prefetch the bounds of nodes within 200 km. Zoom 8–18 is selected to fit the card budget, and prefetch pauses while interactive Map is open. |
+| Multiple Wi-Fi profiles | Ready | Scan, save, select, delete, connect, disconnect and reconnect from the device. |
+| Radio and device settings | Ready | Region/preset, frequency, bandwidth, spreading factor, coding rate, power, RX boost, display and time settings. |
+| SD-first retained data | Ready | SD is the primary history/map/export store. Missing or unusable SD enters a visible live-only RF chat mode; it does not silently move history into default NVS. |
+| Packet and event diagnostics | Ready | Bounded parsed packet/raw previews, event log, storage/map status and crash status without secret logging. |
+| Observer MQTT | Ready | Optional TLS-only, QoS 1, bounded health/location observer with no message text, keys or contacts. |
 
-- the official MeshCore companion protocol and current MeshCore firmware;
-- MeshCore Open, including its repeater/room management implementation
-  (`0fe250230905fdd05dbedc0f546736990beacf53`);
-- MeshCoreTerm / MC Term v0.9.13 documentation and changelog
-  (`bfb7a3b6d2aa30907f7b38992502e62510eab2cf`);
-- the official iOS/Android companion-client management surface.
+## Repeater and room administration
 
-`Ready` means the current DeskOS source has an on-device path and focused
-software coverage. It does not replace exact release-candidate hardware
-evidence. `Blocking` means production release is forbidden.
+| Capability | RC1 status | DeskOS workflow |
+|---|---|---|
+| Verified target selection | Ready | Repeater/room actions require an exact retained full key and canonical role. |
+| Login and logout | Ready | Masked password entry, empty-password repeaters, explicit success/failure/timeout state and volatile authority cleared on logout or target switch. |
+| Route selection | Ready | Current proven direct route is preferred; bounded fallback and selected route state are visible. |
+| Status and telemetry | Ready | Authenticated status/counters and remote telemetry request/result are available on-device. |
+| Neighbours | Ready | Paged neighbour query with bounded full-key/contact resolution. |
+| ACL | Ready | Authenticated ACL query and confirmed mutations without displaying retained secrets. |
+| Full CLI | Ready | Bounded authenticated request/reply transcript with redaction and explicit local confirmation for mutations. Sensitive input is not persistently retained or logged, and volatile confirmation buffers are wiped. |
+| Device/radio/advert settings | Ready | Read/query through the admin surface; mutations require an authenticated matching session and local confirmation. |
+| Room posts | Ready | Current-session room text send/receive with bounded transcript and logout; old traffic is not replayed into a new session. |
+| Remote destructive actions | Guarded | Reboot, password/key and other sensitive CLI mutations remain confirmation-gated; sensitive input is redacted, not persistently retained or logged, and wiped from volatile confirmation buffers. |
 
-## Client capability matrix
+## Intentionally deferred to 1.5 / RC2
 
-| Capability | Phone client | MeshCoreTerm | DeskOS status | Production requirement |
-|---|---:|---:|---|---|
-| Local identity, name, QR/export and boot advert | Yes | Yes | Ready | Exact candidate must boot as `D1L` and advertise that identity |
-| Public and custom channel messaging | Yes | Yes | Ready | Send, receive, history, search and unread state |
-| Direct messages with ACK/delivery state | Yes | Yes | Ready | Direct/flood route selection, retry and terminal delivery state |
-| Contacts: import/export, rename, favorite, mute, delete | Yes | Yes | Ready | Only verified full keys become send targets |
-| Heard nodes, roles, signal and route detail | Yes | Yes | Ready | Unknown/noncanonical identities stay read-only |
-| Path discovery/reset, ping and TRACE | Yes | Yes | Partial | TRACE exists; expose equivalent route reset and reachability actions |
-| Map, peer positions and explicit local position | Yes | Yes | Ready | No invented GPS; signed peer location only |
-| Telemetry request/history | Yes | Yes | Partial | Local telemetry exists; remote manual request/history must be on-device |
-| Multiple Wi-Fi profiles | Platform dependent | Yes | Partial | Current saved station works; profile selection remains to be exposed |
-| BLE/Wi-Fi companion operation | Yes | Yes | Ready | Official core companion surface and authenticated BLE |
-| Radio, display, notification and storage settings | Yes | Yes | Ready | Persisted user-visible settings and truthful hardware state |
-| Packet/raw diagnostic inspection | Varies | Yes | Ready | Bounded parsed packet and event views; no credential logging |
-| Signed firmware update and rollback | Platform dependent | No online update | Ready | Exact signed local package only |
+These features are compiled behind unavailable RC1 capabilities and are not
+shown as usable production controls:
 
-## Repeater and room management matrix
+- BLE companion pairing/transport;
+- on-device contact or channel QR sharing;
+- signed OTA/update and recovery workflows.
 
-| Capability | Phone client | MeshCoreTerm | DeskOS status | Production requirement |
-|---|---:|---:|---|---|
-| Select verified repeater/room target | Yes | Yes | Ready | Exact retained full key and role |
-| Password login from device | Yes | Yes | In progress | Masked input, empty repeater password, clear failure/success state |
-| Saved-route direct login with flood fallback | Yes | Yes | Ready in runtime | Show selected route mode and timeout state in UI |
-| Guest/admin role gating | Yes | Yes | Partial | Read tools for guest; all mutations admin-gated |
-| Logout and target-switch session clearing | Yes | Yes | In progress | Clear volatile authority when leaving or switching |
-| Detailed status and counters | Yes | Yes | Partial | Render all decoded repeater/room status fields |
-| Telemetry request | Yes | Yes | Blocking | Request, decode and display remote telemetry |
-| Neighbour list | Yes | Yes | Blocking | Paged binary neighbour request and contact resolution |
-| Full CLI console | Yes | Yes | Blocking | Bounded command/reply transcript with sensitive-command redaction |
-| Device/radio/advert settings | Yes | Yes | Blocking | Read/write through authenticated CLI with local confirmation |
-| Region management | Yes | Yes | Blocking | List/add/remove regions with role checks and confirmation |
-| ACL and guest/admin management | Yes | Yes | Blocking | List/add/update/remove ACL entries without exposing secrets |
-| Server identity management | Yes | Yes | Blocking | Name/location/public identity plus guarded private-key operations |
-| Password management | Yes | Yes | Blocking | Masked entry, no retained/logged/echoed secret |
-| Reboot | Yes | Yes | Blocking | Explicit second local confirmation |
-| Room login | Yes | Yes | In progress | Current session login must not replay old traffic unexpectedly |
-| Room console transcript/send | Yes | Yes | Blocking | New posts, ACK state, bounded current-session transcript and logout |
+URI-based channel/contact management, USB diagnostics and normal non-erasing
+flashing remain available where described in the user guide.
 
-## Release gate
+## Final release gate
 
-Production remains blocked until every `Blocking`, `Partial`, and `In progress`
-row above is either:
+Software scope is complete only when the exact RC1 commit builds in GitHub
+Actions with `D1L_RELEASE_PROFILE=core_1_0` and
+`D1L_SD_HISTORY_MODE=conditional`. The downloaded checksum, inventory and
+provenance must verify before flashing. Public release still requires one
+bounded physical gate on that exact Actions artifact:
 
-1. implemented with an on-device path and focused automated coverage; or
-2. documented as genuinely hardware-inapplicable while providing the
-   equivalent DeskOS workflow.
+1. boot and DeskOS navigation;
+2. boot identity advert and one Public message;
+3. one DM with ACK;
+4. one PATH/TRACE and one repeater Ping;
+5. repeater login plus authenticated query;
+6. Wi-Fi reconnect;
+7. SD write/remount and degraded-mode notice check;
+8. one authorized Map download followed by an offline cache revisit.
 
-The final candidate must then be built by GitHub Actions, flashed on the Pi 5
-through the stable D1L USB identity, and pass the required smoke, persistence,
-SD, Wi-Fi, controlled-peer RF/admin, automated scroll, and framebuffer gates.
-No soak is part of this release run.
+No soak is part of this release run. The only permitted D1L route is
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` on the Pi 5 after verifying
+`VID:PID 1a86:7523`.

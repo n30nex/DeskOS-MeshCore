@@ -21,6 +21,7 @@ def test_read_state_includes_volatile_seventeenth_dm_row(tmp_path: Path) -> None
         "-I",
         str(ROOT / "main"),
         str(ROOT / "main/mesh/read_state.c"),
+        str(ROOT / "tests/native/retained_blob_store_nvs_adapter.c"),
         str(ROOT / "tests/native/read_state_visible_tail_test.c"),
         "-o",
         str(binary),

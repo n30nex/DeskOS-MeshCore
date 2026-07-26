@@ -16,7 +16,13 @@ def test_storage_view_is_a_bounded_pure_component():
     assert '"ui/ui_storage_view.c"' in cmake
     assert "d1l_ui_storage_view_input_t" in header
     assert "d1l_ui_storage_view_model_t" in header
-    assert "D1L_UI_STORAGE_LOCATION_COUNT 6U" in header
+    assert "D1L_UI_STORAGE_LOCATION_COUNT 9U" in header
+    assert "D1L_UI_STORAGE_LOCATION_NODES" in header
+    assert "D1L_UI_STORAGE_LOCATION_CONTACTS" in header
+    assert "D1L_UI_STORAGE_LOCATION_READ_STATE" in header
+    assert "node_store_backend" in header
+    assert "contact_store_backend" in header
+    assert "read_state_backend" in header
     assert "D1L_UI_STORAGE_VIEW_MODEL_MAX_BYTES" in header
     assert "_Static_assert(sizeof(d1l_ui_storage_view_model_t)" in source
     assert "d1l_ui_storage_view_model_is_valid" in source

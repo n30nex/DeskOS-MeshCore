@@ -1,6 +1,8 @@
 import copy
 import json
 
+import pytest
+
 from scripts import sd_remove_reinsert_acceptance_d1l as accept
 
 
@@ -8,8 +10,8 @@ COMMIT = "e03b8a3d8f24acbf7f5f177ceebc1f3a85a93a81"
 
 
 def storage_status(attempt: int, mode: str) -> dict:
-    sd_mode = mode == "sd"
-    backend = "sd" if sd_mode else "nvs"
+    sd_mode = mode == accept.SD_MODE
+    backend = "sd" if sd_mode else "volatile"
     clean_store = {
         "sd_read_fail_count": 0,
         "sd_write_fail_count": 0,
@@ -40,10 +42,27 @@ def storage_status(attempt: int, mode: str) -> dict:
             "atomic_rename": sd_mode,
             "status_stale": False,
         },
+        "data_backend": backend,
         "message_store_backend": backend,
         "dm_store_backend": backend,
         "route_store_backend": backend,
         "packet_log_backend": backend,
+        "node_store_backend": backend,
+        "contact_store_backend": backend,
+        "read_state_backend": backend,
+        "live_mesh_without_sd": ["rf_tx", "rf_rx", "chat"],
+        "setup_required": not sd_mode,
+        "setup_action": (
+            "retained_history_sd_enabled" if sd_mode else "insert_card"
+        ),
+        "note": (
+            "SD retained history ready"
+            if sd_mode
+            else (
+                "No SD card reported by the RP2040 bridge; live RF and "
+                "chat continue but history is not saved"
+            )
+        ),
         "retained_nvs": {
             "marker_ready": True,
             "markers_complete": True,
@@ -62,7 +81,7 @@ def storage_status(attempt: int, mode: str) -> dict:
 
 
 def canary(token: str, mode: str, generation: int) -> dict:
-    backend = "sd" if mode == "sd" else "nvs"
+    backend = "sd" if mode == accept.SD_MODE else "volatile"
     return {
         "schema": 1,
         "ok": True,
@@ -76,6 +95,7 @@ def canary(token: str, mode: str, generation: int) -> dict:
         "storage_manager_quiesced": True,
         "retained_worker_quiesced": True,
         "backend_mode": mode,
+        "history_persisted": mode == accept.SD_MODE,
         "public_rf_tx": False,
         "dm_rf_tx": False,
         "formats_sd": False,
@@ -156,8 +176,8 @@ def readbacks(token: str, receipt: dict) -> dict[str, dict]:
 
 
 def persistence(token: str, mode: str, generation: int) -> dict[str, dict]:
-    sd_required = mode == "sd"
-    deferred_sd_sync = mode == "nvs_no_card"
+    sd_required = mode == accept.SD_MODE
+    deferred_sd_sync = False
     fingerprint = accept.fingerprint_for_token(token)
     message_persistence = {
         "loaded": True,
@@ -237,14 +257,18 @@ def persistence(token: str, mode: str, generation: int) -> dict[str, dict]:
 
 def bundle(token: str, mode: str, generation: int) -> dict:
     receipt = canary(token, mode, generation)
-    snapshot = persistence(token, mode, generation)
+    volatile = mode == accept.VOLATILE_NO_CARD_MODE
+    snapshot = None if volatile else persistence(token, mode, generation)
     return {
         "token": token,
-        "mode": mode,
+        "mode": (
+            accept.LIVE_ONLY_EVIDENCE_MODE if volatile else mode
+        ),
+        "storage_mode": mode,
         "canary": receipt,
         "readbacks": readbacks(token, receipt),
         "persistence": snapshot,
-        "persistence_attempts_used": 1,
+        "persistence_attempts_used": 0 if volatile else 1,
         "generations": {name: generation for name in accept.STORE_NAMES},
         "ok": True,
     }
@@ -300,6 +324,10 @@ def add_event(events: list[dict], cycle: int, phase: str, command: str | None = 
             "phase": phase,
             "action": action,
             "message": action,
+            "expected_ack": accept.OPERATOR_ACK_TOKENS[action],
+            "ack_timeout_sec": accept.OPERATOR_ACK_TIMEOUT_SEC,
+            "acknowledged": True,
+            "ack_result": "accepted",
         })
     else:
         events.append({
@@ -324,29 +352,56 @@ def valid_report() -> dict:
             phase: accept.cycle_token("rrtest", index, phase)
             for phase in ("before", "absent", "after")
         }
-        before = bundle(tokens["before"], "sd", index * 10 + 1)
-        absent = bundle(tokens["absent"], "nvs_no_card", index * 10 + 2)
-        after = bundle(tokens["after"], "sd", index * 10 + 4)
-        reconcile = persistence(tokens["absent"], "sd", index * 10 + 3)
+        before = bundle(
+            tokens["before"],
+            accept.SD_MODE,
+            index * 10 + 1,
+        )
+        absent = bundle(
+            tokens["absent"],
+            accept.VOLATILE_NO_CARD_MODE,
+            index * 10 + 2,
+        )
+        after = bundle(
+            tokens["after"],
+            accept.SD_MODE,
+            index * 10 + 4,
+        )
+        no_card_samples = [
+            storage_status(
+                index * 10 + 3,
+                accept.VOLATILE_NO_CARD_MODE,
+            ),
+            storage_status(
+                index * 10 + 4,
+                accept.VOLATILE_NO_CARD_MODE,
+            ),
+        ]
+        notice_probe = {
+            "ok": True,
+            "cmd": "ui scroll-probe",
+            "surface": "storage",
+            "tab": "settings",
+            "surface_supported": True,
+            "target_found": True,
+        }
+        absent["degraded_notice_visible"] = True
+        absent["degraded_notice"] = {
+            "storage_status": no_card_samples[-1],
+            "ui_probe": notice_probe,
+            "live_mesh_without_sd": ["rf_tx", "rf_rx", "chat"],
+        }
         cycles.append({
             "cycle": index,
             "tokens": tokens,
             "baseline_ready_samples": [storage_status(index * 10 + 1, "sd"), storage_status(index * 10 + 2, "sd")],
             "before_remove": before,
-            "no_card_samples": [storage_status(index * 10 + 3, "nvs_no_card"), storage_status(index * 10 + 4, "nvs_no_card")],
+            "no_card_samples": no_card_samples,
             "absent": absent,
             "ready_samples": [storage_status(index * 10 + 5, "sd"), storage_status(index * 10 + 6, "sd")],
-            "prewrite": {
-                "earlier_readbacks": {
-                    "before": copy.deepcopy(before["readbacks"]),
-                    "absent": copy.deepcopy(absent["readbacks"]),
-                },
-                "reconcile": reconcile,
-                "reconcile_attempts_used": 1,
-                "reconcile_generations": {name: index * 10 + 3 for name in accept.STORE_NAMES},
-                "generation_changed": True,
-                "gate_passed": True,
-            },
+            "post_reinsert_readback_before": copy.deepcopy(
+                before["readbacks"]
+            ),
             "after_reinsert": after,
             "post_canaries": post_canaries(tokens["after"]),
             "health": {"ok": True, "cmd": "health", "boot_nonce": 99},
@@ -357,10 +412,15 @@ def valid_report() -> dict:
             ("before_remove_canary", f"storage retained-canary {tokens['before']}", None),
             ("prompt_remove", None, "remove"),
             ("no_card_poll", "storage status", None),
+            ("degraded_notice_probe", "ui scroll-probe storage", None),
             ("absent_canary", f"storage retained-canary {tokens['absent']}", None),
             ("prompt_reinsert", None, "reinsert"),
             ("ready_poll", "storage status", None),
-            ("prewrite_reconcile", "routes", None),
+            (
+                "post_reinsert_readback_before",
+                f"messages public search {tokens['before']}",
+                None,
+            ),
             ("after_reinsert_canary", f"storage retained-canary {tokens['after']}", None),
             ("post_file_canary", "storage filecanary", None),
             ("post_map_canary", f"storage map-tile-canary {tokens['after']}", None),
@@ -376,9 +436,19 @@ def valid_report() -> dict:
         "port": "COM12",
         "baud": 115200,
         "expected_firmware_commit": COMMIT,
-        "version": {"ok": True, "cmd": "version", "build_commit": COMMIT},
+        "version": {
+            "ok": True,
+            "cmd": "version",
+            "build_commit": COMMIT,
+            "release_profile": accept.EXPECTED_RELEASE_PROFILE,
+            "sd_history_mode": accept.EXPECTED_SD_HISTORY_MODE,
+        },
         "firmware_identity": True,
         "strict_evidence": True,
+        "physical_observed": True,
+        "manual_only": False,
+        "operator_ack_required": True,
+        "operator_ack_timeout_sec": accept.OPERATOR_ACK_TIMEOUT_SEC,
         "cycles_required": accept.REQUIRED_CYCLES,
         "cycles_completed": accept.REQUIRED_CYCLES,
         "initial_boot_nonce": 99,
@@ -386,6 +456,7 @@ def valid_report() -> dict:
         "public_rf_tx": False,
         "dm_rf_tx": False,
         "formats_sd": False,
+        "erases_nvs": False,
         "events": events,
         "cycles": cycles,
         "git": {"commit": COMMIT, "dirty": False},
@@ -393,22 +464,78 @@ def valid_report() -> dict:
     }
 
 
-def test_strict_dry_run_is_noninteractive_and_port_safe():
+def test_strict_dry_run_is_bounded_acknowledged_and_port_safe():
     report = accept.dry_run_report(COMMIT, "rrtest", strict_evidence=True)
 
     assert report["ok"] is True
     assert report["strict_evidence"] is True
-    assert report["noninteractive"] is True
-    assert report["waits_for_enter"] is False
+    assert report["cycles_required"] == 1
+    assert report["noninteractive"] is False
+    assert report["waits_for_enter"] is True
+    assert report["operator_ack_required"] is True
+    assert report["operator_ack_tokens"] == {
+        "remove": "removed",
+        "reinsert": "reinserted",
+    }
+    assert (
+        report["operator_ack_timeout_sec"]
+        == accept.OPERATOR_ACK_TIMEOUT_SEC
+    )
     assert report["rp2040_usb_used"] is False
     assert report["uf2_volume_used"] is False
+    assert report["erases_nvs"] is False
     text = json.dumps(report)
     assert "COM8" not in text and "COM11" not in text and "COM29" not in text
 
 
-def test_firmware_contract_admits_only_explicit_no_card_nvs_and_emits_safety_fields():
+@pytest.mark.parametrize(
+    ("received", "code", "result"),
+    [
+        (None, "operator_ack_timeout", "timeout"),
+        ("wrong", "operator_ack_mismatch", "mismatch"),
+    ],
+)
+def test_operator_acknowledgement_fails_closed(
+    received,
+    code,
+    result,
+):
+    events: list[dict] = []
+    session = accept.EventSession(
+        None,
+        1.0,
+        events,
+        operator_ack_timeout_sec=5.0,
+        operator_ack_reader=lambda _action, _timeout: received,
+    )
+    with pytest.raises(accept.SessionAbort) as caught:
+        session.prompt(1, "prompt_remove", "remove", "REMOVE SD NOW")
+    assert caught.value.code == code
+    assert events[0]["acknowledged"] is False
+    assert events[0]["ack_result"] == result
+    assert events[0]["ack_timeout_sec"] == 5.0
+
+
+def test_operator_acknowledgement_accepts_exact_action_token():
+    events: list[dict] = []
+    session = accept.EventSession(
+        None,
+        1.0,
+        events,
+        operator_ack_timeout_sec=5.0,
+        operator_ack_reader=lambda _action, _timeout: "removed",
+    )
+    session.prompt(1, "prompt_remove", "remove", "REMOVE SD NOW")
+    assert events[0]["acknowledged"] is True
+    assert events[0]["ack_result"] == "accepted"
+
+
+def test_firmware_contract_admits_only_explicit_no_card_volatile_mode():
     source = open("main/comms/usb_console.c", encoding="utf-8").read()
-    body = source.split("static bool storage_retained_history_nvs_no_card_ready", 1)[1].split(
+    body = source.split(
+        "static bool storage_retained_history_volatile_no_card_ready",
+        1,
+    )[1].split(
         "static bool retained_canary_backend_generations", 1
     )[0]
     for required in (
@@ -420,73 +547,67 @@ def test_firmware_contract_admits_only_explicit_no_card_nvs_and_emits_safety_fie
         "!status->sd_presence_stale",
         "!status->sd_mounted",
         "!status->bridge_status_stale",
-        'text_equals(status->message_store_backend, "nvs")',
-        "d1l_retained_blob_store_nvs_markers_complete()",
-        "d1l_retained_blob_store_nvs_anchor_ready()",
-        "d1l_retained_blob_store_nvs_sentinel_ready()",
+        'text_equals(status->data_backend, "volatile")',
+        'text_equals(status->message_store_backend, "volatile")',
+        'text_equals(status->dm_store_backend, "volatile")',
+        'text_equals(status->route_store_backend, "volatile")',
+        'text_equals(status->packet_log_backend, "volatile")',
     ):
         assert required in body
     canary_body = source.split("static void cmd_storage_retained_canary", 1)[1].split(
         "static void cmd_storage_setup", 1
     )[0]
     assert '\\"backend_mode\\":\\"%s\\"' in canary_body
+    assert '\\"history_persisted\\":%s' in canary_body
     assert '\\"dm_rf_tx\\":false' in canary_body
     assert '\\"backend_generations\\"' in canary_body
 
 
-def test_explicit_no_card_rejects_stale_presence_and_bridge_loss():
-    stale = storage_status(1, "nvs_no_card")
+def test_explicit_no_card_requires_fresh_volatile_live_only_truth():
+    stale = storage_status(1, accept.VOLATILE_NO_CARD_MODE)
     stale["sd"]["presence_stale"] = True
-    bridge_loss = storage_status(1, "nvs_no_card")
+    bridge_loss = storage_status(1, accept.VOLATILE_NO_CARD_MODE)
     bridge_loss["sd"]["rp2040_protocol_supported"] = False
+    nvs = storage_status(1, accept.VOLATILE_NO_CARD_MODE)
+    for field in accept.HISTORY_BACKEND_FIELDS:
+        nvs[field] = "nvs"
 
-    assert accept.storage_mode_matches(storage_status(1, "nvs_no_card"), "nvs_no_card")
-    assert not accept.storage_mode_matches(stale, "nvs_no_card")
-    assert not accept.storage_mode_matches(bridge_loss, "nvs_no_card")
+    assert accept.storage_mode_matches(
+        storage_status(1, accept.VOLATILE_NO_CARD_MODE),
+        accept.VOLATILE_NO_CARD_MODE,
+    )
+    assert not accept.storage_mode_matches(
+        stale,
+        accept.VOLATILE_NO_CARD_MODE,
+    )
+    assert not accept.storage_mode_matches(
+        bridge_loss,
+        accept.VOLATILE_NO_CARD_MODE,
+    )
+    assert not accept.storage_mode_matches(
+        nvs,
+        accept.VOLATILE_NO_CARD_MODE,
+    )
 
 
-def test_absent_persistence_requires_deferred_sd_sync_for_mirrored_stores():
+def test_no_card_canary_is_live_only_and_never_claims_persistence():
     token = "rrtest-01-nvs"
-    results = persistence(token, "nvs_no_card", 2)
-    assert accept.persistence_snapshot_clean(results, token, "nvs_no_card")
-
-    mirrored = (
-        (f"messages public search {token}", "sd"),
-        (f"messages dm {accept.fingerprint_for_token(token)}", "sd"),
-        ("routes", "sd_primary"),
-    )
-    for command, backend in mirrored:
-        for field in ("dirty", "reconcile_pending"):
-            tampered = copy.deepcopy(results)
-            tampered[command]["persistence"][backend][field] = False
-            assert not accept.persistence_snapshot_clean(
-                tampered, token, "nvs_no_card"
-            )
-
-
-def test_absent_persistence_keeps_packet_and_nvs_state_clean():
-    token = "rrtest-01-nvs"
-    packet_command = f"packets search {token}"
-    public_command = f"messages public search {token}"
-
-    packet_dirty = persistence(token, "nvs_no_card", 2)
-    packet_dirty[packet_command]["persistence"]["sd"]["dirty"] = True
-    assert not accept.persistence_snapshot_clean(
-        packet_dirty, token, "nvs_no_card"
-    )
-
-    packet_pending = persistence(token, "nvs_no_card", 2)
-    packet_pending[packet_command]["persistence"]["reconcile"]["pending"] = True
-    assert not accept.persistence_snapshot_clean(
-        packet_pending, token, "nvs_no_card"
-    )
-
-    for field, value in (("dirty", True), ("failures", 1)):
-        nvs_bad = persistence(token, "nvs_no_card", 2)
-        nvs_bad[public_command]["persistence"]["nvs"][field] = value
-        assert not accept.persistence_snapshot_clean(
-            nvs_bad, token, "nvs_no_card"
+    receipt = canary(token, accept.VOLATILE_NO_CARD_MODE, 2)
+    assert (
+        accept.retained_canary_metadata(
+            receipt,
+            token,
+            accept.VOLATILE_NO_CARD_MODE,
         )
+        is not None
+    )
+    assert receipt["history_persisted"] is False
+    assert set(receipt["backends"].values()) == {"volatile"}
+    assert not accept.persistence_snapshot_clean(
+        persistence(token, accept.SD_MODE, 2),
+        token,
+        accept.VOLATILE_NO_CARD_MODE,
+    )
 
 
 def test_ready_sd_persistence_still_rejects_deferred_flags():
@@ -498,36 +619,53 @@ def test_ready_sd_persistence_still_rejects_deferred_flags():
         assert not accept.persistence_snapshot_clean(results, token, "sd")
 
 
-def test_valid_ten_cycle_report_passes():
+def test_valid_one_cycle_report_passes():
     assert accept.validate_report(valid_report())
 
 
-def test_nine_cycles_fail_closed():
+def test_missing_only_cycle_fails_closed():
     report = valid_report()
-    report["cycles"] = report["cycles"][:-1]
-    report["cycles_completed"] = 9
+    report["cycles"] = []
+    report["cycles_completed"] = 0
     assert not accept.validate_report(report)
 
 
 def test_duplicate_or_missing_absent_token_fails_closed():
     report = valid_report()
-    report["cycles"][1]["tokens"]["absent"] = report["cycles"][0]["tokens"]["absent"]
+    report["cycles"][0]["tokens"]["absent"] = report["cycles"][0][
+        "tokens"
+    ]["before"]
     assert not accept.validate_report(report)
 
 
-def test_bad_generation_delta_fails_closed():
+def test_absent_canary_cannot_claim_durable_or_nvs_storage():
     report = valid_report()
-    cycle = report["cycles"][0]
-    cycle["prewrite"]["reconcile_generations"] = copy.deepcopy(cycle["absent"]["generations"])
+    absent = report["cycles"][0]["absent"]
+    absent["canary"]["history_persisted"] = True
+    assert not accept.validate_report(report)
+    report = valid_report()
+    report["cycles"][0]["absent"]["canary"]["backends"][
+        "messages"
+    ] = "nvs"
     assert not accept.validate_report(report)
 
 
-def test_post_write_before_reconcile_fails_closed():
+def test_absent_canary_before_notice_probe_fails_closed():
     report = valid_report()
     events = report["events"]
-    reconcile = next(i for i, event in enumerate(events) if event.get("cycle") == 1 and event.get("phase") == "prewrite_reconcile")
-    post = next(i for i, event in enumerate(events) if event.get("cycle") == 1 and event.get("phase") == "after_reinsert_canary")
-    events[reconcile], events[post] = events[post], events[reconcile]
+    notice = next(
+        i
+        for i, event in enumerate(events)
+        if event.get("cycle") == 1
+        and event.get("phase") == "degraded_notice_probe"
+    )
+    absent = next(
+        i
+        for i, event in enumerate(events)
+        if event.get("cycle") == 1
+        and event.get("phase") == "absent_canary"
+    )
+    events[notice], events[absent] = events[absent], events[notice]
     for sequence, event in enumerate(events, 1):
         event["sequence"] = sequence
     assert not accept.validate_report(report)
@@ -535,7 +673,7 @@ def test_post_write_before_reconcile_fails_closed():
 
 def test_boot_nonce_change_and_unsafe_command_fail_closed():
     report = valid_report()
-    report["cycles"][3]["health"]["boot_nonce"] = 100
+    report["cycles"][0]["health"]["boot_nonce"] = 100
     assert not accept.validate_report(report)
 
     report = valid_report()
@@ -574,14 +712,14 @@ def test_forged_identity_port_or_top_level_ok_fails_closed():
 
 def test_partial_blocker_receipt_cannot_be_canonical_success():
     report = valid_report()
-    report["cycles"] = report["cycles"][:3]
-    report["cycles_completed"] = 3
+    report["cycles"] = []
+    report["cycles_completed"] = 0
     report["ok"] = False
     report["blocker"] = {
         "code": "state_timeout",
         "phase": "no_card_poll",
-        "detail": "nvs_no_card",
-        "cycle": 4,
+        "detail": accept.VOLATILE_NO_CARD_MODE,
+        "cycle": 1,
         "last_event_sequence": 44,
     }
     assert not accept.validate_report(report)

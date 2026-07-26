@@ -49,7 +49,9 @@ typedef struct {
 
 typedef struct {
     char url[D1L_MAP_TILE_URL_TEMPLATE_MAX + 32U];
+    char source_id[25];
     char attribution[D1L_MAP_TILE_ATTRIBUTION_MAX + 1U];
+    char license_url[129];
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char tmp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char attribution_path[D1L_RP2040_FILE_PATH_MAX + 1U];
@@ -62,6 +64,8 @@ typedef struct {
     int status_code;
     uint32_t retry_after_sec;
     bool provider_allowed;
+    bool provider_configured;
+    bool background_prefetch_permitted;
     bool attribution_saved;
     bool cache_hit;
     bool content_type_valid;
@@ -85,6 +89,12 @@ bool d1l_map_tile_store_coord_valid(uint8_t z, uint32_t x, uint32_t y);
 bool d1l_map_tile_store_path(uint8_t z, uint32_t x, uint32_t y,
                              char *dest, size_t dest_size);
 bool d1l_map_tile_png_valid(const uint8_t *data, size_t len);
+esp_err_t d1l_map_tile_store_cached(
+    uint8_t z,
+    uint32_t x,
+    uint32_t y,
+    const d1l_storage_status_t *status,
+    bool *out_cached);
 esp_err_t d1l_map_tile_store_read(uint8_t z,
                                   uint32_t x,
                                   uint32_t y,

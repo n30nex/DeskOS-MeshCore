@@ -20,6 +20,7 @@ typedef enum {
     D1L_MESHCORE_PACKET_SEMANTIC_PATH,
     D1L_MESHCORE_PACKET_SEMANTIC_TRACE,
     D1L_MESHCORE_PACKET_SEMANTIC_ADVERT,
+    D1L_MESHCORE_PACKET_SEMANTIC_CONTROL,
 } d1l_meshcore_packet_semantic_kind_t;
 
 typedef struct {
