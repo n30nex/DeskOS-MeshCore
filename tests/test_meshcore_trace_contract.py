@@ -140,7 +140,12 @@ def test_runtime_owner_derives_contact_trace_from_one_current_proven_path() -> N
     send = service.split(
         "static esp_err_t meshcore_service_handle_send_trace_contact", 1
     )[1].split("static void meshcore_service_reply", 1)[0]
-    wrapper = service.split(
+    queue = service.split(
+        "static esp_err_t meshcore_service_send_trace_command", 1
+    )[1].split(
+        "esp_err_t d1l_meshcore_service_send_trace_contact", 1
+    )[0]
+    wrappers = service.split(
         "esp_err_t d1l_meshcore_service_send_trace_contact", 1
     )[1].split("const char *d1l_meshcore_service_state_name", 1)[0]
     helper = service.split(
@@ -185,11 +190,13 @@ def test_runtime_owner_derives_contact_trace_from_one_current_proven_path() -> N
     assert send.index("meshcore_service_handle_send_raw(&raw_cmd)") < send.index(
         "s_status.trace_tx_queued++"
     )
-    assert "D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT" in wrapper
-    assert "trace_fingerprint" in wrapper
-    assert "meshcore_service_lower_hex(fingerprint[i])" in wrapper
-    assert "ESP_ERR_INVALID_ARG" in wrapper
-    assert "path_hash" not in wrapper
+    assert "D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT" in queue
+    assert "trace_fingerprint" in queue
+    assert "meshcore_service_lower_hex(fingerprint[i])" in queue
+    assert "ESP_ERR_INVALID_ARG" in queue
+    assert "path_hash" not in queue
+    assert "meshcore_service_send_trace_command(fingerprint, false)" in wrappers
+    assert "meshcore_service_send_trace_command(fingerprint, true)" in wrappers
     assert "d1l_meshcore_service_send_trace_loop" not in service
     assert "d1l_meshcore_service_send_trace_loop" not in header
     assert "ESP_ERR_NOT_FINISHED means one TRACE is pending" in header
