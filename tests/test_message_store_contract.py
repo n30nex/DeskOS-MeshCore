@@ -38,7 +38,18 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     assert "d1l_retained_blob_store_write_sd_primary_guarded(" in source
     assert "d1l_retained_blob_store_write_nvs_fallback(" in source
     assert "d1l_retained_blob_store_erase_sd_primary_guarded(" not in source
-    assert "d1l_retained_blob_store_erase_nvs_fallback(" not in source
+    assert source.count("d1l_retained_blob_store_erase_nvs_fallback(") == 2
+    clear_all = source.split("esp_err_t d1l_message_store_clear(void)", 1)[1].split(
+        "esp_err_t d1l_message_store_clear_channel", 1
+    )[0]
+    clear_channel = source.split(
+        "esp_err_t d1l_message_store_clear_channel", 1
+    )[1].split("esp_err_t d1l_message_store_flush", 1)[0]
+    for clear in (clear_all, clear_channel):
+        retire = clear.index("d1l_retained_blob_store_erase_nvs_fallback(")
+        flush = clear.index("d1l_message_store_flush()")
+        assert retire < flush
+        assert "if (retire_ret != ESP_OK)" in clear
     assert "s_epoch" in source
     assert "s_content_revision" in source
     assert "s_clear_lineage" in source

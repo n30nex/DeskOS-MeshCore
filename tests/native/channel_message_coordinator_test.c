@@ -90,17 +90,11 @@ esp_err_t d1l_channel_store_reconcile_retained_rows(
 {
     s_reconcile_calls++;
     assert(rows && message_generation);
-#if EXPECT_CORE
-    assert(row_count == 1U);
-#else
     assert(row_count == 2U);
-#endif
     assert(rows[0].channel_id == UINT64_C(1) &&
            rows[0].message_seq == 10U && rows[0].received);
-#if !EXPECT_CORE
     assert(rows[1].channel_id == UINT64_C(2) &&
            rows[1].message_seq == 11U && !rows[1].received);
-#endif
     assert(message_generation->epoch == 7U &&
            message_generation->next_seq == 12U &&
            message_generation->clear_lineage == UINT64_C(0x12345678));

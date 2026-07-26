@@ -598,6 +598,15 @@ esp_err_t d1l_retained_blob_store_write_nvs_fallback(
         blob_write(&s_nvs, src, len) : s_nvs_write_error;
 }
 
+esp_err_t d1l_retained_blob_store_erase_nvs_fallback(
+    d1l_retained_blob_store_id_t store_id, const char *key)
+{
+    assert(store_id == D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
+    assert(strcmp(key, "threads") == 0);
+    memset(&s_nvs, 0, sizeof(s_nvs));
+    return ESP_OK;
+}
+
 static void test_late_ready_merges_before_primary_write(void)
 {
     reset_backend();

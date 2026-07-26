@@ -4,6 +4,10 @@
 
 #include "ui/ui_settings.h"
 
+#ifndef EXPECT_BLE
+#error "EXPECT_BLE must bind the release-profile case"
+#endif
+
 _Static_assert(sizeof(d1l_ui_more_view_model_t) <= D1L_UI_MORE_VIEW_MODEL_MAX_BYTES,
                "More view model size budget regressed");
 _Static_assert(sizeof(d1l_ui_settings_controller_t) <=
@@ -219,15 +223,16 @@ static void test_release_profile_strips_hidden_sd_failures(void)
     assert(d1l_ui_more_view(&input, &view));
     const d1l_ui_more_item_view_t *storage =
         item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 0U);
-#if EXPECT_CORE
-    assert(!input.wifi_build_enabled);
-    assert(!input.ble_build_enabled);
-    assert(!input.map_location_set);
-    assert(!input.storage_sd_present);
-    assert(!input.storage_retained_sd_degraded);
-    assert(strcmp(storage->status, "Internal storage") == 0);
-    assert(storage->accent == 0xF4F7FBU);
-    assert(!storage->warning);
+    assert(input.wifi_build_enabled);
+    assert(input.ble_build_enabled == (EXPECT_BLE != 0));
+    assert(input.ble_transport_supported == (EXPECT_BLE != 0));
+    assert(input.ble_companion_enabled == (EXPECT_BLE != 0));
+    assert(input.map_location_set);
+    assert(input.storage_sd_present);
+    assert(input.storage_retained_sd_degraded);
+    assert(strcmp(storage->status, "Needs attention") == 0);
+    assert(storage->accent == 0xF87171U);
+    assert(storage->warning);
 
     input.storage_retained_backup_degraded = true;
     assert(d1l_ui_more_view(&input, &view));
@@ -235,16 +240,6 @@ static void test_release_profile_strips_hidden_sd_failures(void)
     assert(strcmp(storage->status, "Needs attention") == 0);
     assert(storage->accent == 0xF87171U);
     assert(storage->warning);
-#else
-    assert(input.wifi_build_enabled);
-    assert(input.ble_build_enabled);
-    assert(input.map_location_set);
-    assert(input.storage_sd_present);
-    assert(input.storage_retained_sd_degraded);
-    assert(strcmp(storage->status, "Needs attention") == 0);
-    assert(storage->accent == 0xF87171U);
-    assert(storage->warning);
-#endif
 }
 
 int main(void)

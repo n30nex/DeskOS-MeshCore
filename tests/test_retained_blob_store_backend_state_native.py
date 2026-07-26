@@ -82,7 +82,7 @@ def test_retained_sd_profile_admission_matrix(tmp_path):
             "core_conditional",
             "D1L_RELEASE_PROFILE_CORE_1_0",
             "D1L_SD_HISTORY_MODE_CONDITIONAL",
-            False,
+            True,
         ),
         (
             "core_disabled",

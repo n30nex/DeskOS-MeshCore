@@ -342,5 +342,8 @@ def test_release_docs_define_current_storage_and_map_acceptance():
     assert "Degraded mode keeps basic live RF" in guide
     assert "SD-primary retained data" in checklist
     assert "authorized Map download/offline revisit" in checklist
-    assert "one consolidated physical" in checklist
+    assert "automated 12-surface navigation receipt" in checklist
+    assert "one consolidated physical" not in checklist.split(
+        "## Historical", 1
+    )[0]
     assert "No soak is required" in checklist
