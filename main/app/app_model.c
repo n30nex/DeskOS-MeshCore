@@ -908,6 +908,46 @@ esp_err_t d1l_app_model_send_trace_contact(const char *fingerprint)
     return d1l_meshcore_service_send_trace_contact(fingerprint);
 }
 
+void d1l_app_model_trace_snapshot(
+    d1l_meshcore_trace_snapshot_t *out_snapshot)
+{
+    d1l_meshcore_service_trace_snapshot(out_snapshot);
+}
+
+esp_err_t d1l_app_model_ping_repeater(const char *fingerprint)
+{
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return d1l_meshcore_service_ping_repeater(fingerprint);
+}
+
+esp_err_t d1l_app_model_discover_nearby(void)
+{
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return d1l_meshcore_service_discover_nearby();
+}
+
+void d1l_app_model_discovery_snapshot(
+    d1l_meshcore_discovery_snapshot_t *out_snapshot)
+{
+    d1l_meshcore_service_discovery_snapshot(out_snapshot);
+}
+
+esp_err_t d1l_app_model_clear_nodes(bool confirmed)
+{
+    if (!confirmed) {
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    const esp_err_t ret = d1l_node_store_clear();
+    if (ret == ESP_OK) {
+        d1l_meshcore_service_clear_discovery_results();
+    }
+    return ret;
+}
+
 size_t d1l_app_model_query_dm_thread_page(const char *fingerprint,
                                           d1l_dm_entry_t *out_entries,
                                           bool *out_unread,

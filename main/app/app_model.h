@@ -347,6 +347,13 @@ void d1l_app_model_contact_telemetry_snapshot(
     d1l_meshcore_contact_telemetry_snapshot_t *out_snapshot);
 esp_err_t d1l_app_model_reset_contact_route(const char *fingerprint);
 esp_err_t d1l_app_model_send_trace_contact(const char *fingerprint);
+void d1l_app_model_trace_snapshot(
+    d1l_meshcore_trace_snapshot_t *out_snapshot);
+esp_err_t d1l_app_model_ping_repeater(const char *fingerprint);
+esp_err_t d1l_app_model_discover_nearby(void);
+void d1l_app_model_discovery_snapshot(
+    d1l_meshcore_discovery_snapshot_t *out_snapshot);
+esp_err_t d1l_app_model_clear_nodes(bool confirmed);
 size_t d1l_app_model_query_dm_thread_page(const char *fingerprint,
                                           d1l_dm_entry_t *out_entries,
                                           bool *out_unread,

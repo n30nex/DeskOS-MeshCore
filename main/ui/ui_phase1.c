@@ -113,6 +113,7 @@ static d1l_wifi_scan_result_t s_wifi_scan_result;
 static bool s_wifi_scan_loaded;
 static lv_obj_t *s_route_detail_sheet;
 static lv_obj_t *s_route_trace_sheet;
+static lv_obj_t *s_finder_sheet;
 static lv_obj_t *s_packet_detail_sheet;
 static lv_obj_t *s_packet_search_sheet;
 static lv_obj_t *s_packet_search_textarea;
@@ -149,6 +150,7 @@ static d1l_ui_channel_sheets_controller_t s_channel_sheets_controller EXT_RAM_BS
 static d1l_ui_node_detail_controller_t s_node_detail_controller EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
 static bool s_terminal_clear_armed;
+static bool s_nodes_clear_armed;
 static bool s_update_install_armed;
 static bool s_update_reboot_armed;
 static d1l_meshcore_admin_mutation_t s_admin_mutation_armed =
@@ -159,6 +161,7 @@ static bool s_admin_cli_secure_input;
 static bool s_admin_rendered_generation_valid;
 static uint32_t s_admin_rendered_dm_revision;
 static uint32_t s_terminal_clear_deadline;
+static uint32_t s_nodes_clear_deadline;
 static uint32_t s_update_install_deadline;
 static uint32_t s_update_reboot_deadline;
 static uint32_t s_admin_mutation_deadline;
@@ -189,7 +192,14 @@ static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY]
     EXT_RAM_BSS_ATTR;
 static d1l_meshcore_contact_telemetry_snapshot_t
     s_route_trace_telemetry EXT_RAM_BSS_ATTR;
+static d1l_meshcore_trace_snapshot_t
+    s_route_trace_snapshot EXT_RAM_BSS_ATTR;
+static d1l_meshcore_discovery_snapshot_t
+    s_finder_snapshot EXT_RAM_BSS_ATTR;
 static uint32_t s_route_trace_telemetry_rendered_generation;
+static uint32_t s_route_trace_last_render_second;
+static uint32_t s_finder_rendered_generation;
+static uint32_t s_finder_last_render_second;
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]
     EXT_RAM_BSS_ATTR;
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
@@ -245,6 +255,7 @@ static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_map_node_detail(const char *fingerprint);
 static void open_route_trace_event_cb(lv_event_t *event);
 static void render_route_trace_sheet(void);
+static void render_finder_sheet(void);
 static void open_route_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
 static void open_packet_search_event_cb(lv_event_t *event);
@@ -267,6 +278,7 @@ static void open_update_sheet_event_cb(lv_event_t *event);
 static void open_notifications_sheet_event_cb(lv_event_t *event);
 static void open_admin_sheet_event_cb(lv_event_t *event);
 static void open_sheet_event_cb(lv_event_t *event);
+static bool confirmation_active(bool armed, uint32_t deadline);
 
 typedef d1l_ui_screen_t d1l_ui_tab_t;
 
@@ -1696,6 +1708,12 @@ static void hide_route_trace_sheet(void)
     restore_dock_for_active_tab();
 }
 
+static void hide_finder_sheet(void)
+{
+    d1l_ui_modal_hide(s_finder_sheet);
+    restore_dock_for_active_tab();
+}
+
 static void hide_packet_detail_sheet(void)
 {
     d1l_ui_modal_hide(s_packet_detail_sheet);
@@ -2522,6 +2540,7 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
     hide_channel_management_sheets();
     hide_route_detail_sheet();
     hide_route_trace_sheet();
+    hide_finder_sheet();
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
@@ -2955,6 +2974,25 @@ static void route_trace_request_event_cb(lv_event_t *event)
     }
 }
 
+static void route_ping_request_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE) ||
+        strcmp(s_route_trace_contact.type, "repeater") != 0 ||
+        s_route_trace_contact.fingerprint[0] == '\0') {
+        show_toast("Ping", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    const esp_err_t ret = d1l_app_model_ping_repeater(
+        s_route_trace_contact.fingerprint);
+    if (ret == ESP_OK) {
+        show_toast_text("Zero-hop Ping queued", true);
+        render_route_trace_sheet();
+    } else {
+        show_toast("Ping", ret);
+    }
+}
+
 static void route_probe_request_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -3016,8 +3054,10 @@ static void render_route_trace_sheet(void)
     const size_t best = route_count ? ui_route_trace_best_index(s_route_trace_entries, route_count) : 0;
     d1l_app_model_contact_telemetry_snapshot(
         contact->fingerprint, &s_route_trace_telemetry);
+    d1l_app_model_trace_snapshot(&s_route_trace_snapshot);
     s_route_trace_telemetry_rendered_generation =
         s_route_trace_telemetry.generation;
+    s_route_trace_last_render_second = lv_tick_get() / 1000U;
 
     create_button(s_route_trace_sheet, "Back", 12, 6, 72, 44,
                   close_route_trace_event_cb, NULL);
@@ -3027,12 +3067,23 @@ static void render_route_trace_sheet(void)
     lv_obj_set_width(title, 150);
     lv_obj_set_pos(title, 94, 10);
 
-    create_button(s_route_trace_sheet, "Probe", 250, 6, 68, 44,
-                  route_probe_request_event_cb, NULL);
-    create_button(s_route_trace_sheet, "Trace", 324, 6, 66, 44,
-                  route_trace_request_event_cb, NULL);
-    create_button(s_route_trace_sheet, "Reset", 396, 6, 68, 44,
-                  route_reset_event_cb, NULL);
+    if (strcmp(contact->type, "repeater") == 0) {
+        create_button(s_route_trace_sheet, "Probe", 250, 6, 52, 44,
+                      route_probe_request_event_cb, NULL);
+        create_button(s_route_trace_sheet, "Ping", 306, 6, 48, 44,
+                      route_ping_request_event_cb, NULL);
+        create_button(s_route_trace_sheet, "Trace", 358, 6, 50, 44,
+                      route_trace_request_event_cb, NULL);
+        create_button(s_route_trace_sheet, "Reset", 412, 6, 52, 44,
+                      route_reset_event_cb, NULL);
+    } else {
+        create_button(s_route_trace_sheet, "Probe", 250, 6, 68, 44,
+                      route_probe_request_event_cb, NULL);
+        create_button(s_route_trace_sheet, "Trace", 324, 6, 66, 44,
+                      route_trace_request_event_cb, NULL);
+        create_button(s_route_trace_sheet, "Reset", 396, 6, 68, 44,
+                      route_reset_event_cb, NULL);
+    }
 
     lv_obj_t *meta = create_label(s_route_trace_sheet, "", 0x8EA0AE);
     label_set_fmt(meta, "Trace %.16s  rows %u/%u",
@@ -3086,6 +3137,114 @@ static void render_route_trace_sheet(void)
     lv_obj_set_pos(telemetry_state, 16, 142);
 
     int content_y = 168;
+    const bool trace_target_matches =
+        s_route_trace_snapshot.target_fingerprint[0] != '\0' &&
+        strcmp(s_route_trace_snapshot.target_fingerprint,
+               contact->fingerprint) == 0;
+    if (trace_target_matches &&
+        (s_route_trace_snapshot.pending ||
+         s_route_trace_snapshot.last_attempt_valid)) {
+        lv_obj_t *trace_panel =
+            create_object(s_route_trace_sheet, "trace result");
+        if (trace_panel) {
+            lv_obj_set_width(trace_panel, 448);
+            lv_obj_set_pos(trace_panel, 16, content_y);
+            lv_obj_set_style_bg_color(
+                trace_panel, lv_color_hex(0x10282A), 0);
+            lv_obj_set_style_border_color(
+                trace_panel, lv_color_hex(0x2DD4BF), 0);
+            lv_obj_set_style_border_width(trace_panel, 1, 0);
+            lv_obj_set_style_radius(trace_panel, 8, 0);
+            lv_obj_set_style_pad_all(trace_panel, 8, 0);
+            lv_obj_clear_flag(trace_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+            const char *operation =
+                s_route_trace_snapshot.zero_hop_ping ?
+                    "Zero-hop Ping" : "TRACE";
+            char result_line[160] = {0};
+            char snr_line[192] = {0};
+            int panel_height = 64;
+            if (s_route_trace_snapshot.pending) {
+                snprintf(
+                    result_line, sizeof(result_line),
+                    "%s pending  %lus elapsed",
+                    operation,
+                    (unsigned long)(
+                        s_route_trace_snapshot.pending_age_ms / 1000U));
+                snprintf(
+                    snr_line, sizeof(snr_line),
+                    "Waiting for a correlated direct response");
+            } else if (
+                s_route_trace_snapshot.last_attempt_outcome ==
+                D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE) {
+                snprintf(result_line, sizeof(result_line),
+                         "%s timed out", operation);
+                snprintf(
+                    snr_line, sizeof(snr_line),
+                    "No zero-hop/direct response; inspect route or range");
+            } else if (
+                s_route_trace_snapshot.last_result_valid &&
+                s_route_trace_snapshot.last_tag ==
+                    s_route_trace_snapshot.last_attempt_tag) {
+                const int back_snr =
+                    s_route_trace_snapshot.last_radio_snr_quarter_db;
+                const int back_abs = back_snr < 0 ? -back_snr : back_snr;
+                snprintf(
+                    result_line, sizeof(result_line),
+                    "%s reply  RTT %lums  RSSI %d  back SNR %s%d.%02d",
+                    operation,
+                    (unsigned long)
+                        s_route_trace_snapshot.last_round_trip_ms,
+                    s_route_trace_snapshot.last_rssi_dbm,
+                    back_snr < 0 ? "-" : "", back_abs / 4,
+                    (back_abs % 4) * 25);
+                size_t used = 0U;
+                used += (size_t)snprintf(
+                    snr_line, sizeof(snr_line), "Hop SNR:");
+                for (size_t i = 0U;
+                     i < s_route_trace_snapshot.last_path_hops &&
+                     used + 16U < sizeof(snr_line); ++i) {
+                    const int hop =
+                        s_route_trace_snapshot
+                            .last_path_snrs_quarter_db[i];
+                    const int hop_abs = hop < 0 ? -hop : hop;
+                    const int written = snprintf(
+                        &snr_line[used], sizeof(snr_line) - used,
+                        " %u=%s%d.%02d", (unsigned)(i + 1U),
+                        hop < 0 ? "-" : "", hop_abs / 4,
+                        (hop_abs % 4) * 25);
+                    if (written <= 0 ||
+                        (size_t)written >= sizeof(snr_line) - used) {
+                        break;
+                    }
+                    used += (size_t)written;
+                }
+                panel_height = 82;
+            } else {
+                snprintf(result_line, sizeof(result_line),
+                         "%s result unavailable", operation);
+                snprintf(snr_line, sizeof(snr_line),
+                         "No matched response retained");
+            }
+
+            lv_obj_t *result =
+                create_label(trace_panel, result_line, 0x5EEAD4);
+            if (result) {
+                lv_label_set_long_mode(result, LV_LABEL_LONG_WRAP);
+                lv_obj_set_width(result, 416);
+                lv_obj_set_pos(result, 8, 4);
+            }
+            lv_obj_t *snrs =
+                create_label(trace_panel, snr_line, 0xE5EDF5);
+            if (snrs) {
+                lv_label_set_long_mode(snrs, LV_LABEL_LONG_WRAP);
+                lv_obj_set_width(snrs, 416);
+                lv_obj_set_pos(snrs, 8, 30);
+            }
+            lv_obj_set_height(trace_panel, panel_height);
+            content_y += panel_height + 10;
+        }
+    }
     if (s_route_trace_telemetry.history_count == 0U) {
         lv_obj_t *empty = create_label(
             s_route_trace_sheet,
@@ -5428,6 +5587,181 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
     }
 }
 
+static const char *finder_role_name(uint8_t node_type)
+{
+    switch (node_type) {
+    case D1L_MESHCORE_DISCOVERY_NODE_TYPE_CHAT:
+        return "Chat";
+    case D1L_MESHCORE_DISCOVERY_NODE_TYPE_REPEATER:
+        return "Repeater";
+    case D1L_MESHCORE_DISCOVERY_NODE_TYPE_ROOM:
+        return "Room";
+    case D1L_MESHCORE_DISCOVERY_NODE_TYPE_SENSOR:
+        return "Sensor";
+    default:
+        return "Node";
+    }
+}
+
+static void close_finder_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_finder_sheet();
+}
+
+static void finder_scan_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const esp_err_t ret = d1l_app_model_discover_nearby();
+    if (ret == ESP_OK) {
+        show_toast_text("Nearby scan sent", true);
+    } else if (ret != ESP_ERR_NOT_FINISHED) {
+        show_toast("Nearby scan", ret);
+    }
+    render_finder_sheet();
+}
+
+static void render_finder_sheet(void)
+{
+    if (!s_finder_sheet) {
+        return;
+    }
+    const lv_coord_t previous_scroll_y = lv_obj_get_scroll_y(s_finder_sheet);
+    lv_obj_clean(s_finder_sheet);
+    d1l_app_model_discovery_snapshot(&s_finder_snapshot);
+    s_finder_rendered_generation = s_finder_snapshot.generation;
+    s_finder_last_render_second = lv_tick_get() / 1000U;
+
+    create_button(s_finder_sheet, "Back", 12, 6, 72, 44,
+                  close_finder_sheet_event_cb, NULL);
+    lv_obj_t *title =
+        create_label(s_finder_sheet, "Find Nearby", 0xF4F7FB);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(title, 250);
+        lv_obj_set_pos(title, 94, 10);
+    }
+    create_button(s_finder_sheet, "Scan", 380, 6, 84, 44,
+                  finder_scan_event_cb, NULL);
+
+    char state[96] = {0};
+    if (s_finder_snapshot.active) {
+        snprintf(state, sizeof(state),
+                 "Listening %lus  found %u  responses %lu",
+                 (unsigned long)(
+                     (s_finder_snapshot.remaining_ms + 999U) / 1000U),
+                 (unsigned)s_finder_snapshot.result_count,
+                 (unsigned long)s_finder_snapshot.total_responses);
+    } else {
+        snprintf(state, sizeof(state),
+                 "Scan idle  found %u  responses %lu",
+                 (unsigned)s_finder_snapshot.result_count,
+                 (unsigned long)s_finder_snapshot.total_responses);
+    }
+    lv_obj_t *status = create_label(s_finder_sheet, state,
+                                    s_finder_snapshot.active ?
+                                        0x5EEAD4 : 0x8EA0AE);
+    if (status) {
+        lv_label_set_long_mode(status, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(status, 448);
+        lv_obj_set_pos(status, 16, 62);
+    }
+    lv_obj_t *boundary = create_label(
+        s_finder_sheet,
+        "Zero-hop RF only. Discovery keys are unverified until a signed advert is received.",
+        0xFBBF24);
+    if (boundary) {
+        lv_label_set_long_mode(boundary, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(boundary, 448);
+        lv_obj_set_pos(boundary, 16, 88);
+    }
+
+    int y = 132;
+    for (size_t i = 0U; i < s_finder_snapshot.result_count; ++i) {
+        const d1l_meshcore_discovery_result_t *entry =
+            &s_finder_snapshot.results[i];
+        d1l_contact_entry_t contact = {0};
+        const bool known =
+            d1l_app_model_find_contact_by_public_key(
+                entry->public_key_hex, &contact) == ESP_OK;
+        const char *name = known && contact.alias[0] ?
+            contact.alias : entry->fingerprint;
+
+        lv_obj_t *panel =
+            create_object(s_finder_sheet, "finder result row");
+        if (!panel) {
+            continue;
+        }
+        lv_obj_set_size(panel, 448, 74);
+        lv_obj_set_pos(panel, 16, y);
+        lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0);
+        lv_obj_set_style_border_color(
+            panel, lv_color_hex(known ? 0x2DD4BF : 0x334155), 0);
+        lv_obj_set_style_border_width(panel, 1, 0);
+        lv_obj_set_style_radius(panel, 8, 0);
+        lv_obj_set_style_pad_all(panel, 8, 0);
+        lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+
+        char heading[96] = {0};
+        snprintf(heading, sizeof(heading), "%s  %s%s",
+                 name, finder_role_name(entry->node_type),
+                 known ? "  contact" : "");
+        lv_obj_t *heading_label =
+            create_label(panel, heading, known ? 0x5EEAD4 : 0xF4F7FB);
+        if (heading_label) {
+            lv_label_set_long_mode(heading_label, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(heading_label, 416);
+            lv_obj_set_pos(heading_label, 8, 2);
+        }
+
+        const int local_abs = entry->local_snr_quarter_db < 0 ?
+            -entry->local_snr_quarter_db : entry->local_snr_quarter_db;
+        const int remote_abs = entry->remote_snr_quarter_db < 0 ?
+            -entry->remote_snr_quarter_db : entry->remote_snr_quarter_db;
+        char metrics[160] = {0};
+        snprintf(
+            metrics, sizeof(metrics),
+            "RSSI %d  there %s%d.%02d  back %s%d.%02d  %lus ago",
+            entry->last_rssi_dbm,
+            entry->remote_snr_quarter_db < 0 ? "-" : "",
+            remote_abs / 4, (remote_abs % 4) * 25,
+            entry->local_snr_quarter_db < 0 ? "-" : "",
+            local_abs / 4, (local_abs % 4) * 25,
+            (unsigned long)(entry->age_ms / 1000U));
+        lv_obj_t *metrics_label =
+            create_label(panel, metrics, 0x8EA0AE);
+        if (metrics_label) {
+            lv_label_set_long_mode(metrics_label, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(metrics_label, 416);
+            lv_obj_set_pos(metrics_label, 8, 28);
+        }
+        lv_obj_t *key = create_label(
+            panel, entry->public_key_hex, 0x64748B);
+        if (key) {
+            lv_label_set_long_mode(key, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(key, 416);
+            lv_obj_set_pos(key, 8, 50);
+        }
+        y += 84;
+    }
+    if (s_finder_snapshot.result_count == 0U) {
+        lv_obj_t *empty = create_label(
+            s_finder_sheet,
+            s_finder_snapshot.active ?
+                "Waiting for compatible chats, repeaters, rooms, and sensors..." :
+                "Tap Scan to actively find compatible zero-hop nodes.",
+            0x8EA0AE);
+        if (empty) {
+            lv_label_set_long_mode(empty, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(empty, 448);
+            lv_obj_set_pos(empty, 16, y + 12);
+        }
+    }
+    lv_obj_update_layout(s_finder_sheet);
+    lv_obj_scroll_to_y(s_finder_sheet, previous_scroll_y, LV_ANIM_OFF);
+}
+
 static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
                                 void *context)
 {
@@ -5447,6 +5781,32 @@ static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
         break;
     case D1L_UI_NODES_ACTION_OPEN_NODE_DM:
         open_node_dm_for(event->node);
+        break;
+    case D1L_UI_NODES_ACTION_FIND_NEARBY: {
+        const esp_err_t ret = d1l_app_model_discover_nearby();
+        if (ret == ESP_OK) {
+            show_toast_text("Nearby scan sent", true);
+        } else if (ret != ESP_ERR_NOT_FINISHED) {
+            show_toast("Nearby scan", ret);
+        }
+        render_finder_sheet();
+        show_modal(s_finder_sheet);
+        break;
+    }
+    case D1L_UI_NODES_ACTION_CLEAR_HEARD:
+        if (!confirmation_active(
+                s_nodes_clear_armed, s_nodes_clear_deadline)) {
+            s_nodes_clear_armed = true;
+            s_nodes_clear_deadline = lv_tick_get() + 5000U;
+            show_toast_text("Tap Clear again to erase heard nodes", true);
+        } else {
+            s_nodes_clear_armed = false;
+            const esp_err_t ret = d1l_app_model_clear_nodes(true);
+            show_toast("Clear heard nodes", ret);
+            if (ret == ESP_OK) {
+                request_content_refresh();
+            }
+        }
         break;
     case D1L_UI_NODES_ACTION_NONE:
     default:
@@ -8644,13 +9004,22 @@ static void refresh_timer_cb(lv_timer_t *timer)
     } else if (d1l_ui_modal_visible(d1l_ui_service_sheets_notifications(
                    &s_service_sheets_controller))) {
         (void)render_notifications_service_sheet();
+    } else if (d1l_ui_modal_visible(s_finder_sheet)) {
+        d1l_app_model_discovery_snapshot(&s_finder_snapshot);
+        const uint32_t render_second = lv_tick_get() / 1000U;
+        if (s_finder_snapshot.generation != s_finder_rendered_generation ||
+            render_second != s_finder_last_render_second) {
+            render_finder_sheet();
+        }
     } else if (d1l_ui_modal_visible(s_route_trace_sheet) &&
                s_route_trace_contact.fingerprint[0] != '\0') {
         d1l_app_model_contact_telemetry_snapshot(
             s_route_trace_contact.fingerprint,
             &s_route_trace_telemetry);
+        const uint32_t render_second = lv_tick_get() / 1000U;
         if (s_route_trace_telemetry.generation !=
-            s_route_trace_telemetry_rendered_generation) {
+                s_route_trace_telemetry_rendered_generation ||
+            render_second != s_route_trace_last_render_second) {
             render_route_trace_sheet();
         }
     }
@@ -9049,6 +9418,25 @@ static void create_route_trace_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_route_trace_sheet);
 }
 
+static void create_finder_sheet(lv_obj_t *screen)
+{
+    s_finder_sheet = create_object(screen, "finder sheet");
+    if (!s_finder_sheet) {
+        return;
+    }
+    lv_obj_set_size(s_finder_sheet, 480, 424);
+    lv_obj_set_pos(s_finder_sheet, 0, 56);
+    lv_obj_set_style_radius(s_finder_sheet, 0, 0);
+    lv_obj_set_style_bg_color(
+        s_finder_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_width(s_finder_sheet, 0, 0);
+    lv_obj_set_style_pad_all(s_finder_sheet, 0, 0);
+    lv_obj_set_scroll_dir(s_finder_sheet, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(
+        s_finder_sheet, LV_SCROLLBAR_MODE_AUTO);
+    d1l_ui_modal_hide(s_finder_sheet);
+}
+
 static void create_packet_detail_sheet(lv_obj_t *screen)
 {
     s_packet_detail_sheet = create_object(screen, "packet detail sheet");
@@ -9356,6 +9744,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_route_detail_sheet(s_screen);
     if (d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
         create_route_trace_sheet(s_screen);
+        create_finder_sheet(s_screen);
     }
     create_packet_detail_sheet(s_screen);
     create_packet_search_sheet(s_screen);

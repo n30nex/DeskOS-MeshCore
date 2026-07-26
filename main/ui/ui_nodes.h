@@ -26,6 +26,8 @@ typedef enum {
     D1L_UI_NODES_ACTION_OPEN_CONTACT_DM,
     D1L_UI_NODES_ACTION_OPEN_NODE,
     D1L_UI_NODES_ACTION_OPEN_NODE_DM,
+    D1L_UI_NODES_ACTION_FIND_NEARBY,
+    D1L_UI_NODES_ACTION_CLEAR_HEARD,
 } d1l_ui_nodes_action_t;
 
 typedef struct {
@@ -51,6 +53,8 @@ typedef struct d1l_ui_nodes_controller {
     void *action_context;
     d1l_ui_nodes_action_binding_t contact_rows[D1L_APP_SNAPSHOT_CONTACT_PREVIEW];
     d1l_ui_nodes_action_binding_t node_rows[D1L_NODE_STORE_CAPACITY];
+    d1l_ui_nodes_action_binding_t find_nearby;
+    d1l_ui_nodes_action_binding_t clear_heard;
 } d1l_ui_nodes_controller_t;
 
 void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,

@@ -516,7 +516,7 @@
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
     "main/mesh/meshcore_trace.h": "776b5a2d69997e9d5400f3ca575acc2e5fb617dbb14fbe8fcfd6c6322d7ba51a",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
-    "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
+    "main/mesh/meshcore_wire.h": "fe42a573ec801a7bef1ce7bf3a4e3243b2382d0a816ed6f93c91b1f4992542e8",
     "main/mesh/node_store.c": "e2fcfecd12aa8b22c203806f700086bb18daf7c0f983786e8a4294463ddb8db6",
     "main/mesh/node_store.h": "6f9ebf9b92bcca3d405df25483454192011a372c7eaedee2a5625badd22daa23",
     "main/mesh/store_lock.h": "1fae71b73b643c37452a8da8d7c0a3c4bd0e839014e3a490af25206b41d2d7fe",

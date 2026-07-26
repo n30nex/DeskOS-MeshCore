@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "mesh/meshcore_discovery.h"
 #include "mesh/meshcore_packet_semantics.h"
 #include "mesh/meshcore_trace.h"
 
@@ -98,6 +99,8 @@ static void expect_type_length(uint8_t type, size_t payload_len,
     uint8_t payload[D1L_MESHCORE_MAX_PACKET_PAYLOAD] = {0};
     if (type == D1L_MESHCORE_PAYLOAD_MULTIPART && payload_len > 0U) {
         payload[0] = 0xf3U;
+    } else if (type == D1L_MESHCORE_PAYLOAD_CONTROL && payload_len > 0U) {
+        payload[0] = D1L_MESHCORE_DISCOVERY_RESPONSE_TYPE;
     }
     const size_t raw_len = make_direct_frame(raw, type, payload, payload_len);
     d1l_meshcore_packet_semantic_view_t view;
@@ -162,6 +165,10 @@ static void test_boundaries(void)
                        D1L_MESHCORE_PACKET_SEMANTIC_ADVERT);
     expect_type_length(D1L_MESHCORE_PAYLOAD_ADVERT, 133U, false,
                        D1L_MESHCORE_PACKET_SEMANTIC_INVALID);
+    expect_type_length(D1L_MESHCORE_PAYLOAD_CONTROL, 5U, false,
+                       D1L_MESHCORE_PACKET_SEMANTIC_INVALID);
+    expect_type_length(D1L_MESHCORE_PAYLOAD_CONTROL, 6U, true,
+                       D1L_MESHCORE_PACKET_SEMANTIC_CONTROL);
 
     uint8_t raw[256] = {0};
     uint8_t payload[5] = {0};
@@ -220,6 +227,7 @@ static void test_deterministic_cases(void)
                 D1L_MESHCORE_PAYLOAD_PATH,
                 D1L_MESHCORE_PAYLOAD_TRACE,
                 D1L_MESHCORE_PAYLOAD_MULTIPART,
+                D1L_MESHCORE_PAYLOAD_CONTROL,
             };
             const uint8_t type = types[case_index %
                 (sizeof(types) / sizeof(types[0]))];
@@ -229,6 +237,8 @@ static void test_deterministic_cases(void)
             if (type == D1L_MESHCORE_PAYLOAD_MULTIPART) {
                 raw[2] = (uint8_t)((raw[2] & 0xf0U) |
                                    D1L_MESHCORE_PAYLOAD_ACK);
+            } else if (type == D1L_MESHCORE_PAYLOAD_CONTROL) {
+                raw[2] |= 0x80U;
             }
         }
 
@@ -248,7 +258,7 @@ static void test_deterministic_cases(void)
 
         assert_view_equal(&first, &second);
         assert(first.kind > D1L_MESHCORE_PACKET_SEMANTIC_INVALID);
-        assert(first.kind <= D1L_MESHCORE_PACKET_SEMANTIC_ADVERT);
+        assert(first.kind <= D1L_MESHCORE_PACKET_SEMANTIC_CONTROL);
         assert(first.wire.version == D1L_MESHCORE_PAYLOAD_VER_1);
         assert(first.wire.payload >= raw);
         assert(first.wire.payload + first.wire.payload_len <= raw + raw_len);

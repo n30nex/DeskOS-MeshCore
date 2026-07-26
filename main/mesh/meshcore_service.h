@@ -6,6 +6,7 @@
 
 #include "esp_err.h"
 #include "mesh/meshcore_admin_runtime.h"
+#include "mesh/meshcore_discovery.h"
 #include "mesh/meshcore_trace.h"
 
 typedef enum {
@@ -103,6 +104,9 @@ typedef struct {
     bool last_result_valid;
     uint32_t last_tag;
     uint32_t last_age_ms;
+    uint32_t last_round_trip_ms;
+    char target_fingerprint[17];
+    bool zero_hop_ping;
     uint8_t last_path_hash_bytes;
     uint8_t last_path_hops;
     uint8_t last_path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
@@ -113,6 +117,27 @@ typedef struct {
     bool last_route_summary_accepted;
     bool last_packet_preview_retained;
 } d1l_meshcore_trace_snapshot_t;
+
+typedef struct {
+    uint8_t node_type;
+    char fingerprint[17];
+    char public_key_hex[65];
+    int last_rssi_dbm;
+    int local_snr_quarter_db;
+    int remote_snr_quarter_db;
+    uint32_t age_ms;
+} d1l_meshcore_discovery_result_t;
+
+typedef struct {
+    uint32_t generation;
+    bool active;
+    uint32_t tag;
+    uint32_t remaining_ms;
+    uint32_t total_responses;
+    size_t result_count;
+    d1l_meshcore_discovery_result_t
+        results[D1L_MESHCORE_DISCOVERY_MAX_RESULTS];
+} d1l_meshcore_discovery_snapshot_t;
 
 typedef d1l_meshcore_admin_runtime_snapshot_t d1l_meshcore_admin_snapshot_t;
 
@@ -154,6 +179,8 @@ esp_err_t d1l_meshcore_service_start_rx_async(void);
 esp_err_t d1l_meshcore_service_ensure_identity(void);
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
 void d1l_meshcore_service_trace_snapshot(d1l_meshcore_trace_snapshot_t *out_snapshot);
+void d1l_meshcore_service_discovery_snapshot(
+    d1l_meshcore_discovery_snapshot_t *out_snapshot);
 void d1l_meshcore_service_admin_snapshot(
     d1l_meshcore_admin_snapshot_t *out_snapshot);
 void d1l_meshcore_service_contact_telemetry_snapshot(
@@ -188,7 +215,10 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     size_t out_token_size);
 esp_err_t d1l_meshcore_service_reset_contact_route(
     const char *fingerprint);
+esp_err_t d1l_meshcore_service_discover_nearby(void);
+void d1l_meshcore_service_clear_discovery_results(void);
 /* ESP_ERR_NOT_FINISHED means one TRACE is pending; ESP_ERR_NOT_ALLOWED means
  * the bounded post-outcome cooldown is active. */
 esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint);
+esp_err_t d1l_meshcore_service_ping_repeater(const char *fingerprint);
 const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state);

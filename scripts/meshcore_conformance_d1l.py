@@ -1380,6 +1380,7 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/meshcore_identity_exchange.c",
     "main/mesh/meshcore_identity_exchange.h",
     "main/mesh/meshcore_dm_retry.h",
+    "main/mesh/meshcore_discovery.h",
     "main/mesh/meshcore_lifetime.h",
     "main/mesh/meshcore_packet_hash.c",
     "main/mesh/meshcore_packet_hash.h",

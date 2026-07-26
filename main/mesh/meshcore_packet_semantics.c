@@ -73,6 +73,14 @@ static bool classify(const uint8_t *raw,
         }
         view->kind = D1L_MESHCORE_PACKET_SEMANTIC_ADVERT;
         return true;
+    case D1L_MESHCORE_PAYLOAD_CONTROL:
+        if (packet->route != D1L_MESHCORE_ROUTE_DIRECT ||
+            packet->path_hops != 0U || packet->payload_len < 6U ||
+            (packet->payload[0] & 0x80U) == 0U) {
+            return false;
+        }
+        view->kind = D1L_MESHCORE_PACKET_SEMANTIC_CONTROL;
+        return true;
     default:
         return false;
     }

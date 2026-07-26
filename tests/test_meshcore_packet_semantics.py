@@ -90,6 +90,7 @@ def test_production_receive_dispatch_is_semantic_preflight_bound():
         "PATH",
         "TRACE",
         "ADVERT",
+        "CONTROL",
     ):
         assert f"D1L_MESHCORE_PACKET_SEMANTIC_{kind}" in dispatch
 
