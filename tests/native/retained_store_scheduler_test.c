@@ -154,9 +154,39 @@ static d1l_retained_store_scheduler_options_t forced_options(
 {
     d1l_retained_store_scheduler_options_t options =
         background_options(fixture);
+    for (size_t i = 0; i < 4U; ++i) {
+        fixture->stores[i].observation.dirty = true;
+    }
     options.force = true;
     options.deadline_us = deadline_us;
     return options;
+}
+
+static void test_forced_clean_pass_skips_all_stores(void)
+{
+    scheduler_fixture_t fixture;
+    fixture_init(&fixture);
+    d1l_retained_store_scheduler_options_t options =
+        forced_options(&fixture, fixture.now_us + 1000);
+    for (size_t i = 0; i < 4U; ++i) {
+        fixture.stores[i].observation.dirty = false;
+    }
+
+    d1l_retained_store_pass_t pass = {0};
+    assert(d1l_retained_store_scheduler_run(
+               fixture.descriptors, 4U, &options, &pass) == ESP_OK);
+    assert(pass.force);
+    assert(!pass.deadline_exhausted);
+    assert(pass.attempted_count == 0U);
+    assert(pass.skipped_clean_count == 4U);
+    assert(fixture.progress_starts == 0U);
+    assert(fixture.progress_finishes == 0U);
+    for (size_t i = 0; i < 4U; ++i) {
+        assert(fixture.stores[i].flush_calls == 0U);
+        assert(fixture.stores[i].due_calls == 0U);
+        assert(pass.stores[i].outcome ==
+               D1L_RETAINED_STORE_OUTCOME_SKIPPED_CLEAN);
+    }
 }
 
 static void test_burst_mutations_coalesce_to_one_commit(void)
@@ -244,6 +274,7 @@ static void test_forced_deadline_stops_remaining_stores(void)
      * every descriptor. This is the bounded recovery point for the worker's
      * flush lock; synchronous store I/O itself is not mid-call cancellable. */
     fixture.stores[0].advance_us = 0;
+    fixture.stores[0].observation.dirty = true;
     options.deadline_us = fixture.now_us + 1000;
     assert(d1l_retained_store_scheduler_run(
                fixture.descriptors, 4U, &options, &pass) == ESP_OK);
@@ -485,6 +516,7 @@ static void test_finite_tick_conversion_boundaries(void)
 
 int main(void)
 {
+    test_forced_clean_pass_skips_all_stores();
     test_burst_mutations_coalesce_to_one_commit();
     test_due_work_reports_coalesced_state();
     test_forced_deadline_stops_remaining_stores();
