@@ -694,14 +694,14 @@ static void test_interruption_windows_are_idempotent(void)
     assert(d1l_factory_reset_resume(&status) == ESP_OK);
     assert_clear_entries_absent();
 
-    /* Five lineage commits shift the first erase/progress commits to 8/9.
-     * A cut at progress commit 9 leaves
+    /* Seven lineage commits shift the first erase/progress commits to 10/11.
+     * A cut at progress commit 11 leaves
      * the intent behind the data; replay must accept NOT_FOUND and continue. */
     mock_reset();
     seed_inventory(false);
     memset(&status, 0, sizeof(status));
     assert(d1l_factory_reset_request(&status) == ESP_OK);
-    s_fail_commit_call = 9U;
+    s_fail_commit_call = 11U;
     assert(d1l_factory_reset_resume(&status) == ESP_FAIL);
     assert(mock_copy(first.partition_label, first.nvs_namespace, first.key,
                      NULL, 0U) == 0U);

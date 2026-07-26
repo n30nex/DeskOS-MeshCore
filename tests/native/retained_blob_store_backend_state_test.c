@@ -1122,7 +1122,7 @@ static void test_release_profile_sd_admission(void)
     assert_all_states(false, 0U);
     assert(strcmp(d1l_retained_blob_store_backend_name(
                       D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES),
-                  "nvs") == 0);
+                  "volatile") == 0);
     assert(d1l_retained_blob_store_write_sd_primary(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
                payload, sizeof(payload)) == ESP_ERR_INVALID_STATE);
@@ -1132,19 +1132,27 @@ static void test_release_profile_sd_admission(void)
     assert(d1l_retained_blob_store_write(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
                payload, sizeof(payload)) == ESP_OK);
-    assert_nvs_blob(true, "d1l_messages", "public",
-                    payload, sizeof(payload));
 #if EXPECT_PROFILE_SD_ENABLED
+    test_sd_file_t *file =
+        find_sd_file("stores/messages/public/public.bin");
+    assert(file);
+    assert(file->length == sizeof(payload));
+    assert(memcmp(file->data, payload, sizeof(payload)) == 0);
+    assert(find_nvs_entry(true, "d1l_messages", "public") == NULL);
     assert(s_rename_count > 0U);
-#else
-    assert(s_sd_event_count == 0U);
-#endif
 
     assert(d1l_retained_blob_store_read(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
                readback, &readback_len) == ESP_OK);
     assert(readback_len == sizeof(payload));
     assert(memcmp(readback, payload, sizeof(payload)) == 0);
+#else
+    assert(s_sd_event_count == 0U);
+    assert(find_nvs_entry(true, "d1l_messages", "public") == NULL);
+    assert(d1l_retained_blob_store_read(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               readback, &readback_len) == ESP_ERR_NOT_FOUND);
+#endif
 
     assert(d1l_retained_blob_store_erase(
                D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
