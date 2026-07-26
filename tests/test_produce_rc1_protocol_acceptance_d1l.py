@@ -629,6 +629,35 @@ def test_admin_login_failure_never_exposes_wire_password(
     assert "<redacted>" in str(caught.value)
 
 
+def test_console_readiness_retries_a_command_lost_before_init(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    responses = [
+        {"schema": 1, "ok": False, "cmd": "health", "code": "TIMEOUT"},
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "health",
+            "board_ready": True,
+            "ui_ready": True,
+        },
+    ]
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return responses.pop(0)
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    result = runner.wait_for_console_ready(
+        object(), timeout=1.0, command_timeout=0.1, poll_interval=0
+    )
+
+    assert result["ok"] is True
+    assert [command for command, _timeout in calls] == ["health", "health"]
+
+
 def test_runner_is_pi_only_stable_by_id_and_self_validating():
     source = Path(runner.__file__).read_text(encoding="utf-8")
 
