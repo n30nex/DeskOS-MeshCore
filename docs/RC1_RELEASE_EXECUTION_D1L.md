@@ -217,7 +217,16 @@ socket, peer device and peer key.
 
 ```bash
 RF="$EVIDENCE_DIR/rf-full-acceptance.json"
-"$PY" scripts/rf_full_acceptance_d1l.py \
+env \
+  -u D1L_DM_TARGET \
+  -u MESH_PEER_STATUS_PATH \
+  -u MESH_PEER_PORT \
+  -u MESH_PEER_SSH_HOST \
+  -u MESH_PEER_REMOTE_STATUS_PATH \
+  -u MESH_PEER_CONTROL_SOCKET \
+  -u MESH_PEER_DEVICE \
+  -u MESH_PEER_PUBLIC_KEY \
+  "$PY" scripts/rf_full_acceptance_d1l.py \
   --port "$PORT" \
   --peer-local \
   --d1l-public-key "$D1L_PUBLIC_KEY" \
