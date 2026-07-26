@@ -57,6 +57,7 @@ MAX_PREFETCH_ZOOM = 18
 NODE_RADIUS_KM = 200
 CONSOLE_BAUD = 115200
 COMMAND_TIMEOUT_SECONDS = 20.0
+BOOT_TIMEOUT_SECONDS = 45.0
 POLL_INTERVAL_SECONDS = 1.0
 PREFETCH_TIMEOUT_SECONDS = 180.0
 OFFLINE_VIEW_TIMEOUT_SECONDS = 120.0
@@ -641,6 +642,44 @@ def send_checked(
     return send_console_command(ser, command, timeout)
 
 
+def wait_for_console_ready(
+    ser: Any,
+    *,
+    timeout: float,
+    command_timeout: float,
+    interval: float,
+) -> dict[str, Any]:
+    """Retry health because a command sent before console init is discarded."""
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceFailure(
+                "console_not_ready",
+                "D1L console did not become ready after cold boot",
+            )
+        result = send_checked(
+            ser,
+            "health",
+            min(command_timeout, remaining),
+        )
+        if (
+            type(result) is dict
+            and result.get("ok") is True
+            and result.get("cmd") == "health"
+            and result.get("board_ready") is True
+            and result.get("ui_ready") is True
+        ):
+            return validate_health(result)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceFailure(
+                "console_not_ready",
+                "D1L console did not become ready after cold boot",
+            )
+        time.sleep(min(interval, remaining))
+
+
 def poll_command(
     ser: Any,
     command: str,
@@ -714,6 +753,7 @@ def run_acceptance(
     actions_run: str,
     workflow_run_attempt: str,
     command_timeout: float,
+    boot_timeout: float,
     poll_interval: float,
     prefetch_timeout: float,
     offline_timeout: float,
@@ -752,12 +792,15 @@ def run_acceptance(
     ) as ser:
         ser.reset_input_buffer()
         try:
+            initial_health = wait_for_console_ready(
+                ser,
+                timeout=boot_timeout,
+                command_timeout=command_timeout,
+                interval=poll_interval,
+            )
             version = validate_version(
                 send_checked(ser, "version", command_timeout),
                 expected_commit,
-            )
-            initial_health = validate_health(
-                send_checked(ser, "health", command_timeout)
             )
             initial_nonce = int(initial_health["boot_nonce"])
             validate_crashlog(
@@ -1071,6 +1114,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=COMMAND_TIMEOUT_SECONDS,
     )
     parser.add_argument(
+        "--boot-timeout",
+        type=float,
+        default=BOOT_TIMEOUT_SECONDS,
+    )
+    parser.add_argument(
         "--poll-interval",
         type=float,
         default=POLL_INTERVAL_SECONDS,
@@ -1093,6 +1141,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     for name in (
         "command_timeout",
+        "boot_timeout",
         "poll_interval",
         "prefetch_timeout",
         "offline_timeout",
@@ -1132,6 +1181,7 @@ def main(argv: list[str] | None = None) -> int:
             actions_run=actions_run,
             workflow_run_attempt=workflow_run_attempt,
             command_timeout=args.command_timeout,
+            boot_timeout=args.boot_timeout,
             poll_interval=args.poll_interval,
             prefetch_timeout=args.prefetch_timeout,
             offline_timeout=args.offline_timeout,

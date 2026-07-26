@@ -405,6 +405,44 @@ def test_firmware_exposes_machine_map_acceptance_and_blocks_osm_bulk_prefetch():
     assert "force_reload_next_acquire" in view_c
 
 
+def test_console_readiness_retries_a_command_lost_before_init(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    responses = [
+        {"schema": 1, "ok": False, "cmd": "health", "code": "TIMEOUT"},
+        health(),
+    ]
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return responses.pop(0)
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    result = runner.wait_for_console_ready(
+        object(),
+        timeout=1.0,
+        command_timeout=0.1,
+        interval=0,
+    )
+
+    assert result["ok"] is True
+    assert [command for command, _timeout in calls] == ["health", "health"]
+
+
+def test_cli_exposes_bounded_boot_timeout():
+    args = runner.parse_args(
+        [
+            "--expected-firmware-commit", COMMIT,
+            "--github-actions-run", RUN,
+            "--workflow-run-attempt", ATTEMPT,
+            "--output", "map.json",
+        ]
+    )
+    assert args.boot_timeout == runner.BOOT_TIMEOUT_SECONDS
+
+
 def test_cli_has_no_manual_dry_run_or_secret_configuration_surface():
     with pytest.raises(SystemExit):
         runner.parse_args(

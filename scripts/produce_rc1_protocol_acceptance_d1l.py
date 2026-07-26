@@ -456,6 +456,41 @@ def checked_console_command(
     return result
 
 
+def wait_for_console_ready(
+    ser: Any,
+    timeout: float,
+    command_timeout: float,
+    *,
+    poll_interval: float = 0.1,
+) -> dict[str, Any]:
+    """Retry health because a command sent before console init is discarded."""
+    failure_label = "cold boot console readiness"
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProtocolAcceptanceError(
+                f"serial command failed: {failure_label}"
+            )
+        result = send_console_command(
+            ser,
+            "health",
+            min(command_timeout, remaining),
+        )
+        if (
+            result.get("ok") is True
+            and result.get("board_ready") is True
+            and result.get("ui_ready") is True
+        ):
+            return result
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProtocolAcceptanceError(
+                f"serial command failed: {failure_label}"
+            )
+        time.sleep(min(poll_interval, remaining))
+
+
 def execute(
     *,
     root: Path,
@@ -549,19 +584,11 @@ def execute(
         baudrate=baud,
         timeout=command_timeout,
     ) as ser:
-        boot_health = checked_console_command(
+        boot_health = wait_for_console_ready(
             ser,
-            "health",
             boot_timeout,
-            failure_label="cold boot console readiness",
+            command_timeout,
         )
-        if not (
-            boot_health.get("board_ready") is True
-            and boot_health.get("ui_ready") is True
-        ):
-            raise ProtocolAcceptanceError(
-                "cold boot console became responsive before board/UI readiness"
-            )
 
         def command(
             value: str, *, failure_label: str | None = None
