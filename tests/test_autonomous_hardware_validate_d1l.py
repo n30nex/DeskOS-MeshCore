@@ -140,15 +140,17 @@ def write_flasher_args(build: Path) -> None:
     (build / "partition_table").mkdir(parents=True, exist_ok=True)
     (build / "bootloader" / "bootloader.bin").write_bytes(b"boot")
     (build / "partition_table" / "partition-table.bin").write_bytes(b"part")
+    (build / "ota_data_initial.bin").write_bytes(b"ota")
     (build / "meshcore_deskos_d1l.bin").write_bytes(b"app")
     (build / "flasher_args.json").write_text(
         json.dumps(
             {
                 "write_flash_args": ["--flash_mode", "dio", "--flash_size", "8MB", "--flash_freq", "80m"],
                 "flash_files": {
-                    "0x10000": "meshcore_deskos_d1l.bin",
                     "0x0": "bootloader/bootloader.bin",
                     "0x8000": "partition_table/partition-table.bin",
+                    "0xf000": "ota_data_initial.bin",
+                    "0x20000": "meshcore_deskos_d1l.bin",
                 },
                 "extra_esptool_args": {
                     "after": "hard_reset",
@@ -350,7 +352,8 @@ def write_actions_provenance_fixture(
     flash_roles = (
         ("bootloader", "bootloader/bootloader.bin", "firmware/bootloader.bin", "0x0"),
         ("partition-table", "partition_table/partition-table.bin", "firmware/partition-table.bin", "0x8000"),
-        ("app", "meshcore_deskos_d1l.bin", "firmware/meshcore_deskos_d1l.bin", "0x10000"),
+        ("ota-data", "ota_data_initial.bin", "firmware/ota_data_initial.bin", "0xf000"),
+        ("app", "meshcore_deskos_d1l.bin", "firmware/meshcore_deskos_d1l.bin", "0x20000"),
     )
     for role, source_name, package_name, offset in flash_roles:
         source = build / source_name
@@ -450,7 +453,12 @@ def test_esptool_command_uses_actions_build_files(tmp_path):
     assert "COM12" in command
     assert "--flash-mode" in command
     assert "--flash_size" not in command
-    assert command.index("0x0") < command.index("0x8000") < command.index("0x10000")
+    assert (
+        command.index("0x0")
+        < command.index("0x8000")
+        < command.index("0xf000")
+        < command.index("0x20000")
+    )
     assert str((build / "meshcore_deskos_d1l.bin").resolve()) in command
 
 
@@ -480,7 +488,7 @@ def test_flash_esp32_waits_after_successful_hard_reset(tmp_path, monkeypatch):
     assert report["ok"] is True
     assert report["artifact_verification"]["ok"] is True
     assert report["artifact_verification"]["manifest_complete"] is True
-    assert len(report["artifact_verification"]["flash_files"]) == 3
+    assert len(report["artifact_verification"]["flash_files"]) == 4
     assert report["flashed_at"]
     assert report["post_flash_settle_sec"] == runner.POST_ESP32_FLASH_SETTLE_SEC
     assert sleeps == [runner.POST_ESP32_FLASH_SETTLE_SEC]

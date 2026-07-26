@@ -31,6 +31,7 @@ def write_actions_fixture(root: Path) -> Path:
     source_files = {
         "bootloader/bootloader.bin": b"bootloader",
         "partition_table/partition-table.bin": b"partition-table",
+        "ota_data_initial.bin": b"ota-data",
         "meshcore_deskos_d1l.bin": b"application",
     }
     for relative, content in source_files.items():
@@ -43,7 +44,8 @@ def write_actions_fixture(root: Path) -> Path:
                 "flash_files": {
                     "0x0": "bootloader/bootloader.bin",
                     "0x8000": "partition_table/partition-table.bin",
-                    "0x10000": "meshcore_deskos_d1l.bin",
+                    "0xf000": "ota_data_initial.bin",
+                    "0x20000": "meshcore_deskos_d1l.bin",
                 }
             }
         ),
@@ -98,7 +100,8 @@ def write_actions_fixture(root: Path) -> Path:
             "firmware/partition-table.bin",
             "0x8000",
         ),
-        ("app", "meshcore_deskos_d1l.bin", "firmware/meshcore_deskos_d1l.bin", "0x10000"),
+        ("ota-data", "ota_data_initial.bin", "firmware/ota_data_initial.bin", "0xf000"),
+        ("app", "meshcore_deskos_d1l.bin", "firmware/meshcore_deskos_d1l.bin", "0x20000"),
     )
     for role, source_name, package_name, offset in roles:
         source = build / source_name

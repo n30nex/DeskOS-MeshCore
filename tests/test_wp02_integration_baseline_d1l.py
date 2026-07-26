@@ -56,6 +56,7 @@ def write_actions_fixture(root: Path, commit: str) -> tuple[Path, dict[str, str]
     sources = {
         "bootloader": ("bootloader/bootloader.bin", b"bootloader"),
         "partition-table": ("partition_table/partition-table.bin", b"partition"),
+        "ota-data": ("ota_data_initial.bin", b"ota-data"),
         "app": ("meshcore_deskos_d1l.bin", b"application"),
     }
     for source, content in sources.values():
@@ -77,6 +78,7 @@ def write_actions_fixture(root: Path, commit: str) -> tuple[Path, dict[str, str]
     package_paths = {
         "bootloader": "firmware/bootloader.bin",
         "partition-table": "firmware/partition-table.bin",
+        "ota-data": "firmware/ota_data_initial.bin",
         "app": "firmware/meshcore_deskos_d1l.bin",
     }
     for role, (source, _) in sources.items():

@@ -110,7 +110,8 @@ EXPECTED_REPOSITORY = "n30nex/SIGUI"
 EXPECTED_FLASH_ROLES = {
     0x0: ("bootloader", "bootloader/bootloader.bin"),
     0x8000: ("partition-table", "partition_table/partition-table.bin"),
-    0x10000: ("app", "meshcore_deskos_d1l.bin"),
+    0xF000: ("ota-data", "ota_data_initial.bin"),
+    0x20000: ("app", "meshcore_deskos_d1l.bin"),
 }
 FORBIDDEN_PORTS = frozenset({"COM8", "COM11", "COM16", "COM29"})
 RETAINED_STATE_COMMANDS = (
@@ -197,11 +198,17 @@ def verify_core_package(
     package_root = github_run_dir / "d1l-release-package"
     package = _inside(package_dir, package_root, "Core release package")
     manifests = sorted(package.rglob("SHA256SUMS.txt"))
-    if manifests != [package / "SHA256SUMS.txt"] or not verify_checksum_tree(
-        package
-    ):
+    expected_manifests = {
+        package / "SHA256SUMS.txt",
+        *(
+            package / "rp2040" / name / "SHA256SUMS.txt"
+            for name in EXPECTED_RP2040_ARTIFACT_NAMES
+        ),
+    }
+    if set(manifests) != expected_manifests or not verify_checksum_tree(package):
         raise ValueError(
-            "Core package must have one complete valid root SHA256SUMS.txt"
+            "Core package must have the complete valid root and RP2040 "
+            "SHA256SUMS.txt manifests"
         )
     manifest_path = package / "manifest.json"
     manifest = _load_json(manifest_path, "Core release manifest")
@@ -317,8 +324,11 @@ def verify_core_package(
         row.get("offset"): row for row in action_rows if isinstance(row, dict)
     }
     package_rows = manifest.get("flash_files")
-    if not isinstance(package_rows, list) or len(package_rows) != 3:
-        raise ValueError("Core package must contain exactly three project images")
+    if (
+        not isinstance(package_rows, list)
+        or len(package_rows) != len(EXPECTED_FLASH_ROLES)
+    ):
+        raise ValueError("Core package must contain exactly four project images")
     checked_rows: list[dict] = []
     seen_offsets: set[int] = set()
     for row in package_rows:

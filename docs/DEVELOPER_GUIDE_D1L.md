@@ -160,8 +160,10 @@ route, and packet fallback blobs use the separate 124 KiB `d1l_retained`
 partition at `0x7E1000`; its 4 KiB metadata sector at `0x7E0000` holds two
 versioned marker copies. The dedicated partition itself stores a versioned
 `d1l_ret_meta/anchor`, and a final completion claim is stored in default NVS as
-the `d1l_ret_meta/initialized` sentinel. The factory app remains at `0x10000`
-and ends before the metadata sector. Upgrade reads copy a scoped legacy
+the `d1l_ret_meta/initialized` sentinel. The non-erasing project image writes
+OTA selection data at `0xF000` and the primary `ota_0` app at `0x20000`; the
+secondary `ota_1` slot begins at `0x400000`, and both end before the metadata
+sector. Upgrade reads copy a scoped legacy
 retained key from default NVS only after the dedicated write commits, then
 erase only that old key; the completion sentinel is committed after all known
 legacy-key migration succeeds.

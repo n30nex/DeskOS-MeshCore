@@ -1,5 +1,11 @@
 from pathlib import Path
 
+from scripts import (
+    autonomous_hardware_validate_d1l,
+    core_flash_only_d1l,
+    release_gate_audit_d1l,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -67,3 +73,24 @@ def test_d1l_dual_ota_partitions_have_release_headroom():
     assert int(meta[3], 16) == ota_1_offset + ota_1_size
     assert int(meta[3], 16) + int(meta[4], 16) == int(retained[3], 16)
     assert int(retained[3], 16) + int(retained[4], 16) == 0x800000
+
+
+def test_closing_flash_guards_match_the_dual_slot_project_layout():
+    expected_paths = {
+        0x0: "build/bootloader/bootloader.bin",
+        0x8000: "build/partition_table/partition-table.bin",
+        0xF000: "build/ota_data_initial.bin",
+        0x20000: "build/meshcore_deskos_d1l.bin",
+    }
+    expected_roles = {
+        0x0: ("bootloader", "bootloader/bootloader.bin"),
+        0x8000: ("partition-table", "partition_table/partition-table.bin"),
+        0xF000: ("ota-data", "ota_data_initial.bin"),
+        0x20000: ("app", "meshcore_deskos_d1l.bin"),
+    }
+
+    assert core_flash_only_d1l.EXPECTED_FLASH_ROLES == expected_roles
+    assert release_gate_audit_d1l.REQUIRED_ESP32_FLASH_ROLES == expected_paths
+    source = read("scripts/autonomous_hardware_validate_d1l.py").lower()
+    for offset, path in expected_paths.items():
+        assert f"{hex(offset)}: \"{path}\"" in source

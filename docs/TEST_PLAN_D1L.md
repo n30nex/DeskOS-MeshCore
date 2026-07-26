@@ -268,8 +268,9 @@ Do not run a local firmware build and do not hand-edit `dependencies.lock`.
    numeric Actions run, prove successful non-erasing `esptool write-flash`, and
    bind the exact
    command offset/file set to the complete checksummed artifact. It must include
-   the D1L bootloader at `0x0`, partition table at `0x8000`, and application at
-   `0x10000`, with no extra pair. Run `version` and require an OK JSON response
+   the D1L bootloader at `0x0`, partition table at `0x8000`, OTA selection data
+   at `0xF000`, and primary application at `0x20000`, with no extra pair. Run
+   `version` and require an OK JSON response
    whose `idf` is exactly `v5.5.4` and whose full `build_commit` equals the
    selected 40-hex commit.
 6. On the same artifact, repeat issue #63 board, display/touch, Wi-Fi, RF,
@@ -546,7 +547,7 @@ python .\scripts\package_release_d1l.py --build-dir build --out-dir artifacts\re
 
 Verify:
 
-1. `manifest.json` lists bootloader offset `0x0`, partition offset `0x8000`, and app offset `0x10000`.
+1. `manifest.json` lists bootloader offset `0x0`, partition offset `0x8000`, OTA-data offset `0xF000`, and app offset `0x20000`.
 2. `firmware/meshcore_deskos_d1l.bin` and `update/meshcore_deskos_d1l-app.bin` have matching SHA256 hashes.
 3. `full-flash/meshcore_deskos_d1l-full-8mb.bin` is exactly 8MB.
 4. `SHA256SUMS.txt` includes every package file except itself.

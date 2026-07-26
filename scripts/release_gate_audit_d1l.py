@@ -120,7 +120,8 @@ HOST_CHECKS_ARTIFACT_TYPE = "d1l_host_checks_success"
 REQUIRED_ESP32_FLASH_ROLES = {
     0x0: "build/bootloader/bootloader.bin",
     0x8000: "build/partition_table/partition-table.bin",
-    0x10000: "build/meshcore_deskos_d1l.bin",
+    0xF000: "build/ota_data_initial.bin",
+    0x20000: "build/meshcore_deskos_d1l.bin",
 }
 REQUIRED_UI_TELEMETRY_FIELDS = {
     "heap_free",

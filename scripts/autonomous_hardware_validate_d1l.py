@@ -355,7 +355,8 @@ def verify_esp32_flash_inputs(ctx: RunContext) -> dict:
     required_roles = {
         0x0: "build/bootloader/bootloader.bin",
         0x8000: "build/partition_table/partition-table.bin",
-        0x10000: "build/meshcore_deskos_d1l.bin",
+        0xF000: "build/ota_data_initial.bin",
+        0x20000: "build/meshcore_deskos_d1l.bin",
     }
     verified_by_offset = {item["offset"]: item["path"] for item in verified_files}
     if verified_by_offset != required_roles:
@@ -536,6 +537,7 @@ def verify_actions_artifact_provenance(
     expected_roles = {
         "bootloader": "bootloader/bootloader.bin",
         "partition-table": "partition_table/partition-table.bin",
+        "ota-data": "ota_data_initial.bin",
         "app": "meshcore_deskos_d1l.bin",
     }
     flash_by_role = {

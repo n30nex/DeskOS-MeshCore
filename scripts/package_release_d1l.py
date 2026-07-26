@@ -2379,7 +2379,7 @@ SD history mode: `{sd_history_mode}`
 ## Normal non-erasing USB install
 
 The normal project flash writes the Actions-built bootloader, partition table,
-and application at their declared ESP-IDF offsets. It does not issue an erase
+OTA selection data, and application at their declared ESP-IDF offsets. It does not issue an erase
 and preserves unrelated NVS regions. Both wrappers invoke the package-root
 `flash_project.py`, which verifies the complete checksum inventory, resolves
 the exact USB identity, and gives esptool only the stable requested target.
@@ -2538,7 +2538,8 @@ performs the same inventory and USB identity checks before its warning.
 ## Normal USB Install
 
 Normal project flashing writes the exact Actions-built bootloader, partition
-table, and app at their ESP-IDF offsets without erasing unrelated NVS regions.
+table, OTA selection data, and app at their ESP-IDF offsets without erasing
+unrelated NVS regions.
 Release qualification uses exactly
 `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` on the Pi 5 and requires
 VID:PID `1A86:7523`.
@@ -2645,8 +2646,8 @@ missing user features. RF-triggered firmware update is also impossible.
 
 ## Contents
 
-- `firmware/` contains the bootloader, OTA partition table, application image,
-  and `flasher_args.json`.
+- `firmware/` contains the bootloader, partition table, OTA selection data,
+  application image, and `flasher_args.json`.
 - `update/d1l-update.bin`, `update/d1l-update.manifest`, and
   `update/d1l-update.sig` are one exact signed update set.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is the destructive
@@ -2672,9 +2673,9 @@ The target must enumerate as VID:PID `1A86:7523`. Never substitute
 resolve the D1L by the same VID:PID immediately before use; do not reuse an
 old COM assignment.
 
-Normal project flashing writes bootloader, OTA partition table, and app at the
-ESP-IDF offsets. Use the full 8MB image only for reviewed recovery because it
-can overwrite settings, logs, contacts, and message state.
+Normal project flashing writes bootloader, partition table, OTA selection
+data, and app at the ESP-IDF offsets. Use the full 8MB image only for reviewed
+recovery because it can overwrite settings, logs, contacts, and message state.
 
 ## Signed local update
 
@@ -2728,7 +2729,8 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 
 ## Contents
 
-- `firmware/` contains the bootloader, partition table, app binary, and `flasher_args.json`.
+- `firmware/` contains the bootloader, partition table, OTA selection data,
+  app binary, and `flasher_args.json`.
 {rp2040_contents}
 - `update/d1l-update.bin` is the application image for development update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
@@ -2745,7 +2747,9 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 
 ## Normal Flash
 
-Normal project flashing writes bootloader, partition table, and app at their ESP-IDF offsets while preserving unrelated flash regions.
+Normal project flashing writes bootloader, partition table, OTA selection
+data, and app at their ESP-IDF offsets while preserving unrelated flash
+regions.
 
 ```powershell
 $env:D1L_PORT = "COMx"
