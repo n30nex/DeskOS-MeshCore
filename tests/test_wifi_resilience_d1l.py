@@ -273,6 +273,7 @@ def test_dry_run_is_truthful_non_hardware_and_has_no_password_surface():
     }
     assert report["acceptance_passed"] is False
     assert report["feature_evidence_eligible"] is False
+    assert report["rc1_gate_eligible"] is False
     assert report["release_gate_eligible"] is False
     assert report["commands"] == []
     assert called is False
@@ -553,6 +554,7 @@ def test_feature_receipt_can_never_be_promoted_to_full_wp13_release_gate(
     written = json.loads(out.read_text(encoding="ascii"))
 
     assert written["feature_evidence_eligible"] is True
+    assert written["rc1_gate_eligible"] is True
     assert written["release_gate_eligible"] is False
     assert written["full_wp13_matrix_covered"] is False
     assert written["uncovered_release_scenarios"] == list(

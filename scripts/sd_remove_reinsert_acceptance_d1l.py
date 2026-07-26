@@ -783,6 +783,8 @@ def validate_report(report: dict, *, require_final: bool = True) -> bool:
         or type(report.get("baud")) is not int or report.get("baud") <= 0
         or report.get("strict_evidence") is not True
         or report.get("physical_observed") is not True
+        or report.get("dry_run") is not False
+        or report.get("simulated") is not False
         or report.get("manual_only") is not False
         or report.get("operator_ack_required") is not True
         or not isinstance(ack_timeout, (int, float))
@@ -979,6 +981,8 @@ def run_acceptance(
         "cycles_required": REQUIRED_CYCLES, "cycles_completed": 0,
         "strict_evidence": True,
         "physical_observed": True,
+        "dry_run": False,
+        "simulated": False,
         "manual_only": False,
         "operator_ack_required": True,
         "operator_ack_timeout_sec": operator_ack_timeout_sec,
@@ -1043,6 +1047,8 @@ def dry_run_report(
 ) -> dict:
     return {
         "schema": 1, "kind": KIND, "mode": "dry-run", "hardware_required": True,
+        "physical_observed": False, "dry_run": True, "simulated": False,
+        "manual_only": False,
         "expected_firmware_commit": expected_firmware_commit,
         "base_token": base_token, "cycles_required": REQUIRED_CYCLES,
         "strict_evidence": strict_evidence,

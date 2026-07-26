@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts import capture_core_actions_run_d1l as actions_capture
+from scripts import produce_rc1_bounded_physical_receipt_d1l as aggregate
 from scripts import rc1_release_gate_audit_d1l as audit
 
 
@@ -14,6 +15,32 @@ COMMIT = "a" * 40
 RUN = "123456789"
 ATTEMPT = "1"
 APP_BYTES = b"exact rc1 application image"
+ROLE_OUTCOMES = {
+    "flash": {},
+    "ui": {
+        "boot": True,
+        "ui_navigation": True,
+        "no_panic": True,
+        "no_unexpected_reset": True,
+    },
+    "rf": {"dm_ack": True},
+    "protocol": {
+        "boot_advert": True,
+        "public_send_count": 1,
+        "path": True,
+        "trace": True,
+        "ping": True,
+        "repeater_login": True,
+        "repeater_query": True,
+    },
+    "wifi": {"wifi_reconnect": True},
+    "sd": {"sd_write": True, "sd_remount": True},
+    "sd_degraded": {"sd_degraded_notice": True},
+    "map": {
+        "authorized_map_download": True,
+        "map_cache_revisit": True,
+    },
+}
 
 
 def sha256(path: Path) -> str:
@@ -411,6 +438,16 @@ def release_fixture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Path, Path, Path, Path]:
     monkeypatch.setattr(
+        aggregate,
+        "VALIDATORS",
+        {
+            role: (
+                lambda _data, _candidate, outcomes=outcomes: dict(outcomes)
+            )
+            for role, outcomes in ROLE_OUTCOMES.items()
+        },
+    )
+    monkeypatch.setattr(
         audit,
         "sd_reboot_remount_artifact_ok",
         lambda _data, _port, _commit: True,
@@ -482,6 +519,54 @@ def test_exact_package_and_single_bounded_receipt_are_release_ready(
         "app_path": f"firmware/{audit.APP_NAME}",
         "app_sha256": sha256(package / "firmware" / audit.APP_NAME),
     }
+
+
+def test_physical_sources_are_semantically_revalidated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    package, actions_receipt, receipt, evidence = release_fixture(
+        tmp_path, monkeypatch
+    )
+    validators = dict(aggregate.VALIDATORS)
+
+    def reject_map(_data, _candidate):
+        raise aggregate.EvidenceError("synthetic semantic rejection")
+
+    validators["map"] = reject_map
+    monkeypatch.setattr(aggregate, "VALIDATORS", validators)
+
+    result = audit.audit(
+        package,
+        actions_receipt,
+        receipt,
+        evidence,
+        repository_root=tmp_path,
+    )
+
+    assert result["ready_for_public_release"] is False
+    assert "physical_evidence_sidecar_machine_sources" in result["failures"]
+
+
+def test_physical_source_validator_registry_must_be_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    package, actions_receipt, receipt, evidence = release_fixture(
+        tmp_path, monkeypatch
+    )
+    validators = dict(aggregate.VALIDATORS)
+    validators.pop("map")
+    monkeypatch.setattr(aggregate, "VALIDATORS", validators)
+
+    result = audit.audit(
+        package,
+        actions_receipt,
+        receipt,
+        evidence,
+        repository_root=tmp_path,
+    )
+
+    assert result["ready_for_public_release"] is False
+    assert "physical_evidence_sidecar_machine_sources" in result["failures"]
 
 
 @pytest.mark.parametrize(

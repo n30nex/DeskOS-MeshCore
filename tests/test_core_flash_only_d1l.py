@@ -369,6 +369,10 @@ def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
     assert closing["closure_eligible"] is True
     assert closing["scope"] == "core-retained-reflash-only"
     assert closing["retained_state_preserved"] is True
+    assert closing["physical_observed"] is True
+    assert closing["dry_run"] is False
+    assert closing["simulated"] is False
+    assert closing["manual_only"] is False
     assert closing["sd_history_mode"] == "conditional"
     assert closing["erase_flash"] is False
     assert closing["workflow_run_attempt"] == RUN_ATTEMPT

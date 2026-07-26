@@ -7,6 +7,10 @@ The active candidate is `release_profile=core_1_0` with
 changed slice during development and the single release-critical sequence
 below. No soak or broad edge-case campaign is required for RC1.
 
+Execute that release-critical sequence with the
+[authoritative RC1 release execution](RC1_RELEASE_EXECUTION_D1L.md). Its
+commands and eight evidence roles are the closing contract for `v1.0.0`.
+
 Required sequence:
 
 1. Run only focused source checks for the files changed in the current slice,
@@ -28,11 +32,13 @@ Required sequence:
 6. Confirm SD is primary for retained history and that missing/unusable SD
    enters visible live-only RF chat without redirecting history to default
    NVS. Never format or repair media from firmware or validation.
-7. Confirm built-in OSM remains attributed and visible-current-view-only;
-   background download requires an explicitly authorized provider and pauses
-   while interactive Map is open.
-8. Collect one consolidated physical confirmation for display, touch,
-   keyboard, brightness/timeout wake behavior and the five dock roots.
+7. Use the exact Actions host-contract evidence to confirm built-in OSM remains
+   attributed and visible-current-view-only and that authorized background
+   download pauses while interactive Map is open. The bounded physical Map
+   receipt proves only authorized download plus offline SD-cache revisit.
+8. Retain the operator's completed physical display/touch/keyboard/scroll
+   acceptance and do not repeat it. On the final exact artifact, collect the
+   automated 12-surface navigation receipt.
 
 Pass requires every receipt to bind the same exact commit, GitHub Actions run,
 downloaded package and flashed image. Predecessor artifacts, local builds,

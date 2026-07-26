@@ -145,6 +145,8 @@ TRANSCRIPT_KEYS = frozenset(
         "port",
         "d1l_target",
         "d1l_target_after",
+        "runner_commit",
+        "runner_source_clean",
         "expected_firmware_commit",
         "github_actions_run",
         "workflow_run_attempt",
@@ -163,6 +165,7 @@ PROTOCOL_OPERATIONS = frozenset(
         "trace_request",
         "trace_result",
         "peer_before",
+        "public_tx_authorization",
         "public_send",
         "public_tx_record",
         "peer_after_public",
@@ -297,6 +300,20 @@ def _candidate_binding(
     return True
 
 
+def _runner_source_binding(
+    data: dict[str, Any], candidate: dict[str, str]
+) -> bool:
+    git = data.get("git")
+    return (
+        _exact_commit(data.get("commit")) == candidate["firmware_commit"]
+        and isinstance(git, dict)
+        and _exact_commit(git.get("commit")) == candidate["firmware_commit"]
+        and git.get("status_ok") is True
+        and git.get("dirty") is False
+        and git.get("dirty_entries") == []
+    )
+
+
 def _target(data: dict[str, Any], field: str = "d1l_target") -> dict[str, Any]:
     snapshot = data.get(field)
     try:
@@ -358,7 +375,7 @@ def validate_flash(
         and _find_app_row(data, candidate["app_sha256"])
     ):
         raise EvidenceError("flash receipt does not prove the exact non-erasing app flash")
-    return {"settings_preserved": True}
+    return {}
 
 
 def _ui_health_truth(data: dict[str, Any], commit: str) -> bool:
@@ -402,6 +419,7 @@ def validate_ui(
         and data.get("release_profile") == RELEASE_PROFILE
         and data.get("expected_sd_history_mode") == SD_HISTORY_MODE
         and _candidate_binding(data, candidate, require_run=True)
+        and _runner_source_binding(data, candidate)
         and scroll_probe_ok(data, POSIX_D1L_TARGET)
         and _ui_health_truth(data, candidate["firmware_commit"])
         and _target(data)
@@ -424,6 +442,7 @@ def validate_rf(
         and data.get("execution_complete") is True
         and data.get("closure_eligible") is True
         and _candidate_binding(data, candidate, require_run=True)
+        and _runner_source_binding(data, candidate)
         and _exact_commit(data.get("device_build_commit"))
         == candidate["firmware_commit"]
         and data.get("device_release_profile") == RELEASE_PROFILE
@@ -451,6 +470,9 @@ def _transcript(
         or not _machine_physical(data, mode="hardware")
         or data.get("manual_only") is not False
         or data.get("port") != POSIX_D1L_TARGET
+        or _exact_commit(data.get("runner_commit"))
+        != candidate["firmware_commit"]
+        or data.get("runner_source_clean") is not True
         or not _candidate_binding(data, candidate, require_run=True)
         or not _target_pair(data)
     ):
@@ -665,6 +687,7 @@ def validate_protocol(
     trace_request = _response(steps, "trace_request")
     trace_result = _response(steps, "trace_result")
     before = _response(steps, "peer_before")
+    public_tx_authorization = _response(steps, "public_tx_authorization")
     public_send = _response(steps, "public_send")
     public_tx_record = _response(steps, "public_tx_record")
     after_public = _response(steps, "peer_after_public")
@@ -901,6 +924,16 @@ def validate_protocol(
         and isinstance(trace_result.get("last_result"), dict)
         and trace_result["last_result"].get("valid") is True
         and trace_result["last_result"].get("tag") == trace_tag
+        and steps["public_tx_authorization"]["command"]
+        == "operator flag --authorize-public-tx"
+        and public_tx_authorization
+        == {
+            "schema": 1,
+            "ok": True,
+            "authorized": True,
+            "source": "cli_flag",
+            "bounded_public_tx_count": 1,
+        }
         and public_send.get("ok") is True
         and public_send.get("cmd") == "mesh send public"
         and public_send.get("queued") is True
@@ -1102,6 +1135,8 @@ def validate_wifi(
     if not (
         _candidate_binding(data, candidate, require_run=False)
         and validate_wifi_report(data)
+        and data.get("rc1_gate_eligible") is True
+        and data.get("release_gate_eligible") is False
         and _target_pair(data)
     ):
         raise EvidenceError("Wi-Fi receipt is not an exact saved-profile reconnect pass")

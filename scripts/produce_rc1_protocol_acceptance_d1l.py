@@ -220,6 +220,13 @@ def load_admin_password(path: Path) -> str:
     return value
 
 
+def require_public_tx_authorization(authorized: bool) -> None:
+    if authorized is not True:
+        raise ProtocolAcceptanceError(
+            "the bounded Public send requires explicit --authorize-public-tx"
+        )
+
+
 def capture_peer_status(
     path: Path,
     *,
@@ -461,6 +468,7 @@ def execute(
     peer_public_key: str,
     admin_fingerprint: str,
     admin_password_path: Path,
+    authorize_public_tx: bool,
     baud: int = 115200,
     command_timeout: float = 8.0,
     rf_timeout: float = 75.0,
@@ -470,6 +478,7 @@ def execute(
     status_capture: Callable[..., dict[str, Any]] = capture_peer_status,
     control_sender: Callable[..., dict[str, Any]] = send_peer_control,
 ) -> dict[str, Any]:
+    require_public_tx_authorization(authorize_public_tx)
     root = Path(root).resolve()
     output = _safe_new_output(output)
     commit = exact_commit(expected_commit)
@@ -623,6 +632,18 @@ def execute(
             "peer_before",
             "controlled-peer status capture",
             peer_status(),
+        )
+        _step(
+            steps,
+            "public_tx_authorization",
+            "operator flag --authorize-public-tx",
+            {
+                "schema": 1,
+                "ok": True,
+                "authorized": True,
+                "source": "cli_flag",
+                "bounded_public_tx_count": 1,
+            },
         )
         public_send = _step(
             steps,
@@ -977,6 +998,8 @@ def execute(
         "port": POSIX_D1L_TARGET,
         "d1l_target": d1l_target,
         "d1l_target_after": d1l_target_after,
+        "runner_commit": source["commit"],
+        "runner_source_clean": True,
         "expected_firmware_commit": commit,
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
@@ -1008,6 +1031,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--admin-fingerprint", required=True)
     parser.add_argument("--admin-password-file", required=True)
+    parser.add_argument(
+        "--authorize-public-tx",
+        action="store_true",
+        help="explicitly authorize the one tokenized RC1 Public acceptance send",
+    )
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--command-timeout", type=float, default=8.0)
     parser.add_argument("--rf-timeout", type=float, default=75.0)
@@ -1030,6 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
             peer_public_key=args.peer_public_key,
             admin_fingerprint=args.admin_fingerprint,
             admin_password_path=Path(args.admin_password_file),
+            authorize_public_tx=args.authorize_public_tx,
             baud=args.baud,
             command_timeout=args.command_timeout,
             rf_timeout=args.rf_timeout,

@@ -27,6 +27,38 @@ ROLE_OUTCOMES = {
 }
 
 
+def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    data = {
+        "schema": 2,
+        "kind": "esp32_flash",
+        "mode": "hardware",
+        "physical_observed": True,
+        "simulated": False,
+        "dry_run": False,
+        "manual_only": False,
+        "ok": True,
+        "closure_eligible": True,
+        "release_profile": producer.RELEASE_PROFILE,
+        "sd_history_mode": producer.SD_HISTORY_MODE,
+        "commit": COMMIT,
+        "github_actions_run": "123",
+        "workflow_run_attempt": "1",
+        "device_build_commit": COMMIT,
+        "erase_flash": False,
+        "formats_sd": False,
+        "retained_state_preserved": True,
+        "result": {"name": "esp32_flash", "ok": True},
+    }
+    monkeypatch.setattr(producer, "_machine_physical", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(producer, "_candidate_binding", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(producer, "_target_pair", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(producer, "_find_app_row", lambda *_args, **_kwargs: True)
+
+    assert producer.validate_flash(data, CANDIDATE) == {}
+
+
 def test_producer_bundles_unique_machine_sources_and_hashes_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

@@ -23,15 +23,23 @@
   one operator-authorized Public send, DM/ACK, contact PATH/TRACE, repeater
   Ping, repeater login/authenticated query, Wi-Fi reconnect, SD
   write/remount/degraded notice, and authorized Map download/offline revisit.
-- [ ] Confirm built-in OSM is attributed and visible-current-view-only, and
-  authorized-provider prefetch pauses while the interactive Map is open.
+- [ ] Verify the exact Actions host-contract evidence keeps built-in OSM
+  attributed/current-view-only and pauses authorized-provider prefetch while
+  interactive Map is open. The physical Map receipt is intentionally limited
+  to authorized download plus offline SD-cache revisit.
 - [ ] Confirm SD remains the retained-history authority and missing/unusable SD
   enters visible live-only RF chat without silent default-NVS fallback.
-- [ ] Complete one consolidated physical display/touch/keyboard review.
+- [x] The operator accepted the physical display/touch/keyboard/scroll
+  behavior during RC1 development. Do not repeat that manual campaign; the
+  final exact artifact uses the automated 12-surface navigation receipt.
 - [ ] Run the final fail-closed audit and require its RC1 readiness result true.
 
 No soak is required. Do not cut a release tag until every current item above
 passes on the exact downloaded and flashed Actions artifact.
+
+Use the [authoritative RC1 release execution](RC1_RELEASE_EXECUTION_D1L.md)
+for the exact-main capture, bootstrap/retained-reflash pair, eight evidence
+sources, aggregate, final audit, `v1.0.0` tag and checksummed release assets.
 
 ## Historical phase ledger
 

@@ -8,6 +8,11 @@ During implementation, run only the focused checks needed by the changed
 slice. Do not repeat unrelated UI, SD, RF or edge-case campaigns. No soak is
 part of RC1.
 
+After the final change merges, stop using issue-sized examples and follow the
+[authoritative RC1 release execution](RC1_RELEASE_EXECUTION_D1L.md) exactly.
+It owns the exact-main Actions capture, two non-erasing flash phases, bounded
+eight-source gate, final audit, `v1.0.0` tag and release assets.
+
 ## Current cycle
 
 1. Start from current `main` and make the smallest change that closes the
@@ -40,7 +45,9 @@ part of RC1.
 - Background/offline Map download requires connected Wi-Fi, configured
   location, ready SD and an HTTPS provider manifest explicitly authorizing
   offline storage and background prefetch.
-- Automated validation never transmits on the default Public channel.
+- Automated validation transmits on the default Public channel only for the
+  single tokenized final gate when the operator explicitly supplies
+  `--authorize-public-tx`; every other automated path remains Public-silent.
 - Use only a narrowly authorized controlled peer for DM/RF/Admin proof.
 - BLE companion transport, QR sharing and signed OTA/update/recovery product
   workflows are deferred to 1.5 / RC2.

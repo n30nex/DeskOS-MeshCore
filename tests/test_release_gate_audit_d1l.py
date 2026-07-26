@@ -987,6 +987,34 @@ def full_rf_payload(
     return payload
 
 
+def test_full_rf_acceptance_accepts_only_validated_pi_local_peer(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    payload = full_rf_payload(
+        evidence_source=audit.LOCAL_PEER_EVIDENCE_SOURCE,
+        peer_port=None,
+    )
+    payload["controlled_peer"].update(
+        {
+            "access_mode": "local",
+            "hostname": "neopi5",
+            "control_socket": "/run/canadaverse-control/com15/control.sock",
+            "device": "/dev/krab-t-echo",
+            "public_key": "0bf0a701d5ae2db6" + ("a" * 48),
+            "max_status_age_sec": 120.0,
+        }
+    )
+    monkeypatch.setattr(
+        audit, "pinned_peer_report_shape_ok", lambda _data: True
+    )
+    assert audit.full_rf_acceptance_ok(payload, "COM12", None) is True
+
+    monkeypatch.setattr(
+        audit, "pinned_peer_report_shape_ok", lambda _data: False
+    )
+    assert audit.full_rf_acceptance_ok(payload, "COM12", None) is False
+
+
 def write_core_evidence(root: Path) -> None:
     write_supported_sdk_workflow(root)
     run_dir = root / "artifacts" / "github" / RUN_ID
@@ -1496,6 +1524,7 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
 
 def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
     token = "remount1"
+    source_commit = metadata_commit or commit
     persistence_commands = audit.persistence_readback_commands(token)
     message_persistence = {
         "loaded": True,
@@ -1638,9 +1667,21 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
         root / "artifacts" / "hardware" / "com12" / f"sd_reboot_remount_{commit[:7]}.json",
         {
             "schema": 1,
+            "kind": "sd_reboot_remount_acceptance_d1l",
             "mode": "hardware",
+            "physical_observed": True,
+            "dry_run": False,
+            "simulated": False,
+            "manual_only": False,
             "port": "COM12",
             "token": token,
+            "commit": source_commit,
+            "git": {
+                "commit": source_commit,
+                "status_ok": True,
+                "dirty": False,
+                "dirty_entries": [],
+            },
             "expected_firmware_commit": commit,
             "pre_device_build_commit": commit,
             "device_build_commit": commit,
@@ -3941,7 +3982,24 @@ def test_release_gate_audit_rejects_scroll_probe_when_map_network_counter_grows(
     assert gate_by_id(report)["ui_scroll_probe"]["ok"] is False
 
 
-def test_release_gate_audit_requires_scroll_probe_movement(tmp_path: Path):
+def test_release_gate_audit_requires_dynamic_surface_movement(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = scroll_probe_payload()
+    payload["probe_results"]["public_messages"]["ok"] = False
+    payload["probe_results"]["public_messages"]["moved"] = False
+    for event in payload["events"]:
+        if event["screen"] == "public_messages":
+            event["probe"] = payload["probe_results"]["public_messages"]
+    write_json(hardware / "scroll_probe_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_scroll_probe"]["ok"] is False
+
+
+def test_release_gate_audit_allows_static_storage_scroll_probe(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
     payload = scroll_probe_payload()
@@ -3955,7 +4013,7 @@ def test_release_gate_audit_requires_scroll_probe_movement(tmp_path: Path):
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
-    assert gates["ui_scroll_probe"]["ok"] is False
+    assert gates["ui_scroll_probe"]["ok"] is True
 
 
 def test_release_gate_audit_allows_static_home_launcher_scroll_probe(tmp_path: Path):

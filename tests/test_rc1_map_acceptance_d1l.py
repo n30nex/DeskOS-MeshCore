@@ -217,6 +217,8 @@ def test_machine_transcript_is_accepted_by_aggregate_map_gate():
         crashlog=crashlog(),
         target_before=target,
         target_after=copy.deepcopy(target),
+        runner_commit=COMMIT,
+        runner_source_clean=True,
         expected_commit=COMMIT,
         actions_run=RUN,
         workflow_run_attempt=ATTEMPT,
@@ -246,7 +248,52 @@ def test_machine_transcript_is_accepted_by_aggregate_map_gate():
         "crashlog",
     ]
     assert transcript["manual_only"] is False
+    assert transcript["runner_commit"] == COMMIT
+    assert transcript["runner_source_clean"] is True
     assert transcript["port"] == d1l_serial_target.POSIX_D1L_TARGET
+
+
+@pytest.mark.parametrize(
+    ("runner_commit", "runner_source_clean"),
+    [
+        ("b" * 40, True),
+        (COMMIT, False),
+    ],
+)
+def test_machine_transcript_rejects_wrong_runner_source(
+    runner_commit: str,
+    runner_source_clean: bool,
+):
+    before = provider_status()
+    after = provider_status(network_requests=5, downloaded_tiles=8)
+    target = target_snapshot()
+    transcript = runner.build_transcript(
+        version=version(),
+        provider=before,
+        baseline=before,
+        download=after,
+        online_view=online_view(),
+        revisit=offline_view(),
+        health=health(),
+        crashlog=crashlog(),
+        target_before=target,
+        target_after=copy.deepcopy(target),
+        runner_commit=runner_commit,
+        runner_source_clean=runner_source_clean,
+        expected_commit=COMMIT,
+        actions_run=RUN,
+        workflow_run_attempt=ATTEMPT,
+    )
+
+    with pytest.raises(aggregate.EvidenceError):
+        aggregate.validate_map(
+            transcript,
+            {
+                "firmware_commit": COMMIT,
+                "actions_run": RUN,
+                "actions_run_attempt": ATTEMPT,
+            },
+        )
 
 
 def test_provider_and_download_validation_fail_closed_on_osm_or_no_delta():
