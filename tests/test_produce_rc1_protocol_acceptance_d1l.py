@@ -639,3 +639,6 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     assert "--authorize-public-tx" in source
     assert "validate_protocol(transcript, candidate)" in source
     assert "--dry-run" not in source
+    assert source.index(
+        'label="inbound DM ACK dispatch"'
+    ) < source.index('label="matched contact TRACE"')
