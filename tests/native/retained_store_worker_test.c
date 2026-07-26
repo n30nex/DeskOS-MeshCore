@@ -434,6 +434,16 @@ static uint32_t store_flush_calls(size_t index)
     return native_store_stats(index).flush_calls;
 }
 
+static void mark_all_stores_dirty(void)
+{
+    assert(pthread_mutex_lock(&s_store_mutex) == 0);
+    for (size_t i = 0U; i < 7U; ++i) {
+        s_stores[i].revision++;
+        s_stores[i].dirty = true;
+    }
+    assert(pthread_mutex_unlock(&s_store_mutex) == 0);
+}
+
 int main(void)
 {
     for (size_t i = 0U; i < 7U; ++i) {
@@ -481,6 +491,7 @@ int main(void)
     assert(store_flush_calls(5U) == 0U);
     assert(store_flush_calls(6U) == 0U);
 
+    mark_all_stores_dirty();
     assert(d1l_route_store_worker_force_flush(1000U) == ESP_OK);
     assert(store_flush_calls(0U) == 2U);
     assert(store_flush_calls(1U) == 1U);
@@ -501,6 +512,7 @@ int main(void)
     assert(!d1l_route_store_persistence_should_yield());
     d1l_route_store_worker_quiesce_end();
 
+    mark_all_stores_dirty();
     assert(d1l_route_store_worker_force_flush(1000U) == ESP_OK);
     assert(store_flush_calls(0U) == 3U);
     assert(store_flush_calls(1U) == 2U);
