@@ -24,23 +24,25 @@ int main(void)
         D1L_RELEASE_FEATURE_DIRECT_MESSAGES));
     assert(d1l_release_feature_available(D1L_RELEASE_FEATURE_NODES));
     assert(d1l_release_feature_available(D1L_RELEASE_FEATURE_PACKETS));
-    assert(!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP));
-    assert(!d1l_release_feature_available(
+    assert(d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP));
+    assert(d1l_release_feature_available(
         D1L_RELEASE_FEATURE_WIFI_USER_CONTROL));
     assert(!d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE));
-    assert(!d1l_release_feature_available(
+    assert(d1l_release_feature_available(
         D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT));
-    assert(!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN));
-    assert(!d1l_release_feature_available(
+    assert(d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN));
+    assert(d1l_release_feature_available(
         D1L_RELEASE_FEATURE_OBSERVER_MQTT));
     assert(!d1l_release_feature_available(
         D1L_RELEASE_FEATURE_SIGNED_UPDATE));
-    assert(!d1l_release_feature_available(
+    assert(d1l_release_feature_available(
         D1L_RELEASE_FEATURE_MUTABLE_TERMINAL));
-    assert(!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION));
+    assert(d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION));
     assert(!d1l_release_feature_available(
         D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI));
-    assert(!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE));
+    assert(d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE));
+    assert(!d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_USB_RECOVERY));
 #elif EXPECT_FULL
     assert(d1l_release_profile_id() == D1L_RELEASE_PROFILE_FULL_FEATURE);
     assert(strcmp(d1l_release_profile_name(), "full_feature") == 0);
@@ -69,7 +71,7 @@ int main(void)
            D1L_SD_HISTORY_MODE_CONDITIONAL);
     assert(strcmp(d1l_release_sd_history_mode_name(), "conditional") == 0);
 #if EXPECT_CORE
-    assert(!d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY));
+    assert(d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY));
 #endif
 #else
     assert(d1l_release_sd_history_mode() ==

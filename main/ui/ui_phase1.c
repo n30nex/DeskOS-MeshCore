@@ -5296,7 +5296,9 @@ static void channel_management_action_handler(
         if (ret == ESP_OK && set_managed_channel(&updated)) {
             d1l_ui_channel_sheets_hide_create(
                 &s_channel_sheets_controller);
-            if (!show_channel_export_sheet()) {
+            if (!d1l_release_feature_available(
+                    D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI) ||
+                !show_channel_export_sheet()) {
                 show_channel_options_sheet();
             }
         }
@@ -5362,7 +5364,10 @@ static void channel_management_action_handler(
         }
         return;
     case D1L_UI_CHANNEL_ACTION_OPEN_EXPORT:
-        show_channel_export_sheet();
+        if (d1l_release_feature_available(
+                D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI)) {
+            show_channel_export_sheet();
+        }
         return;
     case D1L_UI_CHANNEL_ACTION_CLOSE_EXPORT:
         d1l_ui_channel_sheets_hide_export(&s_channel_sheets_controller);

@@ -79,17 +79,16 @@ int main(void)
         simulate_rx_effects(private_key.channel_hash);
 #if EXPECT_CORE
     assert(d1l_release_profile_is_core());
-    assert(private_effects.decrypt == 0U);
-    assert(private_effects.message == 0U);
-    assert(private_effects.route == 0U);
-    assert(private_effects.packet == 0U);
 #else
     assert(!d1l_release_profile_is_core());
-    assert(private_effects.decrypt == 1U);
-    assert(private_effects.message == 1U);
-    assert(private_effects.route == 1U);
-    assert(private_effects.packet == 1U);
 #endif
+    if (d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
+        assert(private_effects.decrypt == 1U);
+        assert(private_effects.message == 1U);
+        assert(private_effects.route == 1U);
+        assert(private_effects.packet == 1U);
+    }
 
     assert(d1l_channel_store_note_message(
                D1L_CHANNEL_PUBLIC_ID, 4U, true) == ESP_OK);
@@ -119,17 +118,18 @@ int main(void)
         channel_info(private_channel.channel_id);
     assert(public_after.newest_message_seq == 6U);
     assert(public_after.unread_count == 1U);
-#if EXPECT_CORE
-    assert(private_after.newest_message_seq ==
-           private_before.newest_message_seq);
-    assert(private_after.read_through_seq ==
-           private_before.read_through_seq);
-    assert(private_after.unread_count == private_before.unread_count);
-    assert(private_after.updated_ms == private_before.updated_ms);
-#else
-    assert(private_after.newest_message_seq == 7U);
-    assert(private_after.unread_count == 1U);
-#endif
+    if (d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
+        assert(private_after.newest_message_seq == 7U);
+        assert(private_after.unread_count == 1U);
+    } else {
+        assert(private_after.newest_message_seq ==
+               private_before.newest_message_seq);
+        assert(private_after.read_through_seq ==
+               private_before.read_through_seq);
+        assert(private_after.unread_count == private_before.unread_count);
+        assert(private_after.updated_ms == private_before.updated_ms);
+    }
 
     memset(&public_key, 0, sizeof(public_key));
     memset(&private_key, 0, sizeof(private_key));

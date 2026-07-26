@@ -96,6 +96,7 @@ bool d1l_ui_channel_sheets_set_export_uri(
 
 #ifndef D1L_UI_CHANNEL_SHEETS_SECRET_TEST
 
+#include "app/release_profile.h"
 #include "lvgl.h"
 #include "ui_keyboard.h"
 #include "ui_modal.h"
@@ -670,12 +671,18 @@ bool d1l_ui_channel_sheets_render_options(
         16, 172, 448, 48, BINDING_OPTIONS_DEFAULT,
         can_make_default ? D1L_UI_CHANNEL_ACTION_MAKE_DEFAULT :
                            D1L_UI_CHANNEL_ACTION_NONE) != NULL && complete;
-    complete = create_button(controller, sheet, "Export one-time QR",
-                             16, 228, 448, 48, BINDING_OPTIONS_EXPORT,
-                             D1L_UI_CHANNEL_ACTION_OPEN_EXPORT) != NULL && complete;
+    const bool qr_sharing_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
+    if (qr_sharing_available) {
+        complete = create_button(controller, sheet, "Export one-time QR",
+                                 16, 228, 448, 48, BINDING_OPTIONS_EXPORT,
+                                 D1L_UI_CHANNEL_ACTION_OPEN_EXPORT) != NULL &&
+            complete;
+    }
     lv_obj_t *remove = create_button(
         controller, sheet, is_public ? "Remove (protected)" : "Remove channel",
-        16, 284, 448, 52, BINDING_OPTIONS_REMOVE,
+        16, qr_sharing_available ? 284 : 228, 448, 52,
+        BINDING_OPTIONS_REMOVE,
         is_public ? D1L_UI_CHANNEL_ACTION_NONE : D1L_UI_CHANNEL_ACTION_OPEN_REMOVE);
     if (!is_public) {
         style_danger_button(remove);
@@ -689,7 +696,7 @@ bool d1l_ui_channel_sheets_render_options(
     if (note) {
         lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
         lv_obj_set_width(note, 448);
-        lv_obj_set_pos(note, 16, 356);
+        lv_obj_set_pos(note, 16, qr_sharing_available ? 356 : 300);
     } else {
         complete = false;
     }
@@ -722,7 +729,9 @@ bool d1l_ui_channel_sheets_render_export(
     void *action_context)
 {
     lv_obj_t *sheet = controller ? controller->export_sheet : NULL;
-    if (!begin_render(controller, sheet, true, action_handler, action_context) ||
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI) ||
+        !begin_render(controller, sheet, true, action_handler, action_context) ||
         controller->export_uri[0] == '\0') {
         invalidate_render(controller, sheet);
         return false;

@@ -39,7 +39,8 @@ esp_err_t d1l_channel_message_reconcile(void)
         }
         size_t admitted_row_count = 0U;
         for (size_t i = 0U; i < row_count; ++i) {
-            if (d1l_release_profile_is_core() &&
+            if (!d1l_release_feature_available(
+                    D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT) &&
                 s_message_rows[i].channel_id != D1L_CHANNEL_PUBLIC_ID) {
                 continue;
             }

@@ -837,20 +837,6 @@ static bool enforce_release_command_policy(
         return false;
     }
 
-    if (d1l_release_profile_is_core()) {
-        if (d1l_usb_command_equals(
-                command, "packets clear", sizeof("packets clear") - 1U)) {
-            release_unsupported_result(
-                command, D1L_RELEASE_FEATURE_PACKETS);
-            return false;
-        }
-        if (d1l_usb_command_equals(
-                command, "nodes clear", sizeof("nodes clear") - 1U)) {
-            release_unsupported_result(
-                command, D1L_RELEASE_FEATURE_NODES);
-            return false;
-        }
-    }
     const d1l_release_command_rule_t *rule = release_command_rule(command);
     if (d1l_release_profile_is_core() && rule &&
         rule->feature == D1L_RELEASE_FEATURE_SD_HISTORY &&
@@ -5678,7 +5664,8 @@ static void cmd_messages_read(const char *line)
 static void cmd_nodes(void)
 {
     d1l_node_store_stats_t stats = d1l_node_store_stats();
-    const bool include_location = !d1l_release_profile_is_core();
+    const bool include_location = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_LOCATION);
     const uint32_t marker_generation = include_location ?
         d1l_node_store_marker_generation() : 0U;
     static d1l_node_view_t entries[8] EXT_RAM_BSS_ATTR;
@@ -8202,7 +8189,9 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    if (d1l_release_profile_is_core()) {
+    if (d1l_release_profile_is_core() &&
+        !d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
         print_release_profile_fields();
         printf(",\"commands\":[\"help\",\"version\",\"board\","
                "\"settings get\",\"settings reset\","

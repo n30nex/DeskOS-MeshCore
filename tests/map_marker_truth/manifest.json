@@ -107,7 +107,7 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "818ae4e44bea31668372178edbd8e2cede37086408cb8ef0b197ac6a19537014",
+    "main/app/app_model.c": "4147f999e4c5eaefba9aba7ad2cc74169e4ced5142bb9c96837366d8f2428b1e",
     "main/app/app_model.h": "3e21e6ecb1f4a73fe277bbfd6cf44c435411589ed1b42199626b3c0bc3070320",
     "main/app/settings_model.c": "e0e7e4b6f084e829eb3967da38dc1ecb9d3f42bdbb0a757be76289bc17c8ddf4",
     "main/app/settings_model.h": "007127211f82d275e7af01dfc6b9c348d0576678b48ba4688685f56f71949b88",
@@ -134,7 +134,7 @@
     "main/ui/ui_map.h": "35833cc85e96764c126cb311697f43c238bc742130b42c87d603d51ce8695176",
     "main/ui/ui_node_detail.c": "9cfd5f1c4a63341416df3463caa260b8ed5dfbc3b2479d5b40c9b7a6ec56a139",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "1c8b0f994099c04142740e32b8b64f23eca062f2dc83631386b5d6c00a4af725",
+    "main/ui/ui_phase1.c": "c6928cb418a431c87a5a07be53e18b87c90c130ce41f84cd5187d5b04b12d72c",
     "tools/ui_simulator.py": "9b80a6ccde4ec55a6d199a546fc2380d2a7b55ba8c1faa96da2ea922052558f0"
   }
 }

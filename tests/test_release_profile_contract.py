@@ -17,11 +17,11 @@ def between(source: str, start: str, end: str) -> str:
     return source.split(start, 1)[1].split(end, 1)[0]
 
 
-def test_full_feature_profile_is_the_deterministic_build_default():
+def test_core_rc1_profile_is_the_deterministic_build_default():
     root_cmake = read("CMakeLists.txt")
     component_cmake = read("main/CMakeLists.txt")
 
-    assert 'set(D1L_RELEASE_PROFILE "full_feature" CACHE STRING' in root_cmake
+    assert 'set(D1L_RELEASE_PROFILE "core_1_0" CACHE STRING' in root_cmake
     assert 'set(D1L_SD_HISTORY_MODE "conditional" CACHE STRING' in root_cmake
     assert '"app/release_profile.c"' in component_cmake
     assert "D1L_RELEASE_PROFILE=${D1L_RELEASE_PROFILE_DEFINE}" in component_cmake
@@ -38,15 +38,23 @@ def test_release_profile_is_one_immutable_authority_with_no_runtime_setter():
     assert "d1l_release_feature_available" in header
     assert "d1l_release_profile_set" not in header
     assert "d1l_release_sd_history_mode_set" not in header
-    assert '.map = false' in source
-    assert '.wifi_user_control = false' in source
-    assert '.ble = false' in source
-    assert '.multi_channel_management = false' in source
-    assert '.admin = false' in source
-    assert '.observer_mqtt = false' in source
-    assert '.signed_update = false' in source
-    assert '.mutable_terminal = false' in source
-    assert '.location = false' in source
+    core = between(
+        source,
+        "static const d1l_release_capabilities_t s_core_capabilities",
+        "static const d1l_release_capabilities_t s_development_capabilities",
+    )
+    assert ".sd_history =\n        D1L_SD_HISTORY_MODE !=" in core
+    assert ".map = true" in core
+    assert ".wifi_user_control = true" in core
+    assert ".ble = false" in core
+    assert ".multi_channel_management = true" in core
+    assert ".admin = true" in core
+    assert ".observer_mqtt = true" in core
+    assert ".signed_update = false" in core
+    assert ".mutable_terminal = true" in core
+    assert ".location = true" in core
+    assert ".advanced_qr_emoji = false" in core
+    assert ".user_trace = true" in core
     assert "d1l_release_capabilities_t release_capabilities;" in app_header
     assert "snapshot->release_profile = d1l_release_profile_name();" in app_source
     assert "snapshot->release_capabilities = *d1l_release_capabilities();" in app_source

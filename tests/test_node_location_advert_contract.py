@@ -305,7 +305,10 @@ def test_non_core_serial_nodes_and_export_report_exact_advert_coordinates():
         assert field in cmd_nodes
         if "marker_generation" not in field:
             assert field in export_nodes
-    assert "const bool include_location = !d1l_release_profile_is_core();" in cmd_nodes
+    assert (
+        "const bool include_location = d1l_release_feature_available(\n"
+        "        D1L_RELEASE_FEATURE_LOCATION);"
+    ) in cmd_nodes
     assert cmd_nodes.count("if (include_location) {") == 3
 
 
