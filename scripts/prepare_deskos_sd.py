@@ -402,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         target_info = ensure_target(args.target, args.skip_filesystem_check)
         items = checked_bundle_items()
-        provider = None
+        provider = load_provider_manifest(BUNDLE_ROOT)
         if args.tiles_from:
             tile_source = args.tiles_from.resolve()
             if not tile_source.is_dir():

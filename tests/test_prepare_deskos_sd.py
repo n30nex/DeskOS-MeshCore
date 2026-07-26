@@ -43,9 +43,13 @@ def test_prepare_is_plan_only_by_default_and_apply_is_verified(tmp_path):
     map_manifest = target / "deskos" / "map" / "manifest.json"
     receipt = target / "deskos" / "card-preparation-receipt.json"
     assert manifest.is_file()
-    assert json.loads(map_manifest.read_text(encoding="utf-8"))["schema"] == 2
+    map_payload = json.loads(map_manifest.read_text(encoding="utf-8"))
+    assert map_payload["schema"] == 2
+    assert map_payload["source"] == "nrcan-cbmt"
     receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
     assert receipt_payload["formats_sd"] is False
+    assert receipt_payload["provider"]["source_id"] == "nrcan-cbmt"
+    assert (target / "deskos" / "map" / "offline-provider.json").is_file()
     expected_directories = {
         "deskos/stores/messages/public",
         "deskos/stores/messages/dm",

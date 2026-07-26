@@ -100,8 +100,10 @@ The checked-in payload is under `sdcard/deskos`. Run the command without
 provider manifest granting offline storage; the public OpenStreetMap Standard
 tile service is interactive-cache only and must not be bulk downloaded.
 
-The provider manifest is optional for a normal card. It is required only for
-authorized background/offline Map downloads.
+The release includes an authorized Natural Resources Canada CBMT provider
+manifest for background/offline Map downloads. Card preparation installs it,
+and firmware seeds it when absent on a ready card without replacing any
+operator-supplied provider.
 
 ## Build and release policy
 

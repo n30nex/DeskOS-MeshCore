@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "source_id": "nrcan-cbmt",
+  "attribution": "Natural Resources Canada; Open Government Licence - Canada",
+  "license_url": "https://open.canada.ca/en/open-government-licence-canada",
+  "offline_storage_permitted": true,
+  "background_prefetch_permitted": true,
+  "network_url_template": "https://maps.geogratis.gc.ca/wms/CBMT?mode=tile&tilemode=gmap&layers=National%20Sub_national%20Regional%20Sub_regional&tile={x}+{y}+{z}",
+  "tile_template": "z{z}/x{x}/y{y}.png",
+  "max_zoom": 15,
+  "average_tile_bytes": 65536,
+  "minimum_request_interval_ms": 1000
+}

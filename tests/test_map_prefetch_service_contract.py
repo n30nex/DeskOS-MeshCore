@@ -1,3 +1,5 @@
+import json
+
 from pathlib import Path
 
 
@@ -25,6 +27,35 @@ def test_offline_provider_is_explicit_fail_closed_and_secret_safe():
     assert "out_provider->background_prefetch_permitted = false;" in provider
     assert "provider.url_template" in store
     assert "result.url" not in read("main/map/map_prefetch_service.c")
+
+
+def test_authorized_default_provider_is_seeded_without_overwrite():
+    provider = read("main/map/map_tile_provider.c")
+    manifest = json.loads(read("sdcard/offline-tile-provider.json"))
+
+    assert manifest == {
+        "schema": 1,
+        "source_id": "nrcan-cbmt",
+        "attribution":
+            "Natural Resources Canada; Open Government Licence - Canada",
+        "license_url":
+            "https://open.canada.ca/en/open-government-licence-canada",
+        "offline_storage_permitted": True,
+        "background_prefetch_permitted": True,
+        "network_url_template":
+            "https://maps.geogratis.gc.ca/wms/CBMT?mode=tile&tilemode=gmap&"
+            "layers=National%20Sub_national%20Regional%20Sub_regional&"
+            "tile={x}+{y}+{z}",
+        "tile_template": "z{z}/x{x}/y{y}.png",
+        "max_zoom": 15,
+        "average_tile_bytes": 65536,
+        "minimum_request_interval_ms": 1000,
+    }
+    assert (
+        "if (read_ret == ESP_ERR_NOT_FOUND) {\n"
+        "        (void)seed_default_provider_config();"
+    ) in provider
+    assert "D1L_MAP_PROVIDER_CONFIG_PATH, false," in provider
 
 
 def test_background_service_is_sd_wifi_location_and_visible_map_gated():

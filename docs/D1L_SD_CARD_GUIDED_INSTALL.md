@@ -29,6 +29,15 @@ The preparer:
 - verifies every copied file by SHA-256; and
 - writes `deskos/card-preparation-receipt.json`.
 
+## Included Map Provider
+
+DeskOS includes an authorized Natural Resources Canada CBMT provider for
+background prefetch and offline SD caching. The preparer installs its metadata
+at `deskos/map/offline-provider.json`. Firmware also seeds the same metadata
+when that file is absent on an otherwise ready DeskOS card, so an already
+installed card does not need to be removed or reformatted. Neither path
+replaces a different provider file already on the card.
+
 Re-running it accepts identical files and rejects a changed destination.
 `--skip-filesystem-check` is only for a non-card staging directory and must not
 be used to bypass checks on real media.
@@ -44,6 +53,7 @@ python scripts/prepare_deskos_sd.py --target <mounted-card-root> \
   --tiles-from <licensed-tile-directory> --apply
 ```
 
+That option replaces the included provider only on a newly prepared card.
 Do not bulk-download from `tile.openstreetmap.org`. The built-in OpenStreetMap
 policy supports bounded current-view caching, not unattended offline-area
 prefetch. A provider example is included at
