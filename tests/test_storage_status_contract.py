@@ -206,13 +206,18 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert "const bool refresh_timed_out = ret == ESP_ERR_TIMEOUT" in boot_prepare
     assert 'strcmp(s_status.sd_state, "mount_required")' in boot_prepare
     assert 'strcmp(s_status.sd_state, "no_card")' in boot_prepare
+    assert 'strcmp(s_status.sd_state, "mount_pending") == 0' in boot_prepare
     assert "The bridge may accept MOUNT" in boot_prepare
     assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in source
-    assert "#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 40U" in source
+    assert "#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 60U" in source
     assert "#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U" in source
     assert "poll_timeout_ms = remaining_ms < D1L_STORAGE_BOOT_POLL_TIMEOUT_MS" in source
     assert "d1l_storage_status_refresh(poll_timeout_ms)" in source
     assert 'strcmp(s_status.sd_state, "mount_pending")' in source
+    assert 'return last_ret == ESP_ERR_TIMEOUT ? ESP_OK : last_ret;' in source
+    assert source.index('strcmp(s_status.sd_state, "mount_pending") == 0') < source.index(
+        'return last_ret == ESP_ERR_TIMEOUT ? ESP_OK : last_ret;'
+    )
     assert "poll_mount_pending()" in boot_prepare
     assert "d1l_storage_format_sd_confirmed" not in boot_prepare
     assert "d1l_rp2040_bridge_format_sd" not in boot_prepare

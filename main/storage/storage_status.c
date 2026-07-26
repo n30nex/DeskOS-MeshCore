@@ -19,7 +19,7 @@
 
 #define D1L_STORAGE_BOOT_POLL_INTERVAL_MS 250U
 #define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U
-#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 40U
+#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 60U
 #define D1L_STORAGE_MANAGER_STACK_BYTES 4096U
 #define D1L_STORAGE_MANAGER_IDLE_INTERVAL_MS 2000U
 #define D1L_STORAGE_MANAGER_BACKOFF_MS 5000U
@@ -807,10 +807,10 @@ static esp_err_t poll_mount_pending_until(int64_t deadline_us)
         last_ret = poll_ret;
     }
 
-    if (last_ret == ESP_ERR_TIMEOUT && strcmp(s_status.sd_state, "mount_pending") != 0) {
-        return ESP_OK;
+    if (strcmp(s_status.sd_state, "mount_pending") == 0) {
+        return ESP_ERR_TIMEOUT;
     }
-    return last_ret;
+    return last_ret == ESP_ERR_TIMEOUT ? ESP_OK : last_ret;
 }
 
 static esp_err_t poll_mount_pending(void)
@@ -1187,6 +1187,10 @@ esp_err_t d1l_storage_boot_prepare(uint32_t timeout_ms)
     }
 
     const bool refresh_timed_out = ret == ESP_ERR_TIMEOUT;
+    if (!refresh_timed_out &&
+        strcmp(s_status.sd_state, "mount_pending") == 0) {
+        return poll_mount_pending();
+    }
     if (!refresh_timed_out &&
         strcmp(s_status.sd_state, "mount_required") != 0 &&
         strcmp(s_status.sd_state, "no_card") != 0) {
