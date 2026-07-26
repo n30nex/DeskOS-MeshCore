@@ -7815,8 +7815,12 @@ esp_err_t d1l_ui_phase1_request_map_acceptance(void)
     if (!d1l_ui_screen_available(D1L_UI_TAB_MAP)) {
         return ESP_ERR_NOT_SUPPORTED;
     }
-    if (!s_started || !s_content || s_lock_visible ||
-        s_onboarding_visible || d1l_ui_modal_has_active()) {
+    /*
+     * The inactivity lock stays foreground while this bounded acceptance view
+     * renders behind it. Never bypass onboarding or an active user modal.
+     */
+    if (!s_started || !s_content || s_onboarding_visible ||
+        d1l_ui_modal_has_active()) {
         return ESP_ERR_INVALID_STATE;
     }
     /*

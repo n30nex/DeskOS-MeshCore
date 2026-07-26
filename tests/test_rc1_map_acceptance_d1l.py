@@ -405,6 +405,18 @@ def test_firmware_exposes_machine_map_acceptance_and_blocks_osm_bulk_prefetch():
     assert "force_reload_next_acquire" in view_c
 
 
+def test_map_acceptance_renders_behind_lock_without_dismissing_user_state():
+    ui_c = (ROOT / "main/ui/ui_phase1.c").read_text(encoding="utf-8")
+    request = ui_c.split(
+        "esp_err_t d1l_ui_phase1_request_map_acceptance(void)", 1
+    )[1].split("esp_err_t d1l_ui_phase1_scroll_probe", 1)[0]
+
+    assert "s_lock_visible" not in request
+    assert "s_onboarding_visible" in request
+    assert "d1l_ui_modal_has_active()" in request
+    assert "unlock_event_cb" not in request
+
+
 def test_console_readiness_retries_a_command_lost_before_init(
     monkeypatch: pytest.MonkeyPatch,
 ):
