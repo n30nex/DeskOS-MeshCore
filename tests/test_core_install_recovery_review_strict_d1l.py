@@ -71,7 +71,7 @@ def write_package(root: Path) -> Path:
                 "windows": "flash_project.ps1",
                 "posix": "flash_project.sh",
             },
-            "normal_install_port": "COM12",
+            "normal_install_port": install_review.POSIX_D1L_TARGET,
             "normal_install_targets": (
                 install_review.expected_normal_install_targets()
             ),

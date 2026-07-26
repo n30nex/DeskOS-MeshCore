@@ -4,13 +4,115 @@
 **Target tag:** `v1.0.0`
 **Target device:** Seeed SenseCAP Indicator D1L
 **Radio region default:** USA/Canada
-**Status:** production contract for the 24-hour release sprint
-**Supersedes for this release only:** the Full Feature Completion stop condition
-**Does not delete or weaken:** the Full Feature Completion roadmap or full release audit
+**SD mode:** `conditional`
+**Status:** current DeskOS 1.0 / RC1 production contract
+**Supersedes:** the minimal 24-hour Core scope retained later in this file
 
 ---
 
-## Current Core hardware route (2026-07-24)
+## Current DeskOS 1.0 / RC1 contract (2026-07-25)
+
+DeskOS D1L is a touch-first, non-forwarding MeshCore client. The production
+build is immutable `core_1_0` with `conditional` SD support. A normal user can
+operate the supported surface from the touchscreen; USB remains an explicit
+diagnostic and URI-import path.
+
+### Supported RC1 surface
+
+| Capability | RC1 contract |
+|---|---|
+| Identity/adverts | Retained exact identity; signed flood advert is queued after MeshCore RX starts |
+| Messaging | Public and custom channels; send/receive/history/search/unread; DM exact-key routing, ACK, retry and terminal state |
+| Contacts | USB MeshCore URI import; touchscreen rename, favorite, mute and confirmed remove |
+| Nodes | Signed roles and evidence; Finder; up to 512 retained nodes; only unlocated entries may be replaced at capacity, while signed-location markers remain until explicit clear |
+| Path tools | Repeater Ping as zero-hop TRACE; verified-contact PATH/TRACE with pending/timeout/reply/RTT/RSSI/hop-SNR truth |
+| Map | Configured device center; valid signed advert coordinates; zoom 8–18; attributed built-in OSM visible-view cache |
+| Background Map | Connected Wi-Fi, ready SD and an authorized HTTPS provider permitting offline storage and background prefetch; nodes bounded to 200 km |
+| Wi-Fi | Scan, save multiple profiles, select, delete, connect, disconnect and reconnect |
+| Settings | Region/preset, radio parameters and power, RX boost, display and fixed-offset time |
+| Administration | Verified repeater/room login/logout, route state, status, telemetry, neighbours, ACL, bounded CLI, confirmed settings mutations and current-session room posts |
+| Storage | SD-primary history, contacts/nodes, routes, packets, Map and exports; visible live-only RF degraded mode without history fallback |
+| Diagnostics | Bounded packets/raw preview, event terminal, storage/Map/Wi-Fi/crash status |
+| Observer | Optional TLS-only `mqtts://`, QoS 1, bounded health/location payload without message text, keys or contacts |
+
+Finder results remain unverified until a signed advert arrives. Public display
+names never alias-match into a DM target. Touchscreen contact URI import is not
+an RC1 claim; use `contacts import <meshcore-uri>` over USB.
+
+### Storage and Map authority
+
+- Users prepare a 32GB-or-larger FAT32 card. Firmware and validation never
+  format, repair or overwrite foreign media.
+- SD is the primary retained-data authority. Missing/unusable SD displays
+  restrictions and retains basic live Public/channel/DM RF operation; retained
+  history, Map cache/download and exports are unavailable.
+- Default NVS contains bounded device/configuration, identity, channel,
+  Wi-Fi/Observer, display/time, boot/recovery and diagnostic metadata. It is
+  not a silent retained-history fallback.
+- Built-in OpenStreetMap Standard displays
+  `(c) OpenStreetMap contributors` and may fetch only the visible current-view
+  3×3 at one zoom per visible generation. Read-only Map probes request no
+  tiles.
+- Authorized-provider background prefetch pauses while interactive Map is
+  open. It uses zoom 8–18 as space permits, caps Map allocation at 60%, and
+  preserves at least 8 GiB outside that allocation.
+
+### Security and intentionally deferred scope
+
+- Remote mutations require the exact authenticated target/session and local
+  confirmation. Sensitive input is redacted, not persistently retained or
+  logged, and wiped from volatile confirmation buffers.
+- DeskOS never forwards third-party MeshCore traffic. Release automation never
+  transmits on the default Public channel.
+- BLE companion transport, contact/channel QR sharing, and signed
+  OTA/update/recovery product workflows are deferred to 1.5 / RC2 and must
+  remain unavailable in RC1.
+
+### Release artifact and physical gate
+
+Release firmware must be built by the exact candidate commit's GitHub Actions
+run using pinned ESP-IDF 5.5.4. Verify the downloaded package checksum tree,
+inventory, provenance, SBOM, `core_1_0` profile and `conditional` SD mode.
+Local firmware builds and predecessor packages cannot qualify.
+
+The release-closing D1L is attached to Pi 5 host `neopi5` and may be selected
+only by:
+
+```text
+/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+VID:PID 1a86:7523
+```
+
+Never substitute a raw `/dev/ttyUSB*` path or stale Windows COM assignment,
+and never enumerate or probe another Pi serial device.
+
+Public release requires one bounded gate on the exact downloaded and flashed
+Actions artifact:
+
+1. boot and five-root DeskOS navigation;
+2. boot advert and one operator-authorized Public message;
+3. one DM with ACK;
+4. contact PATH/TRACE and repeater Ping;
+5. repeater login and authenticated query;
+6. Wi-Fi reconnect;
+7. SD write/remount plus missing/unusable-card degraded notice;
+8. authorized-provider Map download and offline cache revisit;
+9. consolidated physical display/touch/keyboard confirmation.
+
+No soak is required. Any unexpected reboot, artifact mismatch, destructive SD
+operation, missing required workflow or unconfirmed security-sensitive
+mutation is a no-go.
+
+---
+
+## Historical 24-hour minimal-Core contract
+
+Everything below this heading records the superseded July 18 minimal-Core
+proposal and predecessor evidence requirements. Its unavailable-feature
+matrix, NVS-authoritative fallback, USB-recovery claim, COM routing and soak
+requirements do not describe the current RC1 product or release gate.
+
+### Historical hardware route (2026-07-24)
 
 The release-closing D1L is currently attached to the Raspberry Pi 5 host
 `neopi5`. Hardware work runs from the unprivileged, key-only development
@@ -38,7 +140,7 @@ access to the required peer status and control resources.
 
 ---
 
-## 1. Product statement
+### Historical 1. Product statement
 
 MeshCore DeskOS D1L Core 1.0 is a touch-first, non-forwarding MeshCore desk client focused on reliable messaging and local mesh visibility.
 
@@ -58,7 +160,7 @@ Core 1.0 must not imply that Map, Wi-Fi, BLE, OTA, administration, multi-channel
 
 ---
 
-## 2. Supported capability matrix
+### Historical 2. Supported capability matrix
 
 | Capability | Core 1.0 state | Release condition |
 |---|---|---|
@@ -82,7 +184,7 @@ Core 1.0 must not imply that Map, Wi-Fi, BLE, OTA, administration, multi-channel
 
 ---
 
-## 3. Unavailable capability matrix
+### Historical 3. Unavailable capability matrix
 
 The following are unavailable in Core 1.0 and must not be reachable:
 
@@ -103,7 +205,7 @@ The following are unavailable in Core 1.0 and must not be reachable:
 
 ---
 
-## 4. Release-profile authority
+### Historical 4. Release-profile authority
 
 Add one immutable capability authority:
 
@@ -129,7 +231,7 @@ The exact implementation mechanism may use Kconfig, CMake definitions, or a gene
 
 ---
 
-## 5. UI rules
+### Historical 5. UI rules
 
 Core navigation consists of:
 
@@ -158,9 +260,9 @@ No dead button may open a partial controller.
 
 ---
 
-## 6. Command rules
+### Historical 6. Command rules
 
-### Permitted categories
+#### Permitted categories
 
 - version, board, health, crashlog;
 - display/touch/backlight;
@@ -173,7 +275,7 @@ No dead button may open a partial controller.
 - storage status and Core-supported retention;
 - controlled reboot and documented recovery.
 
-### Rejected categories
+#### Rejected categories
 
 Unavailable feature mutations must fail before side effects with:
 
@@ -190,9 +292,9 @@ Read-only status may return `ok=true` with `available=false`, or the bounded uns
 
 ---
 
-## 7. Storage contract
+### Historical 7. Storage contract
 
-### Always supported
+#### Always supported
 
 - settings;
 - identity;
@@ -203,7 +305,7 @@ Read-only status may return `ok=true` with `available=false`, or the bounded uns
 - crashlog;
 - NVS fallback.
 
-### Conditional SD
+#### Conditional SD
 
 SD is supported only when the exact final candidate proves:
 
@@ -227,7 +329,7 @@ When conditional qualification fails:
 
 ---
 
-## 8. RF contract
+### Historical 8. RF contract
 
 - D1L is non-forwarding.
 - Default region is USA/Canada.
@@ -244,7 +346,7 @@ When conditional qualification fails:
 
 ---
 
-## 9. Minimum production evidence
+### Historical 9. Minimum production evidence
 
 Core 1.0 requires:
 
@@ -270,7 +372,7 @@ The Full Feature audit is expected to remain false.
 
 ---
 
-## 10. Release notes minimum
+### Historical 10. Release notes minimum
 
 Release notes must include:
 
@@ -288,7 +390,7 @@ Release notes must include:
 
 ---
 
-## 11. No-go conditions
+### Historical 11. No-go conditions
 
 Do not tag when:
 

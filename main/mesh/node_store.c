@@ -496,15 +496,26 @@ static int find_by_fingerprint(const char *fingerprint)
     return -1;
 }
 
-static size_t oldest_index(void)
+static bool oldest_unlocated_index(size_t *out_index)
 {
-    size_t oldest = 0;
-    for (size_t i = 1; i < s_count; ++i) {
-        if (s_entries[i].seq < s_entries[oldest].seq) {
+    if (!out_index) {
+        return false;
+    }
+    bool found = false;
+    size_t oldest = 0U;
+    for (size_t i = 0U; i < s_count; ++i) {
+        if (s_entries[i].location_valid) {
+            continue;
+        }
+        if (!found || s_entries[i].seq < s_entries[oldest].seq) {
             oldest = i;
+            found = true;
         }
     }
-    return oldest;
+    if (found) {
+        *out_index = oldest;
+    }
+    return found;
 }
 
 static bool bounded_text_terminated(const char *text, size_t capacity)
@@ -526,19 +537,31 @@ static bool persisted_entry_is_valid(const d1l_node_entry_t *entry)
             location_in_bounds(entry->lat_e6, entry->lon_e6));
 }
 
-static size_t least_recent_advert_index(void)
+static bool least_recent_unlocated_advert_index(size_t *out_index)
 {
+    if (!out_index) {
+        return false;
+    }
+    bool found = false;
     size_t oldest = 0U;
-    for (size_t i = 1U; i < s_count; ++i) {
-        if (s_entries[i].advert_timestamp <
+    for (size_t i = 0U; i < s_count; ++i) {
+        if (s_entries[i].location_valid) {
+            continue;
+        }
+        if (!found ||
+            s_entries[i].advert_timestamp <
                 s_entries[oldest].advert_timestamp ||
             (s_entries[i].advert_timestamp ==
                  s_entries[oldest].advert_timestamp &&
              s_entries[i].seq < s_entries[oldest].seq)) {
             oldest = i;
+            found = true;
         }
     }
-    return oldest;
+    if (found) {
+        *out_index = oldest;
+    }
+    return found;
 }
 
 static bool merge_persisted_entry_locked(const d1l_node_entry_t *incoming,
@@ -557,7 +580,14 @@ static bool merge_persisted_entry_locked(const d1l_node_entry_t *incoming,
         if (s_count < D1L_NODE_STORE_CAPACITY) {
             index = s_count++;
         } else {
-            index = least_recent_advert_index();
+            /*
+             * A signed advert with coordinates remains a Map marker until the
+             * user clears the node store. Capacity pressure may replace only
+             * an entry that has never supplied a valid location.
+             */
+            if (!least_recent_unlocated_advert_index(&index)) {
+                return false;
+            }
             if (incoming->advert_timestamp <
                     s_entries[index].advert_timestamp ||
                 (incoming->advert_timestamp ==
@@ -1339,7 +1369,15 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
     } else if (s_count < D1L_NODE_STORE_CAPACITY) {
         index = s_count++;
     } else {
-        index = oldest_index();
+        /*
+         * Located nodes are durable Map state. Never evict one merely because
+         * another fingerprint was heard; fail closed when all slots are Map
+         * markers and allow existing fingerprints to keep updating in place.
+         */
+        if (!oldest_unlocated_index(&index)) {
+            d1l_store_lock_give(&s_store_lock);
+            return ESP_ERR_NO_MEM;
+        }
         replacing_oldest = true;
         s_dropped_oldest++;
     }

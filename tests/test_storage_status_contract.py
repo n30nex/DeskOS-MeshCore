@@ -819,7 +819,8 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     runner = read("scripts/sd_file_canary_d1l.py")
     retained_runner = read("scripts/sd_retained_history_acceptance_d1l.py")
     docs = read("docs/TEST_PLAN_D1L.md")
-    runbook = read("docs/RP2040_SD_BRIDGE_FLASH_D1L.md")
+    active_plan = docs.split("## Historical", 1)[0]
+    install_guide = read("docs/D1L_SD_CARD_GUIDED_INSTALL.md")
 
     assert "cmd_storage_filecanary" in console
     assert "storage_filecanary_ready" in console
@@ -916,17 +917,15 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "setup confirm" not in retained_runner
     assert "COM11" not in retained_runner
     assert "COM29" not in retained_runner
-    assert "storage filecanary" in docs
-    assert "sd_retained_history_acceptance_d1l.py" in docs
-    assert "docs/RP2040_SD_BRIDGE_FLASH_D1L.md" in docs
-    assert "COM12" in runbook
-    assert "Do not use COM8, COM11, or COM29" in runbook
-    assert "Do not send Public RF" in runbook
-    assert "flash_d1l.ps1" in runbook
-    assert "flash_rp2040_sd_bridge_uf2.py" in runbook
-    assert "sd_retained_history_acceptance_d1l.py" in runbook
-    assert "--copy" in runbook
-    assert "deskos_sd_bridge.ino.uf2" in runbook
+    assert "SD write/remount and degraded" in active_plan
+    assert "No soak" in active_plan
+    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active_plan
+    assert "ID_VENDOR_ID=1a86" in active_plan
+    assert "ID_MODEL_ID=7523" in active_plan
+    assert "does not send RF" in install_guide
+    assert "does not silently redirect persistent histories to" in install_guide
+    assert "NVS" in install_guide
+    assert "does not send RF, erase NVS, flash firmware, or format storage" in install_guide
 
 
 def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
@@ -1118,44 +1117,45 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
 def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():
     board = read("third_party/sensecap_indicator_esp32/components/bsp/src/boards/sensecap_indicator_board.c")
     bsp_sd = read("third_party/sensecap_indicator_esp32/components/bsp/src/storage/bsp_sdcard.c")
-    roadmap = read("docs/ROADMAP.md")
+    readme = read("README.md")
 
     assert ".FUNC_SDMMC_EN =   (0)" in board
     assert ".FUNC_SDSPI_EN =       (0)" in board
     assert "return ESP_ERR_NOT_SUPPORTED" in bsp_sd
     assert ".format_if_mount_failed = false" in bsp_sd
-    assert "MicroSD support is handled by the RP2040 side" in roadmap
+    assert "FAT32 SD/RP2040 primary history" in readme
 
 
 def test_sd_validation_docs_do_not_require_public_rf_or_reserved_ports():
     validation = read("docs/D1L_SD_CARD_GUIDED_INSTALL.md")
 
     assert "mesh send public" not in validation
-    assert "Do not use `COM8`, `COM11`, or `COM29`" in validation
-    assert "COM7" not in validation
-    assert "flash_d1l" not in validation
-    assert "monitor_d1l" not in validation
-    assert "backup_flash" not in validation
-    assert "soak_d1l.py --active-public-text" not in validation
-    assert "probe_d1l_dm.py --bot-port" not in validation
-    assert "COM12" in validation
-    assert "COM16" in validation
+    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in validation
+    assert "`1a86:7523`" in validation
+    assert "raw `/dev/ttyUSB*` paths are never accepted" in validation
+    assert "does not send RF, erase NVS, flash firmware, or format storage" in validation
+    assert "COM12" not in validation
+    assert "COM16" not in validation
 
 
-def test_docs_keep_sd_backed_store_claims_pending_until_hardware_proof():
+def test_docs_define_sd_primary_storage_and_live_only_degraded_mode():
     readme = read("README.md")
     user_guide = read("docs/USER_GUIDE_D1L.md")
     limitations = read("docs/KNOWN_LIMITATIONS.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
 
-    for doc in [limitations, checklist]:
-        assert "retained stores" in doc or "Retained DeskOS stores" in doc or "Optional SD-card" in doc
-        assert "pending" in doc.lower() or "fallback" in doc.lower()
+    for doc in (readme, user_guide, limitations, checklist):
+        assert "core_1_0" in doc
+        assert "conditional" in doc
+        assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in doc
+        assert "1a86:7523" in doc
 
-    assert "SD-backed message/packet/route/export/map-tile stores" in checklist
-    assert "- [ ] Optional SD-card data storage implemented" in checklist
-    for core_doc in [readme, user_guide]:
-        assert "SD history" in core_doc
-        assert "disabled" in core_doc
-        assert "NVS" in core_doc
-        assert "RP2040 payload" in core_doc
+    for doc in (readme, user_guide, limitations):
+        assert "SD" in doc
+        assert "primary" in doc
+        assert "live-only" in doc
+        assert "default NVS" in doc
+
+    assert "SD-primary retained data" in checklist
+    assert "without silent default-NVS fallback" in checklist
+    assert "No soak is required" in checklist

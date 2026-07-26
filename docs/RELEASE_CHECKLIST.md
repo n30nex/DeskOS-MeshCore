@@ -1,27 +1,46 @@
 # Release Checklist
 
-## Current Full Feature production candidate (2026-07-25)
+## Current DeskOS 1.0 / RC1 production candidate (2026-07-25)
 
-- [x] All declared user-facing Full Feature domains are implemented.
-- [x] The candidate defaults are `full_feature` and `conditional` SD history.
-- [x] Release builds use pinned ESP-IDF 5.5.4 and GitHub Actions.
-- [x] The current D1L route is Pi 5 `neopi5` using only
-  `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with `1A86:7523`.
+- [x] The agreed RC1 user surface is implemented in source: boot advert,
+  Public/custom channels, DM/ACK, contacts, Finder, repeater Ping,
+  contact PATH/TRACE, Map, multiple Wi-Fi profiles, SD-primary retained data,
+  Observer, diagnostics and the full repeater/room Admin surface.
+- [x] The candidate defaults are `core_1_0` and `conditional` SD history.
+- [x] BLE companion transport, contact/channel QR sharing and signed
+  OTA/update/recovery product workflows are explicitly deferred to 1.5 / RC2.
+- [x] Release firmware must be built by GitHub Actions with pinned ESP-IDF
+  5.5.4. Local firmware builds cannot become the release artifact.
+- [x] The current D1L route is Pi 5 `neopi5`, selected only through
+  `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after verifying
+  `VID:PID 1a86:7523`.
 - [ ] Freeze the final source commit and download its exact Actions package.
-- [ ] Verify the complete package checksum tree and signed update bundle.
-- [ ] Flash that exact package non-erasing and retain the target-bound receipt.
-- [ ] Pass automated Full Feature smoke, UI, reboot/persistence, conditional-SD,
-  and controlled DM/RF acceptance on the same installed candidate.
-- [ ] Pass the 12-hour idle/listening soak on the same boot lineage.
-- [ ] Complete one consolidated physical display/touch review.
-- [ ] Run the final fail-closed audit and require
-  `full_feature_release_ready=true`.
+- [ ] Verify the complete package checksum tree, inventory, provenance, SBOM,
+  Actions identity, `core_1_0` profile and `conditional` SD mode.
+- [ ] Flash that exact verified package non-erasing through the stable Pi
+  by-id route and retain a target-bound receipt.
+- [ ] Pass the bounded same-artifact gate: boot/five-root UI, boot advert and
+  one operator-authorized Public send, DM/ACK, contact PATH/TRACE, repeater
+  Ping, repeater login/authenticated query, Wi-Fi reconnect, SD
+  write/remount/degraded notice, and authorized Map download/offline revisit.
+- [ ] Confirm built-in OSM is attributed and visible-current-view-only, and
+  authorized-provider prefetch pauses while the interactive Map is open.
+- [ ] Confirm SD remains the retained-history authority and missing/unusable SD
+  enters visible live-only RF chat without silent default-NVS fallback.
+- [ ] Complete one consolidated physical display/touch/keyboard review.
+- [ ] Run the final fail-closed audit and require its RC1 readiness result true.
 
-No release tag should be cut until the final exact-candidate audit passes.
-Historical Core and predecessor receipts are supporting history only and
-cannot close any item above.
+No soak is required. Do not cut a release tag until every current item above
+passes on the exact downloaded and flashed Actions artifact.
 
-## Phase 1
+## Historical phase ledger
+
+Everything below this heading is retained as predecessor evidence only. Old
+Full Feature profile claims, COM routes, soak requirements, incomplete-feature
+matrices and NVS-fallback policy are superseded and cannot close a current RC1
+item.
+
+### Historical Phase 1
 
 - [ ] Live `main` is `bd6ea0e685442d8a820766f4686395e50ca5397f` through PR #198; exact-main Actions `29651963484` passed. The last downloaded/checksum-verified strict bank remains `d24894268d877c09644d41bb45f23a795af8b93d` / Actions `29645992569`, with verification-receipt SHA-256 `6142a4cc372186e269e6b9d9d9bca5372136303779db2bf308c6cf793569129d`. Current-main artifacts and all frozen-candidate RF/SD/UI/update/soak gates remain open.
 - [x] PRs #190/#191/#193/#194/#195/#196/#198 are merged: multi-width and user-visible TRACE lifecycle, bounded post-flash matrix, 1,000-transition host UI stress, deduplicated PR CI, and neutral fail-closed controlled-peer RF evidence policy. None of these check off physical RF, UI, SD, update, soak, or public-release closure.
@@ -171,7 +190,7 @@ cannot close any item above.
   until that distinct closure artifact exists.
 - [x] Smoke JSON and monitor logs archived. Persistence smoke snapshots and restores only node name/path-hash, preserves saved Wi-Fi/profile metadata and Wi-Fi/BLE enable intent, and never uses `settings reset` as cleanup.
 
-## Phase 3 UI Shell
+### Historical Phase 3 UI Shell
 
 - [x] 480x480 dark shell replaces the bring-up tile home.
 - [x] Top status, home dashboard, bottom dock, packet view, Settings setup dashboard, advert sheet, toast, and lock overlay implemented.
@@ -199,7 +218,7 @@ cannot close any item above.
 - [ ] #76 software is merged; the exact candidate still must pass Home pixel, touch, focus, accessibility, lifecycle/UI-task, and 1,000-transition acceptance.
 - [ ] #77 implements pinned-protocol authenticated repeater and room-server administration with secret redaction, bounded sessions, confirmed allowlisted mutations, simulator coverage, and controlled compatible-peer hardware proof.
 
-## Phase 4 Messaging And Stores
+### Historical Phase 4 Messaging And Stores
 
 - [x] Bounded NVS-backed Public message store implemented.
 - [x] Public TX/RX events append persisted recent message rows.
@@ -283,7 +302,7 @@ cannot close any item above.
 - [x] Historical partial `a1afd4b` RF evidence proves outbound DM, ACK/PATH, direct route, health, Meshcorebot-on-COM11, and no-Public-command checks; `artifacts/hardware/com12/rf_full_acceptance_a1afd4b.json` remains failed because the controlled inbound DM token was not observed and cannot qualify a successor SHA.
 - [ ] Full DM workflow: manual touch review plus a passing newest `artifacts/hardware/com12/rf_full_acceptance_*.json` after the Meshcorebot control channel sends the recorded inbound `+dm ... <token>_in` command.
 
-## Phase 7 Polish And Soak
+### Historical Phase 7 Polish And Soak
 
 - [x] Crash ring and reset reason diagnostics implemented and hardware-smoke validated.
 - [x] Health telemetry reports heap/PSRAM, LVGL, reset reason, board/UI readiness, and task stack watermarks; the combined retained worker now has its own byte high-water field after the `3aefb9f` hardware stack-overflow finding.
@@ -304,7 +323,7 @@ cannot close any item above.
 - [ ] 12-hour idle/listening soak without crash.
 - [x] 1-hour active Public messaging soak without UI freeze passed on `COM7`.
 
-## Major Version Release
+### Historical Major Version Release
 
 - [x] Private GitHub repo exists under the user's account.
 - [x] CI artifacts produced.

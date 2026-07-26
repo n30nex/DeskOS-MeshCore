@@ -31,7 +31,6 @@ try:
         EXPECTED_PID,
         EXPECTED_VID,
         POSIX_D1L_TARGET,
-        WINDOWS_D1L_TARGET,
         safe_slug,
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
@@ -39,7 +38,6 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         EXPECTED_PID,
         EXPECTED_VID,
         POSIX_D1L_TARGET,
-        WINDOWS_D1L_TARGET,
         safe_slug,
     )
 
@@ -47,12 +45,12 @@ CORE_RELEASE_PROFILE = "core_1_0"
 CORE_SD_HISTORY_MODE = "disabled"
 CORE_PACKAGE_SCHEMA = 2
 CORE_INSTALL_CONTRACT_SCHEMA = 2
-CORE_TARGET_ARTIFACT_SLUG = safe_slug("core-windows-posix-usb")
+CORE_TARGET_ARTIFACT_SLUG = safe_slug("core-pi-by-id-windows-manual")
 INSTALL_REVIEW_CONFIRMATIONS = (
     "checksums_reviewed",
     "normal_usb_install_reviewed",
     "generated_entrypoints_reviewed",
-    "windows_com12_normal_install_reviewed",
+    "windows_manual_non_qualifying_install_reviewed",
     "posix_stable_by_id_normal_install_reviewed",
     "usb_identity_policy_reviewed",
     "raw_tty_observational_only_reviewed",
@@ -154,26 +152,35 @@ INSTALL_REVIEW_RECEIPT_KEYS = frozenset(
 def expected_normal_install_targets() -> dict[str, dict[str, Any]]:
     return {
         "windows": {
-            "requested_path": WINDOWS_D1L_TARGET,
-            "target_kind": "windows_com",
+            "requested_path": None,
+            "target_kind": "windows_com_operator_supplied",
             "vid": EXPECTED_VID,
             "pid": EXPECTED_PID,
+            "qualifying": False,
+            "explicit_operator_port_required": True,
+            "port_probe_forbidden": True,
         },
         "posix": {
             "requested_path": POSIX_D1L_TARGET,
             "target_kind": "posix_by_id",
             "vid": EXPECTED_VID,
             "pid": EXPECTED_PID,
+            "qualifying": True,
         },
     }
 
 
-def expected_target_policy() -> dict[str, bool]:
+def expected_target_policy() -> dict[str, Any]:
     return {
         "stable_requested_path_only": True,
         "resolved_tty_observational_only": True,
         "hardware_identity_required": True,
         "raw_posix_tty_forbidden": True,
+        "qualification_platform": "posix",
+        "qualification_target": POSIX_D1L_TARGET,
+        "windows_manual_non_qualifying": True,
+        "windows_explicit_operator_port_required": True,
+        "windows_port_probe_forbidden": True,
     }
 
 
@@ -350,7 +357,7 @@ def validate_package_review_inputs(
             "windows": "flash_project.ps1",
             "posix": "flash_project.sh",
         }
-        and install.get("normal_install_port") == WINDOWS_D1L_TARGET
+        and install.get("normal_install_port") == POSIX_D1L_TARGET
         and install.get("normal_install_targets")
         == expected_normal_install_targets()
         and install.get("target_policy") == expected_target_policy()

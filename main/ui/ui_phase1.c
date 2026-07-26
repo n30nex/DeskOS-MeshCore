@@ -65,6 +65,7 @@ static lv_disp_draw_buf_t s_draw_buf;
 static lv_disp_drv_t s_disp_drv;
 static lv_color_t *s_buf1;
 static lv_color_t *s_buf2;
+static esp_timer_handle_t s_lv_tick_timer;
 static uint8_t *s_capture_shadow;
 static uint8_t *s_capture_snapshot;
 static SemaphoreHandle_t s_capture_lock;
@@ -76,6 +77,8 @@ static uint32_t s_capture_flush_count;
 static uint32_t s_capture_crc32;
 static TaskHandle_t s_ui_task_handle;
 static TaskHandle_t s_touch_task_handle;
+static SemaphoreHandle_t s_ui_start_done_sem;
+static esp_err_t s_ui_start_result = ESP_ERR_INVALID_STATE;
 static portMUX_TYPE s_touch_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_board_touch_state_t s_touch_state;
 static bool s_touch_state_ready = false;
@@ -172,12 +175,20 @@ static bool s_backlight_pulse_active;
 static uint32_t s_backlight_pulse_until;
 static uint32_t s_last_notification_unread;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_packet_log_entry_t
+    s_packet_row_payloads[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
+static size_t s_packet_row_payload_count;
+static uint32_t s_packet_row_generation;
 static d1l_contact_entry_t s_compose_contact;
 static esp_err_t s_compose_last_send_error;
 static int32_t s_map_location_lat_e7;
 static int32_t s_map_location_lon_e7;
 static bool s_map_location_returns_to_options;
 static d1l_route_entry_t s_route_detail_route;
+static d1l_route_entry_t
+    s_route_row_payloads[D1L_APP_SNAPSHOT_ROUTE_PREVIEW] EXT_RAM_BSS_ATTR;
+static size_t s_route_row_payload_count;
+static uint32_t s_route_row_generation;
 static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
@@ -244,8 +255,19 @@ static d1l_ui_compose_probe_result_t s_compose_probe_result;
 
 #define D1L_TOUCH_TASK_STACK_BYTES 4096U
 #define D1L_UI_TASK_STACK_BYTES 12288U
+#define D1L_UI_ROW_TOKEN_INDEX_BITS 8U
+#define D1L_UI_ROW_TOKEN_INDEX_MASK 0xFFU
+#define D1L_UI_ROW_TOKEN_GENERATION_MASK 0x00FFFFFFU
+
+_Static_assert(D1L_PACKET_LOG_CAPACITY <= D1L_UI_ROW_TOKEN_INDEX_MASK,
+               "packet row token index is too small");
+_Static_assert(D1L_APP_SNAPSHOT_ROUTE_PREVIEW <= D1L_UI_ROW_TOKEN_INDEX_MASK,
+               "route row token index is too small");
 
 static void render_active_tab(void);
+static esp_err_t initialize_ui_runtime(void);
+static void fail_ui_start_on_ui_task(esp_err_t result);
+static void touch_poll_task(void *arg);
 static bool show_contact_detail_sheet(void);
 static bool show_contact_options_sheet(void);
 static void open_public_history_event_cb(lv_event_t *event);
@@ -2290,7 +2312,44 @@ static size_t refresh_packet_terminal_rows(void)
     return s_packets_controller.row_count;
 }
 
-static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entry_t *entry)
+static uint32_t next_row_generation(uint32_t current)
+{
+    current = (current + 1U) & D1L_UI_ROW_TOKEN_GENERATION_MASK;
+    return current == 0U ? 1U : current;
+}
+
+static void *row_token(uint32_t generation, size_t index)
+{
+    const uintptr_t token =
+        ((uintptr_t)generation << D1L_UI_ROW_TOKEN_INDEX_BITS) |
+        ((uintptr_t)index + 1U);
+    return (void *)token;
+}
+
+static bool row_token_index(const void *user_data,
+                            uint32_t expected_generation,
+                            size_t payload_count,
+                            size_t *out_index)
+{
+    const uintptr_t token = (uintptr_t)user_data;
+    const uint32_t generation =
+        (uint32_t)((token >> D1L_UI_ROW_TOKEN_INDEX_BITS) &
+                   D1L_UI_ROW_TOKEN_GENERATION_MASK);
+    const size_t encoded_index =
+        (size_t)(token & D1L_UI_ROW_TOKEN_INDEX_MASK);
+    if (!out_index || generation == 0U ||
+        generation != expected_generation || encoded_index == 0U ||
+        encoded_index > payload_count) {
+        return false;
+    }
+    *out_index = encoded_index - 1U;
+    return true;
+}
+
+static void render_packet_row(lv_obj_t *parent,
+                              int y,
+                              const d1l_packet_log_entry_t *entry,
+                              size_t payload_index)
 {
     if (!entry) {
         return;
@@ -2304,7 +2363,8 @@ static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entr
         return;
     }
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED, (void *)entry);
+    lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED,
+                        row_token(s_packet_row_generation, payload_index));
     lv_obj_set_style_pad_all(row, 7, 0);
     lv_obj_set_style_bg_color(row, lv_color_hex(0x071018), 0);
     lv_obj_set_style_border_color(row, lv_color_hex(accent_color), 0);
@@ -2334,14 +2394,18 @@ static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entr
     obj_align_if(note, LV_ALIGN_BOTTOM_LEFT, 8, 0);
 }
 
-static void render_route_row(lv_obj_t *parent, int y, const d1l_route_entry_t *entry)
+static void render_route_row(lv_obj_t *parent,
+                             int y,
+                             const d1l_route_entry_t *entry,
+                             size_t payload_index)
 {
     lv_obj_t *row = create_panel(parent, 18, y, 424, 48);
     if (!row) {
         return;
     }
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, open_route_detail_event_cb, LV_EVENT_CLICKED, (void *)entry);
+    lv_obj_add_event_cb(row, open_route_detail_event_cb, LV_EVENT_CLICKED,
+                        row_token(s_route_row_generation, payload_index));
     lv_obj_set_style_pad_all(row, 8, 0);
     lv_obj_t *label = create_label(row, entry->label[0] ? entry->label : entry->target, 0xA7F3D0);
     label_set_dot_width(label, 176);
@@ -3637,12 +3701,17 @@ static void render_route_detail_sheet(void)
 
 static void open_route_detail_event_cb(lv_event_t *event)
 {
-    const d1l_route_entry_t *entry = (const d1l_route_entry_t *)lv_event_get_user_data(event);
-    if (!entry || entry->seq == 0) {
+    size_t payload_index = 0U;
+    if (!event ||
+        !row_token_index(lv_event_get_user_data(event),
+                         s_route_row_generation,
+                         s_route_row_payload_count,
+                         &payload_index) ||
+        s_route_row_payloads[payload_index].seq == 0U) {
         show_toast("Route", ESP_ERR_INVALID_STATE);
         return;
     }
-    s_route_detail_route = *entry;
+    s_route_detail_route = s_route_row_payloads[payload_index];
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -4004,12 +4073,17 @@ static void render_packet_detail_sheet(void)
 
 static void open_packet_detail_event_cb(lv_event_t *event)
 {
-    const d1l_packet_log_entry_t *entry = (const d1l_packet_log_entry_t *)lv_event_get_user_data(event);
-    if (!entry || entry->seq == 0) {
+    size_t payload_index = 0U;
+    if (!event ||
+        !row_token_index(lv_event_get_user_data(event),
+                         s_packet_row_generation,
+                         s_packet_row_payload_count,
+                         &payload_index) ||
+        s_packet_row_payloads[payload_index].seq == 0U) {
         show_toast("Packet", ESP_ERR_INVALID_STATE);
         return;
     }
-    s_packet_detail_packet = *entry;
+    s_packet_detail_packet = s_packet_row_payloads[payload_index];
     s_packet_detail_advanced = false;
     hide_sheet();
     hide_public_history_sheet();
@@ -6075,6 +6149,11 @@ static lv_obj_t *render_packet_filter_button(lv_obj_t *parent, const char *label
 
 static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
+    s_packet_row_generation = next_row_generation(s_packet_row_generation);
+    s_packet_row_payload_count = 0U;
+    s_route_row_generation = next_row_generation(s_route_row_generation);
+    s_route_row_payload_count = 0U;
+
     char snr[16];
     format_snr_tenths(snr, sizeof(snr), snapshot->signal_summary.latest_snr_tenths);
     lv_obj_t *title = create_label(content, "Packets", 0xF4F7FB);
@@ -6133,8 +6212,13 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
     lv_label_set_long_mode(feed_count, LV_LABEL_LONG_DOT);
     lv_obj_set_width(feed_count, 210);
     lv_obj_set_pos(feed_count, 218, s_packets_controller.search_text[0] ? 176 : 156);
+    if (packet_rows > D1L_PACKET_LOG_CAPACITY) {
+        packet_rows = D1L_PACKET_LOG_CAPACITY;
+    }
+    s_packet_row_payload_count = packet_rows;
     for (size_t i = 0; i < packet_rows; ++i) {
-        render_packet_row(content, y, &s_packets_controller.rows[i]);
+        s_packet_row_payloads[i] = s_packets_controller.rows[i];
+        render_packet_row(content, y, &s_packet_row_payloads[i], i);
         y += 52;
     }
     if (packet_rows == 0 && snapshot->recent_packet_count > 0) {
@@ -6170,12 +6254,18 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         }
         y += 48;
     }
-    if (snapshot->recent_route_count > 0) {
+    size_t route_rows = snapshot->recent_route_count;
+    if (route_rows > D1L_APP_SNAPSHOT_ROUTE_PREVIEW) {
+        route_rows = D1L_APP_SNAPSHOT_ROUTE_PREVIEW;
+    }
+    s_route_row_payload_count = route_rows;
+    if (route_rows > 0U) {
         lv_obj_t *routes = create_label(content, "Routes", 0x8EA0AE);
         lv_obj_set_pos(routes, 26, y);
         y += 24;
-        for (size_t i = 0; i < snapshot->recent_route_count; ++i) {
-            render_route_row(content, y, &snapshot->recent_routes[i]);
+        for (size_t i = 0; i < route_rows; ++i) {
+            s_route_row_payloads[i] = snapshot->recent_routes[i];
+            render_route_row(content, y, &s_route_row_payloads[i], i);
             y += 54;
         }
     }
@@ -9635,6 +9725,32 @@ static void create_lock_overlay(lv_obj_t *screen)
 static void ui_task(void *arg)
 {
     (void)arg;
+    s_ui_start_result = initialize_ui_runtime();
+    if (s_ui_start_result != ESP_OK) {
+        fail_ui_start_on_ui_task(s_ui_start_result);
+        return;
+    }
+
+    /* The fully featured LVGL tree leaves too little internal RAM for this
+     * UI-owned stack. The touch task remains LVGL-free and is started only
+     * after the complete display/input/tree runtime is ready. */
+    if (xTaskCreatePinnedToCoreWithCaps(
+            touch_poll_task, "d1l_touch", D1L_TOUCH_TASK_STACK_BYTES,
+            NULL, 4, &s_touch_task_handle, D1L_UI_TASK_CORE,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        s_touch_task_handle = NULL;
+        fail_ui_start_on_ui_task(ESP_ERR_NO_MEM);
+        return;
+    }
+
+    d1l_health_monitor_register_ui_task(xTaskGetCurrentTaskHandle());
+    d1l_app_model_get()->ui_ready = true;
+    s_started = true;
+    s_ui_start_result = ESP_OK;
+    if (s_ui_start_done_sem) {
+        (void)xSemaphoreGive(s_ui_start_done_sem);
+    }
+
     while (true) {
         uint32_t wait_ms = lv_timer_handler();
         d1l_health_monitor_sample_lvgl();
@@ -9776,30 +9892,15 @@ esp_err_t d1l_ui_phase1_show_home(void)
     return ESP_OK;
 }
 
-esp_err_t d1l_ui_phase1_start(void)
+static esp_err_t initialize_ui_runtime(void)
 {
-    if (s_started) {
-        return ESP_OK;
-    }
-    if (!s_scroll_probe_done_sem) {
-        s_scroll_probe_done_sem = xSemaphoreCreateBinary();
-        if (!s_scroll_probe_done_sem) {
-            return ESP_ERR_NO_MEM;
-        }
-    }
-    if (!s_compose_probe_done_sem) {
-        s_compose_probe_done_sem = xSemaphoreCreateBinary();
-        if (!s_compose_probe_done_sem) {
-            return ESP_ERR_NO_MEM;
-        }
-    }
-
     lv_init();
     d1l_ui_packets_init(&s_packets_controller);
-    d1l_health_monitor_set_lvgl_ready(true);
-    ESP_RETURN_ON_ERROR(init_capture_buffers(), TAG, "capture buffer init failed");
+    ESP_RETURN_ON_ERROR(init_capture_buffers(), TAG,
+                        "capture buffer init failed");
 
-    const size_t buffer_pixels = D1L_UI_CAPTURE_WIDTH * D1L_UI_CAPTURE_HEIGHT;
+    const size_t buffer_pixels =
+        D1L_UI_CAPTURE_WIDTH * D1L_UI_CAPTURE_HEIGHT;
 #if CONFIG_LCD_LVGL_DIRECT_MODE
     void *fb1 = NULL;
     void *fb2 = NULL;
@@ -9807,8 +9908,12 @@ esp_err_t d1l_ui_phase1_start(void)
     s_buf1 = (lv_color_t *)fb1;
     s_buf2 = (lv_color_t *)fb2;
 #else
-    s_buf1 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_buf2 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_buf1 = heap_caps_malloc(
+        buffer_pixels * sizeof(lv_color_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_buf2 = heap_caps_malloc(
+        buffer_pixels * sizeof(lv_color_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #endif
     if (!s_buf1 || !s_buf2) {
         return ESP_ERR_NO_MEM;
@@ -9826,9 +9931,12 @@ esp_err_t d1l_ui_phase1_start(void)
     bsp_lcd_flush_is_last_register(lcd_flush_is_last_cb);
     bsp_lcd_direct_mode_register(lcd_direct_mode_copy_cb);
 #endif
-    s_bsp_flush_ready_registered = (bsp_lcd_set_cb(lcd_flush_ready_cb, &s_disp_drv) == ESP_OK);
+    s_bsp_flush_ready_registered =
+        (bsp_lcd_set_cb(lcd_flush_ready_cb, &s_disp_drv) == ESP_OK);
     if (!s_bsp_flush_ready_registered) {
-        ESP_LOGW(TAG, "BSP LCD flush callback registration failed; falling back to immediate ready");
+        ESP_LOGW(
+            TAG,
+            "BSP LCD flush callback registration failed; falling back to immediate ready");
     }
     lv_disp_drv_register(&s_disp_drv);
 
@@ -9838,36 +9946,83 @@ esp_err_t d1l_ui_phase1_start(void)
     indev_drv.read_cb = touch_read_cb;
     lv_indev_drv_register(&indev_drv);
 
+    ESP_RETURN_ON_ERROR(d1l_ui_phase1_show_home(), TAG,
+                        "home screen failed");
+
     const esp_timer_create_args_t tick_args = {
         .callback = &lv_tick_task,
         .name = "lvgl_tick",
     };
-    esp_timer_handle_t tick_timer;
-    ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 5000));
-
-    ESP_RETURN_ON_ERROR(d1l_ui_phase1_show_home(), TAG, "home screen failed");
-    if (xTaskCreatePinnedToCoreWithCaps(
-            touch_poll_task, "d1l_touch", D1L_TOUCH_TASK_STACK_BYTES,
-            NULL, 4, &s_touch_task_handle, D1L_UI_TASK_CORE,
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
-        s_touch_task_handle = NULL;
-        return ESP_ERR_NO_MEM;
+    ESP_RETURN_ON_ERROR(
+        esp_timer_create(&tick_args, &s_lv_tick_timer),
+        TAG, "LVGL tick timer creation failed");
+    esp_err_t ret = esp_timer_start_periodic(s_lv_tick_timer, 5000);
+    if (ret != ESP_OK) {
+        (void)esp_timer_delete(s_lv_tick_timer);
+        s_lv_tick_timer = NULL;
+        return ret;
     }
-    /* The fully featured LVGL tree leaves too little internal RAM for these
-     * UI-owned stacks. Neither task performs flash writes; allocate only their
-     * stacks in configured external RAM while both TCBs stay internal. */
+
+    d1l_health_monitor_set_lvgl_ready(true);
+    return ESP_OK;
+}
+
+static void fail_ui_start_on_ui_task(esp_err_t result)
+{
+    d1l_health_monitor_register_ui_task(NULL);
+    if (s_lv_tick_timer) {
+        (void)esp_timer_stop(s_lv_tick_timer);
+        (void)esp_timer_delete(s_lv_tick_timer);
+        s_lv_tick_timer = NULL;
+    }
+    d1l_health_monitor_set_lvgl_ready(false);
+    d1l_app_model_get()->ui_ready = false;
+    s_touch_task_handle = NULL;
+    s_ui_task_handle = NULL;
+    s_started = false;
+    s_ui_start_result = result;
+    if (s_ui_start_done_sem) {
+        (void)xSemaphoreGive(s_ui_start_done_sem);
+    }
+    vTaskDelete(NULL);
+}
+
+esp_err_t d1l_ui_phase1_start(void)
+{
+    if (s_started) {
+        return ESP_OK;
+    }
+    if (!s_scroll_probe_done_sem) {
+        s_scroll_probe_done_sem = xSemaphoreCreateBinary();
+        if (!s_scroll_probe_done_sem) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_compose_probe_done_sem) {
+        s_compose_probe_done_sem = xSemaphoreCreateBinary();
+        if (!s_compose_probe_done_sem) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_ui_start_done_sem) {
+        s_ui_start_done_sem = xSemaphoreCreateBinary();
+        if (!s_ui_start_done_sem) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    while (xSemaphoreTake(s_ui_start_done_sem, 0) == pdTRUE) {
+    }
+    s_ui_start_result = ESP_ERR_INVALID_STATE;
+
     if (xTaskCreatePinnedToCoreWithCaps(
             ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES, NULL, 5,
             &s_ui_task_handle, D1L_UI_TASK_CORE,
             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         s_ui_task_handle = NULL;
-        vTaskDelete(s_touch_task_handle);
-        s_touch_task_handle = NULL;
         return ESP_ERR_NO_MEM;
     }
-    d1l_health_monitor_register_ui_task(s_ui_task_handle);
-    d1l_app_model_get()->ui_ready = true;
-    s_started = true;
-    return ESP_OK;
+
+    (void)xSemaphoreTake(s_ui_start_done_sem, portMAX_DELAY);
+    const esp_err_t start_result = s_ui_start_result;
+    return start_result;
 }

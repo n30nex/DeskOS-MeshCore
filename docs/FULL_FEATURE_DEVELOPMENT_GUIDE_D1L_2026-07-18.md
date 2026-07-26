@@ -1,9 +1,12 @@
 # MeshCore DeskOS D1L Full Feature Development Guide
 
-> Historical development reference captured on 2026-07-18. This is not the
-> MeshCore DeskOS D1L Core 1.0 user guide, is not included in the Core release
-> package, and describes features that are intentionally unreachable in the
-> `core_1_0` profile. See `USER_GUIDE_D1L.md` for the shipping Core surface.
+> **SUPERSEDED HISTORICAL DEVELOPMENT REFERENCE (2026-07-18).**
+> This file's capability status, COM routing, NVS fallback and soak directions
+> do not describe the current `core_1_0` / `conditional` RC1 candidate. Do not
+> execute them as release instructions. Use the
+> [project README](../README.md), [RC1 user guide](USER_GUIDE_D1L.md),
+> [RC1 test plan](TEST_PLAN_D1L.md), and
+> [SD-card guide](D1L_SD_CARD_GUIDED_INSTALL.md).
 
 This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk console for a local MeshCore mesh.
 

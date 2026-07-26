@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture and safely materialize one exact Core GitHub Actions run."""
+"""Capture and safely materialize the exact merged RC1 GitHub Actions run."""
 
 from __future__ import annotations
 
@@ -27,13 +27,16 @@ except ImportError:  # pragma: no cover
 REPOSITORY = "n30nex/SIGUI"
 WORKFLOW_NAME = "d1l-ci"
 WORKFLOW_PATH = ".github/workflows/d1l-ci.yml"
-RELEASE_BRANCH = "release/24h-core"
+RELEASE_BRANCH = "main"
 EXPECTED_ACTIONS_ARTIFACTS = (
     "d1l-host-artifacts",
     "d1l-meshcore-wire-conformance",
     "d1l-idf55-migration-state",
     "d1l-firmware-artifacts",
     "d1l-release-package",
+    "rp2040-sd-bridge-firmware",
+    "rp2040-sd-smoke-firmware",
+    "rp2040-seeed-official-sd-smoke-firmware",
 )
 MAX_ZIP_ENTRIES = 100_000
 MAX_UNCOMPRESSED_BYTES = 8 * 1024 * 1024 * 1024
@@ -234,7 +237,7 @@ def validate_run(raw: dict, *, run_id: str, commit: str) -> None:
         and raw.get("conclusion") == "success"
         and _exact_sha(raw.get("head_sha")) == commit
         and raw.get("head_branch") == RELEASE_BRANCH
-        and raw.get("event") == "workflow_dispatch"
+        and raw.get("event") == "push"
         and raw.get("path") == WORKFLOW_PATH
         and raw.get("name") == WORKFLOW_NAME
         and isinstance(run_attempt, int)
@@ -242,7 +245,9 @@ def validate_run(raw: dict, *, run_id: str, commit: str) -> None:
         and run_attempt >= 1
         and repository.get("full_name") == REPOSITORY
     ):
-        raise ValueError("GitHub Actions run is not the exact successful Core candidate")
+        raise ValueError(
+            "GitHub Actions run is not the exact successful merged-main RC1 candidate"
+        )
 
 
 def validate_artifacts(
@@ -255,7 +260,7 @@ def validate_artifacts(
         or total != len(EXPECTED_ACTIONS_ARTIFACTS)
         or len(artifacts) != len(EXPECTED_ACTIONS_ARTIFACTS)
     ):
-        raise ValueError("Actions run does not expose exactly five Core artifacts")
+        raise ValueError("Actions run does not expose exactly eight RC1 artifacts")
     by_name: dict[str, dict] = {}
     ids: set[int] = set()
     for row in artifacts:
@@ -287,7 +292,7 @@ def validate_artifacts(
         ids.add(artifact_id)
         by_name[name] = row
     if set(by_name) != set(EXPECTED_ACTIONS_ARTIFACTS):
-        raise ValueError("Actions artifact names do not match the disabled-Core set")
+        raise ValueError("Actions artifact names do not match the RC1 set")
     return by_name
 
 
@@ -465,8 +470,8 @@ def validate_capture_receipt(
         / "build-inputs"
         / "d1l-candidate-scope.json"
     )
-    scope = _read_json_file(scope_path, "Core candidate scope")
-    if scope != {
+    scope = _read_json_file(scope_path, "RC1 candidate scope")
+    expected_scope = {
         "schema": 1,
         "kind": "d1l_candidate_scope",
         "source_commit": commit,
@@ -474,13 +479,20 @@ def validate_capture_receipt(
         "workflow_run_attempt": run_attempt,
         "repository": REPOSITORY,
         "workflow": WORKFLOW_NAME,
-        "event": "workflow_dispatch",
-        "include_sd_bridge": False,
-        "scope_reason": "esp32_only",
+        "event": "push",
+        "include_sd_bridge": True,
         "release_profile": "core_1_0",
-        "sd_history_mode": "disabled",
-    }:
-        raise ValueError("Checksummed Core candidate scope is not exact")
+        "sd_history_mode": "conditional",
+    }
+    scope_reason = scope.get("scope_reason")
+    scope_without_reason = {
+        key: value for key, value in scope.items() if key != "scope_reason"
+    }
+    if (
+        scope_without_reason != expected_scope
+        or scope_reason not in {"rc1_candidate", "rc1_sd_paths"}
+    ):
+        raise ValueError("Checksummed merged-main RC1 candidate scope is not exact")
     return {
         "ok": True,
         "receipt": file_row(receipt_path, root),

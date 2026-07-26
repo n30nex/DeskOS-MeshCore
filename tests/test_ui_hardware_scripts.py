@@ -695,45 +695,46 @@ def test_scroll_probe_ignores_normal_power_on_history_but_rejects_crash_like_res
     assert scroll_probe_d1l.event_failed(event) is True
 
 
-def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
+def test_active_release_docs_require_one_bounded_gate_without_soak():
     release_docs = [
-        "README.md",
-        "docs/ROADMAP.md",
-        "docs/KNOWN_LIMITATIONS.md",
-        "docs/RELEASE_CHECKLIST.md",
-        "docs/TEST_PLAN_D1L.md",
-    ]
-    offenders = [
-        rel
-        for rel in release_docs
-        if any(
-            phrase in (ROOT / rel).read_text(encoding="utf-8")
-            for phrase in ("100-cycle", "500-cycle tab-abuse", "500-cycle tab abuse")
+        (ROOT / rel).read_text(encoding="utf-8").split("## Historical", 1)[0]
+        for rel in (
+            "docs/ROADMAP.md",
+            "docs/KNOWN_LIMITATIONS.md",
+            "docs/RELEASE_CHECKLIST.md",
+            "docs/TEST_PLAN_D1L.md",
         )
     ]
-    assert offenders == []
+    active = "\n".join(release_docs)
+
+    assert "one bounded" in active
+    assert "No soak" in active
+    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active
+    assert "VID:PID 1a86:7523" in active
+    assert "100-cycle" not in active
+    assert "500-cycle tab-abuse" not in active
+    assert "500-cycle tab abuse" not in active
 
 
-def test_active_release_docs_mark_keyboard_p0_closed_and_keep_fast_path():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    roadmap = (ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
-    checklist = (ROOT / "docs/RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
-    limitations = (ROOT / "docs/KNOWN_LIMITATIONS.md").read_text(encoding="utf-8")
-    test_plan = (ROOT / "docs/TEST_PLAN_D1L.md").read_text(encoding="utf-8")
-    release_docs = "\n".join((readme, roadmap, checklist, limitations, test_plan))
+def test_active_release_docs_keep_ui_acceptance_on_exact_candidate():
+    roadmap = (ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8").split(
+        "## Historical", 1
+    )[0]
+    checklist = (ROOT / "docs/RELEASE_CHECKLIST.md").read_text(
+        encoding="utf-8"
+    ).split("## Historical", 1)[0]
+    test_plan = (ROOT / "docs/TEST_PLAN_D1L.md").read_text(
+        encoding="utf-8"
+    ).split("## Historical", 1)[0]
 
-    assert "| On-screen keyboard and sheets |" not in roadmap
-    assert "Expanded issue #2 compose/input keyboard capture from PR #35" in checklist
-    assert "PR #35" in release_docs
-    assert "28727064923" in release_docs
-    assert "capture_count=11" in release_docs
-    assert "ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets all" in test_plan
-    assert "broader keyboard/sheet physical review" not in release_docs
-    assert "expanded `--targets all` keyboard/sheet physical review" not in release_docs
-    assert "expanded `--targets all` keyboard/sheet review" not in release_docs
-    assert "ui_navigation.c" in roadmap
-    assert "ui_modal.c" in roadmap
-    assert "ui_chrome.c" in roadmap
+    assert "boot/UI" in roadmap
+    assert "one consolidated physical UI confirmation" in roadmap
+    assert "boot/five-root UI" in checklist
+    assert "one consolidated physical display/touch/keyboard review" in checklist
+    assert "boot and five-root navigation" in test_plan
+    assert "display, touch,\n   keyboard" in test_plan
+    assert "same exact commit" in test_plan
+    assert "No soak" in test_plan
 
 
 def test_smoke_knows_ui_console_commands():

@@ -288,24 +288,19 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert "d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
 
 
-def test_release_docs_require_external_provenance_for_ambiguous_retained_bytes():
-    developer = read("docs/DEVELOPER_GUIDE_D1L.md")
+def test_release_docs_define_sd_primary_without_history_nvs_fallback():
+    readme = read("README.md")
+    user_guide = read("docs/USER_GUIDE_D1L.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
-    roadmap = read("docs/ROADMAP.md")
-    test_plan = read("docs/TEST_PLAN_D1L.md")
     limitations = read("docs/KNOWN_LIMITATIONS.md")
-    combined = "\n".join([developer, checklist, roadmap, test_plan, limitations])
 
-    assert "external_init_required=true" in combined
-    assert "markers_complete=true" in combined
-    assert "prepare_retained_nvs_upgrade_d1l.py" in developer
-    assert "prepare_retained_nvs_upgrade_d1l.py" in checklist
-    assert "prepare_retained_nvs_upgrade_d1l.py" in test_plan
-    assert "firmware neither probes nor erases ambiguous nonblank bytes" in checklist
-    assert "firmware must not delete it automatically" in test_plan
-    assert "direct scoped first-upgrade erase" not in combined
-    assert "triple absence directly" not in combined
-    assert "storage status.retained_nvs.telemetry" in combined
-    assert 'scope="boot_runtime_api_calls"' in combined
-    assert "physical_flash_cycles_measured=false" in combined
-    assert "API-level" in combined
+    for doc in (readme, user_guide, checklist, limitations):
+        assert "core_1_0" in doc
+        assert "conditional" in doc
+
+    assert "SD as the primary store" in user_guide
+    assert "Retained history is not redirected there" in user_guide
+    assert "does not silently redirect history into default NVS" in user_guide
+    assert "Degraded mode keeps basic live RF Public/channel/DM chat" in user_guide
+    assert "firmware never formats it" in limitations
+    assert "without silent default-NVS fallback" in checklist

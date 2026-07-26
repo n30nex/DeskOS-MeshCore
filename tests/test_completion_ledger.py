@@ -84,6 +84,8 @@ def test_completion_reporting_is_recomputed_and_does_not_waive_release_gates():
     assert metrics["gate_total"] == 11
     assert metrics["weighted_reported_percent"] == 64
     assert release_ready(ledger) is False
+    assert "Historical generated ledger snapshot" in rendered
+    assert "not as RC1 release authority" in rendered
     assert "not a release-gate waiver" in rendered
 
 

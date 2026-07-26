@@ -60,7 +60,10 @@ def test_heard_node_store_is_bounded_sd_primary_and_degrades_without_nvs_history
     assert "nvs_" not in upsert
     assert "d1l_retained_blob_store_" not in upsert
     assert "find_by_fingerprint" in source
-    assert "oldest_index" in source
+    assert "oldest_unlocated_index" in source
+    assert "least_recent_unlocated_advert_index" in source
+    assert "if (s_entries[i].location_valid)" in source
+    assert "return ESP_ERR_NO_MEM;" in upsert
     assert '"mesh/node_store.c"' in cmake
     assert "d1l_node_store_init()" in app_main
 

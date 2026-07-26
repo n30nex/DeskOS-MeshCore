@@ -51,9 +51,11 @@ def write_source_tree(root: Path) -> None:
 
     for relative in (
         "docs/USER_GUIDE_D1L.md",
-        "docs/DEVELOPER_GUIDE_D1L.md",
-        "docs/FLASH_RECOVERY_D1L.md",
-        "docs/RP2040_SD_BRIDGE_FLASH_D1L.md",
+        "docs/DESKOS_MESHCORE_FEATURE_PARITY.md",
+        "docs/KNOWN_LIMITATIONS.md",
+        "docs/D1L_SD_CARD_GUIDED_INSTALL.md",
+        "docs/ATTRIBUTIONS.md",
+        "docs/release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md",
     ):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)

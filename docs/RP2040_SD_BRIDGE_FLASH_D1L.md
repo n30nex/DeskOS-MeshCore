@@ -1,5 +1,12 @@
 # D1L RP2040 SD Bridge Flash And Proof
 
+> **SUPERSEDED WINDOWS-COM SD-BRIDGE PROCEDURE — DO NOT EXECUTE FOR RC1.**
+> Its COM12/COM16, NVS-fallback and soak directions are historical. Current SD
+> preparation and bounded release acceptance are defined by the
+> [project README](../README.md), [RC1 user guide](USER_GUIDE_D1L.md),
+> [RC1 test plan](TEST_PLAN_D1L.md), and
+> [SD-card guide](D1L_SD_CARD_GUIDED_INSTALL.md). Never format user media.
+
 This procedure is for the D1L RP2040 SD bridge firmware only. It is not the
 ESP32-S3 DeskOS firmware flash path.
 

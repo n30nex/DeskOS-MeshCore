@@ -1,157 +1,78 @@
-# D1L SD Card Guided Install
+# DeskOS SD Card Setup
 
-## Prepare a Production Card
+DeskOS 1.0 uses a prepared SD card as its persistent history and map-cache
+store. Use a 32 GB or larger card formatted as FAT32. DeskOS never formats a
+card.
 
-DeskOS never formats an SD card. On a computer, format a 32GB-or-larger card
-as FAT32, then use the checked-in card payload:
+## Prepare the Card
 
-```powershell
-python .\scripts\prepare_deskos_sd.py --target E:\ --apply
+The release package contains `scripts/prepare_deskos_sd.py` and the complete
+`sdcard/` payload. Run the preparer from the unpacked release:
+
+```text
+python scripts/prepare_deskos_sd.py --target <mounted-card-root>
 ```
 
-Replace `E:\` with the exact mounted card. The command:
+That first command is a read-only plan. Review the exact target and then apply
+it:
 
-- defaults to a read-only plan until `--apply` is supplied;
-- requires FAT32 and a 32GB-class capacity;
-- creates only the documented `deskos` tree;
-- never formats, deletes, or overwrites a different existing file;
+```text
+python scripts/prepare_deskos_sd.py --target <mounted-card-root> --apply
+```
+
+The preparer:
+
+- requires FAT32 and at least 28,000,000,000 bytes of card capacity;
+- creates only the documented `deskos/` tree;
+- never formats the card;
+- refuses to overwrite a different existing file;
 - verifies every copied file by SHA-256; and
 - writes `deskos/card-preparation-receipt.json`.
 
-The source layout is in `sdcard/deskos`. Re-running the preparer accepts
-identical files and refuses changed destinations. `--skip-filesystem-check`
-exists only for staging/test directories and must never bypass the check on a
-real card.
+Re-running it accepts identical files and rejects a changed destination.
+`--skip-filesystem-check` is only for a non-card staging directory and must not
+be used to bypass checks on real media.
 
-Preloaded map tiles are optional. Import is accepted only when the tile source
-contains `offline-tile-provider.json` with
-`offline_storage_permitted=true`, provider attribution, and its license URL:
+## Optional Preloaded Map Tiles
 
-```powershell
-python .\scripts\prepare_deskos_sd.py --target E:\ --tiles-from C:\licensed-tiles --apply
-```
-
-Do not bulk-download from `tile.openstreetmap.org`; that service permits
-interactive current-view caching but expressly prohibits offline-area
-prefetch. The example provider manifest is
-`sdcard/offline-tile-provider.example.json`.
-
-## Recover or Upgrade the RP2040 Bridge
-
-The legacy `scripts/autonomous_hardware_validate_d1l.py` runner is
-planning-only: its hardware entry point is disabled until full-key D1L
-admission and stable flash binding are implemented. Use this guided flow only
-when the Pi 5 D1L target is working but the RP2040 does
-not answer the DeskOS bridge protocol and no autonomous UF2 path appears. The
-only manual action is putting the RP2040 into BOOTSEL/UF2 mode twice: once for
-the official SD smoke proof and once to restore the DeskOS SD bridge.
-
-## Before Running
-
-- Use the latest green GitHub Actions run artifacts.
-- Prepare the SD card as FAT32 on a computer, then insert it in the D1L.
-- Build and validate on Pi 5 host `neopi5`.
-- Bind the ESP32 only through
-  `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with USB identity
-  `1a86:7523`; never guess a raw `/dev/ttyUSB*` path or probe another serial
-  device.
-- Do not use `COM8`, `COM11`, or `COM29` when reviewing an older Windows
-  receipt. That route is retired; `COM12` was the D1L and `COM16` was the
-  maintenance-only RP2040 route.
-- Do not format the SD card from the device, script, serial console, or UI.
-- Do not send Public RF.
-
-## Guided Command
-
-From the repository root:
-
-```powershell
-python .\scripts\guided_sd_install_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
-```
-
-The retired autonomous refresh may be reviewed without hardware access:
-
-```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke --dry-run
-```
-
-The script will:
-
-1. Bind the host-success marker, release manifest, packaged files, and standalone
-   firmware hashes to the requested canonical 40-hex commit and explicitly
-   supplied numeric Actions run.
-2. Request the RP2040 bootloader transition through the COM12 bridge command
-   when available, with configured COM16 as the maintenance-only fallback, and
-   accept only an explicitly authorized UF2 volume or one newly correlated UF2
-   volume.
-3. Copy only `seeed_official_sd_smoke.ino.uf2`.
-4. Capture the official Seeed SD smoke JSON from COM16, then capture the bounded
-   RP2040-unavailable fallback receipt before restoring the production bridge.
-5. Restore the checksum-verified `deskos_sd_bridge.ino.uf2`, run a preflight,
-   and require a clean `READY_SD` zero-counter gate before diagnostics.
-6. Poll the isolated raw diagnostic only until its bounded deadline.
-7. Restore that exact bridge UF2 again and reflash the checksum-verified ESP32
-   project image to establish a clean post-diagnostic boot boundary.
-8. Run a fresh preflight and require `READY_SD`, non-stale SD status, all five
-   retained stores on SD, zero retained failure counters, and no degradation
-   latch.
-9. Only after that clean gate, run file/export/map/retained/reboot canaries.
-   Any failed later SD stage preserves
-   its receipt, runs the release audit, attempts bounded exact recovery, and
-   stops all subsequent canaries.
-
-A UF2 disk that was present before the commanded D1L bootloader transition is
-not eligible for automatic selection. Pass `--uf2-volume <drive>:` to authorize
-that exact pre-existing volume; otherwise the runner requires exactly one newly
-appeared UF2 volume correlated with the commanded D1L transition.
-COM17 or any other discovered RP2040-looking serial device is inventory-only
-and is never touched. Configured COM16 may be absent while the production
-no-USB bridge runs; that state is accepted only when COM12 proves the bridge
-protocol and explicit bootloader command.
-
-For ESP32/UI-only planning after the RP2040 bridge has already been proved,
-the non-hardware plan can skip the SD suite:
-
-```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes --dry-run
-```
-
-That plan performs no flash, serial mutation, or RP2040 UF2 copy.
-
-The report is written to:
+Tiles may be preloaded only from a provider that explicitly permits offline
+storage. The tile source must contain `offline-tile-provider.json` with
+`offline_storage_permitted=true`, provider attribution, and a license URL:
 
 ```text
-artifacts\hardware\com12\d1l-guided-sd-install-<sha7>-actions<run-id>.json
+python scripts/prepare_deskos_sd.py --target <mounted-card-root> \
+  --tiles-from <licensed-tile-directory> --apply
 ```
 
-## At Each Prompt
+Do not bulk-download from `tile.openstreetmap.org`. The built-in OpenStreetMap
+policy supports bounded current-view caching, not unattended offline-area
+prefetch. A provider example is included at
+`sdcard/offline-tile-provider.example.json`.
 
-Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mode. The expected
-Windows result is a mounted UF2 disk containing `INFO_UF2.TXT` or `INDEX.HTM`.
-After the disk appears, press Enter in the script window.
+## Install and Check
 
-If Windows mounts more than one UF2 disk, rerun with an explicit volume:
+1. Safely eject the prepared card and insert it while the D1L is powered off.
+2. Boot DeskOS.
+3. Open **Settings > Storage**.
+4. Require the SD state to become ready and the retained stores to report SD as
+   their persistent backend.
+5. Open **Map**, allow an authorized tile request, then revisit the same view
+   to confirm it loads from the cache.
 
-```powershell
-python .\scripts\guided_sd_install_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --uf2-volume E:
-```
+If the card, FAT32 filesystem, or RP2040 bridge is unavailable, DeskOS remains
+usable for live RF transmit/receive, Public chat, and direct chat. It displays
+a degraded-mode notice and does not silently redirect persistent histories to
+NVS. Correct the card or bridge and reboot; do not format the card on the
+device.
 
-## Passing Result
+The release package also contains the exact paired RP2040 bridge and SD-smoke
+UF2 artifacts. RP2040 recovery requires its physical BOOTSEL/UF2 mode and is a
+service operation; it is not part of routine card preparation.
 
-For SD support to be considered working:
+## Release Acceptance Boundary
 
-- Official smoke reports `test="seeed_official_sd_smoke"` and `ok=true`.
-- Bridge restore reports `rp2040 ping` `ok=true` and
-  `protocol_supported=true`.
-- Preflight reports `ready_for_sd_acceptance=true`.
-- SD canaries report `ok=true`.
-- Every report keeps `public_rf_tx=false` and `formats_sd=false`.
-
-This proves the installed FAT32 card path. Public release still requires actual
-no-card and unformatted/non-FAT32 evidence, <=32GB multi-card evidence, and
-SD-slot electrical/power evidence.
-
-If official smoke fails, preserve the generated artifact; it contains the raw
-SD diagnostic fields needed to distinguish card/power/SPI/filesystem failures.
-If official smoke passes but bridge preflight fails, the SD hardware path works
-and the remaining issue is in the DeskOS bridge/protocol path.
+Production acceptance uses the exact checksum-verified GitHub Actions package
+on the Pi 5. The ESP32 target is bound only through
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with USB identity
+`1a86:7523`; raw `/dev/ttyUSB*` paths are never accepted. Card setup itself
+does not send RF, erase NVS, flash firmware, or format storage.

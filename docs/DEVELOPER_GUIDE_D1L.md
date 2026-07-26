@@ -1,5 +1,14 @@
 # MeshCore DeskOS D1L Developer Guide
 
+> **SUPERSEDED DEVELOPMENT/VALIDATION PROCEDURES.**
+> The commands below preserve earlier Full Feature, Windows-COM and soak
+> workflows; they are not current RC1 release instructions. Current authority
+> is the [project README](../README.md), [RC1 user guide](USER_GUIDE_D1L.md),
+> [RC1 test plan](TEST_PLAN_D1L.md), and
+> [SD-card guide](D1L_SD_CARD_GUIDED_INSTALL.md). Use only the Pi 5 stable
+> by-id D1L route and the exact downloaded GitHub Actions artifact described
+> there.
+
 ## Repo Shape
 
 - `main/` contains the ESP-IDF firmware app.

@@ -1,5 +1,13 @@
 # SIGUI Repository Audit and 24-Hour Core Production Release Roadmap
 
+> **SUPERSEDED HISTORICAL AUDIT/EXECUTION PLAN — DO NOT EXECUTE.**
+> The minimal-Core capability matrix, Windows alternatives, NVS fallback,
+> recovery path and 90-minute/12-hour soak plans below are not current RC1
+> requirements. Use the [project README](../../README.md),
+> [RC1 user guide](../USER_GUIDE_D1L.md),
+> [RC1 test plan](../TEST_PLAN_D1L.md), and
+> [SD-card guide](../D1L_SD_CARD_GUIDED_INSTALL.md).
+
 **Repository:** `n30nex/SIGUI`
 **Audit date:** 2026-07-18
 **Audited default branch:** `main`

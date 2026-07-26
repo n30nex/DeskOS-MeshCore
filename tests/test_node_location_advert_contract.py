@@ -264,6 +264,8 @@ def test_stale_guard_location_preservation_and_material_marker_generation():
     ):
         assert removed_sync_persistence not in upsert
     assert "note_persistence_dirty_locked(false, now_ms)" in upsert
+    assert "oldest_unlocated_index(&index)" in upsert
+    assert "return ESP_ERR_NO_MEM;" in upsert
     assert "return ESP_OK;" in upsert
 
 

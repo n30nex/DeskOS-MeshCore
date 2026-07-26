@@ -1210,6 +1210,56 @@ static void test_node_sd_failure_keeps_live_data_and_retry_succeeds(void)
     assert(strcmp(after.name, "Changed") == 0);
 }
 
+static void test_located_nodes_are_retained_until_explicit_clear(void)
+{
+    mock_nvs_reset();
+    assert(d1l_node_store_init() == ESP_OK);
+
+    char first_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char first_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    for (uint32_t id = 1U; id <= D1L_NODE_STORE_CAPACITY; ++id) {
+        char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+        char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+        make_public_key(key, id);
+        fingerprint_from_key(fingerprint, key);
+        if (id == 1U) {
+            memcpy(first_key, key, sizeof(first_key));
+            memcpy(first_fingerprint, fingerprint, sizeof(first_fingerprint));
+        }
+        bool stale = true;
+        assert(d1l_node_store_upsert_advert(
+                   fingerprint, key, "Mapped", 'C', -72, 45, 1U, 2U, id,
+                   true, 43000000 + (int32_t)id,
+                   -80000000 - (int32_t)id, &stale) == ESP_OK);
+        assert(!stale);
+    }
+
+    const d1l_node_store_stats_t full = d1l_node_store_stats();
+    assert(full.count == D1L_NODE_STORE_CAPACITY);
+    char overflow_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char overflow_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(overflow_key, D1L_NODE_STORE_CAPACITY + 1U);
+    fingerprint_from_key(overflow_fingerprint, overflow_key);
+    bool stale = true;
+    assert(d1l_node_store_upsert_advert(
+               overflow_fingerprint, overflow_key, "Overflow", 'C', -70, 40,
+               1U, 2U, D1L_NODE_STORE_CAPACITY + 1U, true, 44000000,
+               -81000000, &stale) == ESP_ERR_NO_MEM);
+    assert(!stale);
+    assert(!d1l_node_store_find_by_fingerprint(overflow_fingerprint, NULL));
+    assert_node_stats_equal(d1l_node_store_stats(), full);
+
+    assert(d1l_node_store_upsert_advert(
+               first_fingerprint, first_key, "Mapped Updated", 'C', -60, 60,
+               1U, 2U, D1L_NODE_STORE_CAPACITY + 2U, false, 0, 0,
+               &stale) == ESP_OK);
+    assert(!stale);
+    d1l_node_entry_t updated = {0};
+    assert(d1l_node_store_find_by_fingerprint(first_fingerprint, &updated));
+    assert(updated.location_valid);
+    assert(strcmp(updated.name, "Mapped Updated") == 0);
+}
+
 static d1l_meshcore_advert_admission_receipt_t admit_verified_advert(
     const char *fingerprint, const char *key, const char *name,
     uint32_t timestamp, bool location_valid, int32_t lat_e6, int32_t lon_e6)
@@ -2252,6 +2302,7 @@ int main(void)
     test_node_reachability_is_boot_local_and_wrap_safe();
     test_stale_advert_and_location_preservation();
     test_node_sd_failure_keeps_live_data_and_retry_succeeds();
+    test_located_nodes_are_retained_until_explicit_clear();
     test_d1l_first_zero_timestamp_accepted();
     test_d1l_equal_timestamp_rejected_non_mutating();
     test_d1l_older_timestamp_rejected_non_mutating();

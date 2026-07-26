@@ -2300,6 +2300,9 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     test_plan = read("docs/TEST_PLAN_D1L.md")
     roadmap = read("docs/ROADMAP.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
+    active_test_plan = test_plan.split("## Historical", 1)[0]
+    active_roadmap = roadmap.split("## Historical", 1)[0]
+    active_checklist = checklist.split("## Historical", 1)[0]
 
     assert "Pillow==12.3.0" in host_lock
     assert "--require-hashes" in host_lock
@@ -2312,10 +2315,10 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in workflow
     assert "python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage" in workflow
     assert "python ./tools/ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready" in workflow
-    assert "python .\\tools\\ui_simulator.py --out artifacts\\ui-sim" in test_plan
-    assert "python .\\tools\\ui_simulator.py --scenario large-mesh --out artifacts\\ui-sim-large" in test_plan
-    assert "python .\\tools\\ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts\\ui-sim-map-ready" in test_plan
-    assert "tools/ui_simulator.py" in roadmap
-    assert "large-mesh" in roadmap
-    assert "Simulator screenshots captured" in checklist
-    assert "Large simulated mesh UI stress passes" in checklist
+    assert "focused source checks" in active_test_plan
+    assert "simulator images" in active_test_plan
+    assert "alone do not pass" in active_test_plan
+    assert "one consolidated physical UI confirmation" in active_roadmap
+    assert "boot/five-root UI" in active_checklist
+    assert "one consolidated physical display/touch/keyboard review" in active_checklist
+    assert "No soak is required" in active_checklist

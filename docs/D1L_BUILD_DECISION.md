@@ -3,7 +3,17 @@
 Date: 2026-06-29
 Revised: 2026-07-10 for issue #63
 
-Decision: select ESP-IDF v5.5.4 as the D1L migration target. It becomes the qualified production baseline only after every issue #63 acceptance stage below passes. GitHub Actions must use the version-pinned `espressif/idf:v5.5.4` image; `latest` and moving `release-vX.Y` tags are not release-acceptable.
+Decision: select ESP-IDF v5.5.4 as the D1L production baseline. GitHub Actions
+must use the version-pinned `espressif/idf:v5.5.4` image; `latest` and moving
+`release-vX.Y` tags are not release-acceptable.
+
+The current DeskOS 1.0 / RC1 application profile is `core_1_0` with
+`conditional` SD support. Release firmware must come from the exact candidate
+commit's GitHub Actions package. After checksum, inventory and provenance
+verification, flash that artifact only from Pi 5 `neopi5` through
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after proving
+`VID:PID 1a86:7523`. Raw `/dev/ttyUSB*` paths, stale Windows COM assignments
+and local firmware builds are not release identities.
 
 ## Support Decision
 
@@ -11,7 +21,12 @@ The original ESP-IDF v5.1.x baseline is end of life. Espressif's [v5.1.7 release
 
 Espressif's [official Docker-image documentation](https://docs.espressif.com/projects/esp-idf/en/v5.5.4/esp32s3/api-guides/tools/idf-docker-image.html) distinguishes version tags such as `v5.5.4` from moving release-branch tags such as `release-v5.5`. The official registry publishes `espressif/idf:v5.5.4`, so issue #63 uses that exact version tag to avoid intentional release-branch drift. A tag is not a content-immutable image identity and does not, by itself, make the build reproducible; retain the Actions run metadata and resolved image identity when available.
 
-Status review (2026-07-10): standalone migration commit `39a043c` builds successfully with ESP-IDF v5.5.4 in GitHub Actions using the exact generated-and-committed dependency lock, the tracked Seeed compatibility patch, and the expected effective configuration. It is not yet the qualified production baseline because the combined Map/Wi-Fi candidate still needs its own green Actions build, exact COM12 `version.idf=v5.5.4`, and the complete behavioral gate matrix. The EOL v5.1.x line remains historical vendor context only, not an approved release fallback.
+Historical status review (2026-07-10): standalone migration commit `39a043c`
+built successfully with ESP-IDF v5.5.4 in GitHub Actions using the exact
+generated-and-committed dependency lock, the tracked Seeed compatibility
+patch, and the expected effective configuration. Its COM-based qualification
+plan is predecessor evidence only. The EOL v5.1.x line remains historical
+vendor context, not an approved release fallback.
 
 ## Rationale
 
@@ -25,17 +40,27 @@ SigurdOS remains the primary application architecture reference, but its current
 
 PlatformIO remains useful as a future wrapper if it can call the ESP-IDF project cleanly, but it is not the initial hardware bring-up framework. The D1L hardware stack is closer to Seeed's ESP-IDF SDK than to SigurdOS's Arduino/LovyanGFX T-Deck stack.
 
-## Issue #63 Staged Acceptance
+## Historical issue #63 staged acceptance
+
+This section preserves the original migration decision. Its COM12/COM16 route
+is superseded by the Pi 5 stable by-id route above. Current RC1 validation is
+bounded, has no soak, and must use the exact downloaded Actions artifact.
 
 The SDK migration is release-blocking and is accepted only in these stages:
 
 1. Selected target and compatibility: inventory the pinned Seeed BSP/API/Kconfig differences, pin Actions to `espressif/idf:v5.5.4`, and migrate source/configuration without weakening TLS, certificate-date, Wi-Fi, radio, SD, or no-format safeguards.
 2. Generated dependency state: let ESP-IDF Component Manager generate `dependencies.lock` in the version-pinned Actions environment; do not hand-edit its generated hash. Archive and review that exact output, commit it, then require the qualifying Actions run to leave `dependencies.lock` unchanged. Unexpected generated configuration drift must also be reviewed rather than silently accepted.
 3. Build evidence: pass the complete host suite and the version-pinned Actions firmware/package build, verify package checksums, and retain the run, commit, image, lock, and artifact metadata together.
-4. Exact hardware qualification: flash only the matching Actions artifact to exact COM12. The serial `version` response must report `"idf":"v5.5.4"`; then repeat board, display/touch, Wi-Fi, RF, RP2040/SD, Map, health, reboot, and post-power-cycle smoke. COM16 remains the RP2040 side only when that proof explicitly requires it.
+4. Exact hardware qualification: flash only the matching Actions artifact to
+   the current Pi 5 stable by-id D1L. The serial `version` response must report
+   `"idf":"v5.5.4"`; then run only the bounded RC1 behavior gate.
 5. Release evidence: repeat the relevant commit-matched release-gate evidence and keep `supported_sdk_baseline` plus every other P0 green before cutting a tag.
 
-The workflow pin and fail-closed audit checks for the selected tag plus committed lock target establish only configuration policy; they do not prove how the lock was generated, qualify the SDK, or close issue #63. Actions-generated lock provenance, a clean repeat build/package run, exact COM12 `version.idf` and behavior proof, and refreshed release evidence remain mandatory.
+The workflow pin and fail-closed audit checks for the selected tag plus
+committed lock target establish only configuration policy. The current
+candidate still requires Actions-generated lock provenance, a clean
+build/package run, exact Pi-target `version.idf` and the bounded behavior
+receipt.
 
 If a vendor incompatibility blocks migration, document the exact failing API/Kconfig/source path and obtain explicit approval for a maintained security-patch plan. The release gate must not silently waive the SDK risk.
 
@@ -49,7 +74,9 @@ The decision is considered provisional until real hardware validation confirms:
 - SX1262 status read without DIO3 TCXO control.
 - Repeatable clean build from checkout.
 
-Standalone branch evidence is scoped to its exact artifact. This framework decision remains provisional until the combined Actions artifact passes the staged COM12 qualification above.
+Standalone branch evidence is scoped to its exact artifact. Release
+qualification requires the current exact Actions artifact and Pi by-id gate;
+historical COM receipts do not transfer.
 
 ## Guardrails
 

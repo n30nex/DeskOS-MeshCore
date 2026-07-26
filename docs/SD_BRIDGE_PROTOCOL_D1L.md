@@ -1,5 +1,12 @@
 # D1L RP2040 SD Bridge Protocol
 
+> **HISTORICAL PROTOCOL/INTEGRATION NOTES — NOT CURRENT STORAGE POLICY.**
+> The wire-format observations remain useful, but statements below that route
+> retained history to NVS are superseded by RC1 SD-primary/live-only degraded
+> behavior. Use the [project README](../README.md),
+> [RC1 user guide](USER_GUIDE_D1L.md), [RC1 test plan](TEST_PLAN_D1L.md), and
+> [SD-card guide](D1L_SD_CARD_GUIDED_INSTALL.md).
+
 This is the DeskOS line protocol expected on the ESP32-S3 to RP2040 UART for optional D1L SD-card data storage.
 
 The ESP32 side uses raw newline-delimited ASCII at the board UART pin contract documented in `boards/seeed_indicator_d1l/pinmap.json`: ESP32 UART2 TX GPIO19, ESP32 UART2 RX GPIO20, 115200 baud. The RP2040-side Arduino target lives at `firmware/rp2040_sd_bridge/deskos_sd_bridge`, and `tools/rp2040_sd_protocol.py` is the host reference simulator for this contract.

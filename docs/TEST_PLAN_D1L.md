@@ -1,59 +1,45 @@
 # D1L Test Plan
 
-## Exact Full Feature candidate plan (2026-07-25)
+## Exact RC1 candidate plan (2026-07-25)
 
-The active candidate is `release_profile=full_feature` with
-`sd_history_mode=conditional`. Feature implementation is complete. Validation
-is intentionally limited to the release-critical gates below; historical
-edge-case campaigns are not being repeated unless the exact candidate fails a
-required gate.
+The active candidate is `release_profile=core_1_0` with
+`sd_history_mode=conditional`. Validation is intentionally bounded to the
+changed slice during development and the single release-critical sequence
+below. No soak or broad edge-case campaign is required for RC1.
 
 Required sequence:
 
-1. Run the repository host suite, completion-ledger validation, generated-pack
-   validation and `git diff --check`.
-2. Push one immutable commit and require exact-SHA `d1l-ci` success.
-3. Download the exact package; verify all checksums, provenance, SBOM, Actions
-   identity, release profile, signed update signer and security sequence.
-4. On Pi 5 host `neopi5`, prove the target symlink is
-   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`, prove
-   `ID_VENDOR_ID=1a86` and `ID_MODEL_ID=7523`, then flash that exact package.
-   Never enumerate or probe another Pi serial device.
-5. Run automated version/health/board/settings/radio/identity/storage/BLE/
-   Observer/Admin/update/terminal probes, required UI navigation/scroll
-   probes, message/store checks, controlled reboot and persistence checks.
-6. Run conditional SD/RP2040 checks without formatting. If the required media
-   path is absent or unsafe, report the exact blocked gate; do not erase it.
-7. Use only a narrowly authorized controlled peer for DM/RF/admin acceptance.
-   Never automate a default Public transmission.
-8. Ask for one final consolidated physical confirmation covering display,
-   touch, keyboard, brightness/timeout wake behavior and the five dock roots.
+1. Run only focused source checks for the files changed in the current slice,
+   plus generated-document/package validation needed by that slice and
+   `git diff --check`.
+2. Freeze one immutable commit and require its exact-SHA `d1l-ci` run to pass.
+3. Download that run's `core_1_0`/`conditional` package and verify the complete
+   checksum tree, inventory, provenance, SBOM, Actions identity and profile.
+4. On Pi 5 host `neopi5`, prove
+   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` is readable/writable and
+   has `ID_VENDOR_ID=1a86` and `ID_MODEL_ID=7523`; flash only the verified
+   Actions artifact. Never enumerate or probe another Pi serial device.
+5. Run one bounded post-flash gate on that exact artifact: version/health,
+   boot and five-root navigation, boot advert plus one operator-authorized
+   Public send, one DM/ACK, contact PATH/TRACE, repeater Ping, repeater login
+   plus authenticated query, Wi-Fi reconnect, SD write/remount and degraded
+   notice, and one authorized-provider Map download followed by offline cache
+   revisit.
+6. Confirm SD is primary for retained history and that missing/unusable SD
+   enters visible live-only RF chat without redirecting history to default
+   NVS. Never format or repair media from firmware or validation.
+7. Confirm built-in OSM remains attributed and visible-current-view-only;
+   background download requires an explicitly authorized provider and pauses
+   while interactive Map is open.
+8. Collect one consolidated physical confirmation for display, touch,
+   keyboard, brightness/timeout wake behavior and the five dock roots.
 
-Pass requires receipts bound to the exact firmware commit and Actions run.
-Predecessor artifacts, simulator images, dry runs, a reachable serial port or
-a green source test alone do not pass.
+Pass requires every receipt to bind the same exact commit, GitHub Actions run,
+downloaded package and flashed image. Predecessor artifacts, local builds,
+simulator images, dry runs, a reachable serial port or green source checks
+alone do not pass.
 
-The current device has moved permanently for this development cycle. Raw
-`/dev/ttyUSB*` names and stale Windows COM assignments are not valid target
-identity.
-
-The remaining content is retained historical test rationale and prior exact
-candidate evidence.
-
-Last strict-verified exact-main software/artifact checkpoint: PR #182 at `de0bb75bd91146f0dc9896540d12c71889d7766b` / Actions `29548300732` passes 1,263 host and 33 checksum-contract tests plus 1,008 wire vectors, 931 oracle checks, existing wire/advert fuzzing, and 100,000 native plus 100,000 Clang 18 semantic-packet cases with zero findings. Five downloaded artifacts / 46 entries verify across 341 files with exact-source provenance and SPDX 2.3. The canonical strict receipt SHA-256 is `8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9`; canonical PR Actions `29547584817` and exact main share the reviewed tree. PRs #177-#182 cover replay/hash authority, bounded USB parsing, ACK/lifetime behavior, configured-channel admission, and semantic-packet parsing/fuzzing. A non-erasing exact-main COM12 flash passed, but retained-DM compatibility/migration must be fixed before reboot persistence can pass. Full WP-05, WP-06, official-peer RF, exact-candidate physical acceptance, and release gates remain open.
-
-## Current Core hardware target (2026-07-24)
-
-The release-closing D1L is now attached to Raspberry Pi 5 host `neopi5`.
-Hardware tests run from the unprivileged, key-only account `siguidev` and use
-only `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after proving USB
-VID:PID `1A86:7523`, symlink resolution, and read/write access. The current
-`/dev/ttyUSB2` resolution is observational only and is never a release target.
-The old `COM12` assignment is historical and is not a current alternative.
-The legacy COM restrictions below remain preserved only for interpreting old
-receipts; current work never routes through them.
-
-On `neopi5`, begin every hardware evidence session with:
+Begin every current hardware evidence session with:
 
 ```bash
 export D1L_PORT='/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0'
@@ -63,17 +49,18 @@ grep -qx 'ID_VENDOR_ID=1a86' <<<"$D1L_DEVICE_PROPERTIES"
 grep -qx 'ID_MODEL_ID=7523' <<<"$D1L_DEVICE_PROPERTIES"
 ```
 
-All literal COM12 receipts and checkpoint statements retained below are
-historical evidence for the exact candidates they name, or Windows-alternative
-examples; they are not current Pi evidence and must not be relabeled. The Pi
-move, login, discovery, and serial permissions close no gate. Exact-SHA
-Actions/package identity, non-erasing flash, UI/manual review, software and
-cold reboots, retained state, protocol-time migration, controlled RF/DM,
-60-minute active plus 30-minute idle soak, install review, and final Core audit
-remain fail-closed. Do not start RF or active soak until `siguidev` has
-narrowly scoped, verified access to the exact peer status/control resources.
+Raw `/dev/ttyUSB*` names and stale Windows COM assignments are never current
+target identity.
 
-## Host Tests
+## Historical test rationale and receipts
+
+Everything below this heading predates the current RC1 plan. COM labels,
+Full Feature matrices, broad host campaigns, soak requirements, old SD/NVS
+fallback policy and unavailable-feature claims are retained only to interpret
+the exact historical receipts they name. They are not current commands,
+requirements or evidence for the RC1 candidate.
+
+### Historical host tests
 
 Run:
 
@@ -252,7 +239,7 @@ Coverage:
 
 - WP-01 diagnostic-isolation contract: run asynchronous `storage diag raw` only in an isolated maintenance boot and do not begin retained canaries after a diagnostic merely because an additional 750 ms ordinary timeout elapsed. After diagnostic capture, reset and reflash the checksum-verified exact Actions artifacts, then require a clean `READY_SD` preflight with zero retained read/write/rename failure counters before file, retained, reboot, inserted-card, remove/reinsert, or soak evidence begins. Any overlap with the one-second retained worker or any pre-canary counter contamination invalidates that evidence window.
 
-## Issue #63 Supported-SDK Qualification
+### Historical issue #63 supported-SDK qualification
 
 Firmware compilation and ESP-IDF dependency resolution are GitHub-Actions-only.
 Do not run a local firmware build and do not hand-edit `dependencies.lock`.
@@ -291,7 +278,7 @@ Do not run a local firmware build and do not hand-edit `dependencies.lock`.
    The SDK migration passes only when `supported_sdk_baseline` and every other
    P0 gate are green.
 
-## WP-01 Exact-Pair Evidence Checkpoint
+### Historical WP-01 exact-pair evidence checkpoint
 
 WP-01 is merged with `proof_banked=true`. Its accepted physical source remains `092293f2311a24c9899bc9bf343ab014c4ba0411`; exact push/PR Actions runs are `29272708844` / `29272709642`. The Actions host job reports **773 passed**, and checksum verification covers **8 manifests / 78 entries**. This evidence remains predecessor-bound and must not be relabelled as successor proof.
 
@@ -320,7 +307,7 @@ For WP-02 physical closure, take no device action while release-security and pro
 
 Downloaded release-package verification is recursive and fail-closed. The top `SHA256SUMS.txt` must cover every package file except itself, including each copied RP2040 bundle's nested `SHA256SUMS.txt`; each nested manifest must independently verify its own files. Exact-main run `29286754864` remains the preserved 7/8 negative receipt. PR #64 closed the defect; successor exact-main run `29290978741` strict-passed 8 manifests / 78 entries with root manifest SHA-256 `22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64`.
 
-## Hardware Smoke
+### Historical hardware smoke
 
 Run only after the target checks above pass. For issue work, do not run this
 whole block. Pick the one proof that closes the selected P0, attach that
@@ -480,7 +467,7 @@ selection, use the DM equivalent and do not transmit on the default Public
 channel. Never use a forbidden local serial port for either the D1L or its
 controlled peer.
 
-## Hardware Soak
+### Historical hardware soak
 
 Use the soak runner for Phase 7 stability evidence after smoke passes. The
 runner writes a JSON artifact under `artifacts/soak` unless `--out` is
@@ -543,7 +530,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-in
 
 Before the RP2040 bridge file protocol is flashed, success may include `sd_file_canary_unavailable_count > 0` only because `--allow-sd-unavailable` was set. After the RP2040 bridge is flashed with a ready card, rerun without `--allow-sd-unavailable`; success then requires `storage_file_ops_ready_all=true` and every `storage filecanary` sample to pass.
 
-## Release Package
+### Historical release package
 
 After downloading the matching GitHub Actions ESP32 firmware build artifact:
 
@@ -560,7 +547,7 @@ Verify:
 5. `flash_project.ps1`, `flash_project.sh`, and `flash_full_8mb.ps1` require an explicit D1L port.
 6. `flash_full_8mb.ps1` requires typed confirmation.
 
-## Message Store Persistence
+### Historical message store persistence
 
 For Phase 4 Public message-store validation:
 
@@ -576,7 +563,7 @@ channel. Do not run it against the default Public channel.
 7. Reboot.
 8. Verify `messages public` retains the rows and `packets` either retains the newest packet evidence rows or starts a new evidence window if `packets clear` was run for the packet-log test.
 
-## Unread State
+### Historical unread state
 
 For Phase 4 unread/read-state validation:
 
@@ -594,7 +581,7 @@ For Phase 4 unread/read-state validation:
 12. For physical touch review, open the Messages tab, verify new RX rows are highlighted as `new`, tap global `Read`, and verify the unread count clears; then open a DM thread and verify its `Read` action clears only that thread.
 13. For muted DM behavior when an inbound DM source is available, mute that contact, receive a DM, and verify the unread row is counted under `muted_dm_unread` rather than audible `dm_unread`.
 
-## DM Store And Serial TX
+### Historical DM store and serial TX
 
 For Phase 4 direct-message store validation:
 
@@ -648,7 +635,7 @@ the real-hardware safety boundary, `identity_public_key_matches`,
 schema-1, dry-run, simulated, source-inspection, predecessor, dirty-tree, and
 partial receipts.
 
-## Touch DM Compose
+### Historical touch DM compose
 
 For Phase 4 touch direct-message compose validation:
 
@@ -670,7 +657,7 @@ For Phase 4 touch direct-message thread validation:
 7. For Phase 5/Phase D connectivity validation, run smoke with `--persistence-test`. It must first snapshot a safely parseable node name, path-hash setting, Wi-Fi/BLE enable flags, and read-only Wi-Fi profile metadata; mutate only node name and path-hash; prove them across a route-flushed, nonce-changing reboot; then restore and verify those exact two original fields without issuing `settings reset`, `wifi off`, `ble off`, or changing the saved SSID/password-presence metadata. If the snapshot, initial mutation readback, or restoration cannot be proven, it must fail without another reboot. On the downloaded Actions artifact only, explicitly test `wifi scan` and `wifi connect` with a local 2.4 GHz network when hardware/network validation is in scope.
 8. For Phase 7 diagnostics validation, run `crashlog clear`, `reboot`, then verify `crashlog` contains a new `SW` reset entry and `health` reports nonzero stack watermarks with `board_ready=true` and `ui_ready=true`.
 
-## Heard Node Store
+### Historical heard-node store
 
 For Phase 4 heard-node validation:
 
@@ -682,7 +669,7 @@ For Phase 4 heard-node validation:
 6. Verify the host contracts cover `d1l_node_store_query()` filters for companions, repeaters, room servers, sensors, favorites, keyed-only, reachable-only, and sort modes for last heard, signal, name, role, and favorites.
 7. Until the touch sort/filter sheet is complete, use serial `nodes`, `repeaters`, `roomservers`, `contacts set <fingerprint> favorite <0|1>`, and the UI simulator large-mesh view as the production proof that the query foundation and visual summaries agree.
 
-## Contact Store
+### Historical contact store
 
 For Phase 4 contact-store validation:
 
@@ -717,7 +704,7 @@ For Phase 6 contact export validation:
 5. Open the known-role Contact Detail, tap `Contact options`, then `Export QR`; verify the Contact Export page shows a MeshCore QR plus URI metadata without crashing or exposing the background dock. Back must return to Contact Options. Open the unknown-role Contact Options and verify `Export unavailable` is non-clickable and no QR page opens.
 6. If a MeshCore phone/client is available, scan the QR and verify it imports the same contact name/public key/type.
 
-## Radio Settings
+### Historical radio settings
 
 For Phase 6 radio settings validation:
 
@@ -728,7 +715,7 @@ For Phase 6 radio settings validation:
 5. Open Settings, tap `Radio`, change at least one staged value, tap `US/CAN`, tap `Save`, and verify the Radio Settings sheet stays readable and reports whether live RF matches the saved profile or RF apply remains pending.
 6. Verify `health` remains `board_ready=true` and `ui_ready=true`.
 
-## Route Store
+### Historical route store
 
 For Phase 4 route-store validation:
 
@@ -757,7 +744,7 @@ For Phase 6 retained route trace validation:
 
 `routes probe` remains a DM token/PATH helper, not a canonical TRACE packet. The current real TRACE command is `routes trace contact <fingerprint>`; the runtime must re-resolve exactly one canonical full-key contact and a current-boot proven, nonexpired direct path, then derive the immutable loop without accepting operator path bytes. Contact-derived TRACE supports one- and two-byte hash widths with request flags 0 and 1. Generic TRACE wire helpers support flags 0 through 3, representing 1-, 2-, 4-, and 8-byte hashes; they do not make 4- or 8-byte contact routes available. A canonical three-byte contact route must fail closed because the pinned TRACE flags cannot represent that width. Run the contact command only during an explicitly authorized targeted-RF session, require `public_rf_tx=false`, then poll `routes trace status`. A qualifying receipt must require the expected request flag, the same tag, opaque correlation code, exact hash width, and immutable derived loop; it must classify source, in-flight, unsupported, malformed, duplicate, late, and timeout outcomes without treating them as success. `real_trace_contact_supported=true` reports this bounded software capability, while `hardware_verified=false`; controlled multi-hop official-peer RF, exact-candidate hardware acceptance, UI, and WP-04/WP-10 closure remain open.
 
-## Packet Log
+### Historical packet log
 
 For Phase 6 packet-log validation:
 
@@ -774,7 +761,7 @@ For Phase 6 packet-log validation:
 11. Fill each retained Public, DM, route, and packet ring to capacity, snapshot its durable sequence/count/drop metadata and persisted blob, then inject the corresponding volatile UI canary. The canary must remain visible through the normal recent/query/thread/detail readers without changing durable metadata, evicting a retained row, writing NVS/SD, or appearing in a forced flush. The next real append must supersede the preview, reuse its borrowed sequence exactly once, and evict only the legitimate oldest durable row. Clear and re-init must remove every preview slot.
 12. For physical touch review, open the Packet tab, tap a packet row, verify the packet detail sheet opens with the same fields, and close it.
 
-## Optional SD-Card Data Storage
+### Historical optional SD-card data storage
 
 Important pending production feature:
 
@@ -813,7 +800,7 @@ Use `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the RP2040 UF2 flash and post-flash
 18. Verify the `rp2040-sd-bridge-firmware` artifact checksum manifest before any RP2040 hardware flash attempt.
 18. Before copying the RP2040 UF2, run `python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json`. If it reports `rp2040_protocol_pending` or `sd_card_not_present_diag_pending` and no UF2 volume, put the RP2040 into UF2/BOOTSEL mode. If it reports `sd_bridge_ready`, proceed directly to the SD file/export canaries.
 
-## Mesh Visibility
+### Historical mesh visibility
 
 For Phase 6 signal/room-server/repeater validation:
 

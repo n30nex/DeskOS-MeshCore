@@ -327,38 +327,20 @@ def test_storage_simulator_declares_matching_safe_pages_and_scroll_contract():
         assert f'"{action}"' in simulator
 
 
-def test_release_docs_record_pr61_storage_proof_and_keep_map_hardware_proof_open():
-    docs = "\n".join(
-        read(path)
-        for path in (
-            "README.md",
-            "docs/ROADMAP.md",
-            "docs/RELEASE_CHECKLIST.md",
-            "docs/KNOWN_LIMITATIONS.md",
-            "docs/USER_GUIDE_D1L.md",
-            "docs/TEST_PLAN_D1L.md",
-        )
-    )
-    for evidence in (
-        "PR #60",
-        "0b138be",
-        "29068006554",
-        "29068007961",
-        "63DE54FB",
-        "FD538D71",
-        "5C41EE08",
-    ):
-        assert evidence in docs
-    for evidence in (
-        "PR #61",
-        "4d9f384",
-        "29081187314",
-        "29081214738",
-        "9878ADFB",
-        "77726394",
-        "42619B0E",
-    ):
-        assert evidence in docs
-    assert "Map hierarchy" in docs
-    assert "exact Actions/COM12" in docs
-    assert "Map hardware-proven" not in docs
+def test_release_docs_define_current_storage_and_map_acceptance():
+    readme = read("README.md")
+    guide = read("docs/USER_GUIDE_D1L.md")
+    checklist = read("docs/RELEASE_CHECKLIST.md")
+    test_plan = read("docs/TEST_PLAN_D1L.md").split("## Historical", 1)[0]
+
+    for doc in (readme, guide, checklist, test_plan):
+        assert "core_1_0" in doc
+        assert "conditional" in doc
+        assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in doc
+
+    assert "SD as the primary store" in guide
+    assert "Degraded mode keeps basic live RF" in guide
+    assert "SD-primary retained data" in checklist
+    assert "authorized Map download/offline revisit" in checklist
+    assert "one consolidated physical" in checklist
+    assert "No soak is required" in checklist

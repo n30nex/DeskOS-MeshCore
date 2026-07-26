@@ -1,30 +1,56 @@
 # Fast D1L Release Workflow
 
-Use this loop until the release gate is green. The rule is simple: one issue, one
-small PR, one targeted hardware proof. The goal is to close release blockers
-without spending bench time re-proving unrelated UI, SD, RF, or soak surfaces on
-every PR.
+This is the authoritative fast path for DeskOS 1.0 / RC1. The candidate is
+`D1L_RELEASE_PROFILE=core_1_0` with
+`D1L_SD_HISTORY_MODE=conditional`.
 
-Do not rerun RP2040/SD work unless the issue changes SD/RP2040 code or SD
-evidence is the selected blocker. Do not run the bundled UI validator just
-because an issue is "UI"; run the one COM12 proof that matches the issue's
-acceptance criteria.
+During implementation, run only the focused checks needed by the changed
+slice. Do not repeat unrelated UI, SD, RF or edge-case campaigns. No soak is
+part of RC1.
 
-## Default Cycle
+## Current cycle
 
-1. Start from current `main`.
-2. Pick one open P0 issue from GitHub.
-3. Make the smallest code/docs/test change that can close that issue.
-4. Run focused host tests first.
-5. Run `python -m pytest tests -q` only after the focused set passes.
-6. Push and use the default `d1l-ci` path. It should skip RP2040/SD work unless
-   SD/RP2040 files changed.
-7. Download the ESP32 Actions artifacts and verify checksums.
-8. Run exactly one targeted COM12 hardware proof for the selected issue.
-9. Update the issue and PR with artifact paths.
-10. Merge the PR if checks and targeted hardware proof pass.
+1. Start from current `main` and make the smallest change that closes the
+   selected RC1 issue.
+2. Run focused host/source checks for that change plus `git diff --check`.
+3. Push one immutable candidate and require its exact-SHA `d1l-ci` run.
+4. Download the exact `core_1_0`/`conditional` package and verify checksums,
+   inventory, provenance, SBOM, Actions identity and profile.
+5. On Pi 5 host `neopi5`, select only
+   `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after verifying
+   `VID:PID 1a86:7523`. Never enumerate or probe another Pi serial device.
+6. Flash the verified Actions artifact non-erasing. Do not use a local build,
+   raw `/dev/ttyUSB*` name or stale Windows COM assignment.
+7. Run only the hardware proof that matches the changed slice. For the final
+   candidate, use one bounded gate covering boot/five-root UI, boot advert and
+   one operator-authorized Public send, DM/ACK, contact PATH/TRACE, repeater
+   Ping, repeater login/authenticated query, Wi-Fi reconnect, SD
+   write/remount/degraded notice, and authorized Map download/offline revisit.
+8. Confirm SD-primary behavior, built-in OSM visible-only behavior, provider
+   authorization, and prefetch pause while the interactive Map is open.
+9. Record artifact paths and results against the issue/PR. Merge only after the
+   selected focused proof passes.
 
-## Validation Tiers
+## Current safety limits
+
+- Firmware and validation never format or repair SD. Use a prepared
+  32GB-or-larger FAT32 card.
+- Missing/unusable SD must show live-only RF chat restrictions and must not
+  redirect retained history into default NVS.
+- Background/offline Map download requires connected Wi-Fi, configured
+  location, ready SD and an HTTPS provider manifest explicitly authorizing
+  offline storage and background prefetch.
+- Automated validation never transmits on the default Public channel.
+- Use only a narrowly authorized controlled peer for DM/RF/Admin proof.
+- BLE companion transport, QR sharing and signed OTA/update/recovery product
+  workflows are deferred to 1.5 / RC2.
+
+## Historical validation-tier examples
+
+Everything below this heading predates the current Pi/by-id RC1 flow. Its
+COM12/COM16 examples, Full Feature assumptions, broad test suites, soak
+instructions and old SD/NVS policy are retained only to interpret historical
+receipts. Do not execute them as current release instructions.
 
 ### ESP32/UI Issue
 
@@ -109,7 +135,7 @@ lock provenance, and neither is hardware qualification.
 5. Refresh the relevant commit-matched release evidence and keep the release
    fail-closed until every P0 gate is green.
 
-## Local Progress Dashboard
+### Historical local progress dashboard
 
 Run this in a separate terminal while Codex works:
 
@@ -129,7 +155,7 @@ JSON snapshot:
 python .\scripts\release_progress_dashboard.py --once-json
 ```
 
-## Stop Conditions
+### Historical stop conditions
 
 Stop the cycle only when one of these is true:
 
@@ -140,7 +166,7 @@ Stop the cycle only when one of these is true:
 Do not stop because broad release remains blocked after a narrow issue is
 closed. Move to the next P0.
 
-## Final Production Sweep
+### Historical final production sweep
 
 When the issue-sized P0 list is empty, run the full production sweep: release
 gate audit, current COM12 smoke/UI evidence, required RF/DM proof, remaining SD

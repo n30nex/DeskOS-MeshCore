@@ -1,5 +1,13 @@
 # Full Feature Install and Recovery
 
+> **SUPERSEDED INSTALL/RECOVERY HISTORY — NOT CURRENT RC1 INSTRUCTIONS.**
+> Signed OTA/update/recovery product workflows are deferred to 1.5 / RC2.
+> Do not execute the historical package, port, recovery or soak directions
+> below. Use the exact downloaded GitHub Actions package README together with
+> the [project README](../README.md), [RC1 user guide](USER_GUIDE_D1L.md),
+> [RC1 test plan](TEST_PLAN_D1L.md), and
+> [SD-card guide](D1L_SD_CARD_GUIDED_INSTALL.md).
+
 This repository guide applies only to an extracted MeshCore DeskOS D1L Full
 Feature release package. Build firmware only in GitHub Actions and use the exact
 package whose commit and Actions run match the release candidate.

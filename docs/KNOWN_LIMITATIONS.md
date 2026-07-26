@@ -1,38 +1,41 @@
 # Known Limitations
 
-## Current Full Feature candidate boundary (2026-07-25)
+## Current RC1 candidate boundary (2026-07-25)
 
-The `full_feature` implementation is complete in the active
-`release/24h-core` worktree. This means the intended user-facing feature
-surface is present; it does not mean a public release has been authorized.
-`full_feature_release_ready` remains false until one exact new commit passes
-GitHub Actions, its signed package is downloaded and checksum-verified, that
-same package is flashed to the current D1L, and exact-candidate acceptance is
-complete.
+The production build profile is `core_1_0` with conditional SD support. Its
+agreed 1.0 / RC1 user surface is implemented, but public release remains false
+until the exact commit, GitHub Actions package and bounded physical acceptance
+all refer to the same artifact.
 
-Current intentional boundaries:
+Intentional RC1 boundaries:
 
-- The D1L has no onboard GPS. Its center is explicit local input or an
-  authenticated bonded companion location. Peer pins use only signed
-  peer-advert coordinates with valid time/age evidence.
-- BLE implements the official core initial-sync, contact/channel, messaging,
-  time, advert, radio and battery/storage surface. Remote reboot, factory
-  reset, and private-key import/export are disabled. Optional channel
-  datagrams are not advertised.
-- Server administration is limited to authenticated repeater/room
-  login/status plus `clear stats` and `advert.zerohop`. Each mutation requires
-  a second local confirmation within five seconds. Arbitrary raw remote
-  commands are unavailable.
+- The D1L has no onboard GPS. Map centers on the configured device location.
+  Peer pins use only signed advert coordinates with valid time/age evidence.
+- BLE companion transport, contact/channel QR sharing and signed
+  OTA/update/recovery workflows are deferred to 1.5 / RC2 and unavailable in
+  the RC1 profile.
+- Server administration includes authenticated repeater/room login, status,
+  telemetry, neighbours, ACL, bounded CLI and room posts. Remote mutations
+  require a matching authenticated session and local confirmation; passwords
+  and sensitive command text are not persistently retained or logged;
+  sensitive replies are redacted and volatile confirmation buffers are wiped.
 - Observer is opt-in `mqtts://` TLS only, uses QoS 1 and a bounded queue, and
   never includes message text, contacts, keys or forwarding traffic.
-- SD history is conditional on the RP2040 bridge and user-provided FAT32
-  media. Users prepare FAT32 SD cards on a computer; there is no device-side
-  SD formatting path. NVS fallback remains available where declared.
-- Signed local update requires the production Ed25519 signer, exact image
-  hash, source binding and a strictly increasing anti-rollback sequence.
-  Network-fetched update discovery is not provided.
-- Map networking is limited to the visible current-view cache policy. There
-  is no background prefetch or area download.
+- SD is the primary retained-data, Map and export store. Users prepare FAT32
+  media on a computer; firmware never formats it. Missing or unusable SD
+  enters a visible live-only RF chat mode and does not silently move history
+  into default NVS.
+- Background Map download requires connected Wi-Fi, configured location,
+  ready SD storage and a provider manifest that explicitly permits offline
+  storage and background prefetch. It includes signed nodes within 200 km,
+  uses zoom 8–18 as space permits, caps Map allocation at 60% and preserves an
+  8 GiB card reserve. Built-in OSM remains attributed and
+  visible-current-view-only; authorized-provider prefetch pauses while the
+  interactive Map is open.
+- The heard-node store retains at most 512 nodes. At capacity only an
+  unlocated least-recent entry may be replaced. Valid signed-location markers
+  remain until explicit user clearing; when all 512 entries are located, a new
+  fingerprint is rejected rather than evicting a Map marker.
 - Fixed UTC offsets are supported; automatic timezone/DST rules are not.
 
 The current device is on Pi 5 host `neopi5` (`192.168.0.24`) and may be
@@ -41,9 +44,13 @@ targeted only through
 `VID:PID 1a86:7523`. Raw `/dev/ttyUSB*` names and stale Windows COM
 assignments are not release identity.
 
-Everything below this section is retained historical checkpoint detail. Its
-old percentages, commits, Actions runs and COM routing are not current
-candidate claims.
+## Historical checkpoint ledger
+
+Everything below this heading is retained solely to preserve evidence links
+for earlier commits. Its percentages, open-work claims, feature matrices,
+Actions runs, COM routing, NVS-fallback policy, Map policy, and soak
+requirements are superseded and must not be used as current RC1 instructions
+or release criteria.
 
 As of the 2026-07-18 live-main checkpoint:
 

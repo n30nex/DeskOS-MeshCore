@@ -1,5 +1,12 @@
 # SIGUI production-release handoff — 2026-07-18
 
+> **SUPERSEDED HISTORICAL HANDOFF — NOT CURRENT STATUS OR RELEASE AUTHORITY.**
+> Percentages, feature state, ports, evidence gaps and soak requirements below
+> describe the July 18 checkpoint only. Use the
+> [project README](../README.md), [RC1 user guide](USER_GUIDE_D1L.md),
+> [RC1 test plan](TEST_PLAN_D1L.md), and
+> [SD-card guide](D1L_SD_CARD_GUIDED_INSTALL.md).
+
 This is the compact live handoff for the next implementation session. The machine-readable authority remains [COMPLETION_LEDGER.yaml](COMPLETION_LEDGER.yaml), the dependency graph remains [SIGUI_EXECUTION_BACKLOG_2026-07-12.yaml](completion/SIGUI_EXECUTION_BACKLOG_2026-07-12.yaml), and the ordered roadmap remains [ROADMAP.md](ROADMAP.md).
 
 ## Current answer

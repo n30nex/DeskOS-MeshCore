@@ -356,7 +356,7 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
     console = read("main/comms/usb_console.c")
     ui = read("main/ui/ui_phase1.c")
     messages_ui = read("main/ui/ui_messages.c")
-    limitations = read("docs/KNOWN_LIMITATIONS.md")
+    user_guide = read("docs/USER_GUIDE_D1L.md")
 
     dispatch = service.split("static bool dispatch_bounded_dm_ack", 1)[1].split(
         "static void parse_rx_public_packet", 1
@@ -425,8 +425,9 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
     assert 'print_json_string(esp_err_to_name(e->ack_last_error));' in console
     assert "print_json_string(e->text);" in console
     assert "d1l_dm_ack_state_name(entry->ack_state)" in messages_ui
-    assert "legacy_unverified" in limitations
-    assert "never hydrated into the ACK cache" in limitations
+    assert "queued, transmitted, acknowledged, retrying or failed" in user_guide
+    assert "does not silently retry a failed message" in user_guide
+    assert "complete public key of a retained verified chat contact" in user_guide
 
 
 def test_console_and_smoke_expose_dm_workflow():
