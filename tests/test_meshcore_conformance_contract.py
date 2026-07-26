@@ -70,11 +70,12 @@ def test_conformance_manifest_pins_exact_upstream_and_fixed_scope():
     assert manifest["coverage_boundary"] == "wire_envelope_only"
     assert manifest["issue_65_closure_eligible"] is False
     assert manifest["upstream"]["commit"] == "e8d3c53ba1ea863937081cd0caad759b832f3028"
-    assert manifest["vectors"]["local_to_upstream"] == 504
-    assert manifest["vectors"]["upstream_to_local"] == 504
-    assert manifest["vectors"]["total"] == 1008
+    assert manifest["vectors"]["local_to_upstream"] == 576
+    assert manifest["vectors"]["upstream_to_local"] == 576
+    assert manifest["vectors"]["total"] == 1152
     assert [item["name"] for item in manifest["vector_matrix"]["payload_types"]] == [
-        "TXT", "ACK", "ADVERT", "GRP_TXT", "PATH", "TRACE", "MULTIPART"
+        "TXT", "ACK", "ADVERT", "GRP_TXT", "PATH", "TRACE", "MULTIPART",
+        "CONTROL",
     ]
     assert len(manifest["vector_matrix"]["route_types"]) == 4
     assert len(manifest["vector_matrix"]["path_cases"]) == 9
@@ -508,9 +509,9 @@ def test_harness_has_fixed_bidirectional_matrix_and_structural_sweeps():
     shim = read("tests/meshcore_conformance/meshcore_packet_checked.hpp")
     sha_stub = read("tests/meshcore_conformance/stubs/SHA256.h")
 
-    assert "kExpectedPerDirection == 504" in harness
-    assert "upstream_to_local == 504U" in harness
-    assert "local_to_upstream == 504U" in harness
+    assert "kExpectedPerDirection == 576" in harness
+    assert "upstream_to_local == 576U" in harness
+    assert "local_to_upstream == 576U" in harness
     assert "value <= 0xFFU" in harness
     assert "result.valid != 119U" in harness
     assert "result.invalid != 137U" in harness
@@ -526,6 +527,8 @@ def test_harness_has_fixed_bidirectional_matrix_and_structural_sweeps():
     assert "D1L_MESHCORE_MAX_PACKET_PAYLOAD == MAX_PACKET_PAYLOAD" in shim
     assert "D1L_MESHCORE_ROUTE_DIRECT == ROUTE_TYPE_DIRECT" in shim
     assert "D1L_MESHCORE_PAYLOAD_MULTIPART == PAYLOAD_TYPE_MULTIPART" in shim
+    assert "PAYLOAD_TYPE_CONTROL == 0x0B" in shim
+    assert "D1L_MESHCORE_PAYLOAD_CONTROL == PAYLOAD_TYPE_CONTROL" in shim
     assert "D1L_MESHCORE_PAYLOAD_VER_1 == PAYLOAD_VER_1" in shim
     assert "Packet" not in fuzzer
     assert "d1l_advert_data_parse" in advert_fuzzer
@@ -669,7 +672,7 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert semantic_source["dependency_verification"] is None
     assert semantic_source["verified"] is False
     assert report["wp05_semantic_matrix"]["result"] is None
-    assert len(report["vector_matrix"]["payload_types"]) == 7
+    assert len(report["vector_matrix"]["payload_types"]) == 8
     assert report["payload_version_gate"] == {
         "permissive_envelope_versions": [0, 1, 2, 3],
         "accepted_v1_versions": [0],

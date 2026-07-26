@@ -192,6 +192,15 @@
           "ack_frames",
           "ack_dispatch_correlation_and_delivery"
         ]
+      },
+      {
+        "symbol": "D1L_MESHCORE_PAYLOAD_CONTROL",
+        "code": 11,
+        "wire_vector": "CONTROL",
+        "wire_vector_covered": true,
+        "semantic_capabilities": [
+          "packet_envelope"
+        ]
       }
     ]
   },

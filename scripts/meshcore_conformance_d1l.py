@@ -180,13 +180,13 @@ EXPECTED_ADVERT_FUZZ_CORPUS = {
 }
 
 EXPECTED_VECTORS = {
-    "payload_types": 7,
+    "payload_types": 8,
     "route_types": 4,
     "path_cases": 9,
     "payload_lengths": 2,
-    "local_to_upstream": 504,
-    "upstream_to_local": 504,
-    "total": 1008,
+    "local_to_upstream": 576,
+    "upstream_to_local": 576,
+    "total": 1152,
 }
 EXPECTED_PAYLOAD_VERSION_GATE = {
     "permissive_envelope_versions": [0, 1, 2, 3],
@@ -203,6 +203,7 @@ EXPECTED_VECTOR_MATRIX = {
         {"name": "PATH", "code": 8},
         {"name": "TRACE", "code": 9},
         {"name": "MULTIPART", "code": 10},
+        {"name": "CONTROL", "code": 11},
     ],
     "route_types": [
         {"name": "TRANSPORT_FLOOD", "code": 0},
@@ -1314,6 +1315,13 @@ EXPECTED_ORACLE_PACKET_TYPES = [
             "ack_frames",
             "ack_dispatch_correlation_and_delivery",
         ],
+    },
+    {
+        "symbol": "D1L_MESHCORE_PAYLOAD_CONTROL",
+        "code": 11,
+        "wire_vector": "CONTROL",
+        "wire_vector_covered": True,
+        "semantic_capabilities": ["packet_envelope"],
     },
 ]
 EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
@@ -4168,7 +4176,7 @@ def validate_completed_report(
         ),
         "vector_passed": vector.get("passed") is True,
         "vector_counts": vector.get("vectors")
-        == {"local_to_upstream": 504, "upstream_to_local": 504, "total": 1008},
+        == {"local_to_upstream": 576, "upstream_to_local": 576, "total": 1152},
         "path_counts": vector.get("path_length_encodings")
         == {"tested": 256, "valid": 119, "invalid": 137},
         "version_counts": vector.get("payload_version_gate")
@@ -4988,9 +4996,9 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 vector_result.get("passed") is not True
                 or vector_result.get("coverage_boundary") != "wire_envelope_only"
                 or vector_result.get("issue_65_closure_eligible") is not False
-                or vector_result.get("vectors", {}).get("upstream_to_local") != 504
-                or vector_result.get("vectors", {}).get("local_to_upstream") != 504
-                or vector_result.get("vectors", {}).get("total") != 1008
+                or vector_result.get("vectors", {}).get("upstream_to_local") != 576
+                or vector_result.get("vectors", {}).get("local_to_upstream") != 576
+                or vector_result.get("vectors", {}).get("total") != 1152
                 or vector_result.get("path_length_encodings", {}).get("tested") != 256
                 or vector_result.get("path_length_encodings", {}).get("valid") != 119
                 or vector_result.get("path_length_encodings", {}).get("invalid") != 137

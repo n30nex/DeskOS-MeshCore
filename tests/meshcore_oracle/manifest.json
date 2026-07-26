@@ -122,7 +122,7 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "0703bdd750d6a39aa221c3e6766f04684515a97c2e6e65544c62ec00fe57f640",
+    "tests/meshcore_oracle/coverage_manifest.json": "850d074141610f5ea6b657d54870fadd8567e21dbd67a4180595ad7376e1c1d3",
     "tests/meshcore_oracle/meshcore_admin_session_fixture.cpp": "0ccc70a6a0d8d0e6cea62f6a9da38e3513f1947d098a71718c9d6e419b5608d6",
     "tests/meshcore_oracle/meshcore_admin_session_fixture.h": "4ca2ffdb4598af5c30f4eaa5af5555545b1eee4afd4a231309ad52ce1c640688",
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",

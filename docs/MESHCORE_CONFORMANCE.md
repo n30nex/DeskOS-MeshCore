@@ -349,11 +349,11 @@ upstream-commit/corpus-version pair. The main oracle manifest pins this policy
 file by canonical-LF SHA-256. The conformance runner derives all numeric
 `D1L_MESHCORE_PAYLOAD_*` declarations from `main/mesh/meshcore_wire.h` (while
 explicitly excluding the `D1L_MESHCORE_PAYLOAD_VER_1` version constant) and
-requires exact equality with both the policy registry and the six-type wire
+requires exact equality with both the policy registry and the eight-type wire
 vector matrix. Consequently a new local payload type, a duplicate code, a
 missing roadmap surface, or an unknown capability fails before compilation.
 Envelope-vector coverage remains distinct from semantic coverage: the current
-six local types all have envelope vectors, while the policy reports six fully
+eight local types all have envelope vectors, while the policy reports six fully
 implemented roadmap surfaces, three partial surfaces, and no wholly blocked surface.
 The exact packet registry and blocker receipts are copied into
 `meshcore_oracle_manifest_<full-commit>.json`; `wp04_acceptance_ready` and
