@@ -4261,7 +4261,7 @@ static void parse_rx_discovery_packet(const uint8_t *payload, uint16_t size,
     s_status.rx_packets++;
     status_unlock();
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    snprintf(note, sizeof(note), "nearby %.16s type=%u remote_snr_q=%d",
+    snprintf(note, sizeof(note), "nearby %.16s t=%u snrq=%d",
              fingerprint, (unsigned)wire.node_type,
              (int)wire.remote_snr_quarter_db);
     if (!append_packet_log_deferred(
