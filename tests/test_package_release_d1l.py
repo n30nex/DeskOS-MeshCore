@@ -635,9 +635,14 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         nested_manifest = package_dir / "rp2040" / artifact["name"] / "SHA256SUMS.txt"
         assert verify_sha256_manifest(nested_manifest)
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
+    normalized_readme = " ".join(readme.split())
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
     assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
-    assert "`docs/` contains the user guide" in readme
+    assert (
+        "`docs/` contains the current RC1 user guide, feature-parity matrix, "
+        "limitations, SD-card setup, attributions, and product contract."
+        in normalized_readme
+    )
     assert "`notices/` contains the project license" in readme
     assert f"`sbom_{commit}.spdx.json` is the deterministic SPDX 2.3 SBOM" in readme
     assert f"`provenance_{commit}.json` is deterministic unsigned SLSA v1 provenance" in readme

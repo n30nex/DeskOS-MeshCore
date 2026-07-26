@@ -230,7 +230,7 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert "/dev/ttyUSB<number>" in guide
     assert stable_posix in guide
     assert "non-qualifying manual convenience" in guide
-    assert "No POSIX recovery wrapper is shipped" in guide
+    assert "No POSIX recovery wrapper is shipped" in " ".join(guide.split())
     for generated_text in (ps1, runner_text, recovery, guide):
         assert "COM12" not in generated_text
     assert_actions_identity(
