@@ -26,6 +26,7 @@
 #include "hal/backlight.h"
 #include "hal/display_preferences.h"
 #include "hal/indicator_board.h"
+#include "map/map_view_service.h"
 #include "mesh/dm_store.h"
 #include "mesh/user_text.h"
 #include "ui_ble.h"
@@ -7806,6 +7807,27 @@ esp_err_t d1l_ui_phase1_request_tab(const char *name)
         s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
     }
     request_tab_switch(tab);
+    return ESP_OK;
+}
+
+esp_err_t d1l_ui_phase1_request_map_acceptance(void)
+{
+    if (!d1l_ui_screen_available(D1L_UI_TAB_MAP)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!s_started || !s_content || s_lock_visible ||
+        s_onboarding_visible || d1l_ui_modal_has_active()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /*
+     * This narrow machine-acceptance path opens only the configured current
+     * Map view. It accepts no URL or coordinates and does not transmit RF.
+     * Ordinary serial tab switching remains network-suppressed.
+     */
+    d1l_ui_map_viewport_prepare_acceptance();
+    d1l_map_view_service_force_reload_next_acquire();
+    set_map_interactive_touch_authorized(true);
+    request_tab_switch(D1L_UI_TAB_MAP);
     return ESP_OK;
 }
 

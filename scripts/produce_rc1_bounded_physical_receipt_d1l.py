@@ -18,6 +18,7 @@ import re
 import shutil
 import stat
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -154,16 +155,35 @@ STEP_KEYS = frozenset({"sequence", "operation", "command", "response"})
 PROTOCOL_OPERATIONS = frozenset(
     {
         "version",
-        "peer_before",
-        "public_send",
-        "peer_after",
+        "identity",
+        "health_before",
+        "mesh_status",
+        "peer_advert",
+        "contacts",
         "trace_request",
         "trace_result",
+        "peer_before",
+        "public_send",
+        "public_tx_record",
+        "peer_after_public",
+        "peer_public_send",
+        "public_receive",
+        "peer_before_dm",
+        "dm_send",
+        "dm_ack",
+        "peer_after_dm",
+        "peer_dm_send",
+        "dm_receive_ack",
+        "path_request",
+        "path_result",
+        "admin_login_request",
+        "admin_login_status",
+        "admin_query_request",
+        "admin_query_status",
+        "admin_logout",
         "ping_request",
         "ping_result",
-        "admin_login",
-        "admin_query",
-        "health",
+        "health_after",
         "crashlog",
     }
 )
@@ -462,6 +482,171 @@ def _response(
     return steps[operation]["response"]
 
 
+def _public_key(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized if SHA_RE.fullmatch(normalized) else None
+
+
+def _fingerprint(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().upper()
+    return (
+        normalized
+        if re.fullmatch(r"[0-9A-F]{16}", normalized)
+        else None
+    )
+
+
+def _aware_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+
+
+def _peer_snapshot(value: object) -> dict[str, Any]:
+    if (
+        type(value) is not dict
+        or set(value)
+        != {
+            "source",
+            "path",
+            "captured_at",
+            "snapshot_sha256",
+            "snapshot",
+        }
+        or value.get("source") != "local_peer_status_file"
+        or not isinstance(value.get("path"), str)
+        or not Path(value["path"]).is_absolute()
+        or not isinstance(value.get("snapshot"), dict)
+    ):
+        raise EvidenceError("controlled-peer status capture shape is invalid")
+    snapshot = value["snapshot"]
+    captured = _aware_timestamp(value.get("captured_at"))
+    written = _aware_timestamp(snapshot.get("status_written_at"))
+    freshness = (
+        (captured - written).total_seconds()
+        if captured is not None and written is not None
+        else -1.0
+    )
+    serial = snapshot.get("serial")
+    if not (
+        value.get("snapshot_sha256")
+        == hashlib.sha256(canonical_json(snapshot)).hexdigest()
+        and snapshot.get("service") == "openclaw-radio-listener"
+        and isinstance(snapshot.get("run_id"), str)
+        and bool(snapshot["run_id"])
+        and isinstance(serial, dict)
+        and serial.get("mesh_connected") is True
+        and serial.get("port") == "/dev/krab-t-echo"
+        and _public_key(serial.get("public_key")) is not None
+        and isinstance(snapshot.get("counters"), dict)
+        and isinstance(snapshot.get("mesh"), dict)
+        and 0.0 <= freshness <= 120.0
+    ):
+        raise EvidenceError("controlled-peer status identity or freshness is invalid")
+    return snapshot
+
+
+def _peer_counter(snapshot: dict[str, Any], name: str) -> int | None:
+    counters = snapshot.get("counters")
+    return (
+        _integer(counters.get(name))
+        if isinstance(counters, dict)
+        else None
+    )
+
+
+def _control_exchange(
+    value: object, operation: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if type(value) is not dict or set(value) != {"request", "response"}:
+        raise EvidenceError(f"{operation} control exchange shape is invalid")
+    request = value["request"]
+    response = value["response"]
+    if not (
+        type(request) is dict
+        and set(request) == {"id", "op", "params"}
+        and isinstance(request.get("id"), str)
+        and bool(request["id"])
+        and request.get("op") == operation
+        and type(request.get("params")) is dict
+        and type(response) is dict
+        and set(response)
+        == {
+            "id",
+            "op",
+            "ok",
+            "cached",
+            "duration_ms",
+            "result",
+            "error",
+        }
+        and response.get("id") == request["id"]
+        and response.get("op") == operation
+        and response.get("ok") is True
+        and response.get("cached") is False
+        and _integer(response.get("duration_ms")) is not None
+        and isinstance(response.get("result"), dict)
+        and response.get("error") is None
+    ):
+        raise EvidenceError(f"{operation} control exchange is not an exact fresh success")
+    return request, response["result"]
+
+
+def _delivery_ok(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("acknowledged") is True
+        and value.get("event") is not None
+        and str(value.get("event")).upper() != "ERROR"
+        and "payload" in value
+    )
+
+
+def _unique_message(
+    value: object, *, text: str, direction: str
+) -> dict[str, Any] | None:
+    entries = value.get("entries") if isinstance(value, dict) else None
+    if not isinstance(entries, list):
+        return None
+    matches = [
+        row
+        for row in entries
+        if isinstance(row, dict)
+        and row.get("text") == text
+        and row.get("direction") == direction
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _unique_contact(
+    value: object,
+    *,
+    public_key: str | None = None,
+    fingerprint: str | None = None,
+) -> dict[str, Any] | None:
+    entries = value.get("entries") if isinstance(value, dict) else None
+    if not isinstance(entries, list):
+        return None
+    matches: list[dict[str, Any]] = []
+    for row in entries:
+        if not isinstance(row, dict):
+            continue
+        if public_key is not None and _public_key(row.get("public_key")) != public_key:
+            continue
+        if fingerprint is not None and _fingerprint(row.get("fingerprint")) != fingerprint:
+            continue
+        matches.append(row)
+    return matches[0] if len(matches) == 1 else None
+
+
 def validate_protocol(
     data: dict[str, Any], candidate: dict[str, str]
 ) -> dict[str, bool | int]:
@@ -472,20 +657,165 @@ def validate_protocol(
         operations=PROTOCOL_OPERATIONS,
     )
     version = _response(steps, "version")
-    before = _response(steps, "peer_before")
-    send = _response(steps, "public_send")
-    after = _response(steps, "peer_after")
+    identity = _response(steps, "identity")
+    health_before = _response(steps, "health_before")
+    mesh_status = _response(steps, "mesh_status")
+    peer_advert = _response(steps, "peer_advert")
+    contacts = _response(steps, "contacts")
     trace_request = _response(steps, "trace_request")
     trace_result = _response(steps, "trace_result")
+    before = _response(steps, "peer_before")
+    public_send = _response(steps, "public_send")
+    public_tx_record = _response(steps, "public_tx_record")
+    after_public = _response(steps, "peer_after_public")
+    peer_public_send = _response(steps, "peer_public_send")
+    public_receive = _response(steps, "public_receive")
+    before_dm = _response(steps, "peer_before_dm")
+    dm_send = _response(steps, "dm_send")
+    dm_ack = _response(steps, "dm_ack")
+    after_dm = _response(steps, "peer_after_dm")
+    peer_dm_send = _response(steps, "peer_dm_send")
+    dm_receive_ack = _response(steps, "dm_receive_ack")
+    path_request = _response(steps, "path_request")
+    path_result = _response(steps, "path_result")
+    login_request = _response(steps, "admin_login_request")
+    login_status = _response(steps, "admin_login_status")
+    query_request = _response(steps, "admin_query_request")
+    query_status = _response(steps, "admin_query_status")
+    logout = _response(steps, "admin_logout")
     ping_request = _response(steps, "ping_request")
     ping_result = _response(steps, "ping_result")
-    login = _response(steps, "admin_login")
-    query = _response(steps, "admin_query")
-    health = _response(steps, "health")
+    health_after = _response(steps, "health_after")
     crashlog = _response(steps, "crashlog")
-    before_counters = before.get("counters")
-    after_counters = after.get("counters")
-    token = send.get("token")
+
+    identity_public_key = _public_key(identity.get("public_key"))
+    identity_fingerprint = _fingerprint(identity.get("fingerprint"))
+    if identity_public_key is None:
+        raise EvidenceError("protocol transcript D1L identity is invalid")
+
+    peer_before = _peer_snapshot(before)
+    peer_after_public = _peer_snapshot(after_public)
+    peer_before_dm = _peer_snapshot(before_dm)
+    peer_after_dm = _peer_snapshot(after_dm)
+    peer_public_key = _public_key(
+        peer_before.get("serial", {}).get("public_key")
+    )
+    peer_fingerprint = (
+        peer_public_key[:16].upper() if peer_public_key is not None else None
+    )
+    peer_run_id = peer_before.get("run_id")
+    peer_snapshots = (
+        peer_before,
+        peer_after_public,
+        peer_before_dm,
+        peer_after_dm,
+    )
+    if not (
+        peer_public_key is not None
+        and all(
+            snapshot.get("run_id") == peer_run_id
+            and _public_key(snapshot.get("serial", {}).get("public_key"))
+            == peer_public_key
+            for snapshot in peer_snapshots
+        )
+    ):
+        raise EvidenceError("protocol transcript changed controlled peer identity")
+
+    token_match = re.fullmatch(
+        rf"rc1-public-out-{candidate['firmware_commit'][:8]}-([0-9a-f]{{12}})",
+        str(public_send.get("text") or ""),
+    )
+    if token_match is None:
+        raise EvidenceError("protocol transcript Public token is not candidate-bound")
+    nonce = token_match.group(1)
+    public_out_token = (
+        f"rc1-public-out-{candidate['firmware_commit'][:8]}-{nonce}"
+    )
+    public_in_token = (
+        f"rc1-public-in-{candidate['firmware_commit'][:8]}-{nonce}"
+    )
+    dm_out_token = f"rc1-dm-out-{candidate['firmware_commit'][:8]}-{nonce}"
+    dm_in_token = f"rc1-dm-in-{candidate['firmware_commit'][:8]}-{nonce}"
+
+    advert_control, advert_result = _control_exchange(
+        peer_advert, "radio.advert"
+    )
+    public_control, public_control_result = _control_exchange(
+        peer_public_send, "radio.send_channel"
+    )
+    dm_control, dm_control_result = _control_exchange(
+        peer_dm_send, "radio.send_dm"
+    )
+
+    peer_contact = _unique_contact(contacts, public_key=peer_public_key)
+    login_command = steps["admin_login_request"]["command"]
+    login_command_match = re.fullmatch(
+        r"admin login ([0-9A-F]{16}) <redacted>", login_command
+    )
+    admin_fingerprint = (
+        login_command_match.group(1) if login_command_match else None
+    )
+    admin_contact = _unique_contact(
+        contacts, fingerprint=admin_fingerprint
+    )
+    admin_public_key = (
+        _public_key(admin_contact.get("public_key"))
+        if admin_contact is not None
+        else None
+    )
+
+    public_tx_rows = (
+        public_tx_record.get("entries")
+        if isinstance(public_tx_record.get("entries"), list)
+        else []
+    )
+    matching_public_tx_rows = [
+        row
+        for row in public_tx_rows
+        if isinstance(row, dict)
+        and row.get("direction") == "tx"
+        and row.get("kind") in {"public_text", "channel_text"}
+        and public_out_token in str(row.get("note") or "")
+    ]
+    public_rx_entry = _unique_message(
+        public_receive, text=public_in_token, direction="rx"
+    )
+    dm_tx_entry = _unique_message(
+        dm_ack, text=dm_out_token, direction="tx"
+    )
+    dm_rx_entry = _unique_message(
+        dm_receive_ack, text=dm_in_token, direction="rx"
+    )
+
+    path_token = path_request.get("token")
+    path_tag = (
+        int(path_token[5:], 16)
+        if isinstance(path_token, str)
+        and re.fullmatch(r"path_[0-9A-F]{8}", path_token)
+        else None
+    )
+    path_entries = (
+        path_result.get("entries")
+        if isinstance(path_result.get("entries"), list)
+        else []
+    )
+    path_matches = [
+        row
+        for row in path_entries
+        if isinstance(row, dict)
+        and row.get("tag") == path_tag
+        and _integer(row.get("sequence"), minimum=1) is not None
+    ]
+
+    trace_tag = _integer(trace_request.get("tag"), minimum=1)
+    ping_tag = _integer(ping_request.get("tag"), minimum=1)
+    advert_status = mesh_status.get("advert_tx")
+    before_public_count = _peer_counter(peer_before, "rx_channel_total")
+    after_public_count = _peer_counter(peer_after_public, "rx_channel_total")
+    before_dm_count = _peer_counter(peer_before_dm, "rx_dm_total")
+    after_dm_count = _peer_counter(peer_after_dm, "rx_dm_total")
+    health_nonce = _integer(health_before.get("boot_nonce"), minimum=1)
+
     if not (
         version.get("ok") is True
         and version.get("cmd") == "version"
@@ -493,57 +823,259 @@ def validate_protocol(
         == candidate["firmware_commit"]
         and version.get("release_profile") == RELEASE_PROFILE
         and version.get("sd_history_mode") == SD_HISTORY_MODE
-        and isinstance(before_counters, dict)
-        and isinstance(after_counters, dict)
-        and _integer(before_counters.get("rx_adverts_total")) is not None
-        and _integer(after_counters.get("rx_adverts_total")) is not None
-        and after_counters["rx_adverts_total"]
-        > before_counters["rx_adverts_total"]
-        and _integer(before_counters.get("rx_public_total")) is not None
-        and _integer(after_counters.get("rx_public_total")) is not None
-        and after_counters["rx_public_total"]
-        == before_counters["rx_public_total"] + 1
-        and isinstance(token, str)
-        and bool(token)
-        and send.get("ok") is True
-        and send.get("cmd") == "mesh send public"
-        and send.get("queued") is True
-        and after.get("public_token") == token
+        and identity.get("ok") is True
+        and identity.get("cmd") == "identity status"
+        and identity.get("node_name") == "D1L"
+        and identity.get("role") == "desk_companion"
+        and identity.get("public_key_ready") is True
+        and identity_fingerprint == identity_public_key[:16].upper()
+        and health_before.get("ok") is True
+        and health_before.get("cmd") == "health"
+        and _exact_commit(health_before.get("build_commit"))
+        == candidate["firmware_commit"]
+        and health_before.get("release_profile") == RELEASE_PROFILE
+        and health_before.get("sd_history_mode") == SD_HISTORY_MODE
+        and health_before.get("board_ready") is True
+        and health_before.get("ui_ready") is True
+        and health_nonce is not None
+        and mesh_status.get("ok") is True
+        and mesh_status.get("cmd") == "mesh status"
+        and mesh_status.get("release_profile") == RELEASE_PROFILE
+        and mesh_status.get("sd_history_mode") == SD_HISTORY_MODE
+        and mesh_status.get("identity_ready") is True
+        and mesh_status.get("radio_ready") is True
+        and isinstance(advert_status, dict)
+        and _integer(advert_status.get("queued"), minimum=1) is not None
+        and _integer(advert_status.get("done"), minimum=1) is not None
+        and _integer(advert_status.get("failed")) is not None
+        and advert_status["done"] + advert_status["failed"]
+        <= advert_status["queued"]
+        and advert_status.get("boot_queued") == 1
+        and advert_status.get("boot_done") == 1
+        and advert_status.get("boot_failed") == 0
+        and advert_status.get("last_boot") is True
+        and advert_status.get("last_flood") is True
+        and advert_status.get("last_node_name") == "D1L"
+        and str(advert_status.get("last_public_key_prefix") or "").upper()
+        == identity_public_key[:16].upper()
+        and advert_status.get("boot_flood") is True
+        and advert_status.get("boot_node_name") == "D1L"
+        and str(advert_status.get("boot_public_key_prefix") or "").upper()
+        == identity_public_key[:16].upper()
+        and advert_control.get("id") == f"rc1-advert-{nonce}"
+        and advert_control.get("params") == {"flood": False}
+        and advert_result == {"sent": True, "flood": False}
+        and contacts.get("ok") is True
+        and contacts.get("cmd") == "contacts"
+        and peer_contact is not None
+        and _fingerprint(peer_contact.get("fingerprint"))
+        == peer_fingerprint
+        and peer_contact.get("canonical") is True
+        and peer_contact.get("can_dm") is True
+        and admin_fingerprint is not None
+        and admin_contact is not None
+        and admin_public_key is not None
+        and admin_public_key[:16].upper() == admin_fingerprint
+        and admin_contact.get("canonical") is True
+        and admin_contact.get("can_admin") is True
+        and admin_contact.get("type") == "repeater"
         and trace_request.get("ok") is True
         and trace_request.get("cmd") == "routes trace contact"
+        and _fingerprint(trace_request.get("fingerprint"))
+        == peer_fingerprint
         and trace_request.get("queued") is True
+        and trace_request.get("pending") is True
+        and trace_tag is not None
         and trace_request.get("targeted_trace_rf_tx") is True
         and trace_request.get("public_rf_tx") is False
         and trace_result.get("ok") is True
         and trace_result.get("cmd") == "routes trace status"
+        and _fingerprint(trace_result.get("fingerprint"))
+        == peer_fingerprint
+        and trace_result.get("zero_hop") is False
+        and trace_result.get("matched") is True
+        and trace_result.get("pending", {}).get("active") is False
+        and trace_result.get("last_attempt", {}).get("valid") is True
+        and trace_result.get("last_attempt", {}).get("tag") == trace_tag
+        and trace_result.get("last_attempt", {}).get("outcome") == "matched"
         and isinstance(trace_result.get("last_result"), dict)
         and trace_result["last_result"].get("valid") is True
-        and trace_result.get("last_attempt", {}).get("outcome") == "matched"
+        and trace_result["last_result"].get("tag") == trace_tag
+        and public_send.get("ok") is True
+        and public_send.get("cmd") == "mesh send public"
+        and public_send.get("queued") is True
+        and public_send.get("text") == public_out_token
+        and steps["public_send"]["command"]
+        == f"mesh send public {public_out_token}"
+        and public_tx_record.get("ok") is True
+        and public_tx_record.get("cmd") == "packets search"
+        and steps["public_tx_record"]["command"]
+        == f"packets search {public_out_token}"
+        and len(matching_public_tx_rows) == 1
+        and before_public_count is not None
+        and after_public_count == before_public_count + 1
+        and str(
+            peer_after_public.get("mesh", {}).get("last_rx_sender") or ""
+        ).upper()
+        == identity_public_key[:12].upper()
+        and public_control.get("id") == f"rc1-public-{nonce}"
+        and public_control.get("params")
+        == {"channel": 0, "text": public_in_token}
+        and public_control_result.get("channel") == 0
+        and public_control_result.get("utf8_bytes")
+        == len(public_in_token.encode("utf-8"))
+        and _delivery_ok(public_control_result.get("delivery"))
+        and public_receive.get("ok") is True
+        and public_receive.get("cmd") == "messages public"
+        and steps["public_receive"]["command"]
+        == f"messages public search {public_in_token}"
+        and public_rx_entry is not None
+        and _peer_counter(peer_before_dm, "rx_channel_total")
+        == after_public_count
+        and before_dm_count
+        == _peer_counter(peer_after_public, "rx_dm_total")
+        and dm_send.get("ok") is True
+        and dm_send.get("cmd") == "mesh send dm"
+        and dm_send.get("queued") is True
+        and _fingerprint(dm_send.get("fingerprint")) == peer_fingerprint
+        and steps["dm_send"]["command"]
+        == f"mesh send dm {peer_fingerprint} {dm_out_token}"
+        and dm_ack.get("ok") is True
+        and dm_ack.get("cmd") == "messages dm"
+        and _fingerprint(dm_ack.get("fingerprint")) == peer_fingerprint
+        and steps["dm_ack"]["command"]
+        == f"messages dm {peer_fingerprint}"
+        and dm_tx_entry is not None
+        and dm_tx_entry.get("acked") is True
+        and dm_tx_entry.get("delivered") is True
+        and _integer(dm_tx_entry.get("ack_hash"), minimum=1) is not None
+        and before_dm_count is not None
+        and after_dm_count == before_dm_count + 1
+        and dm_control.get("id") == f"rc1-dm-{nonce}"
+        and dm_control.get("params")
+        == {"target": identity_public_key, "text": dm_in_token}
+        and str(dm_control_result.get("target") or "").lower()
+        == identity_public_key[:12].lower()
+        and dm_control_result.get("utf8_bytes")
+        == len(dm_in_token.encode("utf-8"))
+        and _delivery_ok(dm_control_result.get("delivery"))
+        and dm_receive_ack.get("ok") is True
+        and dm_receive_ack.get("cmd") == "messages dm"
+        and _fingerprint(dm_receive_ack.get("fingerprint"))
+        == peer_fingerprint
+        and steps["dm_receive_ack"]["command"]
+        == f"messages dm {peer_fingerprint}"
+        and dm_rx_entry is not None
+        and dm_rx_entry.get("ack_response", {}).get("identity_valid") is True
+        and dm_rx_entry.get("ack_response", {}).get("state") == "sent"
+        and _integer(
+            dm_rx_entry.get("ack_response", {}).get("dispatch_count"),
+            minimum=1,
+        )
+        is not None
+        and dm_rx_entry.get("ack_response", {}).get("last_kind")
+        in {"direct_ack", "flood_ack", "flood_ack_path", "path_ack"}
+        and dm_rx_entry.get("ack_response", {}).get("last_error") == "ESP_OK"
+        and path_request.get("ok") is True
+        and path_request.get("cmd") == "routes probe"
+        and _fingerprint(path_request.get("fingerprint"))
+        == peer_fingerprint
+        and path_request.get("queued") is True
+        and path_request.get("dm_rf_tx") is True
+        and path_request.get("public_rf_tx") is False
+        and path_request.get("telemetry_requested") is True
+        and path_tag is not None
+        and steps["path_request"]["command"]
+        == f"routes probe {peer_fingerprint}"
+        and path_result.get("ok") is True
+        and path_result.get("cmd") == "routes telemetry"
+        and _fingerprint(path_result.get("fingerprint"))
+        == peer_fingerprint
+        and path_result.get("state") == "received"
+        and path_result.get("pending") is False
+        and path_result.get("pending_tag") == 0
+        and _integer(path_result.get("history_count"), minimum=1)
+        == len(path_entries)
+        and len(path_matches) == 1
+        and steps["path_result"]["command"]
+        == f"routes telemetry {peer_fingerprint}"
+        and login_request.get("ok") is True
+        and login_request.get("cmd") == "admin login"
+        and login_request.get("state") == "login_pending"
+        and _fingerprint(login_request.get("fingerprint"))
+        == admin_fingerprint
+        and login_request.get("credential_exposed") is False
+        and login_request.get("session_secret_exposed") is False
+        and _integer(login_request.get("login_tx_queued"), minimum=1)
+        is not None
+        and login_status.get("ok") is True
+        and login_status.get("cmd") == "admin status"
+        and login_status.get("state") == "authenticated"
+        and login_status.get("role") == "repeater"
+        and _fingerprint(login_status.get("fingerprint"))
+        == admin_fingerprint
+        and login_status.get("credential_exposed") is False
+        and login_status.get("session_secret_exposed") is False
+        and query_request.get("ok") is True
+        and query_request.get("cmd") == "admin telemetry"
+        and query_request.get("state") == "query_pending"
+        and _fingerprint(query_request.get("fingerprint"))
+        == admin_fingerprint
+        and query_request.get("credential_exposed") is False
+        and query_request.get("session_secret_exposed") is False
+        and query_status.get("ok") is True
+        and query_status.get("cmd") == "admin status"
+        and query_status.get("state") == "authenticated"
+        and query_status.get("role") == "repeater"
+        and _fingerprint(query_status.get("fingerprint"))
+        == admin_fingerprint
+        and query_status.get("credential_exposed") is False
+        and query_status.get("session_secret_exposed") is False
+        and query_status.get("query_result", {}).get("valid") is True
+        and query_status.get("query_result", {}).get("kind") == "telemetry"
+        and isinstance(query_status.get("query_result", {}).get("text"), str)
+        and bool(query_status["query_result"]["text"])
+        and _integer(query_status.get("query_accepted"), minimum=1)
+        is not None
+        and logout.get("ok") is True
+        and logout.get("cmd") == "admin logout"
+        and logout.get("state") == "idle"
+        and logout.get("role") == "none"
+        and logout.get("credential_exposed") is False
+        and logout.get("session_secret_exposed") is False
         and ping_request.get("ok") is True
         and ping_request.get("cmd") == "repeater ping"
+        and _fingerprint(ping_request.get("fingerprint"))
+        == admin_fingerprint
         and ping_request.get("queued") is True
+        and ping_request.get("pending") is True
         and ping_request.get("zero_hop") is True
+        and ping_request.get("targeted_trace_rf_tx") is True
+        and ping_request.get("public_rf_tx") is False
+        and ping_tag is not None
         and ping_result.get("ok") is True
         and ping_result.get("cmd") == "repeater ping status"
+        and _fingerprint(ping_result.get("fingerprint"))
+        == admin_fingerprint
+        and ping_result.get("zero_hop") is True
         and ping_result.get("matched") is True
-        and login.get("ok") is True
-        and login.get("cmd") == "admin login"
-        and login.get("state") == "authenticated"
-        and login.get("credential_exposed") is False
-        and query.get("ok") is True
-        and query.get("cmd") in {
-            "admin telemetry",
-            "admin neighbours",
-            "admin access-list",
-        }
-        and query.get("state") == "authenticated"
-        and query.get("query_result", {}).get("valid") is True
-        and query.get("credential_exposed") is False
-        and health.get("ok") is True
-        and health.get("board_ready") is True
-        and health.get("ui_ready") is True
-        and _integer(health.get("boot_nonce"), minimum=1) is not None
+        and ping_result.get("pending", {}).get("active") is False
+        and ping_result.get("last_attempt", {}).get("valid") is True
+        and ping_result.get("last_attempt", {}).get("tag") == ping_tag
+        and ping_result.get("last_attempt", {}).get("outcome") == "matched"
+        and ping_result.get("last_result", {}).get("valid") is True
+        and ping_result.get("last_result", {}).get("tag") == ping_tag
+        and health_after.get("ok") is True
+        and health_after.get("cmd") == "health"
+        and _exact_commit(health_after.get("build_commit"))
+        == candidate["firmware_commit"]
+        and health_after.get("release_profile") == RELEASE_PROFILE
+        and health_after.get("sd_history_mode") == SD_HISTORY_MODE
+        and health_after.get("board_ready") is True
+        and health_after.get("ui_ready") is True
+        and health_after.get("boot_nonce") == health_nonce
         and crashlog.get("ok") is True
+        and crashlog.get("cmd") == "crashlog"
         and not crashlog_has_crash_like_entries(crashlog)
         and sum(
             1

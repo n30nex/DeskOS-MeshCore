@@ -95,6 +95,7 @@ MAP_READ_ONLY_SURFACES = frozenset({
 })
 SCROLL_MOVEMENT_OPTIONAL = {"home", "storage", "storage_card", *MAP_READ_ONLY_SURFACES}
 CORE_RELEASE_PROFILE = "core_1_0"
+CORE_SD_HISTORY_MODE = "conditional"
 RELEASE_PROFILES = ("development", "full_feature", CORE_RELEASE_PROFILE)
 CORE_SCROLL_SEQUENCE = (
     "home",
@@ -103,6 +104,12 @@ CORE_SCROLL_SEQUENCE = (
     "nodes",
     "packets",
     "settings",
+    "storage",
+    "wifi",
+    "map",
+    "map_options",
+    "map_location",
+    "map_cache",
 )
 CORE_SCROLL_SURFACES = frozenset(CORE_SCROLL_SEQUENCE)
 
@@ -139,9 +146,9 @@ def validate_core_evidence_inputs(
         raise ValueError(
             "Core scroll evidence requires a positive workflow run attempt"
         )
-    if expected_sd_history_mode not in SD_HISTORY_MODES:
+    if expected_sd_history_mode != CORE_SD_HISTORY_MODE:
         raise ValueError(
-            "Core scroll evidence requires an exact SD history mode"
+            "Core scroll evidence requires conditional SD history mode"
         )
     source = git_metadata(root)
     if (

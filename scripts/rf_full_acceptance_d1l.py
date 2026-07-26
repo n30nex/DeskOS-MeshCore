@@ -46,6 +46,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 DEFAULT_TARGET_FINGERPRINT = "0BF0A701D5AE2DB6"
 DEFAULT_D1L_PUBLIC_KEY = "ba14729e8588e30b44b36ff9c6c5511b9d88bf787196c6a46de102af6ebafa07"
 RF_FULL_ACCEPTANCE_SCHEMA = 2
+EXPECTED_RELEASE_PROFILE = "core_1_0"
+EXPECTED_SD_HISTORY_MODE = "conditional"
 FORBIDDEN_PORTS = {"COM" + str(number) for number in (8, 11, 29)}
 D1L_REQUIRED_PORT = WINDOWS_D1L_TARGET
 D1L_REQUIRED_POSIX_TARGET = POSIX_D1L_TARGET
@@ -3768,8 +3770,8 @@ def _run_hardware_reserved(
         if not (
             firmware_identity_matches(version, normalized_commit)
             and version.get("idf") == "v5.5.4"
-            and version.get("release_profile") == "core_1_0"
-            and version.get("sd_history_mode") == "disabled"
+            and version.get("release_profile") == EXPECTED_RELEASE_PROFILE
+            and version.get("sd_history_mode") == EXPECTED_SD_HISTORY_MODE
             and protocol_tx_ready_for_rf(version)
         ):
             d1l_target_after = resolve_core_target(

@@ -251,7 +251,7 @@ void app_main(void)
              * can attribute subsequent messages to this D1L.
              */
             esp_err_t boot_advert_ret =
-                d1l_meshcore_service_request_advert(true);
+                d1l_meshcore_service_request_boot_advert(true);
             if (boot_advert_ret != ESP_OK) {
                 ESP_LOGW(TAG, "MeshCore boot advert failed: %s",
                          esp_err_to_name(boot_advert_ret));

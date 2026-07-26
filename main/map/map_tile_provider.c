@@ -79,6 +79,47 @@ static bool url_template_valid(const char *value)
            strchr(value, '#') == NULL;
 }
 
+static bool ascii_equal_case_insensitive(const char *left,
+                                         size_t left_length,
+                                         const char *right)
+{
+    if (!left || !right || strlen(right) != left_length) {
+        return false;
+    }
+    for (size_t i = 0U; i < left_length; ++i) {
+        if (tolower((unsigned char)left[i]) !=
+            tolower((unsigned char)right[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool osm_standard_url(const char *value)
+{
+    static const char host[] = "tile.openstreetmap.org";
+    if (!value || strncmp(value, "https://", 8U) != 0) {
+        return false;
+    }
+    const size_t host_length = sizeof(host) - 1U;
+    const size_t value_length = strlen(value);
+    for (size_t i = 8U; i + host_length <= value_length; ++i) {
+        if (ascii_equal_case_insensitive(
+                &value[i], host_length, host)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool d1l_map_tile_provider_uses_osm_standard(
+    const d1l_map_tile_provider_t *provider)
+{
+    return provider &&
+           (strcmp(provider->source_id, D1L_MAP_TILE_SOURCE_ID) == 0 ||
+            osm_standard_url(provider->url_template));
+}
+
 static const char *json_value(const char *json, const char *key)
 {
     if (!json || !key) {
@@ -324,6 +365,14 @@ static esp_err_t parse_provider_config(
         provider.network_fetch_allowed = true;
     }
     if (background_allowed && !provider.network_fetch_allowed) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    /*
+     * The built-in OSM Standard endpoint is current-view-only. Never accept a
+     * removable-media manifest that attempts to grant offline or bulk rights
+     * for that endpoint.
+     */
+    if (d1l_map_tile_provider_uses_osm_standard(&provider)) {
         return ESP_ERR_INVALID_RESPONSE;
     }
     provider.configured = true;

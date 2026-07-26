@@ -31,6 +31,7 @@ typedef struct {
     uint64_t total_tiles;
     uint64_t visited_tiles;
     uint64_t cached_tiles;
+    uint64_t network_requests;
     uint64_t downloaded_tiles;
     uint64_t failed_tiles;
     uint64_t downloaded_bytes;

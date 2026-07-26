@@ -23,7 +23,7 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
             "build_commit": commit,
             "idf": "v5.5.4",
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
+            "sd_history_mode": "conditional",
         },
         {
             "schema": 1,
@@ -31,7 +31,7 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
             "ok": True,
             "build_commit": commit,
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
+            "sd_history_mode": "conditional",
             "board_ready": True,
             "ui_ready": True,
         },
@@ -369,6 +369,8 @@ def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
     assert closing["closure_eligible"] is True
     assert closing["scope"] == "core-retained-reflash-only"
     assert closing["retained_state_preserved"] is True
+    assert closing["sd_history_mode"] == "conditional"
+    assert closing["erase_flash"] is False
     assert closing["workflow_run_attempt"] == RUN_ATTEMPT
     assert closing["actions_capture_verification"]["ok"] is True
 

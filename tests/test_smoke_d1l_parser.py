@@ -185,6 +185,23 @@ def test_contact_mutation_commands_map_to_console_responses():
     assert expected_command_name("contacts delete A1B2C3D4E5F60789") == "contacts delete"
 
 
+def test_protocol_acceptance_commands_map_to_exact_console_responses():
+    fingerprint = "A1B2C3D4E5F60789"
+    assert expected_command_name(
+        f"routes telemetry {fingerprint}"
+    ) == "routes telemetry"
+    assert expected_command_name("routes trace status") == "routes trace status"
+    assert expected_command_name(
+        f"repeater ping {fingerprint}"
+    ) == "repeater ping"
+    assert expected_command_name(
+        "repeater ping status"
+    ) == "repeater ping status"
+    assert expected_command_name(
+        f"admin login {fingerprint} secret"
+    ) == "admin login"
+
+
 def test_rp2040_argument_commands_map_to_console_responses():
     assert expected_command_name("rp2040 baud-probe 700") == "rp2040 baud-probe"
     assert expected_command_name("rp2040 set-baud 115200") == "rp2040 set-baud"

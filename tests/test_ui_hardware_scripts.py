@@ -254,7 +254,7 @@ def test_scroll_probe_core_profile_recomputes_positive_overflow():
                 "cmd": "health",
                 "build_commit": "a" * 40,
                 "release_profile": "core_1_0",
-                "sd_history_mode": "disabled",
+                "sd_history_mode": "conditional",
             },
             "crashlog": {"entries": []},
         }
@@ -262,7 +262,7 @@ def test_scroll_probe_core_profile_recomputes_positive_overflow():
     for screen in ("home", "dm_thread", "settings"):
         compact = event(screen)
         assert scroll_probe_d1l.event_failed(
-            compact, "core_1_0", "a" * 40, "disabled"
+            compact, "core_1_0", "a" * 40, "conditional"
         ) is False
     assert scroll_probe_d1l.event_failed(
         event("dm_thread"), "full_feature"
@@ -270,7 +270,7 @@ def test_scroll_probe_core_profile_recomputes_positive_overflow():
 
     moving = event("public_messages", bottom=6, after_y=6)
     assert scroll_probe_d1l.event_failed(
-        moving, "core_1_0", "a" * 40, "disabled"
+        moving, "core_1_0", "a" * 40, "conditional"
     ) is False
 
     blocked = event("public_messages", bottom=6, after_y=0)
@@ -278,19 +278,19 @@ def test_scroll_probe_core_profile_recomputes_positive_overflow():
     blocked["probe"]["scroll_top_after"] = 0
     blocked["probe"]["scroll_bottom_after"] = 6
     assert scroll_probe_d1l.event_failed(
-        blocked, "core_1_0", "a" * 40, "disabled"
+        blocked, "core_1_0", "a" * 40, "conditional"
     ) is True
 
     forged = event("settings")
     forged["probe"]["movement_required"] = True
     assert scroll_probe_d1l.event_failed(
-        forged, "core_1_0", "a" * 40, "disabled"
+        forged, "core_1_0", "a" * 40, "conditional"
     ) is True
 
     wrong_profile = event("settings")
     wrong_profile["health"]["release_profile"] = "full_feature"
     assert scroll_probe_d1l.event_failed(
-        wrong_profile, "core_1_0", "a" * 40, "disabled"
+        wrong_profile, "core_1_0", "a" * 40, "conditional"
     ) is True
 
     report = scroll_probe_d1l.dry_run_report(
@@ -301,6 +301,20 @@ def test_scroll_probe_core_profile_recomputes_positive_overflow():
     )
     assert report["release_profile"] == "core_1_0"
     assert report["scroll_movement_policy"] == "positive_raw_overflow"
+    assert report["screens"] == [
+        "home",
+        "public_messages",
+        "dm_thread",
+        "nodes",
+        "packets",
+        "settings",
+        "storage",
+        "wifi",
+        "map",
+        "map_options",
+        "map_location",
+        "map_cache",
+    ]
 
     try:
         scroll_probe_d1l.validate_release_profile_screens(
@@ -309,7 +323,7 @@ def test_scroll_probe_core_profile_recomputes_positive_overflow():
     except ValueError as exc:
         assert "exact ordered surfaces" in str(exc)
     else:
-        raise AssertionError("Core scroll accepted unavailable Map")
+        raise AssertionError("Core scroll accepted a partial surface list")
 
     for invalid in (
         [],
@@ -346,11 +360,22 @@ def test_scroll_probe_core_evidence_inputs_fail_closed(
         expected_firmware_commit="a" * 40,
         github_actions_run="123",
         workflow_run_attempt="1",
-        expected_sd_history_mode="disabled",
+        expected_sd_history_mode="conditional",
         root=tmp_path,
     )
     assert validated["port"] == "COM12"
     assert validated["expected_firmware_commit"] == "a" * 40
+    assert validated["expected_sd_history_mode"] == "conditional"
+
+    with pytest.raises(ValueError, match="conditional SD history mode"):
+        scroll_probe_d1l.validate_core_evidence_inputs(
+            port="COM12",
+            expected_firmware_commit="a" * 40,
+            github_actions_run="123",
+            workflow_run_attempt="1",
+            expected_sd_history_mode="disabled",
+            root=tmp_path,
+        )
 
     for forbidden in ("COM8", "COM11", "COM29", "COM16"):
         try:
@@ -359,7 +384,7 @@ def test_scroll_probe_core_evidence_inputs_fail_closed(
                 expected_firmware_commit="a" * 40,
                 github_actions_run="123",
                 workflow_run_attempt="1",
-                expected_sd_history_mode="disabled",
+                expected_sd_history_mode="conditional",
                 root=tmp_path,
             )
         except ValueError as exc:
@@ -378,7 +403,7 @@ def test_scroll_probe_core_evidence_inputs_fail_closed(
             expected_firmware_commit="a" * 40,
             github_actions_run="123",
             workflow_run_attempt="1",
-            expected_sd_history_mode="disabled",
+            expected_sd_history_mode="conditional",
             root=tmp_path,
         )
     except ValueError as exc:
@@ -417,7 +442,7 @@ def test_scroll_probe_core_identity_preflight_precedes_mutation(
             "cmd": command,
             "build_commit": "b" * 40,
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
+            "sd_history_mode": "conditional",
             "idf": "v5.5.4",
         }
 
@@ -447,7 +472,7 @@ def test_scroll_probe_core_identity_preflight_precedes_mutation(
         expected_firmware_commit="a" * 40,
         github_actions_run="123",
         workflow_run_attempt="1",
-        expected_sd_history_mode="disabled",
+        expected_sd_history_mode="conditional",
         expected_d1l_public_key=PUBLIC_KEY,
         platform_name="nt",
         port_lister=lambda: [
@@ -507,7 +532,7 @@ def test_scroll_probe_invalid_core_target_fails_before_serial_open(
             expected_firmware_commit="a" * 40,
             github_actions_run="123",
             workflow_run_attempt="1",
-            expected_sd_history_mode="disabled",
+            expected_sd_history_mode="conditional",
             expected_d1l_public_key=PUBLIC_KEY,
             platform_name="nt",
             port_lister=lambda: [
@@ -566,7 +591,7 @@ def test_scroll_probe_wrong_full_key_stops_before_health_or_mutation(
                 "cmd": "version",
                 "build_commit": commit,
                 "release_profile": "core_1_0",
-                "sd_history_mode": "disabled",
+                "sd_history_mode": "conditional",
                 "idf": "v5.5.4",
             }
         if command == "identity status":
@@ -601,7 +626,7 @@ def test_scroll_probe_wrong_full_key_stops_before_health_or_mutation(
         expected_firmware_commit=commit,
         github_actions_run="123",
         workflow_run_attempt="1",
-        expected_sd_history_mode="disabled",
+        expected_sd_history_mode="conditional",
         expected_d1l_public_key=PUBLIC_KEY,
         platform_name="nt",
         port_lister=lambda: [
@@ -658,7 +683,7 @@ def test_scroll_probe_rejects_missing_key_before_source_or_serial_io(
             expected_firmware_commit="a" * 40,
             github_actions_run="123",
             workflow_run_attempt="1",
-            expected_sd_history_mode="disabled",
+            expected_sd_history_mode="conditional",
             expected_d1l_public_key="short",
         )
 

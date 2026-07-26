@@ -67,6 +67,7 @@ static uint32_t s_viewport_generation;
 static uint32_t s_viewport_revision;
 static uint32_t s_viewport_suppression_depth;
 static bool s_viewport_suppress_next_acquire;
+static bool s_viewport_acceptance_reset_pending;
 static bool s_viewport_allocation_failed;
 static portMUX_TYPE s_viewport_lease_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint16_t *s_viewport_pixels;
@@ -362,6 +363,25 @@ static void map_viewport_sync_position(const d1l_app_snapshot_t *snapshot)
     if (s_viewport_position_initialized &&
         s_viewport_saved_lat_e7 == snapshot->map_lat_e7 &&
         s_viewport_saved_lon_e7 == snapshot->map_lon_e7) {
+        return;
+    }
+    s_viewport_saved_lat_e7 = snapshot->map_lat_e7;
+    s_viewport_saved_lon_e7 = snapshot->map_lon_e7;
+    s_viewport_lat_e7 = snapshot->map_lat_e7;
+    s_viewport_lon_e7 = snapshot->map_lon_e7;
+    s_viewport_zoom = map_zoom_clamp(snapshot->map_tile_zoom);
+    s_viewport_position_initialized = true;
+}
+
+static void map_viewport_apply_acceptance_reset(
+    const d1l_app_snapshot_t *snapshot)
+{
+    bool pending;
+    portENTER_CRITICAL(&s_viewport_lease_lock);
+    pending = s_viewport_acceptance_reset_pending;
+    s_viewport_acceptance_reset_pending = false;
+    portEXIT_CRITICAL(&s_viewport_lease_lock);
+    if (!pending || !map_center_available(snapshot)) {
         return;
     }
     s_viewport_saved_lat_e7 = snapshot->map_lat_e7;
@@ -1505,6 +1525,7 @@ void d1l_ui_map_render(lv_obj_t *parent,
         return;
     }
     map_viewport_sync_position(snapshot);
+    map_viewport_apply_acceptance_reset(snapshot);
     d1l_ui_map_viewport_release();
     /* Rendering runs on the UI task, so it owns marker hit/cache mutation.
      * Cross-task release only invalidates the lease. */
@@ -2266,6 +2287,14 @@ void d1l_ui_map_viewport_release(void)
     if (generation != 0U) {
         d1l_map_view_service_release_visible(generation);
     }
+}
+
+void d1l_ui_map_viewport_prepare_acceptance(void)
+{
+    portENTER_CRITICAL(&s_viewport_lease_lock);
+    s_viewport_acceptance_reset_pending = true;
+    portEXIT_CRITICAL(&s_viewport_lease_lock);
+    d1l_ui_map_viewport_release();
 }
 
 void d1l_ui_map_viewport_prepare_cover(void)

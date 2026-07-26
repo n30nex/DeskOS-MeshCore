@@ -34,6 +34,8 @@ typedef struct {
 
 void d1l_map_tile_provider_builtin(d1l_map_tile_provider_t *out_provider);
 void d1l_map_tile_provider_snapshot(d1l_map_tile_provider_t *out_provider);
+bool d1l_map_tile_provider_uses_osm_standard(
+    const d1l_map_tile_provider_t *provider);
 esp_err_t d1l_map_tile_provider_refresh(
     const d1l_storage_status_t *storage);
 bool d1l_map_tile_provider_path(

@@ -49,6 +49,7 @@ static uint8_t *s_tile_buffer;
 static d1l_map_prefetch_key_t s_completed_key;
 static bool s_completed_key_valid;
 static int64_t s_backoff_until_us;
+static uint64_t s_network_requests_total;
 
 static void set_phase(d1l_map_prefetch_status_t *status,
                       const char *phase,
@@ -71,6 +72,7 @@ static void publish_status(
     }
     portENTER_CRITICAL(&s_status_lock);
     s_status = *status;
+    s_status.network_requests = s_network_requests_total;
     portEXIT_CRITICAL(&s_status_lock);
 }
 
@@ -286,6 +288,13 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
 
         size_t downloaded_len = 0U;
         d1l_map_tile_download_result_t result = {0};
+        ++s_network_requests_total;
+        status->network_requests = s_network_requests_total;
+        /*
+         * Publish before the blocking HTTPS request. This is a monotonic count
+         * of real provider fetch attempts, not planned or cache-hit tiles.
+         */
+        publish_status(status);
         ret = d1l_map_tile_store_fetch(
             zoom, x, y, &storage, true,
             s_tile_buffer, D1L_MAP_TILE_DOWNLOAD_MAX_BYTES,

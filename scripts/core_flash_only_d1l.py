@@ -98,7 +98,14 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     )
 
 
-EXPECTED_SD_HISTORY_MODE = "disabled"
+EXPECTED_SD_HISTORY_MODE = "conditional"
+EXPECTED_SD_HISTORY_STATE = "runtime_conditional_sd_primary"
+EXPECTED_STORAGE_AUTHORITY = "sd_primary_live_only_without_sd"
+EXPECTED_RP2040_ARTIFACT_NAMES = (
+    "rp2040-sd-bridge-firmware",
+    "rp2040-sd-smoke-firmware",
+    "rp2040-seeed-official-sd-smoke-firmware",
+)
 EXPECTED_REPOSITORY = "n30nex/SIGUI"
 EXPECTED_FLASH_ROLES = {
     0x0: ("bootloader", "bootloader/bootloader.bin"),
@@ -211,6 +218,28 @@ def verify_core_package(
             "size": generated.stat().st_size,
             "sha256": sha256_file(generated),
         }
+    rp2040_artifacts = manifest.get("rp2040_artifacts")
+    rp2040_artifacts_ok = (
+        isinstance(rp2040_artifacts, list)
+        and [row.get("name") for row in rp2040_artifacts if isinstance(row, dict)]
+        == list(EXPECTED_RP2040_ARTIFACT_NAMES)
+        and all(
+            isinstance(row, dict)
+            and isinstance(row.get("uf2_files"), list)
+            and bool(row["uf2_files"])
+            and all(
+                isinstance(relative, str)
+                and relative.startswith("rp2040/")
+                and _inside(
+                    package / relative,
+                    package,
+                    "RP2040 package artifact",
+                ).is_file()
+                for relative in row["uf2_files"]
+            )
+            for row in rp2040_artifacts
+        )
+    )
     required_truth = (
         type(manifest.get("schema")) is int
         and manifest.get("schema") == CORE_PACKAGE_SCHEMA
@@ -219,11 +248,10 @@ def verify_core_package(
         and str(manifest.get("actions_run")) == run_id
         and str(manifest.get("actions_run_attempt")) == run_attempt
         and manifest.get("sd_history_mode") == EXPECTED_SD_HISTORY_MODE
-        and manifest.get("sd_history_state")
-        == "disabled_nvs_authoritative"
-        and manifest.get("storage_authority") == "nvs"
+        and manifest.get("sd_history_state") == EXPECTED_SD_HISTORY_STATE
+        and manifest.get("storage_authority") == EXPECTED_STORAGE_AUTHORITY
         and manifest.get("full_feature_release_ready") is False
-        and manifest.get("rp2040_artifacts") == []
+        and rp2040_artifacts_ok
         and manifest.get("update_image") is None
         and isinstance(workflow, dict)
         and exact_commit(workflow.get("sha")) == commit
@@ -274,10 +302,13 @@ def verify_core_package(
     )
     if not required_truth:
         raise ValueError(
-            "Core package manifest commit/run/profile/disabled-SD truth mismatch"
+            "Core package manifest commit/run/profile/conditional-SD truth mismatch"
         )
-    if (package / "rp2040").exists() or (package / "update").exists():
-        raise ValueError("Disabled-SD Core package contains excluded payloads")
+    if not (package / "rp2040").is_dir() or (package / "update").exists():
+        raise ValueError(
+            "Conditional-SD Core package is missing RP2040 payloads or "
+            "contains an excluded update payload"
+        )
 
     action_rows = actions_verification.get("flash_files")
     if not isinstance(action_rows, list):
@@ -346,7 +377,7 @@ def verify_core_package(
         "workflow_run_attempt": run_attempt,
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": EXPECTED_SD_HISTORY_MODE,
-        "storage_authority": "nvs",
+        "storage_authority": EXPECTED_STORAGE_AUTHORITY,
         "repository": EXPECTED_REPOSITORY,
         "flash_files_match_actions": True,
         "flash_files": checked_rows,

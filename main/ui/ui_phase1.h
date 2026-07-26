@@ -82,6 +82,7 @@ esp_err_t d1l_ui_phase1_start(void);
 bool d1l_ui_phase1_started(void);
 esp_err_t d1l_ui_phase1_show_home(void);
 esp_err_t d1l_ui_phase1_request_tab(const char *name);
+esp_err_t d1l_ui_phase1_request_map_acceptance(void);
 esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
                                       d1l_ui_scroll_probe_result_t *result);
 esp_err_t d1l_ui_phase1_compose_probe(const char *target,

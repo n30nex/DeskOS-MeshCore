@@ -64,6 +64,7 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
                                                uint16_t width,
                                                uint16_t height,
                                                uint32_t *out_generation);
+void d1l_map_view_service_force_reload_next_acquire(void);
 void d1l_map_view_service_release_visible(uint32_t generation);
 void d1l_map_view_service_status(d1l_map_view_status_t *out_status);
 esp_err_t d1l_map_view_service_acquire_frame(uint32_t after_revision,

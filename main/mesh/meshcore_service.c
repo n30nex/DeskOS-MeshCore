@@ -140,6 +140,7 @@ static bool s_service_initialized;
 static bool s_radio_started;
 static volatile bool s_tx_busy;
 static volatile bool s_active_tx_ack_response;
+static bool s_active_advert_boot;
 static bool s_pending_channel_tx;
 static uint64_t s_pending_channel_id;
 static uint64_t s_pending_channel_operation_id;
@@ -342,6 +343,7 @@ typedef struct {
     uint16_t delay_ms;
     bool ack_response;
     bool flood;
+    bool boot_advert;
     char advert_pub_prefix[17];
     char advert_node_name[D1L_NODE_NAME_LEN];
     uint8_t advert_path_hash_bytes;
@@ -4752,6 +4754,9 @@ static void meshcore_service_handle_radio_tx_done(
         event->tx_operation.kind == D1L_MESH_TX_OPERATION_ACK_RESPONSE;
     const bool dm_tx =
         event->tx_operation.kind == D1L_MESH_TX_OPERATION_DM;
+    const bool advert_tx =
+        event->tx_operation.kind == D1L_MESH_TX_OPERATION_ADVERT;
+    const bool boot_advert_tx = advert_tx && s_active_advert_boot;
 
     /* Re-arm RX before any retained-store work so a prompt peer ACK can be
      * copied into the radio event queue while the sole owner persists state. */
@@ -4759,6 +4764,13 @@ static void meshcore_service_handle_radio_tx_done(
     s_active_tx_ack_response = false;
     s_tx_busy = false;
     s_status.tx_packets++;
+    if (advert_tx) {
+        s_status.advert_tx_done++;
+        if (boot_advert_tx) {
+            s_status.boot_advert_tx_done++;
+        }
+        s_active_advert_boot = false;
+    }
     s_status.state = D1L_MESHCORE_SERVICE_READY;
     d1l_meshcore_start_rx();
 
@@ -4813,10 +4825,20 @@ static void meshcore_service_handle_radio_tx_timeout(
         event->tx_operation.kind == D1L_MESH_TX_OPERATION_ACK_RESPONSE;
     const bool dm_tx =
         event->tx_operation.kind == D1L_MESH_TX_OPERATION_DM;
+    const bool advert_tx =
+        event->tx_operation.kind == D1L_MESH_TX_OPERATION_ADVERT;
+    const bool boot_advert_tx = advert_tx && s_active_advert_boot;
 
     meshcore_radio_tx_operation_clear();
     s_active_tx_ack_response = false;
     s_tx_busy = false;
+    if (advert_tx) {
+        s_status.advert_tx_failed++;
+        if (boot_advert_tx) {
+            s_status.boot_advert_tx_failed++;
+        }
+        s_active_advert_boot = false;
+    }
     s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
     d1l_meshcore_start_rx();
 
@@ -5214,6 +5236,9 @@ static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd
     if (!meshcore_radio_tx_operation_begin(operation_kind, NULL)) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (operation_kind == D1L_MESH_TX_OPERATION_ADVERT) {
+        s_active_advert_boot = cmd->boot_advert;
+    }
     if (operation_kind == D1L_MESH_TX_OPERATION_PUBLIC) {
         if (!s_pending_channel_tx || s_pending_channel_id == 0U ||
             !s_pending_channel_packet_hash_ready) {
@@ -5305,6 +5330,33 @@ static void meshcore_service_finalize_send_advert(
     if (!packet_retained) {
         ESP_LOGW(TAG, "packet log advert tx retention failed");
     }
+    status_lock();
+    s_status.advert_tx_queued++;
+    if (cmd->boot_advert) {
+        s_status.boot_advert_tx_queued++;
+    }
+    s_status.last_advert_boot = cmd->boot_advert;
+    s_status.last_advert_flood = cmd->flood;
+    snprintf(
+        s_status.last_advert_public_key_prefix,
+        sizeof(s_status.last_advert_public_key_prefix), "%s",
+        cmd->advert_pub_prefix);
+    snprintf(
+        s_status.last_advert_node_name,
+        sizeof(s_status.last_advert_node_name), "%s",
+        cmd->advert_node_name);
+    if (cmd->boot_advert) {
+        s_status.boot_advert_flood = cmd->flood;
+        snprintf(
+            s_status.boot_advert_public_key_prefix,
+            sizeof(s_status.boot_advert_public_key_prefix), "%s",
+            cmd->advert_pub_prefix);
+        snprintf(
+            s_status.boot_advert_node_name,
+            sizeof(s_status.boot_advert_node_name), "%s",
+            cmd->advert_node_name);
+    }
+    status_unlock();
 }
 
 static void finalize_pending_dm_radio_result(bool sent, esp_err_t error)
@@ -7317,6 +7369,7 @@ void d1l_meshcore_service_init(void)
     s_radio_started = false;
     s_tx_busy = false;
     s_active_tx_ack_response = false;
+    s_active_advert_boot = false;
     __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
     clear_pending_channel_tx();
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
@@ -7781,15 +7834,26 @@ esp_err_t d1l_meshcore_service_admin_logout(void)
     return ret;
 }
 
-esp_err_t d1l_meshcore_service_request_advert(bool flood)
+static esp_err_t meshcore_service_request_advert(bool flood, bool boot_advert)
 {
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
         .requested_tx_kind = D1L_MESH_TX_OPERATION_ADVERT,
         .flood = flood,
+        .boot_advert = boot_advert,
     };
     return meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+}
+
+esp_err_t d1l_meshcore_service_request_advert(bool flood)
+{
+    return meshcore_service_request_advert(flood, false);
+}
+
+esp_err_t d1l_meshcore_service_request_boot_advert(bool flood)
+{
+    return meshcore_service_request_advert(flood, true);
 }
 
 static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,

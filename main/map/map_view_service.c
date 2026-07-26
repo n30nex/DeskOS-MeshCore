@@ -33,6 +33,7 @@ typedef struct {
     uint8_t *compressed;
     uint16_t *decoded_tile;
     int64_t backoff_until_us;
+    bool force_reload_next_acquire;
 } map_service_t;
 
 static map_service_t s_map;
@@ -638,7 +639,10 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
                            s_map.plan.zoom == plan.zoom &&
                            s_map.plan.width == plan.width &&
                            s_map.plan.height == plan.height;
-    if (same_plan && (s_map.status.visible || completed_frame_locked())) {
+    const bool force_reload = s_map.force_reload_next_acquire;
+    s_map.force_reload_next_acquire = false;
+    if (!force_reload && same_plan &&
+        (s_map.status.visible || completed_frame_locked())) {
         s_map.status.visible = true;
         if (completed_frame_locked()) {
             s_map.status.worker_running = false;
@@ -674,6 +678,17 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
     *out_generation = generation;
     xTaskNotifyGive(s_map.worker);
     return ESP_OK;
+}
+
+void d1l_map_view_service_force_reload_next_acquire(void)
+{
+    if (!s_map.lock) {
+        return;
+    }
+    if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        s_map.force_reload_next_acquire = true;
+        xSemaphoreGive(s_map.lock);
+    }
 }
 
 void d1l_map_view_service_release_visible(uint32_t generation)

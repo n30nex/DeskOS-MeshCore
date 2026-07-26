@@ -59,6 +59,7 @@ def test_nodes_expose_finder_and_confirmed_retained_clear() -> None:
 def test_repeater_ping_and_trace_results_are_visible() -> None:
     service = read("main/mesh/meshcore_service.c")
     phase1 = read("main/ui/ui_phase1.c")
+    console = read("main/comms/usb_console.c")
 
     ping = service.split(
         "static esp_err_t meshcore_service_handle_send_trace_contact", 1
@@ -75,3 +76,7 @@ def test_repeater_ping_and_trace_results_are_visible() -> None:
     assert '"%s reply  RTT %lums  RSSI %d  back SNR %s%d.%02d"' in phase1
     assert '"Hop SNR:"' in phase1
     assert "render_second != s_route_trace_last_render_second" in phase1
+    assert "static void cmd_repeater_ping(const char *line)" in console
+    assert "d1l_meshcore_service_ping_repeater(fingerprint)" in console
+    assert '\\"targeted_trace_rf_tx\\":true' in console
+    assert "cmd_trace_status(\"repeater ping status\")" in console
