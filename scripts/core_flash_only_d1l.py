@@ -486,13 +486,33 @@ def read_identity_status_from_handle(
     return command_sender(handle, "identity status", timeout)
 
 
+def _read_retained_state_command(
+    handle: Any,
+    command: str,
+    timeout: float,
+    command_sender: Callable[[Any, str, float], dict],
+) -> dict:
+    result = command_sender(handle, command, timeout)
+    if result.get("ok") is True or result.get("code") != "TIMEOUT":
+        return result
+    time.sleep(1.0)
+    retry_result = dict(command_sender(handle, command, timeout))
+    retry_result["retry_count"] = 1
+    return retry_result
+
+
 def read_retained_state_from_handle(
     handle: Any,
     timeout: float,
     command_sender: Callable[[Any, str, float], dict],
 ) -> list[dict]:
     return [
-        command_sender(handle, command, timeout)
+        _read_retained_state_command(
+            handle,
+            command,
+            timeout,
+            command_sender,
+        )
         for command in RETAINED_STATE_COMMANDS
     ]
 
@@ -795,7 +815,12 @@ def read_retained_state(
         time.sleep(1.0)
         handle.reset_input_buffer()
         return [
-            send_console_command(handle, command, timeout)
+            _read_retained_state_command(
+                handle,
+                command,
+                timeout,
+                send_console_command,
+            )
             for command in RETAINED_STATE_COMMANDS
         ]
 

@@ -168,6 +168,7 @@ FLASH_BOOTSTRAP="$EVIDENCE_DIR/flash-bootstrap.json"
   --commit "$SHA" \
   --port "$PORT" \
   --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --serial-timeout 60 \
   --phase bootstrap \
   --out "$FLASH_BOOTSTRAP"
 
@@ -182,6 +183,7 @@ FLASH_RETAINED="$EVIDENCE_DIR/flash-retained-reflash.json"
   --commit "$SHA" \
   --port "$PORT" \
   --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
+  --serial-timeout 60 \
   --phase retained-reflash \
   --out "$FLASH_RETAINED"
 ```
