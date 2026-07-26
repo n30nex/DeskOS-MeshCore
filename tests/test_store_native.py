@@ -34,6 +34,7 @@ def test_production_node_and_contact_store_native_behavior(tmp_path):
         str(ROOT / "main/mesh/meshcore_wire.c"),
         str(ROOT / "main/mesh/contact_uri.c"),
         str(ROOT / "tests/native/esp_nvs_stubs.c"),
+        str(ROOT / "tests/native/retained_blob_store_nvs_adapter.c"),
         str(ROOT / "tests/native/mbedtls_md_stub.c"),
         str(ROOT / "tests/native/store_behavior_test.c"),
         "-o",

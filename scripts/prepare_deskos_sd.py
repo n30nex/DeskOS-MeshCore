@@ -30,6 +30,8 @@ RUNTIME_DIRECTORIES = (
     "stores/messages/public",
     "stores/messages/dm",
     "stores/nodes",
+    "stores/contacts",
+    "stores/read_state",
     "stores/routes",
     "stores/packet_log",
     "exports",

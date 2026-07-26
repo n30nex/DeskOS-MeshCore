@@ -143,11 +143,15 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in source
     assert "D1L_RETAINED_BLOB_STORE_NODES" in source
     assert "node_store_backend" in header
+    assert "contact_store_backend" in header
+    assert "read_state_backend" in header
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_DM_MESSAGES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_NODES)" in source
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_CONTACTS)" in source
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_READ_STATE)" in source
     assert "refresh_retained_sd_health" in source
     assert "d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
     assert "d1l_retained_blob_store_any_sd_degraded()" in source
@@ -158,6 +162,8 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert 'status->dm_store_backend = "nvs"' not in source
     assert 'status->route_store_backend = "nvs"' not in source
     assert 'status->node_store_backend = "nvs"' not in source
+    assert 'status->contact_store_backend = "nvs"' not in source
+    assert 'status->read_state_backend = "nvs"' not in source
     assert "d1l_retained_blob_store_note_sd_backend(sd->data_ready" in source
     assert "sd->file_ops_supported" in source
     assert "sd->atomic_rename_supported" in source
@@ -620,6 +626,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
         "message_store_backend",
         "packet_log_backend",
         "route_store_backend",
+        "contact_store_backend",
+        "read_state_backend",
         "map_tile_backend",
         "export_backend",
         "map_tile_cache_ready",

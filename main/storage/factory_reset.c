@@ -59,6 +59,8 @@ static const char *const s_sd_lineage_keys[D1L_FACTORY_RESET_SD_STORE_COUNT] = {
     "sd_routes_v1",
     "sd_packets_v1",
     "sd_nodes_v1",
+    "sd_contacts_v1",
+    "sd_read_v1",
 };
 
 typedef struct {
@@ -202,6 +204,16 @@ static const d1l_factory_reset_inventory_entry_t s_inventory[] = {
      D1L_FACTORY_RESET_DISPOSITION_PRESERVE_OWNERSHIP_EVIDENCE, false,
      "prevents retired packet history from resurrecting after SD migration",
      D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"contacts_sd_only", D1L_FACTORY_RESET_PARTITION_DEFAULT,
+     "nvs", "d1l_ret_meta", "sd_contacts_v1",
+     D1L_FACTORY_RESET_DISPOSITION_PRESERVE_OWNERSHIP_EVIDENCE, false,
+     "prevents retired contact data from resurrecting after SD migration",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"read_state_sd_only", D1L_FACTORY_RESET_PARTITION_DEFAULT,
+     "nvs", "d1l_ret_meta", "sd_read_v1",
+     D1L_FACTORY_RESET_DISPOSITION_PRESERVE_OWNERSHIP_EVIDENCE, false,
+     "prevents retired read cursors from resurrecting after SD migration",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
     {"retained_partition_anchor", D1L_FACTORY_RESET_PARTITION_RETAINED,
      D1L_FACTORY_RESET_RETAINED_PARTITION, "d1l_ret_meta", "anchor",
      D1L_FACTORY_RESET_DISPOSITION_PRESERVE_OWNERSHIP_EVIDENCE, false,
@@ -248,6 +260,16 @@ static const d1l_factory_reset_inventory_entry_t s_inventory[] = {
      D1L_FACTORY_RESET_JOURNAL_NAMESPACE, "sd_nodes_v1",
      D1L_FACTORY_RESET_DISPOSITION_INTERNAL_JOURNAL, false,
      "durable post-reset node-history removable-SD lineage fence",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"sd_contact_lineage", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
+     D1L_FACTORY_RESET_JOURNAL_NAMESPACE, "sd_contacts_v1",
+     D1L_FACTORY_RESET_DISPOSITION_INTERNAL_JOURNAL, false,
+     "durable post-reset contact-book removable-SD lineage fence",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"sd_read_state_lineage", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
+     D1L_FACTORY_RESET_JOURNAL_NAMESPACE, "sd_read_v1",
+     D1L_FACTORY_RESET_DISPOSITION_INTERNAL_JOURNAL, false,
+     "durable post-reset read-cursor removable-SD lineage fence",
      D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
 };
 

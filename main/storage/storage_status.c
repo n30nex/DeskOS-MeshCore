@@ -84,6 +84,12 @@ static void refresh_retained_sd_health(d1l_storage_status_t *status)
     (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_NODES,
                                            &status->retained_sd_stats[
                                                D1L_RETAINED_BLOB_STORE_NODES]);
+    (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_CONTACTS,
+                                           &status->retained_sd_stats[
+                                               D1L_RETAINED_BLOB_STORE_CONTACTS]);
+    (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_READ_STATE,
+                                           &status->retained_sd_stats[
+                                               D1L_RETAINED_BLOB_STORE_READ_STATE]);
     status->retained_sd_degraded = d1l_retained_blob_store_any_sd_degraded();
     /* RC1 retained history is SD-only. Internal NVS is not a history mirror,
      * so its ownership/legacy-import state must not be presented as a failed
@@ -318,11 +324,17 @@ static void set_store_backends(d1l_storage_status_t *status)
         d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
     const bool nodes_on_sd =
         d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_NODES);
+    const bool contacts_on_sd =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_CONTACTS);
+    const bool read_state_on_sd =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_READ_STATE);
     const bool any_retained_sd = public_messages_on_sd ||
                                  dm_messages_on_sd ||
                                  routes_on_sd ||
                                  packet_log_on_sd ||
-                                 nodes_on_sd;
+                                 nodes_on_sd ||
+                                 contacts_on_sd ||
+                                 read_state_on_sd;
     status->data_backend = any_retained_sd ? "sd" : "volatile";
     status->message_store_backend =
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES);
@@ -334,6 +346,10 @@ static void set_store_backends(d1l_storage_status_t *status)
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES);
     status->node_store_backend =
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_NODES);
+    status->contact_store_backend =
+        d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_CONTACTS);
+    status->read_state_backend =
+        d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_READ_STATE);
     status->map_tile_backend = d1l_map_tile_store_sd_ready(status) ?
         "sd_map_tiles_ready" : "unavailable";
     status->export_backend = d1l_export_store_sd_ready(status) ?

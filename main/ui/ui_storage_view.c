@@ -254,13 +254,17 @@ static const char *data_summary(const d1l_ui_storage_view_input_t *input)
         backend_uses_sd(input->packet_log_backend) ||
         backend_uses_sd(input->route_store_backend) ||
         backend_uses_sd(input->node_store_backend) ||
+        backend_uses_sd(input->contact_store_backend) ||
+        backend_uses_sd(input->read_state_backend) ||
         backend_uses_sd(input->map_tile_backend) ||
         backend_uses_sd(input->export_backend);
     if (backend_is_live_only(input->message_store_backend) ||
         backend_is_live_only(input->dm_store_backend) ||
         backend_is_live_only(input->packet_log_backend) ||
         backend_is_live_only(input->route_store_backend) ||
-        backend_is_live_only(input->node_store_backend)) {
+        backend_is_live_only(input->node_store_backend) ||
+        backend_is_live_only(input->contact_store_backend) ||
+        backend_is_live_only(input->read_state_backend)) {
         return "Live only; history not saved";
     }
     if (input->retained_backup_degraded) {
@@ -277,7 +281,9 @@ static void set_hero(const d1l_ui_storage_view_input_t *input,
     const char *guidance = "Status updates automatically.";
     uint32_t accent = COLOR_AMBER;
 
-    if (backend_is_live_only(input->node_store_backend)) {
+    if (backend_is_live_only(input->node_store_backend) ||
+        backend_is_live_only(input->contact_store_backend) ||
+        backend_is_live_only(input->read_state_backend)) {
         state = "Live mesh only";
         detail = "SD unavailable; history is not saved.";
         guidance = "RF transmit, receive, and chat remain available.";
@@ -438,6 +444,8 @@ bool d1l_ui_storage_view(const d1l_ui_storage_view_input_t *input,
     memset(out_view, 0, sizeof(*out_view));
     out_view->needs_attention =
         backend_is_live_only(input->node_store_backend) ||
+        backend_is_live_only(input->contact_store_backend) ||
+        backend_is_live_only(input->read_state_backend) ||
         storage_needs_attention(input) ||
         input->retained_backup_degraded;
     set_hero(input, &out_view->hero);
@@ -480,6 +488,14 @@ bool d1l_ui_storage_view(const d1l_ui_storage_view_input_t *input,
                  D1L_UI_STORAGE_LOCATION_NODES, "Node map history",
                  node_backend(input->node_store_backend),
                  backend_accent(input->node_store_backend));
+    set_location(&out_view->locations[D1L_UI_STORAGE_LOCATION_CONTACTS],
+                 D1L_UI_STORAGE_LOCATION_CONTACTS, "Contacts",
+                 retained_backend(input, input->contact_store_backend),
+                 backend_accent(input->contact_store_backend));
+    set_location(&out_view->locations[D1L_UI_STORAGE_LOCATION_READ_STATE],
+                 D1L_UI_STORAGE_LOCATION_READ_STATE, "Read/unread state",
+                 retained_backend(input, input->read_state_backend),
+                 backend_accent(input->read_state_backend));
     set_location(&out_view->locations[D1L_UI_STORAGE_LOCATION_MAP_TILES],
                  D1L_UI_STORAGE_LOCATION_MAP_TILES, "Map tiles",
                  map_backend(input->map_tile_backend),

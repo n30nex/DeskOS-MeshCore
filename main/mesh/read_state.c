@@ -4,13 +4,12 @@
 #include <string.h>
 
 #include "esp_attr.h"
-#include "nvs.h"
 
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
+#include "storage/retained_blob_store.h"
 
-#define D1L_READ_STATE_NAMESPACE "d1l_read"
 #define D1L_READ_STATE_KEY "state"
 #define D1L_READ_STATE_SCHEMA 2U
 #define D1L_READ_STATE_SCHEMA_V1 1U
@@ -69,22 +68,13 @@ static bool blob_v2_is_valid(const d1l_read_state_v2_blob_t *blob, size_t len)
 
 static esp_err_t persist_state(void)
 {
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_READ_STATE_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
     s_state.schema = D1L_READ_STATE_SCHEMA;
     if (s_state.dm_cursor_count > D1L_READ_STATE_DM_THREAD_CAPACITY) {
         s_state.dm_cursor_count = D1L_READ_STATE_DM_THREAD_CAPACITY;
     }
-    ret = nvs_set_blob(handle, D1L_READ_STATE_KEY, &s_state, sizeof(s_state));
-    if (ret == ESP_OK) {
-        ret = nvs_commit(handle);
-    }
-    nvs_close(handle);
-    return ret;
+    return d1l_retained_blob_store_write(
+        D1L_RETAINED_BLOB_STORE_READ_STATE,
+        D1L_READ_STATE_KEY, &s_state, sizeof(s_state));
 }
 
 static esp_err_t persist_mutation_or_rollback(
@@ -119,37 +109,32 @@ esp_err_t d1l_read_state_init(void)
 {
     clear_ram();
     bool migrated = false;
-    bool erased = false;
-
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_READ_STATE_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        s_loaded = false;
-        return ret;
-    }
 
     size_t len = 0;
-    ret = nvs_get_blob(handle, D1L_READ_STATE_KEY, NULL, &len);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+    d1l_read_state_v2_blob_t loaded = {0};
+    size_t read_len = sizeof(loaded);
+    esp_err_t ret = d1l_retained_blob_store_read(
+        D1L_RETAINED_BLOB_STORE_READ_STATE,
+        D1L_READ_STATE_KEY, &loaded, &read_len);
+    if (ret == ESP_ERR_NOT_FOUND) {
         ret = ESP_OK;
     } else if (ret == ESP_OK) {
+        len = read_len;
         if (len == sizeof(d1l_read_state_v2_blob_t)) {
-            d1l_read_state_v2_blob_t loaded = {0};
-            ret = nvs_get_blob(handle, D1L_READ_STATE_KEY, &loaded, &len);
-            if (ret == ESP_OK && blob_v2_is_valid(&loaded, len)) {
+            if (blob_v2_is_valid(&loaded, len)) {
                 s_state = loaded;
-            } else if (ret == ESP_OK) {
+            } else {
                 ret = ESP_ERR_INVALID_VERSION;
             }
         } else if (len == sizeof(d1l_read_state_v1_blob_t)) {
-            d1l_read_state_v1_blob_t loaded = {0};
-            ret = nvs_get_blob(handle, D1L_READ_STATE_KEY, &loaded, &len);
-            if (ret == ESP_OK && blob_v1_is_valid(&loaded, len)) {
-                s_state.last_public_read_seq = loaded.last_public_read_seq;
-                s_state.last_dm_read_seq = loaded.last_dm_read_seq;
-                s_state.mark_read_count = loaded.mark_read_count;
+            const d1l_read_state_v1_blob_t *legacy =
+                (const d1l_read_state_v1_blob_t *)&loaded;
+            if (blob_v1_is_valid(legacy, len)) {
+                s_state.last_public_read_seq = legacy->last_public_read_seq;
+                s_state.last_dm_read_seq = legacy->last_dm_read_seq;
+                s_state.mark_read_count = legacy->mark_read_count;
                 migrated = true;
-            } else if (ret == ESP_OK) {
+            } else {
                 ret = ESP_ERR_INVALID_VERSION;
             }
         } else {
@@ -158,17 +143,11 @@ esp_err_t d1l_read_state_init(void)
 
         if (ret != ESP_OK) {
             clear_ram();
-            ret = nvs_erase_key(handle, D1L_READ_STATE_KEY);
-            if (ret == ESP_ERR_NVS_NOT_FOUND) {
-                ret = ESP_OK;
-            }
-            erased = (ret == ESP_OK);
-        }
-        if (ret == ESP_OK && erased) {
-            ret = nvs_commit(handle);
+            ret = d1l_retained_blob_store_erase(
+                D1L_RETAINED_BLOB_STORE_READ_STATE,
+                D1L_READ_STATE_KEY);
         }
     }
-    nvs_close(handle);
     s_loaded = (ret == ESP_OK);
     if (s_loaded && migrated) {
         ret = persist_state();

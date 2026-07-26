@@ -27,7 +27,7 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         re.S,
     )
     entries = [match.groupdict() for match in pattern.finditer(table)]
-    assert len(entries) == 32
+    assert len(entries) == 40
 
     def label(entry):
         value = entry["label"]
@@ -89,6 +89,12 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         ("nvs", "d1l_time", "wall_ckpt_v1", checkpoint),
         ("nvs", "d1l_crash", "ring", crash),
         ("nvs", "d1l_ret_meta", "initialized", ownership),
+        ("nvs", "d1l_ret_meta", "sd_pub_v1", ownership),
+        ("nvs", "d1l_ret_meta", "sd_dm_v1", ownership),
+        ("nvs", "d1l_ret_meta", "sd_route_v1", ownership),
+        ("nvs", "d1l_ret_meta", "sd_pkt_v1", ownership),
+        ("nvs", "d1l_ret_meta", "sd_contacts_v1", ownership),
+        ("nvs", "d1l_ret_meta", "sd_read_v1", ownership),
         ("d1l_retained", "d1l_ret_meta", "anchor", ownership),
         ("nvs", "d1l_reset", "factory_v1", journal),
         ("nvs", "d1l_reset", "sd_public_v1", journal),
@@ -96,6 +102,8 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         ("nvs", "d1l_reset", "sd_routes_v1", journal),
         ("nvs", "d1l_reset", "sd_packets_v1", journal),
         ("nvs", "d1l_reset", "sd_nodes_v1", journal),
+        ("nvs", "d1l_reset", "sd_contacts_v1", journal),
+        ("nvs", "d1l_reset", "sd_read_v1", journal),
     }
     assert nvs_tuples == expected_nvs_tuples
     for entry in entries:
@@ -144,8 +152,8 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         ),
     }
     header = read("main/storage/factory_reset.h")
-    assert "D1L_FACTORY_RESET_INVENTORY_COUNT 32U" in header
-    assert "D1L_FACTORY_RESET_SD_STORE_COUNT 5U" in header
+    assert "D1L_FACTORY_RESET_INVENTORY_COUNT 40U" in header
+    assert "D1L_FACTORY_RESET_SD_STORE_COUNT 7U" in header
     assert "D1L_FACTORY_RESET_RAW_MARKER_COUNT 2U" in header
     assert "D1L_FACTORY_RESET_RAW_MARKER_BYTES 16U" in header
 

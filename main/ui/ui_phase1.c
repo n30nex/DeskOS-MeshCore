@@ -376,6 +376,8 @@ typedef struct {
     const char *message_store_backend;
     const char *dm_store_backend;
     const char *node_store_backend;
+    const char *contact_store_backend;
+    const char *read_state_backend;
 } d1l_ui_content_generation_t;
 
 typedef struct {
@@ -473,6 +475,8 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .message_store_backend = snapshot->message_store_backend,
         .dm_store_backend = snapshot->dm_store_backend,
         .node_store_backend = snapshot->node_store_backend,
+        .contact_store_backend = snapshot->contact_store_backend,
+        .read_state_backend = snapshot->read_state_backend,
     };
 }
 
@@ -551,7 +555,11 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         content_generation_text_equal(left->dm_store_backend,
                                       right->dm_store_backend) &&
         content_generation_text_equal(left->node_store_backend,
-                                      right->node_store_backend);
+                                      right->node_store_backend) &&
+        content_generation_text_equal(left->contact_store_backend,
+                                      right->contact_store_backend) &&
+        content_generation_text_equal(left->read_state_backend,
+                                      right->read_state_backend);
 }
 
 static void remember_rendered_content_generation(const d1l_app_snapshot_t *snapshot)
@@ -1885,6 +1893,8 @@ static void storage_view_input_from_snapshot(
         .packet_log_backend = snapshot->packet_log_backend,
         .route_store_backend = snapshot->route_store_backend,
         .node_store_backend = snapshot->node_store_backend,
+        .contact_store_backend = snapshot->contact_store_backend,
+        .read_state_backend = snapshot->read_state_backend,
         .map_tile_backend = snapshot->map_tile_backend,
         .export_backend = snapshot->export_backend,
     };

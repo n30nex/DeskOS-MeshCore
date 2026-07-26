@@ -50,6 +50,8 @@ def test_prepare_is_plan_only_by_default_and_apply_is_verified(tmp_path):
         "deskos/stores/messages/public",
         "deskos/stores/messages/dm",
         "deskos/stores/nodes",
+        "deskos/stores/contacts",
+        "deskos/stores/read_state",
         "deskos/stores/routes",
         "deskos/stores/packet_log",
         "deskos/exports",

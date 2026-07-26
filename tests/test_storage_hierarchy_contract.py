@@ -99,6 +99,10 @@ def test_storage_retained_sd_degradation_is_copied_into_touch_snapshot():
     )
     assert "const char *node_store_backend;" in snapshot_struct
     assert "snapshot->node_store_backend = storage.node_store_backend;" in snapshot_copy
+    assert "const char *contact_store_backend;" in snapshot_struct
+    assert "snapshot->contact_store_backend = storage.contact_store_backend;" in snapshot_copy
+    assert "const char *read_state_backend;" in snapshot_struct
+    assert "snapshot->read_state_backend = storage.read_state_backend;" in snapshot_copy
 
 
 def test_storage_touch_ui_prioritizes_all_attention_states():
@@ -229,11 +233,13 @@ def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():
         "packet_log_backend",
         "route_store_backend",
         "node_store_backend",
+        "contact_store_backend",
+        "read_state_backend",
         "map_tile_backend",
         "export_backend",
     ):
         assert f"input->{backend}" in summary
-    assert summary.count("backend_uses_sd(") == 7
+    assert summary.count("backend_uses_sd(") == 9
     assert 'return uses_sd ? "SD card" : "Live only";' in summary
     assert '"Live only; history not saved"' in summary
     assert "sd_pending_store_migration" not in uses_sd

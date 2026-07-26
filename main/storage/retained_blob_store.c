@@ -25,11 +25,15 @@
 #define D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"
 #define D1L_RETAINED_ROUTE_NAMESPACE "d1l_routes"
 #define D1L_RETAINED_PACKET_LOG_NAMESPACE "d1l_packets"
+#define D1L_RETAINED_CONTACT_NAMESPACE "d1l_contacts"
+#define D1L_RETAINED_READ_STATE_NAMESPACE "d1l_read"
 #define D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR "stores/messages/public"
 #define D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"
 #define D1L_RETAINED_ROUTE_SD_DIR "stores/routes"
 #define D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"
 #define D1L_RETAINED_NODE_SD_DIR "stores/nodes"
+#define D1L_RETAINED_CONTACT_SD_DIR "stores/contacts"
+#define D1L_RETAINED_READ_STATE_SD_DIR "stores/read_state"
 #define D1L_RETAINED_SD_LINEAGE_MARKER_KEY "reset_lineage_v1"
 #define D1L_RETAINED_SD_WRITE_TIMEOUT_MS 750U
 #define D1L_RETAINED_SD_READ_TIMEOUT_MS 750U
@@ -101,6 +105,22 @@ static const d1l_retained_blob_store_config_t s_store_configs[] = {
         .legacy_retired_key = NULL,
         .nvs_fallback_allowed = false,
     },
+    {
+        .id = D1L_RETAINED_BLOB_STORE_CONTACTS,
+        .name = "contacts",
+        .nvs_namespace = D1L_RETAINED_CONTACT_NAMESPACE,
+        .sd_directory = D1L_RETAINED_CONTACT_SD_DIR,
+        .legacy_retired_key = "sd_contacts_v1",
+        .nvs_fallback_allowed = false,
+    },
+    {
+        .id = D1L_RETAINED_BLOB_STORE_READ_STATE,
+        .name = "read_state",
+        .nvs_namespace = D1L_RETAINED_READ_STATE_NAMESPACE,
+        .sd_directory = D1L_RETAINED_READ_STATE_SD_DIR,
+        .legacy_retired_key = "sd_read_v1",
+        .nvs_fallback_allowed = false,
+    },
 };
 
 _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_COUNT ==
@@ -112,6 +132,12 @@ _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_PACKET_LOG ==
 _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_NODES ==
                    (uint32_t)D1L_FACTORY_RESET_SD_STORE_NODES,
                "retained and reset node-store identifiers must match");
+_Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_CONTACTS ==
+                   (uint32_t)D1L_FACTORY_RESET_SD_STORE_CONTACTS,
+               "retained and reset contact-store identifiers must match");
+_Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_READ_STATE ==
+                   (uint32_t)D1L_FACTORY_RESET_SD_STORE_READ_STATE,
+               "retained and reset read-state identifiers must match");
 
 static bool s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT];
 static bool s_store_sd_committed[D1L_RETAINED_BLOB_STORE_COUNT];
@@ -703,7 +729,8 @@ static esp_err_t nvs_read_legacy_blob(
         return ret;
     }
     *len_inout = requested_len;
-    return nvs_read_blob_from(config, key, dst, len_inout, false);
+    ret = nvs_read_blob_from(config, key, dst, len_inout, false);
+    return ret == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : ret;
 }
 
 static esp_err_t nvs_write_blob(const d1l_retained_blob_store_config_t *config,

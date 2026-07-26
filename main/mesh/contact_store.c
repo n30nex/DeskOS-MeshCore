@@ -5,13 +5,12 @@
 
 #include "esp_attr.h"
 #include "esp_timer.h"
-#include "nvs.h"
 
 #include "mesh/contact_uri.h"
 #include "mesh/meshcore_wire.h"
 #include "mesh/store_lock.h"
+#include "storage/retained_blob_store.h"
 
-#define D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"
 #define D1L_CONTACT_STORE_KEY "contacts"
 #define D1L_CONTACT_STORE_LEGACY_ALIAS_LEN 24U
 #define D1L_CONTACT_STORE_LEGACY_TYPE_LEN 8U
@@ -404,18 +403,9 @@ static esp_err_t write_contact_blob(const d1l_contact_store_blob_t *blob)
     if (!blob) {
         return ESP_ERR_INVALID_ARG;
     }
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_CONTACT_STORE_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    ret = nvs_set_blob(handle, D1L_CONTACT_STORE_KEY, blob, sizeof(*blob));
-    if (ret == ESP_OK) {
-        ret = nvs_commit(handle);
-    }
-    nvs_close(handle);
-    return ret;
+    return d1l_retained_blob_store_write(
+        D1L_RETAINED_BLOB_STORE_CONTACTS,
+        D1L_CONTACT_STORE_KEY, blob, sizeof(*blob));
 }
 
 static esp_err_t persist_store(void)
@@ -969,17 +959,12 @@ esp_err_t d1l_contact_store_init(void)
     reset_persistence_state();
     bool migrated = false;
 
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_CONTACT_STORE_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        s_loaded = false;
-        return ret;
-    }
-
     memset(&s_blob_scratch, 0, sizeof(s_blob_scratch));
     size_t len = sizeof(s_blob_scratch);
-    ret = nvs_get_blob(handle, D1L_CONTACT_STORE_KEY, &s_blob_scratch, &len);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+    esp_err_t ret = d1l_retained_blob_store_read(
+        D1L_RETAINED_BLOB_STORE_CONTACTS,
+        D1L_CONTACT_STORE_KEY, &s_blob_scratch, &len);
+    if (ret == ESP_ERR_NOT_FOUND) {
         ret = ESP_OK;
     } else if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
         memcpy(s_entries, s_blob_scratch.entries, sizeof(s_entries));
@@ -1014,7 +999,7 @@ esp_err_t d1l_contact_store_init(void)
     } else if (ret == ESP_OK) {
         /* A retained contact blob is user data.  An unrecognised schema or a
          * corrupt record must never be converted into an empty, committed
-         * store during boot.  Keep the original NVS value byte-for-byte,
+         * store during boot.  Keep the original retained value byte-for-byte,
          * expose no contacts, and make every implicit re-open fail closed
          * until the user explicitly clears the store. */
         clear_ram();
@@ -1024,7 +1009,6 @@ esp_err_t d1l_contact_store_init(void)
     if (ret == ESP_OK && migrated) {
         finalize_migrated_path_state();
     }
-    nvs_close(handle);
     if (ret == ESP_OK && migrated) {
         ret = persist_store();
     }
@@ -1128,25 +1112,8 @@ esp_err_t d1l_contact_store_clear(void)
     s_loaded = true;
 
     d1l_store_lock_take(&s_persist_io_lock);
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_CONTACT_STORE_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        s_persistence_fail_count++;
-        s_persistence_last_error = ret;
-        mark_deferred_persistence_locked(
-            (uint32_t)(esp_timer_get_time() / 1000ULL));
-        d1l_store_lock_give(&s_persist_io_lock);
-        d1l_store_lock_give(&s_store_lock);
-        return ret;
-    }
-    ret = nvs_erase_key(handle, D1L_CONTACT_STORE_KEY);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        ret = ESP_OK;
-    }
-    if (ret == ESP_OK) {
-        ret = nvs_commit(handle);
-    }
-    nvs_close(handle);
+    esp_err_t ret = d1l_retained_blob_store_erase(
+        D1L_RETAINED_BLOB_STORE_CONTACTS, D1L_CONTACT_STORE_KEY);
     d1l_store_lock_give(&s_persist_io_lock);
     if (ret == ESP_OK) {
         s_persistence_commit_count++;
