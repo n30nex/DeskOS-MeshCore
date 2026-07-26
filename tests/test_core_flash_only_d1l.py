@@ -21,6 +21,106 @@ def test_retained_snapshot_reads_contacts_before_bulk_message_lists():
     assert commands.index("contacts") < commands.index("messages dm")
 
 
+def test_retained_state_from_handle_retries_only_timeout_once(monkeypatch):
+    handle = object()
+    calls = []
+    sleeps = []
+    attempts = {"contacts": 0}
+    monkeypatch.setattr(
+        flash,
+        "RETAINED_STATE_COMMANDS",
+        ("contacts", "version", "health"),
+    )
+    monkeypatch.setattr(flash.time, "sleep", sleeps.append)
+
+    def sender(selected_handle, command, timeout):
+        calls.append((selected_handle, command, timeout))
+        if command == "contacts":
+            attempts[command] += 1
+            if attempts[command] == 1:
+                return {"cmd": command, "ok": False, "code": "TIMEOUT"}
+            return {"cmd": command, "ok": True, "entries": []}
+        if command == "version":
+            return {"cmd": command, "ok": False, "code": "BAD_REQUEST"}
+        return {"cmd": command, "ok": True, "code": "TIMEOUT"}
+
+    results = flash.read_retained_state_from_handle(handle, 60.0, sender)
+
+    assert [(command, timeout) for _, command, timeout in calls] == [
+        ("contacts", 60.0),
+        ("contacts", 60.0),
+        ("version", 60.0),
+        ("health", 60.0),
+    ]
+    assert all(selected_handle is handle for selected_handle, _, _ in calls)
+    assert sleeps == [1.0]
+    assert results[0]["retry_count"] == 1
+    assert "retry_count" not in results[1]
+    assert "retry_count" not in results[2]
+
+
+def test_read_retained_state_retries_timeout_on_open_handle(
+    monkeypatch,
+):
+    calls = []
+    sleeps = []
+    handle = SimpleNamespace(
+        reset_input_buffer=lambda: calls.append(("reset", handle))
+    )
+    monkeypatch.setitem(
+        flash.sys.modules,
+        "serial",
+        SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        flash,
+        "RETAINED_STATE_COMMANDS",
+        ("contacts",),
+    )
+    monkeypatch.setattr(flash.time, "sleep", sleeps.append)
+
+    @contextlib.contextmanager
+    def opener(_serial, *, port, baudrate, timeout):
+        calls.append(("open", handle, port, baudrate, timeout))
+        yield handle
+
+    attempts = 0
+
+    def sender(selected_handle, command, timeout):
+        nonlocal attempts
+        attempts += 1
+        calls.append(("command", selected_handle, command, timeout))
+        if attempts == 1:
+            return {"cmd": command, "ok": False, "code": "TIMEOUT"}
+        return {"cmd": command, "ok": True, "entries": []}
+
+    monkeypatch.setattr(flash, "open_d1l_serial", opener)
+    monkeypatch.setattr(flash, "send_console_command", sender)
+
+    results = flash.read_retained_state(
+        POSIX_PORT,
+        115200,
+        60.0,
+        0.0,
+    )
+
+    assert calls == [
+        ("open", handle, POSIX_PORT, 115200, 60.0),
+        ("reset", handle),
+        ("command", handle, "contacts", 60.0),
+        ("command", handle, "contacts", 60.0),
+    ]
+    assert sleeps == [1.0, 1.0]
+    assert results == [
+        {
+            "cmd": "contacts",
+            "ok": True,
+            "entries": [],
+            "retry_count": 1,
+        }
+    ]
+
+
 def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
     return [
         {
