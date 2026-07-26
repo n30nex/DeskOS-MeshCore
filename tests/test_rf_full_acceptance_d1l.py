@@ -765,12 +765,17 @@ def test_wait_for_mesh_owner_ready_timeout_is_bounded():
 
 def test_controlled_peer_send_waits_for_advancing_mesh_owner():
     events = []
+    blocked = mesh_owner_status(40, heartbeat=9)
+    blocked["state"] = "tx_busy"
     statuses = iter(
         [
+            blocked,
             mesh_owner_status(41, heartbeat=9),
             mesh_owner_status(42, heartbeat=9),
         ]
     )
+    clock = iter([0.0, 31.0, 45.0])
+    sleeps = []
 
     def read_status():
         status = next(statuses)
@@ -784,16 +789,20 @@ def test_controlled_peer_send_waits_for_advancing_mesh_owner():
     result = rf_accept.send_controlled_peer_dm_after_mesh_owner_ready(
         status_reader=read_status,
         sender=send_peer,
-        timeout_sec=1.0,
-        poll_sec=0.25,
+        timeout_sec=90.0,
+        poll_sec=1.0,
+        monotonic=clock.__next__,
+        sleep=sleeps.append,
     )
 
     assert result == {"validation": {"ok": True}}
     assert events == [
+        ("mesh_status", 40),
         ("mesh_status", 41),
         ("mesh_status", 42),
         ("peer_send", None),
     ]
+    assert sleeps == [1.0, 1.0]
 
 
 def test_controlled_peer_send_fails_closed_when_mesh_owner_times_out():
@@ -811,6 +820,168 @@ def test_controlled_peer_send_fails_closed_when_mesh_owner_times_out():
         )
 
     assert peer_calls == []
+
+
+def test_controlled_peer_send_caps_settle_wait_at_90_seconds():
+    peer_calls = []
+    blocked = mesh_owner_status(41, heartbeat=9)
+    blocked["state"] = "tx_busy"
+    clock = iter([0.0, 91.0])
+
+    with pytest.raises(
+        ValueError,
+        match="did not become ready before controlled-peer inbound DM",
+    ):
+        rf_accept.send_controlled_peer_dm_after_mesh_owner_ready(
+            status_reader=lambda: blocked,
+            sender=lambda: peer_calls.append(True),
+            timeout_sec=900.0,
+            poll_sec=1.0,
+            monotonic=clock.__next__,
+            sleep=lambda _: None,
+        )
+
+    assert peer_calls == []
+
+
+def test_exact_outbound_terminal_row_requires_one_fresh_exact_row():
+    fingerprint = "0BF0A701D5AE2DB6"
+    outbound_text = "core acceptance test rf_terminal_out"
+    baseline = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [
+            {
+                "seq": 1,
+                "direction": "tx",
+                "text": outbound_text,
+                "delivered": True,
+                "acked": True,
+            }
+        ],
+    }
+    assert (
+        rf_accept.exact_outbound_terminal_row(
+            baseline_messages=baseline,
+            current_messages=baseline,
+            outbound_text=outbound_text,
+            fingerprint=fingerprint,
+        )
+        is None
+    )
+
+    terminal = {
+        "seq": 2,
+        "fingerprint": fingerprint.lower(),
+        "direction": "tx",
+        "text": outbound_text,
+        "delivered": True,
+        "acked": True,
+    }
+    current = {
+        "ok": True,
+        "fingerprint": fingerprint.lower(),
+        "entries": [*baseline["entries"], terminal],
+    }
+    assert (
+        rf_accept.exact_outbound_terminal_row(
+            baseline_messages=baseline,
+            current_messages=current,
+            outbound_text=outbound_text,
+            fingerprint=fingerprint,
+        )
+        == terminal
+    )
+
+    duplicate = {**terminal, "seq": 3}
+    assert (
+        rf_accept.exact_outbound_terminal_row(
+            baseline_messages=baseline,
+            current_messages={
+                **current,
+                "entries": [*current["entries"], duplicate],
+            },
+            outbound_text=outbound_text,
+            fingerprint=fingerprint,
+        )
+        is None
+    )
+    assert (
+        rf_accept.exact_outbound_terminal_row(
+            baseline_messages=baseline,
+            current_messages={
+                **current,
+                "entries": [
+                    *baseline["entries"],
+                    {**terminal, "text": outbound_text + "-extra"},
+                ],
+            },
+            outbound_text=outbound_text,
+            fingerprint=fingerprint,
+        )
+        is None
+    )
+
+
+def test_outbound_terminal_waits_for_both_flags_and_times_out_closed():
+    fingerprint = "0BF0A701D5AE2DB6"
+    outbound_text = "core acceptance test rf_terminal_out"
+    baseline = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [
+            {"seq": 1, "direction": "tx", "text": "older"}
+        ],
+    }
+    pending = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [
+            *baseline["entries"],
+            {
+                "seq": 2,
+                "direction": "tx",
+                "text": outbound_text,
+                "delivered": True,
+                "acked": False,
+            },
+        ],
+    }
+    complete = json.loads(json.dumps(pending))
+    complete["entries"][-1]["acked"] = True
+    snapshots = iter([pending, complete])
+    clock = iter([0.0, 0.25])
+    sleeps = []
+
+    terminal = rf_accept.require_outbound_terminal_before_peer(
+        snapshots.__next__,
+        baseline_messages=baseline,
+        outbound_text=outbound_text,
+        fingerprint=fingerprint,
+        timeout_sec=1.0,
+        poll_sec=0.25,
+        monotonic=clock.__next__,
+        sleep=sleeps.append,
+    )
+
+    assert terminal == complete["entries"][-1]
+    assert sleeps == [0.25]
+
+    timeout_clock = iter([0.0, 1.0])
+    with pytest.raises(
+        ValueError,
+        match="delivered=true, acked=true",
+    ):
+        rf_accept.require_outbound_terminal_before_peer(
+            lambda: pending,
+            baseline_messages=baseline,
+            outbound_text=outbound_text,
+            fingerprint=fingerprint,
+            timeout_sec=1.0,
+            poll_sec=0.25,
+            monotonic=timeout_clock.__next__,
+            sleep=lambda _seconds: None,
+        )
 
 
 def test_rf_report_rejects_failed_then_successful_outbound_duplicate():

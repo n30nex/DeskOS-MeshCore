@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_packet_log_generation_reconcile_and_independent_mirror_retries(tmp_path):
+def test_packet_log_unloaded_deferred_admission_and_retained_reconciliation(tmp_path):
     compiler = shutil.which("gcc") or shutil.which("clang")
     if compiler is None:
         raise AssertionError("A C compiler is required for native packet-store tests")

@@ -118,7 +118,7 @@ As of the 2026-07-18 live-main checkpoint:
 - ESP-IDF v5.1.x is end of life and is no longer the selected production target. Standalone migration commit `39a043c` uses version-pinned `espressif/idf:v5.5.4`, commits the exact Actions-generated `dependencies.lock`, applies the tracked Seeed BSP compatibility patch, and passes host, firmware, package, checksum, release, and effective-config checks. That evidence does not yet qualify the combined Map/Wi-Fi candidate: exact COM12 must still report `"idf":"v5.5.4"` and pass board/display/touch/Wi-Fi/RF/RP2040-SD/Map/health/reboot/power-cycle smoke with refreshed commit-matched release evidence. No supported-SDK waiver or hardware qualification is implied by the standalone green build.
 - Manual visual confirmation of display bars and touch target movement is still pending; the serial `display test` and `touch test` commands return OK on hardware. The COM12 hardware pixel-capture path reconstructed the current PR #56 hierarchy from `51258ba` / Actions `29060900359` with matching firmware/host CRC `E72745BA`, a passing simulator diff, `public_rf_tx=false`, and `formats_sd=false`; a three-round all-tab health probe also passed cleanly. PR #51, PR #40, and PR #33 captures remain history for superseded layouts. Physical photos/manual review and final-release-SHA evidence are still pending.
 - MeshCore Public group text TX/RX and signed advert TX/RX are implemented and validated through the serial console, firmware-local contacts can promote heard nodes by fingerprint, full advertised public keys are retained for DM targeting and have passed reboot persistence on `COM7`, contact favorite/mute flags persist across reboot, Public unread/read state persists across reboot, per-thread DM read cursors are implemented, firmware-local routes are learned from Public/advert path metadata, route detail diagnostics and a first route detail sheet are implemented, and serial DM flood TX plus the bounded DM store are validated. DM ACK/PATH receive parsing, direct-route TX selection, contact-row DM compose, first contact detail actions, a bounded Public History/search sheet, and a bounded scrollable DM thread/detail history sheet are implemented, and targeted outbound hardware DM receive by the local COM11 Meshcorebot has passed. `scripts/rf_full_acceptance_d1l.py` now provides a single COM12-side artifact path for identity, Meshcorebot status, outbound DM, controlled inbound DM, ACK/PATH, direct-route, health, and no-Public-command proof. Automated RF uses only `#test` or targeted DMs except for the single tokenized final-gate Public send explicitly authorized with `--authorize-public-tx`. The COM11 Discord Python bot is an independent radio peer and COM11 must never be opened as D1L serial. Manual touch review, a passing full RF acceptance artifact, controlled inbound DM unread proof, and physical DM workflow review are still pending.
-- The inbound-DM ACK durability slice uses DM schema v5 for a retained 32-byte authenticated identity digest and per-row ACK reservation/state/error metadata. Valid v5 rows can be deduplicated and bounded across reboot; interrupted reservations are recovered without boot-time RF. Rows migrated from schemas v1-v4 are preserved exactly but marked `legacy_unverified`, are never hydrated into the ACK cache, and are never used as collision-safe re-ACK evidence. A later retry of a grandfathered row may therefore become one new v5 row; firmware does not silently delete or pretend to deduplicate legacy history. Exact peer/RF and power-loss qualification of the v5 behavior remains pending.
+- The current inbound-DM ACK path uses DM schema v7 for a retained 32-byte authenticated identity digest and per-row ACK reservation/state/error metadata. To meet the compatible-peer response deadline, a new row and its bounded ACK reservation are admitted in RAM and queued without SD/NVS I/O; the retained worker persists the latest state afterward. Same-boot dedupe and the two-dispatch ceiling apply immediately, but power loss before a clean worker pass can lose that newest row and budget, so cross-reboot durability is claimed only after worker convergence. Rows migrated from schemas v1-v4 remain `legacy_unverified`, never hydrate the collision-safe ACK cache, and may become one new current-schema row on a later retry. Exact-candidate peer latency, worker convergence, reboot-after-flush, and controlled power-loss qualification remain pending.
 - PR #92 expands issue #65's bounded foundation to a 931-case pinned-upstream
   oracle for packet, advert, group, DM, ACK, PATH, TRACE, identity, and login
   boundaries, while retaining the separate 100,000-input wire-envelope fuzz
@@ -219,14 +219,15 @@ As of the 2026-07-18 live-main checkpoint:
   differential/RFC 8032 behavior under pinned Clang 18 ASan/UBSan with zero
   exceptions. `BLK-WP04-ED25519-SHIFT-UB-20260714` is closed. This does not
   close ACK, route, TRACE, admin, retained-state, RF, or physical behavior.
-- Reliable inbound DM ACK remains incomplete as a release claim even though its
-  software boundary is merged. PR #98 banks the schema-v5 full 32-byte identity
-  digest, per-row durable reservation/state/error, no-RF partial-backend failure,
-  zero boot-time RF, direct then flood fallback, full-digest callback correlation
-  across SD/NVS resequencing, retained TxDone/timeout outcomes, and a maximum
-  two-dispatch budget. Valid v1-v4 rows remain `legacy_unverified` and do not
-  hydrate collision-safe ACK identity state. Compatible-peer RF, controlled
-  power-loss, reboot, and frozen-candidate hardware evidence remain mandatory.
+- Reliable inbound DM ACK remains incomplete as a release claim until the
+  exact candidate proves its deferred contract on hardware. Historical PR #98
+  banks the superseded schema-v5 durability-first baseline. The current
+  schema-v7 path keeps the full 32-byte identity and bounded dispatch metadata,
+  performs admission/reservation/TxDone/timeout updates in RAM, queues RF before
+  retained-store I/O, and delegates durability to the retained worker. Valid
+  v1-v4 rows remain `legacy_unverified`. Compatible-peer deadline proof, a
+  completed worker pass, reboot-after-flush retention, controlled power loss,
+  and frozen-candidate hardware evidence remain mandatory.
 - PR #99 banks only the learned-route software boundary: a known canonical path
   authenticated during the current boot is eligible while fresh, including a
   known zero-hop path; missing, preboot, stale, and malformed paths fall back to

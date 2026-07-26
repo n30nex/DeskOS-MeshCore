@@ -202,10 +202,11 @@ def test_ack_deadline_retry_and_contact_revalidation_are_fail_closed():
 
     inbound_prepare = inbound.index("d1l_contact_store_prepare_path_route(")
     inbound_return = inbound.index("return false;", inbound_prepare)
-    inbound_append = inbound.index("d1l_dm_store_append_rx_identity(")
+    inbound_append = inbound.index("d1l_dm_store_append_rx_identity_deferred(")
     inbound_radio = inbound.index("dispatch_bounded_dm_ack(")
     assert inbound_prepare < inbound_return < inbound_append
     assert inbound_prepare < inbound_return < inbound_radio
+    assert "d1l_dm_store_append_rx_identity(" not in inbound
 
 
 def test_path_dispatch_masks_subtype_and_queues_only_accepted_flood_reciprocal():

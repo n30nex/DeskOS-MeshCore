@@ -137,6 +137,15 @@ esp_err_t d1l_dm_store_append_rx_identity(
     uint32_t ack_hash,
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     d1l_dm_store_append_outcome_t *outcome);
+/* Retains an inbound row in the bounded ring and marks both backends dirty
+ * without performing storage I/O in the MeshCore radio owner. */
+esp_err_t d1l_dm_store_append_rx_identity_deferred(
+    const char *contact_fingerprint, const char *contact_alias,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, uint8_t attempt,
+    uint32_t ack_hash,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_store_append_outcome_t *outcome);
 esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint, const char *contact_alias,
                                        const char *direction, const char *text, int rssi_dbm,
                                        int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
@@ -146,16 +155,32 @@ esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry);
 bool d1l_dm_store_find_rx_identity(
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     d1l_dm_entry_t *out_entry);
+/* Read only from an already-loaded ring. This never attempts backend
+ * initialization and is safe on the radio owner's RX-to-ACK path. */
+bool d1l_dm_store_find_rx_identity_loaded(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_entry_t *out_entry);
 bool d1l_dm_store_find_delivery_session(
     uint64_t delivery_session_id, d1l_dm_entry_t *out_entry);
 esp_err_t d1l_dm_store_reserve_ack_dispatch(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation);
+esp_err_t d1l_dm_store_reserve_ack_dispatch_deferred(
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation);
 esp_err_t d1l_dm_store_rebind_pending_ack_dispatch(
     uint32_t row_seq,
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     uint8_t dispatch_kind);
+esp_err_t d1l_dm_store_rebind_pending_ack_dispatch_deferred(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind);
 esp_err_t d1l_dm_store_complete_ack_dispatch(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    bool sent, esp_err_t error);
+esp_err_t d1l_dm_store_complete_ack_dispatch_deferred(
     uint32_t row_seq,
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     bool sent, esp_err_t error);

@@ -1660,6 +1660,117 @@ static void test_partial_reservation_commit_never_rolls_back_or_sends_twice(void
     assert(row.ack_dispatch_count == 1U);
 }
 
+static void test_deferred_ack_lifecycle_writes_only_on_explicit_flush(void)
+{
+    reset_backend();
+    s_sd_enabled = true;
+    s_backend_generation = 1U;
+    assert(d1l_dm_store_init() == ESP_OK);
+
+    const uint32_t sd_writes_before = s_sd_write_count;
+    const uint32_t nvs_writes_before = s_nvs_write_count;
+    const size_t operations_before = s_operation_count;
+    uint8_t digest[D1L_DM_IDENTITY_DIGEST_BYTES];
+    fill_identity_digest(digest, 0xD1U);
+
+    d1l_dm_store_append_outcome_t append = {0};
+    assert(d1l_dm_store_append_rx_identity_deferred(
+               "0123456789abcdef", "Node", "deferred-ack", -50, 40,
+               1U, 1U, 0U, 0xD1ACU, digest, &append) == ESP_OK);
+    assert(append.inserted && !append.durable);
+    assert(append.row_seq == 1U && append.error == ESP_OK);
+    assert(s_sd_write_count == sd_writes_before);
+    assert(s_nvs_write_count == nvs_writes_before);
+    assert(s_operation_count == operations_before);
+
+    d1l_dm_entry_t row = {0};
+    assert(d1l_dm_store_find_rx_identity(digest, &row));
+    assert(row.seq == append.row_seq);
+    assert(row.ack_state == D1L_DM_ACK_STATE_RETRYABLE);
+    assert(row.ack_dispatch_count == 0U);
+    assert(d1l_dm_store_stats().persistence_dirty);
+
+    d1l_dm_ack_reservation_t reservation = {0};
+    assert(d1l_dm_store_reserve_ack_dispatch_deferred(
+               digest, 2U, &reservation) == ESP_OK);
+    assert(reservation.reserved && !reservation.durable);
+    assert(reservation.row_seq == append.row_seq);
+    assert(reservation.dispatch_count == 1U);
+    assert(reservation.error == ESP_OK);
+    assert(s_sd_write_count == sd_writes_before);
+    assert(s_nvs_write_count == nvs_writes_before);
+    assert(s_operation_count == operations_before);
+
+    assert(d1l_dm_store_find_rx_identity(digest, &row));
+    assert(row.ack_state == D1L_DM_ACK_STATE_PENDING);
+    assert(row.ack_dispatch_count == 1U);
+    assert(row.ack_dispatch_kind == 2U);
+
+    assert(d1l_dm_store_complete_ack_dispatch_deferred(
+               reservation.row_seq, digest, true, ESP_OK) == ESP_OK);
+    assert(s_sd_write_count == sd_writes_before);
+    assert(s_nvs_write_count == nvs_writes_before);
+    assert(s_operation_count == operations_before);
+    assert(d1l_dm_store_find_rx_identity(digest, &row));
+    assert(row.ack_state == D1L_DM_ACK_STATE_SENT);
+    assert(row.ack_dispatch_count == 1U);
+    assert(row.ack_dispatch_kind == 2U);
+    assert(row.ack_last_error == ESP_OK);
+
+    assert(d1l_dm_store_flush() == ESP_OK);
+    assert(s_sd_write_count == sd_writes_before + 1U);
+    assert(s_nvs_write_count == nvs_writes_before + 1U);
+    assert(!d1l_dm_store_stats().persistence_dirty);
+    assert(s_sd.valid && s_nvs.valid);
+
+    const test_blob_v6_t *sd = (const test_blob_v6_t *)s_sd.data;
+    const test_blob_v6_t *nvs = (const test_blob_v6_t *)s_nvs.data;
+    assert(sd->count == 1U && nvs->count == 1U);
+    assert(sd->entries[0].ack_state == D1L_DM_ACK_STATE_SENT);
+    assert(nvs->entries[0].ack_state == D1L_DM_ACK_STATE_SENT);
+    assert(sd->entries[0].ack_dispatch_count == 1U);
+    assert(nvs->entries[0].ack_dispatch_count == 1U);
+    assert(sd->entries[0].ack_dispatch_kind == 2U);
+    assert(nvs->entries[0].ack_dispatch_kind == 2U);
+    assert(memcmp(sd->entries[0].identity_digest, digest, sizeof(digest)) == 0);
+    assert(memcmp(nvs->entries[0].identity_digest, digest, sizeof(digest)) == 0);
+}
+
+static void test_deferred_ack_unloaded_fails_without_storage_io(void)
+{
+    reset_backend();
+    s_sd_enabled = true;
+    s_backend_generation = 1U;
+    uint8_t digest[D1L_DM_IDENTITY_DIGEST_BYTES];
+    fill_identity_digest(digest, 0xD2U);
+
+    d1l_dm_store_append_outcome_t append = {0};
+    assert(d1l_dm_store_append_rx_identity_deferred(
+               "0123456789abcdef", "Node", "unloaded", -50, 40,
+               1U, 1U, 0U, 0xD2ACU, digest,
+               &append) == ESP_ERR_INVALID_STATE);
+    assert(!append.inserted && !append.durable);
+    assert(append.error == ESP_ERR_INVALID_STATE);
+
+    d1l_dm_ack_reservation_t reservation = {0};
+    assert(d1l_dm_store_reserve_ack_dispatch_deferred(
+               digest, 1U, &reservation) == ESP_ERR_INVALID_STATE);
+    assert(!reservation.reserved && !reservation.durable);
+    assert(reservation.error == ESP_ERR_INVALID_STATE);
+    assert(d1l_dm_store_rebind_pending_ack_dispatch_deferred(
+               1U, digest, 2U) == ESP_ERR_INVALID_STATE);
+    assert(d1l_dm_store_complete_ack_dispatch_deferred(
+               1U, digest, false, ESP_FAIL) == ESP_ERR_INVALID_STATE);
+    d1l_dm_entry_t row = {0};
+    assert(!d1l_dm_store_find_rx_identity_loaded(digest, &row));
+
+    assert(s_backend_state_count == 0U);
+    assert(s_sd_read_count == 0U);
+    assert(s_sd_write_count == 0U);
+    assert(s_nvs_write_count == 0U);
+    assert(s_operation_count == 0U);
+}
+
 static void test_reboot_ack_state_mutations_are_bounded(void)
 {
     uint8_t digest[D1L_DM_IDENTITY_DIGEST_BYTES];
@@ -2845,8 +2956,19 @@ static void test_thread_query_is_exact_paged_and_read_only(void)
     assert(s_operation_count == operations_before);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "deferred-ack") == 0) {
+        test_deferred_ack_lifecycle_writes_only_on_explicit_flush();
+        puts("native DM deferred ACK persistence: ok");
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "deferred-unloaded") == 0) {
+        test_deferred_ack_unloaded_fails_without_storage_io();
+        puts("native DM deferred ACK unloaded path: ok");
+        return 0;
+    }
+    assert(argc == 1);
     test_late_ready_merges_before_primary_write();
     test_replacement_generation_forces_read_before_write();
     test_nvs_failure_after_sd_success_stays_retryable();
@@ -2883,6 +3005,7 @@ int main(void)
     test_append_failure_retains_one_identity_row_until_flush();
     test_tx_append_quiesce_yield_flushes_same_row_without_duplicate();
     test_partial_reservation_commit_never_rolls_back_or_sends_twice();
+    test_deferred_ack_lifecycle_writes_only_on_explicit_flush();
     test_reboot_ack_state_mutations_are_bounded();
     test_txdone_persist_failure_blocks_until_flush_or_reboot();
     test_reconcile_ack_metadata_never_regresses();

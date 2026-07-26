@@ -1757,9 +1757,11 @@ static esp_err_t append_raw_internal(const d1l_packet_log_entry_t *entry,
     if (entry == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    const esp_err_t init_ret = ensure_packet_log_initialized();
-    if (init_ret != ESP_OK) {
-        return init_ret;
+    if (!defer_flush) {
+        const esp_err_t init_ret = ensure_packet_log_initialized();
+        if (init_ret != ESP_OK) {
+            return init_ret;
+        }
     }
 
     if (defer_flush) {
@@ -1774,7 +1776,7 @@ static esp_err_t append_raw_internal(const d1l_packet_log_entry_t *entry,
         d1l_store_lock_take(&s_append_clear_lock);
         d1l_store_lock_take(&s_store_lock);
     }
-    if (s_clear_in_progress) {
+    if (!s_loaded || s_clear_in_progress) {
         d1l_store_lock_give(&s_store_lock);
         d1l_store_lock_give(&s_append_clear_lock);
         return ESP_ERR_INVALID_STATE;
