@@ -1066,7 +1066,7 @@ static bool parse_fingerprint_token(const char *src, char *dest, size_t dest_siz
         if (!isxdigit(c)) {
             return false;
         }
-        dest[i] = (char)toupper(c);
+        dest[i] = (char)tolower(c);
     }
     dest[len] = '\0';
     return true;
