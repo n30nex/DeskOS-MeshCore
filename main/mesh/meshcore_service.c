@@ -2184,12 +2184,14 @@ static void complete_pending_ack_tx(bool sent, esp_err_t error)
         return;
     }
 
-    const esp_err_t persist_ret = d1l_dm_store_complete_ack_dispatch(
-        s_pending_ack_tx.row_seq, s_pending_ack_tx.identity_digest,
-        sent, sent ? ESP_OK : error);
+    const esp_err_t store_ret =
+        d1l_dm_store_complete_ack_dispatch_deferred(
+            s_pending_ack_tx.row_seq, s_pending_ack_tx.identity_digest,
+            sent, sent ? ESP_OK : error);
+    /* The radio owner mutates the retained ring but never performs SD/NVS I/O.
+     * The retained worker will make this exact revision durable. */
     (void)d1l_meshcore_ack_dedupe_mark_durable(
-        &s_ack_dedupe, s_pending_ack_tx.identity_digest,
-        persist_ret == ESP_OK);
+        &s_ack_dedupe, s_pending_ack_tx.identity_digest, false);
 
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
     snprintf(note, sizeof(note), "%s %lu %.12s",
@@ -2198,7 +2200,7 @@ static void complete_pending_ack_tx(bool sent, esp_err_t error)
              s_pending_ack_tx.alias);
     if (sent) {
         s_status.ack_tx_done++;
-        s_status.ack_tx_last_error = persist_ret;
+        s_status.ack_tx_last_error = store_ret;
         esp_err_t route_ret = d1l_route_store_upsert_observation(
             s_pending_ack_tx.fingerprint, s_pending_ack_tx.alias,
             s_pending_ack_tx.kind == D1L_MESHCORE_ACK_DISPATCH_FLOOD_ACK_PATH ?
@@ -2209,7 +2211,7 @@ static void complete_pending_ack_tx(bool sent, esp_err_t error)
         if (route_ret != ESP_OK) {
             ESP_LOGW(TAG, "route store DM ACK tx failed: %s", esp_err_to_name(route_ret));
         }
-        append_packet_log(
+        append_packet_log_deferred(
             "tx",
             s_pending_ack_tx.kind == D1L_MESHCORE_ACK_DISPATCH_FLOOD_ACK_PATH ?
                 "dm_ack_path" : "dm_ack",
@@ -2218,19 +2220,20 @@ static void complete_pending_ack_tx(bool sent, esp_err_t error)
             s_pending_ack_tx.raw_len, note);
     } else {
         s_status.ack_tx_failed++;
-        s_status.ack_tx_last_error = persist_ret == ESP_OK ? error : persist_ret;
-        append_packet_log("tx_fail", "dm_ack_failed", 0, 0,
-                          s_pending_ack_tx.path_hash_bytes,
-                          s_pending_ack_tx.path_hops,
-                          s_pending_ack_tx.raw_len,
-                          s_pending_ack_tx.raw,
-                          s_pending_ack_tx.raw_len, note);
+        s_status.ack_tx_last_error = store_ret == ESP_OK ? error : store_ret;
+        append_packet_log_deferred(
+            "tx_fail", "dm_ack_failed", 0, 0,
+            s_pending_ack_tx.path_hash_bytes,
+            s_pending_ack_tx.path_hops,
+            s_pending_ack_tx.raw_len,
+            s_pending_ack_tx.raw,
+            s_pending_ack_tx.raw_len, note);
     }
-    if (persist_ret != ESP_OK) {
+    if (store_ret != ESP_OK) {
         s_status.ack_tx_failed++;
-        s_status.ack_tx_last_error = persist_ret;
-        ESP_LOGW(TAG, "DM ACK completion persistence failed: %s",
-                 esp_err_to_name(persist_ret));
+        s_status.ack_tx_last_error = store_ret;
+        ESP_LOGW(TAG, "DM ACK completion state update failed: %s",
+                 esp_err_to_name(store_ret));
     }
     clear_pending_ack_tx();
 }
@@ -2240,15 +2243,16 @@ static void complete_unqueued_ack_reservation(
     const uint8_t digest[D1L_MESHCORE_DM_ACK_DEDUPE_DIGEST_BYTES],
     esp_err_t error)
 {
-    const esp_err_t persist_ret = d1l_dm_store_complete_ack_dispatch(
-        row_seq, digest, false, error);
+    const esp_err_t store_ret =
+        d1l_dm_store_complete_ack_dispatch_deferred(
+            row_seq, digest, false, error);
     (void)d1l_meshcore_ack_dedupe_mark_durable(
-        &s_ack_dedupe, digest, persist_ret == ESP_OK);
-    if (persist_ret != ESP_OK) {
+        &s_ack_dedupe, digest, false);
+    if (store_ret != ESP_OK) {
         s_status.ack_tx_failed++;
-        s_status.ack_tx_last_error = persist_ret;
-        ESP_LOGW(TAG, "unqueued DM ACK state persistence failed: %s",
-                 esp_err_to_name(persist_ret));
+        s_status.ack_tx_last_error = store_ret;
+        ESP_LOGW(TAG, "unqueued DM ACK state update failed: %s",
+                 esp_err_to_name(store_ret));
     }
 }
 
@@ -2824,25 +2828,11 @@ static bool dispatch_bounded_dm_ack(
 {
     d1l_dm_entry_t retained = {0};
     const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
-    if (!d1l_dm_store_find_rx_identity(digest, &retained) ||
+    if (!d1l_dm_store_find_rx_identity_loaded(digest, &retained) ||
         !remember_ack_identity_state(
             &retained, dm_stats.loaded && !dm_stats.persistence_dirty)) {
         record_dm_ack_failure(ack_hash, ESP_ERR_NOT_FOUND);
         return false;
-    }
-    if (!d1l_meshcore_ack_dedupe_is_durable(&s_ack_dedupe, digest)) {
-        const esp_err_t flush_ret = d1l_dm_store_flush();
-        if (flush_ret != ESP_OK) {
-            record_dm_ack_failure(ack_hash, flush_ret);
-            return false;
-        }
-        (void)d1l_meshcore_ack_dedupe_mark_durable(
-            &s_ack_dedupe, digest, true);
-        if (!d1l_dm_store_find_rx_identity(digest, &retained) ||
-            !remember_ack_identity_state(&retained, true)) {
-            record_dm_ack_failure(ack_hash, ESP_ERR_NOT_FOUND);
-            return false;
-        }
     }
 
     d1l_dm_ack_reservation_t reservation = {0};
@@ -2853,10 +2843,10 @@ static bool dispatch_bounded_dm_ack(
         }
         if (retained.ack_dispatch_kind != (uint8_t)plan->kind) {
             const esp_err_t rebind_ret =
-                d1l_dm_store_rebind_pending_ack_dispatch(
+                d1l_dm_store_rebind_pending_ack_dispatch_deferred(
                     retained.seq, digest, (uint8_t)plan->kind);
             (void)d1l_meshcore_ack_dedupe_mark_durable(
-                &s_ack_dedupe, digest, rebind_ret == ESP_OK);
+                &s_ack_dedupe, digest, false);
             if (rebind_ret != ESP_OK) {
                 record_dm_ack_failure(ack_hash, rebind_ret);
                 return false;
@@ -2864,7 +2854,7 @@ static bool dispatch_bounded_dm_ack(
             retained.ack_dispatch_kind = (uint8_t)plan->kind;
         }
         reservation.reserved = true;
-        reservation.durable = true;
+        reservation.durable = false;
         reservation.row_seq = retained.seq;
         reservation.dispatch_count = retained.ack_dispatch_count;
         reservation.error = ESP_OK;
@@ -2874,8 +2864,9 @@ static bool dispatch_bounded_dm_ack(
                 D1L_MESHCORE_DM_ACK_MAX_DISPATCHES)) {
             return false;
         }
-        const esp_err_t reserve_ret = d1l_dm_store_reserve_ack_dispatch(
-            digest, (uint8_t)plan->kind, &reservation);
+        const esp_err_t reserve_ret =
+            d1l_dm_store_reserve_ack_dispatch_deferred(
+                digest, (uint8_t)plan->kind, &reservation);
         if (reserve_ret != ESP_OK) {
             if (reservation.reserved) {
                 (void)d1l_meshcore_ack_dedupe_set_dispatch_count(
@@ -3564,7 +3555,8 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
             identity_digest, plain, plain_len, wire_message_len, sender_pub);
         d1l_dm_entry_t retained_identity = {0};
         const bool duplicate = digest_ret == ESP_OK &&
-            d1l_dm_store_find_rx_identity(identity_digest, &retained_identity);
+            d1l_dm_store_find_rx_identity_loaded(
+                identity_digest, &retained_identity);
         if (duplicate) {
             const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
             (void)remember_ack_identity_state(
@@ -3654,7 +3646,7 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
 
         d1l_dm_store_append_outcome_t store_outcome = {0};
         esp_err_t store_ret = digest_ret == ESP_OK ?
-            d1l_dm_store_append_rx_identity(
+            d1l_dm_store_append_rx_identity_deferred(
                 contact->fingerprint, contact->alias, stored_message, rssi,
                 (snr * 10) / 4, packet.path_hash_bytes, packet.path_hops,
                 stored_attempt, ack_hash, identity_digest,
@@ -3667,8 +3659,8 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
             secure_zero_bytes(plain, sizeof(plain));
             return false;
         }
-        if (!d1l_dm_store_find_rx_identity(identity_digest,
-                                           &retained_identity) ||
+        if (!d1l_dm_store_find_rx_identity_loaded(
+                identity_digest, &retained_identity) ||
             !remember_ack_identity_state(&retained_identity,
                                          store_outcome.durable)) {
             record_dm_ack_failure(ack_hash, ESP_ERR_INVALID_STATE);
@@ -4908,6 +4900,14 @@ static void meshcore_service_run_owner_maintenance(void)
     (void)meshcore_service_expire_trace_if_due(
         (uint32_t)(now_us / 1000ULL));
     meshcore_service_handle_radio_tx_watchdog();
+    if (s_pending_ack_tx.active && !s_tx_busy) {
+        /* RX admission already placed this ACK in the priority queue. Give it
+         * the next owner dispatch before retained reconciliation, Admin
+         * expiry, or an outbound DM retry can block or claim the radio. The
+         * watchdog still runs above, and normal maintenance resumes after the
+         * ACK has started. */
+        return;
+    }
     (void)d1l_meshcore_admin_runtime_expire(now_us);
     d1l_meshcore_admin_context_t pending_admin = {0};
     const uint32_t pending_admin_generation =

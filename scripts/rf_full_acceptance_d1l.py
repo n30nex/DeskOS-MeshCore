@@ -70,6 +70,8 @@ LOCAL_PEER_MAX_MTIME_STATUS_SKEW_SEC = 30.0
 LOCAL_PEER_CONTROL_UID = 0
 LOCAL_PEER_CONTROL_GID = 0
 LOCAL_PEER_SO_PEERCRED = getattr(socket, "SO_PEERCRED", 17)
+MESH_OWNER_READY_MAX_WAIT_SEC = 30.0
+CONTROLLED_PEER_SETTLE_MAX_WAIT_SEC = 90.0
 REMOTE_PEER_SSH_HOST = "neonx@192.168.0.24"
 REMOTE_PEER_HOSTNAME = "neopi5"
 REMOTE_PEER_STATUS_PATH = (
@@ -1516,10 +1518,11 @@ def wait_for_mesh_owner_ready(
     *,
     timeout_sec: float,
     poll_sec: float,
+    max_wait_sec: float = MESH_OWNER_READY_MAX_WAIT_SEC,
     monotonic: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
-    deadline = monotonic() + max(0.0, min(timeout_sec, 30.0))
+    deadline = monotonic() + max(0.0, min(timeout_sec, max_wait_sec))
     interval = min(max(0.25, poll_sec), 1.0)
     previous_maintenance: int | None = None
     while True:
@@ -1546,11 +1549,16 @@ def send_controlled_peer_dm_after_mesh_owner_ready(
     sender: Callable[[], dict],
     timeout_sec: float,
     poll_sec: float,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     if not wait_for_mesh_owner_ready(
         status_reader,
         timeout_sec=timeout_sec,
         poll_sec=poll_sec,
+        max_wait_sec=CONTROLLED_PEER_SETTLE_MAX_WAIT_SEC,
+        monotonic=monotonic,
+        sleep=sleep,
     ):
         raise ValueError(
             "MeshCore owner did not become ready before controlled-peer inbound DM"
@@ -3163,6 +3171,72 @@ def new_entries_by_seq(
     return fresh
 
 
+def exact_outbound_terminal_row(
+    *,
+    baseline_messages: dict | None,
+    current_messages: dict | None,
+    outbound_text: str,
+    fingerprint: str,
+) -> dict | None:
+    if (
+        not isinstance(current_messages, dict)
+        or current_messages.get("ok") is not True
+    ):
+        return None
+    matches = [
+        row
+        for row in new_entries_by_seq(
+            baseline_messages, current_messages
+        )
+        if row.get("direction") == "tx"
+        and row.get("text") == outbound_text
+        and entry_matches_fingerprint(
+            current_messages, row, fingerprint
+        )
+    ]
+    if len(matches) != 1:
+        return None
+    row = matches[0]
+    return (
+        row
+        if row.get("delivered") is True
+        and row.get("acked") is True
+        else None
+    )
+
+
+def require_outbound_terminal_before_peer(
+    message_reader: Callable[[], dict],
+    *,
+    baseline_messages: dict | None,
+    outbound_text: str,
+    fingerprint: str,
+    timeout_sec: float,
+    poll_sec: float,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
+    deadline = monotonic() + max(0.0, timeout_sec)
+    interval = min(max(0.25, poll_sec), 1.0)
+    while True:
+        terminal = exact_outbound_terminal_row(
+            baseline_messages=baseline_messages,
+            current_messages=message_reader(),
+            outbound_text=outbound_text,
+            fingerprint=fingerprint,
+        )
+        if terminal is not None:
+            return terminal
+        remaining = deadline - monotonic()
+        if remaining <= 0.0:
+            raise ValueError(
+                "Outbound DM did not reach one exact fresh "
+                "delivered=true, acked=true row before "
+                "controlled-peer inbound DM"
+            )
+        sleep(min(interval, remaining))
+
+
 def d1l_deadline_delivery_observation(
     *,
     control: object,
@@ -4568,6 +4642,16 @@ def _run_hardware_reserved(
             )
             time.sleep(2.0)
             run_command(ser, f"packets search {outbound_token}")
+            require_outbound_terminal_before_peer(
+                lambda: run_command(
+                    ser, f"messages dm {fingerprint}"
+                ),
+                baseline_messages=baseline_messages,
+                outbound_text=outbound_text,
+                fingerprint=fingerprint,
+                timeout_sec=wait_sec,
+                poll_sec=poll_sec,
+            )
         if remote_mode:
             send_peer_dm = (
                 send_local_peer_dm

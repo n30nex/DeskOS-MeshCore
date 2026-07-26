@@ -89,7 +89,7 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
     plain_marker = "const bool room_post ="
     dm_plain = dm.split(plain_marker, 1)[1]
     assert dm_plain.index("d1l_meshcore_text_plaintext_view(") < dm_plain.index(
-        "d1l_dm_store_find_rx_identity("
+        "d1l_dm_store_find_rx_identity_loaded("
     ) < dm_plain.index(
         "d1l_meshcore_packet_hash_cache_contains("
     )
@@ -106,9 +106,12 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
         "d1l_meshcore_packet_hash_cache_contains("
     )]
     assert "dispatch_bounded_dm_ack(" in hit
-    assert dm_plain.index("d1l_dm_store_append_rx_identity(") < dm_plain.index(
-        "store_outcome.inserted"
-    ) < dm_plain.rindex("d1l_meshcore_packet_hash_cache_remember(")
+    assert dm_plain.index(
+        "d1l_dm_store_append_rx_identity_deferred("
+    ) < dm_plain.index("store_outcome.inserted") < dm_plain.rindex(
+        "d1l_meshcore_packet_hash_cache_remember("
+    )
+    assert "d1l_dm_store_append_rx_identity(" not in dm_plain
     assert "append_packet_log_deferred(" in dm_plain
     assert dm.index("d1l_meshcore_peer_dispatch_classify(") < dm.index(
         "derive_local_identity_shared_secret("

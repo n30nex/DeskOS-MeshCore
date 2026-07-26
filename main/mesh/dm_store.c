@@ -2224,6 +2224,14 @@ static esp_err_t ensure_store_initialized(void)
     return fallback_loaded ? ESP_OK : ret;
 }
 
+static esp_err_t require_store_loaded_without_io(void)
+{
+    d1l_store_lock_take(&s_store_lock);
+    const bool loaded = s_loaded;
+    d1l_store_lock_give(&s_store_lock);
+    return loaded ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
 esp_err_t d1l_dm_store_init(void)
 {
     d1l_store_lock_take(&s_persist_io_lock);
@@ -2397,6 +2405,7 @@ static esp_err_t append_internal(const char *contact_fingerprint,
                                   uint8_t path_hash_bytes, uint8_t path_hops,
                                   uint8_t attempt, bool delivered, bool acked,
                                   uint32_t ack_hash, bool persist,
+                                  bool flush_now,
                                   const uint8_t *identity_digest,
                                   d1l_dm_store_append_outcome_t *outcome)
 {
@@ -2411,6 +2420,7 @@ static esp_err_t append_internal(const char *contact_fingerprint,
         path_hash_bytes > 3U ||
         path_hops > 63U ||
         (uint16_t)path_hash_bytes * path_hops > 64U ||
+        (!persist && flush_now) ||
         (identity_digest && (!persist || !direction ||
                              strncmp(direction, "rx", D1L_DM_DIRECTION_LEN) != 0))) {
         return ESP_ERR_INVALID_ARG;
@@ -2421,7 +2431,8 @@ static esp_err_t append_internal(const char *contact_fingerprint,
         }
         return ESP_ERR_INVALID_SIZE;
     }
-    esp_err_t ret = ensure_store_initialized();
+    esp_err_t ret = persist && !flush_now ?
+        require_store_loaded_without_io() : ensure_store_initialized();
     if (ret != ESP_OK) {
         if (outcome) {
             outcome->error = ret;
@@ -2560,6 +2571,13 @@ static esp_err_t append_internal(const char *contact_fingerprint,
         outcome->row_seq = entry.seq;
         outcome->delivery_session_id = entry.delivery_session_id;
     }
+    if (!flush_now) {
+        if (outcome) {
+            outcome->durable = false;
+            outcome->error = ESP_OK;
+        }
+        return ESP_OK;
+    }
     ret = d1l_dm_store_flush();
     if (outcome) {
         outcome->durable = ret == ESP_OK;
@@ -2578,7 +2596,7 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint,
 {
     return append_internal(contact_fingerprint, contact_alias, direction, text,
                            rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
-                           attempt, delivered, acked, ack_hash, true, NULL,
+                           attempt, delivered, acked, ack_hash, true, true, NULL,
                            NULL);
 }
 
@@ -2593,7 +2611,7 @@ esp_err_t d1l_dm_store_append_tx(
     }
     return append_internal(contact_fingerprint, contact_alias, "tx", text,
                            rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
-                           attempt, false, false, ack_hash, true, NULL,
+                           attempt, false, false, ack_hash, true, true, NULL,
                            outcome);
 }
 
@@ -2614,7 +2632,28 @@ esp_err_t d1l_dm_store_append_rx_identity(
     }
     return append_internal(contact_fingerprint, contact_alias, "rx", text,
                            rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
-                           attempt, true, false, ack_hash, true,
+                           attempt, true, false, ack_hash, true, true,
+                           identity_digest, outcome);
+}
+
+esp_err_t d1l_dm_store_append_rx_identity_deferred(
+    const char *contact_fingerprint, const char *contact_alias,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, uint8_t attempt,
+    uint32_t ack_hash,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_store_append_outcome_t *outcome)
+{
+    if (!identity_digest || !outcome) {
+        if (outcome) {
+            memset(outcome, 0, sizeof(*outcome));
+            outcome->error = ESP_ERR_INVALID_ARG;
+        }
+        return ESP_ERR_INVALID_ARG;
+    }
+    return append_internal(contact_fingerprint, contact_alias, "rx", text,
+                           rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
+                           attempt, true, false, ack_hash, true, false,
                            identity_digest, outcome);
 }
 
@@ -2629,7 +2668,7 @@ esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint,
 {
     return append_internal(contact_fingerprint, contact_alias, direction, text,
                            rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
-                           attempt, delivered, acked, ack_hash, false, NULL,
+                           attempt, delivered, acked, ack_hash, false, false, NULL,
                            NULL);
 }
 
@@ -2655,11 +2694,17 @@ static d1l_dm_entry_t *find_rx_identity_locked(
     return NULL;
 }
 
-bool d1l_dm_store_find_rx_identity(
+static bool find_rx_identity_internal(
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
-    d1l_dm_entry_t *out_entry)
+    d1l_dm_entry_t *out_entry,
+    bool allow_backend_init)
 {
-    if (!identity_digest || ensure_store_initialized() != ESP_OK) {
+    if (!identity_digest) {
+        return false;
+    }
+    const esp_err_t ready_ret = allow_backend_init ?
+        ensure_store_initialized() : require_store_loaded_without_io();
+    if (ready_ret != ESP_OK) {
         return false;
     }
     d1l_store_lock_take(&s_store_lock);
@@ -2671,6 +2716,20 @@ bool d1l_dm_store_find_rx_identity(
     }
     d1l_store_lock_give(&s_store_lock);
     return entry != NULL;
+}
+
+bool d1l_dm_store_find_rx_identity(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_entry_t *out_entry)
+{
+    return find_rx_identity_internal(identity_digest, out_entry, true);
+}
+
+bool d1l_dm_store_find_rx_identity_loaded(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_entry_t *out_entry)
+{
+    return find_rx_identity_internal(identity_digest, out_entry, false);
 }
 
 bool d1l_dm_store_find_delivery_session(
@@ -2710,9 +2769,10 @@ static void note_ack_metadata_mutation_locked(void)
     s_nvs_fallback_dirty = true;
 }
 
-esp_err_t d1l_dm_store_reserve_ack_dispatch(
+static esp_err_t reserve_ack_dispatch_internal(
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
-    uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation)
+    uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation,
+    bool flush_now)
 {
     if (reservation) {
         memset(reservation, 0, sizeof(*reservation));
@@ -2722,7 +2782,8 @@ esp_err_t d1l_dm_store_reserve_ack_dispatch(
         dispatch_kind > D1L_DM_ACK_DISPATCH_KIND_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = ensure_store_initialized();
+    esp_err_t ret = flush_now ? ensure_store_initialized() :
+                                require_store_loaded_without_io();
     if (ret != ESP_OK) {
         reservation->error = ret;
         return ret;
@@ -2730,7 +2791,9 @@ esp_err_t d1l_dm_store_reserve_ack_dispatch(
 
     d1l_store_lock_take(&s_store_lock);
     d1l_dm_entry_t *entry = find_rx_identity_locked(identity_digest, 0U);
-    if (!entry || persistence_dirty_locked(s_last_sd_primary_required) ||
+    if (!entry ||
+        (flush_now &&
+         persistence_dirty_locked(s_last_sd_primary_required)) ||
         (entry->ack_state != D1L_DM_ACK_STATE_RETRYABLE &&
          entry->ack_state != D1L_DM_ACK_STATE_SENT) ||
         entry->ack_dispatch_count >= D1L_DM_ACK_DISPATCH_MAX) {
@@ -2749,6 +2812,15 @@ esp_err_t d1l_dm_store_reserve_ack_dispatch(
     entry->ack_last_error = ESP_OK;
     note_ack_metadata_mutation_locked();
     d1l_store_lock_give(&s_store_lock);
+
+    if (!flush_now) {
+        reservation->reserved = true;
+        reservation->durable = false;
+        reservation->row_seq = row_seq;
+        reservation->dispatch_count = (uint8_t)(previous_count + 1U);
+        reservation->error = ESP_OK;
+        return ESP_OK;
+    }
 
     ret = d1l_dm_store_flush();
     if (ret != ESP_OK) {
@@ -2770,16 +2842,34 @@ esp_err_t d1l_dm_store_reserve_ack_dispatch(
     return ESP_OK;
 }
 
-esp_err_t d1l_dm_store_rebind_pending_ack_dispatch(
+esp_err_t d1l_dm_store_reserve_ack_dispatch(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation)
+{
+    return reserve_ack_dispatch_internal(
+        identity_digest, dispatch_kind, reservation, true);
+}
+
+esp_err_t d1l_dm_store_reserve_ack_dispatch_deferred(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation)
+{
+    return reserve_ack_dispatch_internal(
+        identity_digest, dispatch_kind, reservation, false);
+}
+
+static esp_err_t rebind_pending_ack_dispatch_internal(
     uint32_t row_seq,
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
-    uint8_t dispatch_kind)
+    uint8_t dispatch_kind,
+    bool flush_now)
 {
     if (row_seq == 0U || !identity_digest || dispatch_kind == 0U ||
         dispatch_kind > D1L_DM_ACK_DISPATCH_KIND_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = ensure_store_initialized();
+    esp_err_t ret = flush_now ? ensure_store_initialized() :
+                                require_store_loaded_without_io();
     if (ret != ESP_OK) {
         return ret;
     }
@@ -2802,22 +2892,45 @@ esp_err_t d1l_dm_store_rebind_pending_ack_dispatch(
     note_ack_metadata_mutation_locked();
     d1l_store_lock_give(&s_store_lock);
 
+    if (!flush_now) {
+        return ESP_OK;
+    }
     /* As with reservation, never roll this back after persistence starts: one
      * backend may already contain the rebound kind. Dirty pending state blocks
      * RF until a later flush makes that same reservation coherent. */
     return d1l_dm_store_flush();
 }
 
-esp_err_t d1l_dm_store_complete_ack_dispatch(
+esp_err_t d1l_dm_store_rebind_pending_ack_dispatch(
     uint32_t row_seq,
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
-    bool sent, esp_err_t error)
+    uint8_t dispatch_kind)
+{
+    return rebind_pending_ack_dispatch_internal(
+        row_seq, identity_digest, dispatch_kind, true);
+}
+
+esp_err_t d1l_dm_store_rebind_pending_ack_dispatch_deferred(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind)
+{
+    return rebind_pending_ack_dispatch_internal(
+        row_seq, identity_digest, dispatch_kind, false);
+}
+
+static esp_err_t complete_ack_dispatch_internal(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    bool sent, esp_err_t error,
+    bool flush_now)
 {
     if (row_seq == 0U || !identity_digest ||
         (sent && error != ESP_OK) || (!sent && error == ESP_OK)) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = ensure_store_initialized();
+    esp_err_t ret = flush_now ? ensure_store_initialized() :
+                                require_store_loaded_without_io();
     if (ret != ESP_OK) {
         return ret;
     }
@@ -2846,7 +2959,25 @@ esp_err_t d1l_dm_store_complete_ack_dispatch(
     }
     note_ack_metadata_mutation_locked();
     d1l_store_lock_give(&s_store_lock);
-    return d1l_dm_store_flush();
+    return flush_now ? d1l_dm_store_flush() : ESP_OK;
+}
+
+esp_err_t d1l_dm_store_complete_ack_dispatch(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    bool sent, esp_err_t error)
+{
+    return complete_ack_dispatch_internal(
+        row_seq, identity_digest, sent, error, true);
+}
+
+esp_err_t d1l_dm_store_complete_ack_dispatch_deferred(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    bool sent, esp_err_t error)
+{
+    return complete_ack_dispatch_internal(
+        row_seq, identity_digest, sent, error, false);
 }
 
 const char *d1l_dm_ack_state_name(d1l_dm_ack_state_t state)

@@ -73,9 +73,14 @@ static bool s_append_during_delete_result;
 static uint32_t s_enable_sd_on_lock_take_countdown;
 static uint32_t s_fail_nonblocking_take_count;
 static bool s_enable_sd_during_nvs_erase;
+static uint32_t s_backend_state_calls;
 static uint32_t s_sd_primary_reads;
+static uint32_t s_nvs_reads;
+static uint32_t s_history_reads;
 static uint32_t s_sd_primary_writes;
 static uint32_t s_nvs_writes;
+static uint32_t s_sd_primary_erases;
+static uint32_t s_nvs_erases;
 static uint32_t s_journal_mutations;
 static uint32_t s_journal_truncates;
 static uint32_t s_delete_count;
@@ -112,9 +117,14 @@ static void mock_reset(void)
     s_enable_sd_on_lock_take_countdown = 0U;
     s_fail_nonblocking_take_count = 0U;
     s_enable_sd_during_nvs_erase = false;
+    s_backend_state_calls = 0U;
     s_sd_primary_reads = 0U;
+    s_nvs_reads = 0U;
+    s_history_reads = 0U;
     s_sd_primary_writes = 0U;
     s_nvs_writes = 0U;
+    s_sd_primary_erases = 0U;
+    s_nvs_erases = 0U;
     s_journal_mutations = 0U;
     s_journal_truncates = 0U;
     s_delete_count = 0U;
@@ -318,6 +328,7 @@ bool d1l_retained_blob_store_backend_state(
     if (store_id != D1L_RETAINED_BLOB_STORE_PACKET_LOG || !out_state) {
         return false;
     }
+    s_backend_state_calls++;
     if (s_bump_generation_before_reconcile_apply &&
         s_sd_primary_reads > 0U) {
         s_backend_state_calls_after_sd_read++;
@@ -386,6 +397,7 @@ esp_err_t d1l_retained_blob_store_read_nvs_fallback(
     if (store_id != D1L_RETAINED_BLOB_STORE_PACKET_LOG) {
         return ESP_ERR_INVALID_ARG;
     }
+    s_nvs_reads++;
     return mock_blob_read(&s_nvs_fallback, dst, len_inout);
 }
 
@@ -445,6 +457,7 @@ esp_err_t d1l_retained_blob_store_erase_sd_primary_guarded(
         expected_generation != s_backend_generation) {
         return ESP_ERR_INVALID_STATE;
     }
+    s_sd_primary_erases++;
     memset(&s_sd_primary, 0, sizeof(s_sd_primary));
     note_sd_mutation();
     return ESP_OK;
@@ -457,6 +470,7 @@ esp_err_t d1l_retained_blob_store_erase_nvs_fallback(
     if (store_id != D1L_RETAINED_BLOB_STORE_PACKET_LOG) {
         return ESP_ERR_INVALID_ARG;
     }
+    s_nvs_erases++;
     memset(&s_nvs_fallback, 0, sizeof(s_nvs_fallback));
     if (s_enable_sd_during_nvs_erase) {
         s_enable_sd_during_nvs_erase = false;
@@ -473,6 +487,7 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path, uint32_t offset,
 {
     unsigned long segment = 0UL;
     (void)timeout_ms;
+    s_history_reads++;
     if (s_history_read_error != ESP_OK) {
         return s_history_read_error;
     }
@@ -616,6 +631,41 @@ static esp_err_t append_packet_checked(const char *note,
     (void)snprintf(entry.note, sizeof(entry.note), "%s", note);
     return d1l_packet_log_append_raw_checked(
         &entry, NULL, 0U, out_stored_seq);
+}
+
+static void test_unloaded_deferred_append_fails_without_storage_work(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 17U;
+    seed_primary(&s_sd_primary, 1U, 1U, 1U, "unloaded-sd");
+    seed_fallback(1U, 1U, 1U, "unloaded-nvs");
+    seed_history(1U, 1U, "unloaded-history");
+
+    d1l_packet_log_entry_t entry;
+    memset(&entry, 0, sizeof(entry));
+    (void)snprintf(entry.direction, sizeof(entry.direction), "tx");
+    (void)snprintf(entry.kind, sizeof(entry.kind), "dm_ack");
+    (void)snprintf(entry.note, sizeof(entry.note), "unloaded-deferred");
+
+    assert(!d1l_packet_log_append_raw_deferred(&entry, NULL, 0U));
+    assert(s_backend_state_calls == 0U);
+    assert(s_sd_primary_reads == 0U);
+    assert(s_nvs_reads == 0U);
+    assert(s_history_reads == 0U);
+    assert(s_sd_primary_writes == 0U);
+    assert(s_nvs_writes == 0U);
+    assert(s_sd_primary_erases == 0U);
+    assert(s_nvs_erases == 0U);
+    assert(s_journal_mutations == 0U);
+    assert(s_journal_truncates == 0U);
+    assert(s_delete_count == 0U);
+
+    const d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(!stats.loaded);
+    assert(stats.total_written == 0U);
+    assert(stats.count == 0U);
+    assert(!stats.persistence_dirty);
 }
 
 static void test_deferred_append_never_writes_on_caller(void)
@@ -1422,6 +1472,7 @@ static void test_force_flush_rejects_snapshot_staled_by_concurrent_append(void)
 
 int main(void)
 {
+    test_unloaded_deferred_append_fails_without_storage_work();
     test_deferred_append_never_writes_on_caller();
     test_late_sd_is_read_and_merged_before_mutation();
     test_checked_append_reports_resequenced_sd_overlay();

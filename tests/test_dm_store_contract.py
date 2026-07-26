@@ -52,8 +52,12 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "ack_state" in header
     assert "ack_last_error" in header
     assert "d1l_dm_store_append_rx_identity" in header
+    assert "d1l_dm_store_append_rx_identity_deferred" in header
     assert "d1l_dm_store_reserve_ack_dispatch" in header
+    assert "d1l_dm_store_reserve_ack_dispatch_deferred" in header
+    assert "d1l_dm_store_rebind_pending_ack_dispatch_deferred" in header
     assert "d1l_dm_store_complete_ack_dispatch" in header
+    assert "d1l_dm_store_complete_ack_dispatch_deferred" in header
     assert "s_clear_lineage" in source
     assert "new_clear_lineage" in source
     assert "esp_random()" in source
@@ -341,11 +345,13 @@ def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
     assert "dispatch_bounded_dm_ack" in source
     assert '"dm_text_duplicate"' not in source
     assert dm_parse_body.count("record_dm_ack_failure(ack_hash, store_ret);") == 1
-    assert "d1l_dm_store_append_rx_identity(" in dm_parse_body
+    assert "d1l_dm_store_append_rx_identity_deferred(" in dm_parse_body
+    assert "d1l_dm_store_append_rx_identity(" not in dm_parse_body
     assert "store_outcome.inserted" in dm_parse_body
     assert "remember_ack_identity_state(&retained_identity," in dm_parse_body
     assert "store_outcome.durable" in dm_parse_body
-    assert "d1l_dm_store_find_rx_identity(identity_digest" in dm_parse_body
+    assert "d1l_dm_store_find_rx_identity_loaded(" in dm_parse_body
+    assert "d1l_dm_store_find_rx_identity(identity_digest" not in dm_parse_body
     assert "uint32_t ack_tx_queued;" in header
     assert "uint32_t ack_tx_done;" in header
     assert "uint32_t ack_tx_failed;" in header
@@ -356,24 +362,82 @@ def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
     assert '\\\"duplicate_suppressed\\\"' not in console
 
 
-def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot():
+def test_pending_inbound_ack_skips_owner_maintenance_after_watchdog():
+    source = read("main/mesh/meshcore_service.c")
+    maintenance = source.split(
+        "static void meshcore_service_run_owner_maintenance(void)", 1
+    )[1].split("static void meshcore_service_handle_radio_rx_done", 1)[0]
+
+    watchdog_at = maintenance.index(
+        "meshcore_service_handle_radio_tx_watchdog();"
+    )
+    guard_at = maintenance.index(
+        "if (s_pending_ack_tx.active && !s_tx_busy)"
+    )
+    admin_at = maintenance.index(
+        "d1l_meshcore_admin_runtime_expire(now_us)"
+    )
+    channel_at = maintenance.index(
+        "d1l_channel_message_reconcile_if_due("
+    )
+    deadline_at = maintenance.index(
+        "d1l_meshcore_dm_ack_deadline_take_due_when_idle("
+    )
+    guard = maintenance[guard_at:admin_at]
+
+    assert "return;" in guard
+    return_at = guard_at + guard.index("return;")
+    assert watchdog_at < guard_at < return_at < admin_at
+    assert return_at < channel_at
+    assert return_at < deadline_at
+
+
+def test_inbound_dm_ack_is_ram_admitted_before_rf_and_worker_persisted():
     store_h = read("main/mesh/dm_store.h")
     store_c = read("main/mesh/dm_store.c")
     service = read("main/mesh/meshcore_service.c")
+    worker = read("main/mesh/route_store_worker.c")
     console = read("main/comms/usb_console.c")
     ui = read("main/ui/ui_phase1.c")
     messages_ui = read("main/ui/ui_messages.c")
     user_guide = read("docs/USER_GUIDE_D1L.md")
 
     dispatch = service.split("static bool dispatch_bounded_dm_ack", 1)[1].split(
-        "static void parse_rx_public_packet", 1
+        "static bool meshcore_service_enqueue_admin_response_token", 1
     )[0]
     completion = service.split("static void complete_pending_ack_tx", 1)[1].split(
         "static void complete_unqueued_ack_reservation", 1
     )[0]
+    unqueued_completion = service.split(
+        "static void complete_unqueued_ack_reservation", 1
+    )[1].split("static bool bandwidth_to_driver_index", 1)[0]
     initialization = service.split("void d1l_meshcore_service_init", 1)[1].split(
         "esp_err_t d1l_meshcore_service_ensure_identity", 1
     )[0]
+    append_internal = store_c.split("static esp_err_t append_internal", 1)[1].split(
+        "esp_err_t d1l_dm_store_append(", 1
+    )[0]
+    deferred_append = store_c.split(
+        "esp_err_t d1l_dm_store_append_rx_identity_deferred(", 1
+    )[1].split("esp_err_t d1l_dm_store_append_volatile(", 1)[0]
+    reserve_internal = store_c.split(
+        "static esp_err_t reserve_ack_dispatch_internal(", 1
+    )[1].split("esp_err_t d1l_dm_store_reserve_ack_dispatch(", 1)[0]
+    deferred_reserve = store_c.split(
+        "esp_err_t d1l_dm_store_reserve_ack_dispatch_deferred(", 1
+    )[1].split("static esp_err_t rebind_pending_ack_dispatch_internal(", 1)[0]
+    rebind_internal = store_c.split(
+        "static esp_err_t rebind_pending_ack_dispatch_internal(", 1
+    )[1].split("esp_err_t d1l_dm_store_rebind_pending_ack_dispatch(", 1)[0]
+    deferred_rebind = store_c.split(
+        "esp_err_t d1l_dm_store_rebind_pending_ack_dispatch_deferred(", 1
+    )[1].split("static esp_err_t complete_ack_dispatch_internal(", 1)[0]
+    complete_internal = store_c.split(
+        "static esp_err_t complete_ack_dispatch_internal(", 1
+    )[1].split("esp_err_t d1l_dm_store_complete_ack_dispatch(", 1)[0]
+    deferred_complete = store_c.split(
+        "esp_err_t d1l_dm_store_complete_ack_dispatch_deferred(", 1
+    )[1].split("const char *d1l_dm_ack_state_name", 1)[0]
 
     assert "D1L_DM_STORE_SCHEMA 7U" in store_c
     assert "D1L_DM_STORE_SCHEMA_V6 6U" in store_c
@@ -394,31 +458,51 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
     assert "d1l_dm_store_append_outcome_t" in store_h
     assert "outcome->inserted = true" in store_c
     assert "outcome->durable = ret == ESP_OK" in store_c
+    assert "if (!flush_now)" in append_internal
+    assert "outcome->durable = false;" in append_internal
+    assert "attempt, true, false, ack_hash, true, false," in deferred_append
+    assert "if (!flush_now)" in reserve_internal
+    assert "reservation->durable = false;" in reserve_internal
+    assert "identity_digest, dispatch_kind, reservation, false" in deferred_reserve
+    assert "if (!flush_now)" in rebind_internal
+    assert "return ESP_OK;" in rebind_internal
+    assert "row_seq, identity_digest, dispatch_kind, false" in deferred_rebind
+    assert "flush_now ? d1l_dm_store_flush() : ESP_OK" in complete_internal
+    assert "row_seq, identity_digest, sent, error, false" in deferred_complete
     assert "A split SD/NVS write can partially commit" in store_c
     assert "rolling it\n         * back" in store_c
     assert "d1l_dm_ack_state_t previous_state" not in store_c
 
-    reserve_at = dispatch.index("d1l_dm_store_reserve_ack_dispatch(")
+    reserve_at = dispatch.index("d1l_dm_store_reserve_ack_dispatch_deferred(")
     queue_at = dispatch.index("meshcore_service_send_ack_async(")
     assert reserve_at < queue_at
     assert "retained.ack_state == D1L_DM_ACK_STATE_PENDING" in dispatch
-    assert "d1l_dm_store_flush()" in dispatch
+    assert "d1l_dm_store_flush()" not in dispatch
+    assert "d1l_dm_store_reserve_ack_dispatch(" not in dispatch
     assert "reservation.reserved" in dispatch
     assert "reservation.reserved || reserve_ret != ESP_ERR_INVALID_STATE" in dispatch
     assert "d1l_meshcore_ack_dedupe_mark_durable" in dispatch
-    rebind_at = dispatch.index("d1l_dm_store_rebind_pending_ack_dispatch(")
+    assert "reservation.durable = false;" in dispatch
+    rebind_at = dispatch.index("d1l_dm_store_rebind_pending_ack_dispatch_deferred(")
     assert rebind_at < queue_at
+    assert "d1l_dm_store_rebind_pending_ack_dispatch(" not in dispatch
     assert "retained.ack_dispatch_kind != (uint8_t)plan->kind" in dispatch
     assert "record_dm_ack_failure(ack_hash, rebind_ret)" in dispatch
     assert "valid_identity_digest_equal" in store_c
     assert "identity_match_set" in store_c
-    assert "d1l_dm_store_complete_ack_dispatch(" in completion
-    assert completion.index("d1l_dm_store_complete_ack_dispatch(") < completion.index(
-        "clear_pending_ack_tx();"
-    )
+    assert "d1l_dm_store_complete_ack_dispatch_deferred(" in completion
+    assert "d1l_dm_store_complete_ack_dispatch(" not in completion
+    assert completion.index(
+        "d1l_dm_store_complete_ack_dispatch_deferred("
+    ) < completion.index("clear_pending_ack_tx();")
+    assert "d1l_dm_store_complete_ack_dispatch_deferred(" in unqueued_completion
+    assert "d1l_dm_store_complete_ack_dispatch(" not in unqueued_completion
     assert "s_pending_ack_tx.row_seq" in completion
     assert "s_pending_ack_tx.identity_digest" in completion
+    assert "d1l_dm_store_flush_if_due()" in worker
     assert "find_rx_identity_locked(identity_digest, 0U)" in store_c
+    assert "d1l_dm_store_find_rx_identity_loaded" in store_h
+    assert "require_store_loaded_without_io()" in store_c
     assert "row_seq is only a stale-safe" in store_c
     assert "pending_ack_identity_matches(digest)" in dispatch
     assert "s_pending_ack_tx.row_seq == retained.seq" not in dispatch
