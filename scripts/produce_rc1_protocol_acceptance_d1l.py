@@ -470,6 +470,7 @@ def execute(
     admin_password_path: Path,
     authorize_public_tx: bool,
     baud: int = 115200,
+    boot_timeout: float = 45.0,
     command_timeout: float = 8.0,
     rf_timeout: float = 75.0,
     poll_interval: float = 0.5,
@@ -548,6 +549,19 @@ def execute(
         baudrate=baud,
         timeout=command_timeout,
     ) as ser:
+        boot_health = checked_console_command(
+            ser,
+            "health",
+            boot_timeout,
+            failure_label="cold boot console readiness",
+        )
+        if not (
+            boot_health.get("board_ready") is True
+            and boot_health.get("ui_ready") is True
+        ):
+            raise ProtocolAcceptanceError(
+                "cold boot console became responsive before board/UI readiness"
+            )
 
         def command(
             value: str, *, failure_label: str | None = None
@@ -604,28 +618,6 @@ def execute(
             label="controlled peer and admin contacts",
         )
         _step(steps, "contacts", "contacts", contacts)
-
-        trace_request = _step(
-            steps,
-            "trace_request",
-            f"routes trace contact {peer_fingerprint}",
-            command(f"routes trace contact {peer_fingerprint}"),
-        )
-        trace_tag = integer(trace_request.get("tag"), minimum=1)
-        trace_result = poll(
-            lambda: command("routes trace status"),
-            lambda result: (
-                result.get("matched") is True
-                and result.get("zero_hop") is False
-                and str(result.get("fingerprint") or "").upper()
-                == peer_fingerprint
-                and nested(result, "last_result", "tag") == trace_tag
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="matched contact TRACE",
-        )
-        _step(steps, "trace_result", "routes trace status", trace_result)
 
         before = _step(
             steps,
@@ -819,6 +811,32 @@ def execute(
             f"messages dm {peer_fingerprint}",
             dm_receive_ack,
         )
+
+        # A contact-derived TRACE is intentionally after the controlled inbound
+        # DM. That authenticated packet establishes the exact contact path in
+        # this boot; an imported or retained contact alone is not proof of a
+        # current routable loop.
+        trace_request = _step(
+            steps,
+            "trace_request",
+            f"routes trace contact {peer_fingerprint}",
+            command(f"routes trace contact {peer_fingerprint}"),
+        )
+        trace_tag = integer(trace_request.get("tag"), minimum=1)
+        trace_result = poll(
+            lambda: command("routes trace status"),
+            lambda result: (
+                result.get("matched") is True
+                and result.get("zero_hop") is False
+                and str(result.get("fingerprint") or "").upper()
+                == peer_fingerprint
+                and nested(result, "last_result", "tag") == trace_tag
+            ),
+            timeout=rf_timeout,
+            interval=poll_interval,
+            label="matched contact TRACE",
+        )
+        _step(steps, "trace_result", "routes trace status", trace_result)
 
         path_request = _step(
             steps,
@@ -1037,6 +1055,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicitly authorize the one tokenized RC1 Public acceptance send",
     )
     parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--boot-timeout", type=float, default=45.0)
     parser.add_argument("--command-timeout", type=float, default=8.0)
     parser.add_argument("--rf-timeout", type=float, default=75.0)
     parser.add_argument("--poll-interval", type=float, default=0.5)
@@ -1060,6 +1079,7 @@ def main(argv: list[str] | None = None) -> int:
             admin_password_path=Path(args.admin_password_file),
             authorize_public_tx=args.authorize_public_tx,
             baud=args.baud,
+            boot_timeout=args.boot_timeout,
             command_timeout=args.command_timeout,
             rf_timeout=args.rf_timeout,
             poll_interval=args.poll_interval,

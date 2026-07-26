@@ -182,6 +182,8 @@ def expected_command_name(command: str) -> str:
         return "messages public"
     if command in {"routes trace status", "repeater ping status"}:
         return command
+    if command.startswith("routes trace contact "):
+        return "routes trace contact"
     if command == "messages dm clear":
         return command
     for prefix in [

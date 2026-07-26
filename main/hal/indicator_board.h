@@ -44,6 +44,7 @@ typedef struct {
 } d1l_board_touch_raw_state_t;
 
 esp_err_t d1l_board_init(void);
+esp_err_t d1l_board_display_boot_splash(void);
 const d1l_board_status_t *d1l_board_status(void);
 esp_err_t d1l_board_i2c_scan(d1l_board_status_t *out_status);
 esp_err_t d1l_board_display_color_test(void);
