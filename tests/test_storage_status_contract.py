@@ -62,7 +62,8 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert "esp_err_t storage_ret = d1l_storage_status_init()" in app_main
     assert app_main.index("d1l_storage_status_init()") < app_main.index("d1l_message_store_init()")
     assert app_main.index("d1l_rp2040_bridge_init()") < app_main.index("d1l_message_store_init()")
-    assert app_main.index("d1l_storage_boot_prepare") < app_main.index("d1l_message_store_init()")
+    assert "d1l_storage_boot_prepare(" not in app_main
+    assert app_main.index("d1l_storage_status_refresh(") < app_main.index("d1l_message_store_init()")
     assert app_main.index("d1l_packet_log_init()") < app_main.index("d1l_storage_manager_start()")
     assert app_main.index("d1l_storage_manager_start()") < app_main.index("d1l_board_init()")
     assert app_main.index("D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
@@ -282,6 +283,7 @@ def test_storage_manager_performs_one_bounded_initial_bridge_recovery_without_re
     )[1].split("static uint32_t storage_manager_pause_delay_ms", 1)[0]
     ping_flow = manager.split("d1l_rp2040_ping_t ping", 1)[1]
 
+    assert "poll_mount_pending()" not in manager
     assert "D1L_STORAGE_MANAGER_INITIAL_PING_TIMEOUT_LIMIT 3U" in source
     assert "s_manager_bridge_response_seen || s_manager_auto_reset_attempted" in policy
     assert "s_manager_initial_reset_budget_spent" in policy
