@@ -63,8 +63,12 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert "esp_err_t storage_ret = d1l_storage_status_init()" in app_main
     assert app_main.index("d1l_storage_status_init()") < app_main.index("d1l_message_store_init()")
     assert app_main.index("d1l_rp2040_bridge_init()") < app_main.index("d1l_message_store_init()")
-    assert "d1l_storage_boot_prepare(" not in app_main
-    assert app_main.index("d1l_storage_status_refresh(") < app_main.index("d1l_message_store_init()")
+    assert app_main.index("d1l_board_display_boot_splash()") < app_main.index(
+        "d1l_storage_boot_prepare("
+    )
+    assert app_main.index("d1l_storage_boot_prepare(") < app_main.index(
+        "d1l_message_store_init()"
+    )
     assert app_main.index("d1l_packet_log_init()") < app_main.index("d1l_storage_manager_start()")
     assert app_main.index("d1l_board_init()") < app_main.index("d1l_storage_status_init()")
     assert app_main.index("d1l_board_display_boot_splash()") < app_main.index(
@@ -82,8 +86,9 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert splash.index(
         "bsp_lcd_direct_mode_register(splash_direct_mode_copy)"
     ) < splash.rindex("bsp_lcd_flush(")
-    assert app_main.index("D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
+    assert app_main.index("D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
     assert "d1l_storage_status_note_rp2040(rp2040_ret)" in app_main
+    assert "boot SD preparation failed" in app_main
     assert "storage manager start failed" in app_main
     assert "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" in sdkconfig
     assert "CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L" in source
@@ -197,6 +202,11 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
         "esp_err_t d1l_storage_status_mount", 1
     )[0]
     assert "d1l_storage_status_mount(timeout_ms)" in boot_prepare
+    assert "ret != ESP_OK && ret != ESP_ERR_TIMEOUT" in boot_prepare
+    assert "const bool refresh_timed_out = ret == ESP_ERR_TIMEOUT" in boot_prepare
+    assert 'strcmp(s_status.sd_state, "mount_required")' in boot_prepare
+    assert 'strcmp(s_status.sd_state, "no_card")' in boot_prepare
+    assert "The bridge may accept MOUNT" in boot_prepare
     assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in source
     assert "#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 40U" in source
     assert "#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U" in source
