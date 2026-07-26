@@ -134,6 +134,10 @@ def test_server_admin_login_is_available_on_device_and_scrubs_credentials():
     assert 'lv_textarea_set_text(controller->admin_password_textarea, "")' in \
         sheets
     assert "clear_admin_sensitive_input(controller);" in sheets
+    assert (
+        "Select a repeater or room in Nodes, open its details, then tap Admin."
+    ) in sheets
+    assert "Select a repeater or room in Network" not in sheets
     assert "Login is accepted only over local USB" not in sheets
 
     login = phase1.split(
