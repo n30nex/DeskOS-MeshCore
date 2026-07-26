@@ -115,12 +115,12 @@ EXPECTED_FLASH_ROLES = {
 }
 FORBIDDEN_PORTS = frozenset({"COM8", "COM11", "COM16", "COM29"})
 RETAINED_STATE_COMMANDS = (
+    "contacts",
     "version",
     "health",
     "settings get",
     "messages public",
     "messages dm",
-    "contacts",
     "identity status",
 )
 EXPECTED_D1L_ROLE = "desk_companion"
@@ -1157,11 +1157,21 @@ def run_core_flash_only(
                 )
             )
             before_projection = retained_state_projection(before_results)
-            before_version = (
-                before_results[0] if len(before_results) > 0 else {}
+            before_version = next(
+                (
+                    row
+                    for row in before_results
+                    if isinstance(row, dict) and row.get("cmd") == "version"
+                ),
+                {},
             )
-            before_health = (
-                before_results[1] if len(before_results) > 1 else {}
+            before_health = next(
+                (
+                    row
+                    for row in before_results
+                    if isinstance(row, dict) and row.get("cmd") == "health"
+                ),
+                {},
             )
             before_identity = next(
                 (
@@ -1253,8 +1263,22 @@ def run_core_flash_only(
             after_results = retained_state_reader(
                 port, serial_baud, serial_timeout, 0.0
             )
-            version = after_results[0] if len(after_results) > 0 else {}
-            health = after_results[1] if len(after_results) > 1 else {}
+            version = next(
+                (
+                    row
+                    for row in after_results
+                    if isinstance(row, dict) and row.get("cmd") == "version"
+                ),
+                {},
+            )
+            health = next(
+                (
+                    row
+                    for row in after_results
+                    if isinstance(row, dict) and row.get("cmd") == "health"
+                ),
+                {},
+            )
             post_flash_identity = next(
                 (
                     row

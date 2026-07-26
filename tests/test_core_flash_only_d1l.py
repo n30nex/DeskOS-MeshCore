@@ -14,6 +14,13 @@ PUBLIC_KEY = "f" * 64
 POSIX_PORT = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
 
 
+def test_retained_snapshot_reads_contacts_before_bulk_message_lists():
+    commands = flash.RETAINED_STATE_COMMANDS
+
+    assert commands.index("contacts") < commands.index("messages public")
+    assert commands.index("contacts") < commands.index("messages dm")
+
+
 def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
     return [
         {
