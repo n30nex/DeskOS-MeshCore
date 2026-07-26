@@ -372,7 +372,8 @@ def core_probe_result_ok(probe: object, screen: str) -> bool:
         and probe.get("tab") == SCROLL_SURFACES[screen]["tab"]
         and probe.get("surface_supported") is True
         and probe.get("target_found") is True
-        and probe.get("scrollable") is True
+        and type(probe.get("scrollable")) is bool
+        and (not movement_required or probe.get("scrollable") is True)
         and probe.get("movement_required") is movement_required
         and probe.get("moved") is moved
         and (not movement_required or moved)

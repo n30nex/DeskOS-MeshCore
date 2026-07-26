@@ -264,6 +264,14 @@ def test_scroll_probe_core_profile_recomputes_positive_overflow():
         assert scroll_probe_d1l.event_failed(
             compact, "core_1_0", "a" * 40, "conditional"
         ) is False
+    compact_not_scrollable = event("settings")
+    compact_not_scrollable["probe"]["scrollable"] = False
+    assert scroll_probe_d1l.event_failed(
+        compact_not_scrollable,
+        "core_1_0",
+        "a" * 40,
+        "conditional",
+    ) is False
     assert scroll_probe_d1l.event_failed(
         event("dm_thread"), "full_feature"
     ) is True
@@ -285,6 +293,15 @@ def test_scroll_probe_core_profile_recomputes_positive_overflow():
     forged["probe"]["movement_required"] = True
     assert scroll_probe_d1l.event_failed(
         forged, "core_1_0", "a" * 40, "conditional"
+    ) is True
+
+    invalid_scrollable = event("settings")
+    invalid_scrollable["probe"]["scrollable"] = None
+    assert scroll_probe_d1l.event_failed(
+        invalid_scrollable,
+        "core_1_0",
+        "a" * 40,
+        "conditional",
     ) is True
 
     wrong_profile = event("settings")
