@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 try:
     from artifact_metadata import git_metadata, stamp_report
@@ -1478,12 +1478,66 @@ def protocol_tx_ready_for_rf(version_result: object) -> bool:
     )
 
 
-def radio_admission_retryable(result: object) -> bool:
+def _nonnegative_int(value: object) -> bool:
     return (
-        isinstance(result, dict)
-        and result.get("ok") is False
-        and result.get("code") == "ESP_ERR_TIMEOUT"
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 0
     )
+
+
+def mesh_owner_ready_snapshot(result: object) -> bool:
+    if not isinstance(result, dict):
+        return False
+    runtime = result.get("runtime")
+    if not isinstance(runtime, dict):
+        return False
+    return (
+        result.get("ok") is True
+        and result.get("cmd") == "mesh status"
+        and result.get("state") == "ready"
+        and result.get("radio_ready") is True
+        and runtime.get("owner") == "meshcore_service"
+        and all(
+            _nonnegative_int(runtime.get(field))
+            and runtime.get(field) == 0
+            for field in (
+                "command_queue_depth",
+                "priority_queue_depth",
+                "event_queue_depth",
+            )
+        )
+        and _nonnegative_int(runtime.get("owner_maintenance_runs"))
+    )
+
+
+def wait_for_mesh_owner_ready(
+    status_reader: Callable[[], dict],
+    *,
+    timeout_sec: float,
+    poll_sec: float,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    deadline = monotonic() + max(0.0, min(timeout_sec, 30.0))
+    interval = min(max(0.25, poll_sec), 1.0)
+    previous_maintenance: int | None = None
+    while True:
+        status = status_reader()
+        if mesh_owner_ready_snapshot(status):
+            maintenance = status["runtime"]["owner_maintenance_runs"]
+            if (
+                previous_maintenance is not None
+                and maintenance > previous_maintenance
+            ):
+                return True
+            previous_maintenance = maintenance
+        else:
+            previous_maintenance = None
+        remaining = deadline - monotonic()
+        if remaining <= 0.0:
+            return False
+        sleep(min(interval, remaining))
 
 
 def read_json(path: Path) -> dict:
@@ -3628,9 +3682,15 @@ def build_report(
         if import_command is not None
         else None
     )
-    outbound_step = latest_command_step(steps, outbound_command)
+    outbound_steps = [
+        step for step in steps if step.get("command") == outbound_command
+    ]
+    outbound_step = outbound_steps[0] if len(outbound_steps) == 1 else None
     outbound_packets = command_step(steps, f"packets search {outbound_token}")
-    direct_step = latest_command_step(steps, direct_command)
+    direct_steps = [
+        step for step in steps if step.get("command") == direct_command
+    ]
+    direct_step = direct_steps[0] if len(direct_steps) == 1 else None
     latest_messages = latest_step_with_prefix(steps, f"messages dm {fingerprint}")
     first_messages = first_command_step(
         steps, f"messages dm {fingerprint}"
@@ -3911,6 +3971,12 @@ def build_report(
             else True
         ),
         "controlled_peer_contact_ready": contact_ready,
+        "outbound_send_exactly_once": (
+            not send_outbound or len(outbound_steps) == 1
+        ),
+        "direct_send_exactly_once": (
+            not send_outbound or listener_mode or len(direct_steps) == 1
+        ),
         "outbound_dm": outbound_ok,
         "inbound_dm": inbound_ok,
         "ack_path": ack_path_ok,
@@ -4469,18 +4535,19 @@ def _run_hardware_reserved(
                 if listener_mode
                 else outbound_token
             )
-            outbound_result = run_command(
+            if not wait_for_mesh_owner_ready(
+                lambda: run_command(ser, "mesh status"),
+                timeout_sec=wait_sec,
+                poll_sec=poll_sec,
+            ):
+                raise ValueError(
+                    "MeshCore owner did not become ready before outbound DM"
+                )
+            run_command(
                 ser,
                 f"mesh send dm {fingerprint} {outbound_text}",
                 max(timeout, 8.0),
             )
-            if radio_admission_retryable(outbound_result):
-                time.sleep(max(0.25, poll_sec))
-                run_command(
-                    ser,
-                    f"mesh send dm {fingerprint} {outbound_text}",
-                    max(timeout, 8.0),
-                )
             time.sleep(2.0)
             run_command(ser, f"packets search {outbound_token}")
         if remote_mode:
@@ -4537,18 +4604,19 @@ def _run_hardware_reserved(
             run_command(ser, "packets")
             run_command(ser, f"routes trace {fingerprint}")
             if not listener_mode:
-                direct_result = run_command(
+                if not wait_for_mesh_owner_ready(
+                    lambda: run_command(ser, "mesh status"),
+                    timeout_sec=wait_sec,
+                    poll_sec=poll_sec,
+                ):
+                    raise ValueError(
+                        "MeshCore owner did not become ready before direct DM"
+                    )
+                run_command(
                     ser,
                     f"mesh send dm {fingerprint} {direct_token}",
                     max(timeout, 8.0),
                 )
-                if radio_admission_retryable(direct_result):
-                    time.sleep(max(0.25, poll_sec))
-                    run_command(
-                        ser,
-                        f"mesh send dm {fingerprint} {direct_token}",
-                        max(timeout, 8.0),
-                    )
                 time.sleep(2.0)
                 run_command(ser, f"packets search {direct_token}")
             run_command(ser, f"messages dm {fingerprint}")
