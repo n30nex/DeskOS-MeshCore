@@ -87,6 +87,7 @@ REMOTE_PEER_MAX_STATUS_AGE_SEC = 120.0
 REMOTE_PEER_MAX_STATUS_BYTES = 1024 * 1024
 REMOTE_PEER_MAX_CONTROL_BYTES = 64 * 1024
 REMOTE_PEER_SSH_TIMEOUT_SEC = 45.0
+LOCAL_PEER_CONTROL_TIMEOUT_SEC = 60.0
 REMOTE_PEER_SSH_IDENTITY_ENV = "MESH_PEER_SSH_IDENTITY"
 REMOTE_PEER_HELPER_SCHEMA = 1
 MESHCOREBOT_INSTANCE = "com" + str(11)
@@ -1288,10 +1289,10 @@ def run_local_peer_operation(
     if (
         isinstance(timeout_sec, bool)
         or not isinstance(timeout_sec, (int, float))
-        or not 0.1 <= float(timeout_sec) <= REMOTE_PEER_SSH_TIMEOUT_SEC
+        or not 0.1 <= float(timeout_sec) <= LOCAL_PEER_CONTROL_TIMEOUT_SEC
     ):
         raise ValueError(
-            "local controlled-peer timeout must be bounded to 0.1-45 seconds"
+            "local controlled-peer timeout must be bounded to 0.1-60 seconds"
         )
     if operation not in {"capture_status", "send_control"}:
         raise ValueError("unsupported local controlled-peer operation")
@@ -2382,6 +2383,7 @@ def send_local_peer_dm(
             config,
             "send_control",
             control_request=request_raw,
+            timeout_sec=LOCAL_PEER_CONTROL_TIMEOUT_SEC,
         )
         try:
             response_raw = base64.b64decode(
@@ -3420,7 +3422,7 @@ def build_report(
         if import_command is not None
         else None
     )
-    outbound_step = command_step(steps, outbound_command)
+    outbound_step = latest_command_step(steps, outbound_command)
     outbound_packets = command_step(steps, f"packets search {outbound_token}")
     direct_step = latest_command_step(steps, direct_command)
     latest_messages = latest_step_with_prefix(steps, f"messages dm {fingerprint}")
@@ -4234,11 +4236,18 @@ def _run_hardware_reserved(
                 if listener_mode
                 else outbound_token
             )
-            run_command(
+            outbound_result = run_command(
                 ser,
                 f"mesh send dm {fingerprint} {outbound_text}",
                 max(timeout, 8.0),
             )
+            if radio_admission_retryable(outbound_result):
+                time.sleep(max(0.25, poll_sec))
+                run_command(
+                    ser,
+                    f"mesh send dm {fingerprint} {outbound_text}",
+                    max(timeout, 8.0),
+                )
             time.sleep(2.0)
             run_command(ser, f"packets search {outbound_token}")
         if remote_mode:

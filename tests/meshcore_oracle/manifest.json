@@ -71,7 +71,7 @@
     "main/CMakeLists.txt": "61c3195c0c15ea75ba3a68d6947915b619c3d186ebea1a0482b1551df93ee938",
     "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
     "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
-    "main/comms/usb_console.c": "81d6e369becf8e448a5347ba603be7d946036a09904a9342d5d7dd60ec1ffd22",
+    "main/comms/usb_console.c": "7cb60722e73cf0cd5dc254c24b81adaaf0547c9a9632e97d7f701a9338f9986c",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "c0a4e206a9fc433807ddb17e3a11b120caec7959c26bc1d857d89af30acdf418",
     "main/mesh/contact_store.h": "60a66b48162b280354b084b0852c178d6fce2e56c9040891ede160360f2e9d94",

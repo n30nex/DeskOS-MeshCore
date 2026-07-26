@@ -100,7 +100,9 @@ def retained_history_backends_ready(storage_status: dict) -> bool:
     return (
         storage_status.get("ok") is True
         and storage_status.get("data_enabled") is True
-        and storage_status.get("data_backend") == "mixed"
+        # Current SD-first firmware reports "sd"; retain "mixed" for
+        # previously banked receipts and fixtures from the split-backend era.
+        and storage_status.get("data_backend") in {"sd", "mixed"}
         and all(storage_status.get(field) == "sd" for field in RETAINED_HISTORY_BACKENDS)
         and store_backends.get("messages") == "sd"
         and store_backends.get("dm") == "sd"

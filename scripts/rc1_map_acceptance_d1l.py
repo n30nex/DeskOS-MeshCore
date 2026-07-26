@@ -706,6 +706,29 @@ def poll_command(
         time.sleep(min(interval, remaining))
 
 
+def wait_for_saved_wifi(
+    ser: Any,
+    *,
+    timeout: float,
+    command_timeout: float,
+    interval: float,
+    expected_ssid: str | None = None,
+) -> dict[str, Any]:
+    """Wait for the pre-provisioned saved profile to finish connecting."""
+    row = poll_command(
+        ser,
+        "wifi status",
+        timeout=timeout,
+        command_timeout=command_timeout,
+        interval=interval,
+        predicate=lambda status: wifi_is_connected_to(status, expected_ssid),
+    )
+    return validate_connected_wifi(
+        row,
+        expected_ssid=expected_ssid,
+    )
+
+
 def wait_for_ui_tab(
     ser: Any,
     tab: str,
@@ -819,8 +842,11 @@ def run_acceptance(
                 ),
             )
             original_tab = str(ui["active_tab"])
-            wifi = validate_connected_wifi(
-                send_checked(ser, "wifi status", command_timeout)
+            wifi = wait_for_saved_wifi(
+                ser,
+                timeout=wifi_timeout,
+                command_timeout=command_timeout,
+                interval=poll_interval,
             )
             original_ssid = str(wifi["ssid"])
             location = validate_map_center(

@@ -431,6 +431,52 @@ def test_console_readiness_retries_a_command_lost_before_init(
     assert [command for command, _timeout in calls] == ["health", "health"]
 
 
+def test_saved_wifi_readiness_polls_until_saved_profile_connects(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    connecting = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "wifi status",
+        "available": True,
+        "setting_enabled": True,
+        "build_enabled": True,
+        "stack_active": True,
+        "connected": False,
+        "connecting": True,
+        "profile_saved": True,
+        "password_saved": True,
+        "state": "connecting",
+        "live_network": True,
+        "ssid": "Toddmas2.4",
+    }
+    connected = {
+        **connecting,
+        "connected": True,
+        "connecting": False,
+        "state": "connected",
+    }
+    responses = [connecting, connected]
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return responses.pop(0)
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    result = runner.wait_for_saved_wifi(
+        object(),
+        timeout=1.0,
+        command_timeout=0.1,
+        interval=0,
+    )
+
+    assert result["state"] == "connected"
+    assert result["ssid"] == "Toddmas2.4"
+    assert calls == [("wifi status", 0.1), ("wifi status", 0.1)]
+
+
 def test_cli_exposes_bounded_boot_timeout():
     args = runner.parse_args(
         [
@@ -441,6 +487,18 @@ def test_cli_exposes_bounded_boot_timeout():
         ]
     )
     assert args.boot_timeout == runner.BOOT_TIMEOUT_SECONDS
+
+
+def test_cli_exposes_bounded_wifi_timeout():
+    args = runner.parse_args(
+        [
+            "--expected-firmware-commit", COMMIT,
+            "--github-actions-run", RUN,
+            "--workflow-run-attempt", ATTEMPT,
+            "--output", "map.json",
+        ]
+    )
+    assert args.wifi_timeout == runner.WIFI_TIMEOUT_SECONDS
 
 
 def test_cli_has_no_manual_dry_run_or_secret_configuration_surface():

@@ -67,7 +67,7 @@ def retained_canary_hash(token: str) -> int:
 
 def fingerprint_for_token(token: str) -> str:
     value = retained_canary_hash(token)
-    return f"{value:08X}{(value ^ 0xA5A5F00D) & 0xFFFFFFFF:08X}"
+    return f"{value:08x}{(value ^ 0xA5A5F00D) & 0xFFFFFFFF:08x}"
 
 
 def retained_readback_commands(token: str) -> list[str]:

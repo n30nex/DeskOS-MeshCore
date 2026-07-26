@@ -165,6 +165,13 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
         },
         {
             "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
+            "result": {
+                "ok": False,
+                "code": "ESP_ERR_TIMEOUT",
+            },
+        },
+        {
+            "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
             "result": {"ok": True, "cmd": "mesh send dm"},
         },
         {
@@ -720,7 +727,7 @@ def test_rf_full_acceptance_rejects_protocol_tx_not_ready(
         (None, False),
     ],
 )
-def test_direct_dm_retry_requires_exact_radio_admission_timeout(
+def test_dm_retry_requires_exact_radio_admission_timeout(
     result, expected
 ):
     assert rf_accept.radio_admission_retryable(result) is expected
@@ -1974,6 +1981,37 @@ def test_local_peer_mode_rejects_wrong_hostname_before_io(monkeypatch):
     assert calls == []
 
 
+def test_local_control_timeout_is_separate_from_remote_ssh(
+    monkeypatch,
+):
+    assert rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC == 45.0
+    assert rf_accept.LOCAL_PEER_CONTROL_TIMEOUT_SEC == 60.0
+    _, request_raw = rf_accept.remote_control_request(
+        rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        "timeout_bound_in",
+    )
+    io_calls = []
+    monkeypatch.setattr(
+        rf_accept.socket,
+        "gethostname",
+        lambda: rf_accept.REMOTE_PEER_HOSTNAME,
+    )
+    monkeypatch.setattr(
+        rf_accept.os,
+        "lstat",
+        lambda *_args: io_calls.append(True),
+    )
+
+    with pytest.raises(ValueError, match="0.1-60 seconds"):
+        rf_accept.run_local_peer_operation(
+            local_config(),
+            "send_control",
+            control_request=request_raw,
+            timeout_sec=60.001,
+        )
+    assert io_calls == []
+
+
 def test_local_peer_operations_never_ssh_or_open_peer_tty(monkeypatch):
     observed = datetime.now(timezone.utc)
     status_raw = json.dumps(remote_status(observed), separators=(",", ":")).encode(
@@ -2355,8 +2393,11 @@ def test_local_peer_capture_and_control_preserve_exact_sidecars(
         control_request=None,
         timeout_sec=rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC,
     ):
-        assert timeout_sec == rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC
         if operation == "capture_status":
+            assert (
+                timeout_sec
+                == rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC
+            )
             assert control_request is None
             return {
                 "path": rf_accept.REMOTE_PEER_STATUS_PATH,
@@ -2369,6 +2410,10 @@ def test_local_peer_capture_and_control_preserve_exact_sidecars(
                 "raw_b64": base64.b64encode(status_raw).decode("ascii"),
             }
         assert operation == "send_control"
+        assert (
+            timeout_sec
+            == rf_accept.LOCAL_PEER_CONTROL_TIMEOUT_SEC
+        )
         assert control_request == request_raw
         return {
             "socket_path": rf_accept.REMOTE_PEER_CONTROL_SOCKET,
@@ -2440,12 +2485,12 @@ def test_meshcorebot_local_control_captures_exact_acknowledged_exchange(
         operation,
         *,
         control_request=None,
-        timeout_sec=rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC,
+        timeout_sec=rf_accept.LOCAL_PEER_CONTROL_TIMEOUT_SEC,
     ):
         assert observed_config == config
         assert operation == "send_control"
         assert control_request == request_raw
-        assert timeout_sec == rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC
+        assert timeout_sec == rf_accept.LOCAL_PEER_CONTROL_TIMEOUT_SEC
         return {
             "socket_path": rf_accept.MESHCOREBOT_PEER_CONTROL_SOCKET,
             "hostname": rf_accept.REMOTE_PEER_HOSTNAME,
@@ -2845,11 +2890,11 @@ def test_remote_dm_capture_preserves_exact_request_and_response(
         operation,
         *,
         control_request=None,
-        timeout_sec=rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC,
+        timeout_sec=rf_accept.LOCAL_PEER_CONTROL_TIMEOUT_SEC,
     ):
         assert operation == "send_control"
         assert control_request == request_raw
-        assert timeout_sec == rf_accept.REMOTE_PEER_SSH_TIMEOUT_SEC
+        assert timeout_sec == rf_accept.LOCAL_PEER_CONTROL_TIMEOUT_SEC
         return {
             "socket_path": rf_accept.REMOTE_PEER_CONTROL_SOCKET,
             "hostname": rf_accept.REMOTE_PEER_HOSTNAME,

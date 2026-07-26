@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from scripts import sd_retained_history_acceptance_d1l as retained_accept
 import pytest
@@ -219,7 +220,17 @@ def test_fingerprint_for_token_is_stable_hex():
 
     assert first == second
     assert len(first) == 16
-    assert all(ch in "0123456789ABCDEF" for ch in first)
+    assert all(ch in "0123456789abcdef" for ch in first)
+    assert first == first.lower()
+
+    console = Path("main/comms/usb_console.c").read_text(encoding="utf-8")
+    generator = console.split(
+        "static void retained_canary_fingerprint", 1
+    )[1].split(
+        "static void cmd_ui_data_canary", 1
+    )[0]
+    assert '"%08lx%08lx"' in generator
+    assert '"%08lX%08lX"' not in generator
 
 
 def test_readbacks_reject_empty_results_that_only_echo_search_and_fingerprint():
