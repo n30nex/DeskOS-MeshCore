@@ -15,6 +15,16 @@
 #include "app/app_model.h"
 #include "hal/backlight.h"
 
+#define D1L_LCD_WIDTH 480
+#define D1L_LCD_HEIGHT 480
+#define D1L_SPLASH_GLYPH_WIDTH 5
+#define D1L_SPLASH_GLYPH_HEIGHT 7
+#define D1L_SPLASH_GLYPH_SCALE 8
+#define D1L_SPLASH_GLYPH_ADVANCE \
+    ((D1L_SPLASH_GLYPH_WIDTH + 1) * D1L_SPLASH_GLYPH_SCALE)
+#define D1L_SPLASH_TEXT_WIDTH \
+    ((6 * D1L_SPLASH_GLYPH_ADVANCE) - D1L_SPLASH_GLYPH_SCALE)
+
 static const char *TAG = "d1l_board";
 static d1l_board_status_t s_status = {
     .ready = false,
@@ -24,6 +34,62 @@ static d1l_board_status_t s_status = {
 static esp_err_t s_touch_init_result = ESP_ERR_INVALID_STATE;
 static uint32_t s_touch_init_attempts = 0;
 static i2c_bus_device_handle_t s_touch_raw_handle = NULL;
+
+typedef struct {
+    char character;
+    uint8_t rows[D1L_SPLASH_GLYPH_HEIGHT];
+} d1l_splash_glyph_t;
+
+static const d1l_splash_glyph_t s_splash_glyphs[] = {
+    {'D', {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}},
+    {'E', {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F}},
+    {'S', {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E}},
+    {'K', {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11}},
+    {'O', {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}},
+};
+
+static const uint8_t *splash_glyph(char character)
+{
+    for (size_t i = 0; i < sizeof(s_splash_glyphs) / sizeof(s_splash_glyphs[0]); ++i) {
+        if (s_splash_glyphs[i].character == character) {
+            return s_splash_glyphs[i].rows;
+        }
+    }
+    return NULL;
+}
+
+static bool splash_text_pixel(int x, int y)
+{
+    static const char text[] = "DESKOS";
+    const int text_x = (D1L_LCD_WIDTH - D1L_SPLASH_TEXT_WIDTH) / 2;
+    const int text_y = 188;
+    if (x < text_x || y < text_y ||
+        y >= text_y + D1L_SPLASH_GLYPH_HEIGHT * D1L_SPLASH_GLYPH_SCALE) {
+        return false;
+    }
+    const int relative_x = x - text_x;
+    const int glyph_index = relative_x / D1L_SPLASH_GLYPH_ADVANCE;
+    const int glyph_x = (relative_x % D1L_SPLASH_GLYPH_ADVANCE) /
+                        D1L_SPLASH_GLYPH_SCALE;
+    if (glyph_index < 0 || glyph_index >= 6 || glyph_x >= D1L_SPLASH_GLYPH_WIDTH) {
+        return false;
+    }
+    const uint8_t *rows = splash_glyph(text[glyph_index]);
+    const int glyph_y = (y - text_y) / D1L_SPLASH_GLYPH_SCALE;
+    return rows && (rows[glyph_y] & (1U << (D1L_SPLASH_GLYPH_WIDTH - 1 - glyph_x)));
+}
+
+#if CONFIG_LCD_LVGL_DIRECT_MODE
+static bool splash_flush_is_last(void)
+{
+    return true;
+}
+
+static void splash_direct_mode_copy(void)
+{
+    /* Both RGB framebuffers are rendered identically before the refresh. */
+}
+#endif
 
 static uint16_t clamp_touch_coord(int32_t value, uint16_t max)
 {
@@ -164,6 +230,88 @@ esp_err_t d1l_board_init(void)
         d1l_board_i2c_scan(&s_status);
     }
     return ret;
+}
+
+esp_err_t d1l_board_display_boot_splash(void)
+{
+    if (!s_status.ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+#if CONFIG_LCD_LVGL_DIRECT_MODE
+    void *raw_fb1 = NULL;
+    void *raw_fb2 = NULL;
+    bsp_lcd_get_frame_buffer(&raw_fb1, &raw_fb2);
+    if (!raw_fb1 || !raw_fb2) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint16_t *framebuffers[] = {
+        (uint16_t *)raw_fb1,
+        (uint16_t *)raw_fb2,
+    };
+#else
+    uint16_t *line = heap_caps_malloc(
+        D1L_LCD_WIDTH * sizeof(uint16_t),
+        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!line) {
+        line = heap_caps_malloc(
+            D1L_LCD_WIDTH * sizeof(uint16_t), MALLOC_CAP_8BIT);
+    }
+    if (!line) {
+        return ESP_ERR_NO_MEM;
+    }
+#endif
+
+    const uint16_t background = 0x0861; /* deep navy */
+    const uint16_t accent = 0x2EBA;     /* DeskOS cyan */
+    const uint16_t muted = 0x18E3;      /* loading track */
+    for (int y = 0; y < D1L_LCD_HEIGHT; ++y) {
+        for (int x = 0; x < D1L_LCD_WIDTH; ++x) {
+            uint16_t color = background;
+            if (splash_text_pixel(x, y)) {
+                color = accent;
+            } else if (y >= 286 && y < 294 && x >= 120 && x < 360) {
+                color = muted;
+                if ((x >= 126 && x < 194) ||
+                    (x >= 206 && x < 274) ||
+                    (x >= 286 && x < 354)) {
+                    color = accent;
+                }
+            } else if (y >= 148 && y < 154 && x >= 184 && x < 296) {
+                color = accent;
+            }
+#if CONFIG_LCD_LVGL_DIRECT_MODE
+            const size_t offset =
+                (size_t)y * D1L_LCD_WIDTH + (size_t)x;
+            framebuffers[0][offset] = color;
+            framebuffers[1][offset] = color;
+#else
+            line[x] = color;
+#endif
+        }
+#if !CONFIG_LCD_LVGL_DIRECT_MODE
+        const esp_err_t ret =
+            bsp_lcd_flush(0, y, D1L_LCD_WIDTH, y + 1, line);
+        if (ret != ESP_OK) {
+            free(line);
+            return ret;
+        }
+#endif
+    }
+#if CONFIG_LCD_LVGL_DIRECT_MODE
+    /*
+     * The BSP direct-mode flush requires callbacks that LVGL normally
+     * registers later. Install bounded splash callbacks for this one refresh;
+     * UI startup replaces both with its real dirty-area callbacks.
+     */
+    bsp_lcd_flush_is_last_register(splash_flush_is_last);
+    bsp_lcd_direct_mode_register(splash_direct_mode_copy);
+    return bsp_lcd_flush(
+        0, 0, D1L_LCD_WIDTH, D1L_LCD_HEIGHT, framebuffers[0]);
+#else
+    free(line);
+    return ESP_OK;
+#endif
 }
 
 const d1l_board_status_t *d1l_board_status(void)

@@ -16,6 +16,7 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     console = read("main/comms/usb_console.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
+    board = read("main/hal/indicator_board.c")
     sdkconfig = read("sdkconfig.defaults")
 
     assert "D1L_STORAGE_SD_MOUNT_POINT \"/sdcard\"" in header
@@ -65,7 +66,22 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert "d1l_storage_boot_prepare(" not in app_main
     assert app_main.index("d1l_storage_status_refresh(") < app_main.index("d1l_message_store_init()")
     assert app_main.index("d1l_packet_log_init()") < app_main.index("d1l_storage_manager_start()")
-    assert app_main.index("d1l_storage_manager_start()") < app_main.index("d1l_board_init()")
+    assert app_main.index("d1l_board_init()") < app_main.index("d1l_storage_status_init()")
+    assert app_main.index("d1l_board_display_boot_splash()") < app_main.index(
+        "d1l_storage_status_init()"
+    )
+    splash = board.split(
+        "esp_err_t d1l_board_display_boot_splash(void)", 1
+    )[1].split("const d1l_board_status_t *d1l_board_status", 1)[0]
+    assert "bsp_lcd_get_frame_buffer(&raw_fb1, &raw_fb2)" in splash
+    assert "framebuffers[0][offset] = color" in splash
+    assert "framebuffers[1][offset] = color" in splash
+    assert splash.index(
+        "bsp_lcd_flush_is_last_register(splash_flush_is_last)"
+    ) < splash.rindex("bsp_lcd_flush(")
+    assert splash.index(
+        "bsp_lcd_direct_mode_register(splash_direct_mode_copy)"
+    ) < splash.rindex("bsp_lcd_flush(")
     assert app_main.index("D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
     assert "d1l_storage_status_note_rp2040(rp2040_ret)" in app_main
     assert "storage manager start failed" in app_main

@@ -190,6 +190,9 @@ def test_protocol_acceptance_commands_map_to_exact_console_responses():
     assert expected_command_name(
         f"routes telemetry {fingerprint}"
     ) == "routes telemetry"
+    assert expected_command_name(
+        f"routes trace contact {fingerprint}"
+    ) == "routes trace contact"
     assert expected_command_name("routes trace status") == "routes trace status"
     assert expected_command_name(
         f"repeater ping {fingerprint}"

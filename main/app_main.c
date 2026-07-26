@@ -134,6 +134,22 @@ void app_main(void)
            esp_err_to_name(d1l_retained_blob_store_nvs_error()),
            esp_err_to_name(d1l_retained_blob_store_nvs_migration_error()));
 
+    /*
+     * Bring up the LCD before retained SD history is read over the 115200-baud
+     * RP2040 bridge. A populated card can take tens of seconds to replay, and
+     * leaving the panel at its power-on blue during that bounded work makes a
+     * healthy boot indistinguishable from a hang.
+     */
+    esp_err_t board_ret = d1l_board_init();
+    if (board_ret == ESP_OK) {
+        const esp_err_t splash_ret = d1l_board_display_boot_splash();
+        if (splash_ret != ESP_OK) {
+            ESP_LOGW(TAG, "DeskOS boot splash failed: %s",
+                     esp_err_to_name(splash_ret));
+        }
+        ESP_LOGI(TAG, "D1L board initialized; DeskOS boot splash visible");
+    }
+
     esp_err_t storage_ret = d1l_storage_status_init();
     if (storage_ret != ESP_OK) {
         ESP_LOGW(TAG, "storage status init failed: %s", esp_err_to_name(storage_ret));
@@ -225,7 +241,6 @@ void app_main(void)
     }
     d1l_meshcore_service_init();
 
-    esp_err_t board_ret = d1l_board_init();
     if (board_ret == ESP_OK) {
         d1l_display_preferences_t display_preferences = {0};
         d1l_display_preferences_get(&display_preferences);
@@ -280,7 +295,7 @@ void app_main(void)
 
     esp_err_t ui_ret = ESP_ERR_INVALID_STATE;
     if (board_ret == ESP_OK) {
-        ESP_LOGI(TAG, "D1L board initialized");
+        ESP_LOGI(TAG, "D1L full UI starting");
         ui_ret = d1l_ui_phase1_start();
         if (ui_ret != ESP_OK) {
             ESP_LOGE(TAG, "D1L UI startup failed: %s",
