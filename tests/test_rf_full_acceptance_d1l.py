@@ -74,6 +74,23 @@ def d1l_identity_status(public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY):
     }
 
 
+def mesh_owner_status(owner_maintenance_runs: int, heartbeat: int = 7) -> dict:
+    return {
+        "ok": True,
+        "cmd": "mesh status",
+        "state": "ready",
+        "radio_ready": True,
+        "runtime": {
+            "owner": "meshcore_service",
+            "command_queue_depth": 0,
+            "priority_queue_depth": 0,
+            "event_queue_depth": 0,
+            "owner_maintenance_runs": owner_maintenance_runs,
+            "heartbeat": heartbeat,
+        },
+    }
+
+
 def test_rf_full_acceptance_dry_run_is_dm_only():
     report = rf_accept.dry_run_report(
         port="COM12",
@@ -166,13 +183,6 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
         },
         {
             "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
-            "result": {
-                "ok": False,
-                "code": "ESP_ERR_TIMEOUT",
-            },
-        },
-        {
-            "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
             "result": {"ok": True, "cmd": "mesh send dm"},
         },
         {
@@ -186,13 +196,6 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
                 "cmd": "messages dm",
                 "fingerprint": "0bf0a701d5ae2db6",
                 "entries": [{"direction": "rx", "text": "rf_unit_in"}],
-            },
-        },
-        {
-            "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct",
-            "result": {
-                "ok": False,
-                "code": "ESP_ERR_TIMEOUT",
             },
         },
         {
@@ -294,6 +297,8 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
     assert report["controlled_peer"]["port"] == "COM17"
     assert report["checks"]["identity_public_key_matches"] is True
     assert report["checks"]["controlled_peer_observed"] is True
+    assert report["checks"]["outbound_send_exactly_once"] is True
+    assert report["checks"]["direct_send_exactly_once"] is True
     assert report["checks"]["inbound_dm"] is True
     assert report["checks"]["ack_path"] is True
     assert report["checks"]["direct_route"] is True
@@ -718,20 +723,92 @@ def test_rf_full_acceptance_rejects_protocol_tx_not_ready(
     assert not rf_accept.protocol_tx_ready_for_rf(version)
 
 
-@pytest.mark.parametrize(
-    ("result", "expected"),
-    [
-        ({"ok": False, "code": "ESP_ERR_TIMEOUT"}, True),
-        ({"ok": True, "code": "ESP_ERR_TIMEOUT"}, False),
-        ({"ok": False, "code": "ESP_ERR_NO_MEM"}, False),
-        ({"ok": False, "code": "TIMEOUT"}, False),
-        (None, False),
-    ],
-)
-def test_dm_retry_requires_exact_radio_admission_timeout(
-    result, expected
-):
-    assert rf_accept.radio_admission_retryable(result) is expected
+def test_wait_for_mesh_owner_ready_accepts_advancing_maintenance():
+    statuses = iter(
+        [
+            mesh_owner_status(41, heartbeat=9),
+            mesh_owner_status(42, heartbeat=9),
+        ]
+    )
+    clock = iter([0.0, 0.1])
+    sleeps = []
+
+    assert rf_accept.wait_for_mesh_owner_ready(
+        statuses.__next__,
+        timeout_sec=1.0,
+        poll_sec=0.25,
+        monotonic=clock.__next__,
+        sleep=sleeps.append,
+    )
+    assert sleeps == [0.25]
+
+
+def test_wait_for_mesh_owner_ready_timeout_is_bounded():
+    calls = []
+    clock = iter([0.0, 0.1, 0.5])
+    sleeps = []
+
+    def unchanged_status():
+        calls.append(True)
+        return mesh_owner_status(41, heartbeat=9)
+
+    assert not rf_accept.wait_for_mesh_owner_ready(
+        unchanged_status,
+        timeout_sec=0.5,
+        poll_sec=0.25,
+        monotonic=clock.__next__,
+        sleep=sleeps.append,
+    )
+    assert len(calls) == 2
+    assert sleeps == [0.25]
+
+
+def test_rf_report_rejects_failed_then_successful_outbound_duplicate():
+    fingerprint = "0BF0A701D5AE2DB6"
+    outbound_command = f"mesh send dm {fingerprint} rf_unit_out"
+    peer = {
+        "serial": {"active_port": "COM17", "meshcore_connected": True},
+        "discord": {"connected": True},
+    }
+    report = rf_accept.build_report(
+        port="COM12",
+        **windows_target_pair(),
+        baud=115200,
+        peer_status_path=Path("status.json"),
+        peer_port="COM17",
+        fingerprint=fingerprint,
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="rf_unit",
+        send_outbound=True,
+        steps=[
+            {
+                "command": "identity status",
+                "result": d1l_identity_status(),
+            },
+            {
+                "command": outbound_command,
+                "result": {"ok": False, "code": "ESP_ERR_TIMEOUT"},
+            },
+            {
+                "command": outbound_command,
+                "result": {"ok": True, "cmd": "mesh send dm"},
+            },
+            {
+                "command": "packets search rf_unit_out",
+                "result": {
+                    "ok": True,
+                    "entries": [{"note": "rf_unit_out"}],
+                },
+            },
+        ],
+        peer_before=peer,
+        peer_after=peer,
+        inbound_seen_at=None,
+    )
+
+    assert report["checks"]["outbound_send_exactly_once"] is False
+    assert report["checks"]["outbound_dm"] is False
+    assert report["closure_eligible"] is False
 
 
 def test_rf_report_cannot_use_later_ready_version_to_override_first_block():
