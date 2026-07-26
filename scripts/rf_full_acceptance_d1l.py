@@ -2828,10 +2828,34 @@ def entries(value: dict | None) -> list[dict]:
     return rows if isinstance(rows, list) else []
 
 
+def canonical_fingerprint(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.lower()
+    return (
+        normalized
+        if re.fullmatch(r"[0-9a-f]{16}", normalized)
+        else None
+    )
+
+
+def fingerprints_equal(left: object, right: object) -> bool:
+    normalized = canonical_fingerprint(left)
+    return (
+        normalized is not None
+        and normalized == canonical_fingerprint(right)
+    )
+
+
 def entry_matches_fingerprint(value: dict | None, entry: dict, fingerprint: str) -> bool:
     top_level = value.get("fingerprint") if isinstance(value, dict) else None
     entry_fingerprint = entry.get("fingerprint")
-    return (not top_level or top_level == fingerprint) and (not entry_fingerprint or entry_fingerprint == fingerprint)
+    return (
+        not top_level or fingerprints_equal(top_level, fingerprint)
+    ) and (
+        not entry_fingerprint
+        or fingerprints_equal(entry_fingerprint, fingerprint)
+    )
 
 
 def messages_have_inbound_token(value: dict | None, token: str, fingerprint: str) -> bool:
@@ -2887,11 +2911,11 @@ def packets_have_ack_or_path(value: dict | None) -> bool:
 def route_has_direct_path(value: dict | None, fingerprint: str) -> bool:
     if not isinstance(value, dict) or value.get("ok") is not True:
         return False
-    if value.get("fingerprint") != fingerprint:
+    if not fingerprints_equal(value.get("fingerprint"), fingerprint):
         return False
     for entry in entries(value):
         if (
-            entry.get("target") == fingerprint
+            fingerprints_equal(entry.get("target"), fingerprint)
             and entry.get("kind") == "dm_text"
             and entry.get("direction") == "tx"
             and entry.get("route") == "direct"
@@ -3053,7 +3077,7 @@ def correlated_listener_transaction(
     route_rows = [
         row
         for row in new_routes
-        if row.get("target") == fingerprint
+        if fingerprints_equal(row.get("target"), fingerprint)
         and row.get("kind") == "dm_ack"
         and row.get("direction") == "rx"
         and row.get("route") == "direct"

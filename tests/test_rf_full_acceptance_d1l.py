@@ -129,7 +129,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
             "result": {
                 "ok": True,
                 "cmd": "messages dm",
-                "fingerprint": "0BF0A701D5AE2DB6",
+                "fingerprint": "0bf0a701d5ae2db6",
                 "entries": [{"direction": "rx", "text": "rf_unit_in"}],
             },
         },
@@ -146,16 +146,25 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
             "result": {
                 "ok": True,
                 "cmd": "messages dm",
-                "fingerprint": "0BF0A701D5AE2DB6",
+                "fingerprint": "0bf0a701d5ae2db6",
                 "entries": [
                     {
+                        "fingerprint": "0bf0a701d5ae2db6",
                         "direction": "tx",
                         "text": "rf_unit_out",
                         "acked": True,
                         "ack_hash": 4815162342,
                     },
-                    {"direction": "rx", "text": "rf_unit_in"},
-                    {"direction": "tx", "text": "rf_unit_direct"},
+                    {
+                        "fingerprint": "0bf0a701d5ae2db6",
+                        "direction": "rx",
+                        "text": "rf_unit_in",
+                    },
+                    {
+                        "fingerprint": "0bf0a701d5ae2db6",
+                        "direction": "tx",
+                        "text": "rf_unit_direct",
+                    },
                 ],
             },
         },
@@ -175,11 +184,11 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
             "result": {
                 "ok": True,
                 "cmd": "routes trace",
-                "fingerprint": "0BF0A701D5AE2DB6",
+                "fingerprint": "0bf0a701d5ae2db6",
                 "best_route": "direct",
                 "entries": [
                     {
-                        "target": "0BF0A701D5AE2DB6",
+                        "target": "0bf0a701d5ae2db6",
                         "kind": "dm_text",
                         "direction": "tx",
                         "route": "direct",
@@ -1208,9 +1217,10 @@ def test_listener_contact_import_requires_exact_key_and_canonical_chat():
 
 def test_listener_transaction_correlates_new_token_hash_packet_and_route():
     fingerprint = "0123456789ABCDEF"
+    canonical = fingerprint.lower()
     token = "rf_exact_out"
     baseline_messages = {
-        "fingerprint": fingerprint,
+        "fingerprint": canonical,
         "entries": [
             {
                 "seq": 1,
@@ -1220,12 +1230,12 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         ],
     }
     final_messages = {
-        "fingerprint": fingerprint,
+        "fingerprint": canonical,
         "entries": [
             *baseline_messages["entries"],
             {
                 "seq": 2,
-                "fingerprint": fingerprint,
+                "fingerprint": canonical,
                 "direction": "tx",
                 "text": f"core acceptance test {token}",
                 "acked": True,
@@ -1241,7 +1251,7 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
             },
             {
                 "seq": 3,
-                "fingerprint": fingerprint,
+                "fingerprint": canonical,
                 "direction": "rx",
                 "text": rf_accept.RADIO_LISTENER_REPLY,
                 "ack_response": {
@@ -1284,7 +1294,7 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         "entries": [
             {
                 "seq": 20,
-                "target": fingerprint,
+                "target": canonical,
                 "kind": "dm_ack",
                 "direction": "rx",
                 "route": "direct",
@@ -1295,7 +1305,7 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         "entries": [
             {
                 "seq": 21,
-                "target": fingerprint,
+                "target": canonical,
                 "kind": "dm_ack",
                 "direction": "rx",
                 "route": "direct",
