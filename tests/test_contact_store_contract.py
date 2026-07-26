@@ -178,6 +178,8 @@ def test_contacts_can_promote_heard_nodes_by_fingerprint():
     assert "d1l_node_store_find_by_fingerprint" in node_header
     assert "bool d1l_node_store_find_by_fingerprint" in node_source
     assert "parse_fingerprint_token" in console
+    assert "dest[i] = (char)tolower(c);" in console
+    assert "dest[i] = (char)toupper(c);" not in console
     assert "d1l_node_store_find_by_fingerprint(fingerprint, &heard)" in console
     assert "d1l_contact_store_upsert_from_node(fingerprint, alias" in console
     upsert = read("main/mesh/contact_store.c").split(
