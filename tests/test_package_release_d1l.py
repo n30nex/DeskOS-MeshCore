@@ -118,7 +118,7 @@ def write_fake_notices(root: Path) -> None:
     (root / "docs" / "KNOWN_LIMITATIONS.md").write_text("limitations\n", encoding="ascii")
     (root / "docs" / "D1L_SD_CARD_GUIDED_INSTALL.md").write_text("sd setup\n", encoding="ascii")
     release_docs = root / "docs" / "release"
-    release_docs.mkdir()
+    release_docs.mkdir(exist_ok=True)
     (release_docs / "SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md").write_text(
         "product contract\n", encoding="ascii"
     )

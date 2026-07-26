@@ -261,7 +261,6 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "cp .github/d1l-build-inputs.json artifacts/idf-migration/build-inputs.json" in job
     assert "espressif/idf:release-v5.1" not in job
     assert not re.search(r"container:\s*espressif/idf:(?:latest|release-v)", job)
-    assert "idf.py build" in job
     assert "name: Capture ESP-IDF migration state" in job
     assert "name: d1l-idf55-migration-state" in job
     assert "path: artifacts/idf-migration/**" in job

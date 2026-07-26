@@ -1297,8 +1297,14 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert 'cache_status = "Needs FAT32";' in options
     assert options.count("map_menu_row(") == 2
     assert '"Built-in map"' not in options
+    assert "prefetch.provider_configured" in options
+    assert "prefetch.background_prefetch_permitted" in options
     assert (
-        '"Tiles download only while Map is open. Reopening the same area uses the saved copy."'
+        '"The local node area downloads in the background. Opening Map always has priority."'
+        in options
+    )
+    assert (
+        '"Built-in tiles download only while Map is open. Offline prefetch needs an authorized SD source."'
         in options
     )
     assert "D1L_UI_MAP_OPTIONS_ROOT" in map_header

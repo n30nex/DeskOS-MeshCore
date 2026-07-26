@@ -1833,7 +1833,7 @@ def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
         s.line(((0, HOME_TOP_BAR_H), (WIDTH, HOME_TOP_BAR_H)))
         return
     s.rect((0, 0, WIDTH, TOP_BAR_H), (11, 18, 28))
-    s.text("MeshCore DeskOS", (16, 8, 190, 30), 18, TEXT, True)
+    s.text("MeshCore DeskOS", (16, 8, 220, 30), 18, TEXT, True)
     s.text(snap.node_name, (16, 30, 150, 49), 12, MUTED)
     s.text(f"--:--  Mesh {snap.mesh_state}", (202, 10, 464, 28), 12, ACCENT, True, "right")
     if s.release_profile == CORE_RELEASE_PROFILE:

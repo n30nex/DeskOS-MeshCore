@@ -132,7 +132,7 @@ def test_default_output_path_uses_safe_cross_platform_slug(tmp_path: Path):
         RUN_ID,
         RUN_ATTEMPT,
     )
-    assert path.parent.name == "core-windows-posix-usb"
+    assert path.parent.name == "core-pi-by-id-windows-manual"
     assert "/dev/" not in str(path)
     assert "\\dev\\" not in str(path)
 
@@ -174,7 +174,7 @@ def test_capture_and_audit_recompute_exact_install_review(
     assert receipt["recovery_policy"] == (
         install_review.expected_recovery_policy()
     )
-    assert receipt["target_artifact_slug"] == "core-windows-posix-usb"
+    assert receipt["target_artifact_slug"] == "core-pi-by-id-windows-manual"
     assert receipt["package_contract"] == {
         "checksum_tree_ok": True,
         "package_manifest_ok": True,

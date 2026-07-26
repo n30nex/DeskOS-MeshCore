@@ -38,6 +38,7 @@ try:
     )
     from core_smoke_d1l import (
         CORE_RELEASE_PROFILE,
+        D1L_CORE_POSIX_TARGET,
         D1L_CORE_PORT,
         enforce_core_port,
         exact_identity,
@@ -76,6 +77,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     )
     from scripts.core_smoke_d1l import (
         CORE_RELEASE_PROFILE,
+        D1L_CORE_POSIX_TARGET,
         D1L_CORE_PORT,
         enforce_core_port,
         exact_identity,
@@ -252,7 +254,7 @@ def verify_core_package(
             "windows": "flash_project.ps1",
             "posix": "flash_project.sh",
         }
-        and install.get("normal_install_port") == D1L_CORE_PORT
+        and install.get("normal_install_port") == D1L_CORE_POSIX_TARGET
         and install.get("normal_install_targets")
         == expected_normal_install_targets()
         and install.get("target_policy") == expected_target_policy()

@@ -71,7 +71,14 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "d1l_retained_blob_store_write(D1L_DM_STORE_ID" not in source
     assert "d1l_retained_blob_store_erase(D1L_DM_STORE_ID" not in source
     assert "d1l_retained_blob_store_erase_sd_primary" not in source
-    assert "d1l_retained_blob_store_erase_nvs_fallback" not in source
+    clear = source.split("esp_err_t d1l_dm_store_clear(void)", 1)[1].split(
+        "esp_err_t d1l_dm_store_flush(void)", 1
+    )[0]
+    assert "s_sd_primary_dirty = true;" in clear
+    assert "s_nvs_fallback_dirty = true;" in clear
+    assert "d1l_retained_blob_store_erase_nvs_fallback(" in clear
+    assert "return d1l_dm_store_flush();" in clear
+    assert "d1l_retained_blob_store_erase_sd_primary" not in clear
     assert "s_last_sd_backend_generation" in source
     assert "backend_generation_matches" in source
     assert "reconcile_sd_primary" in source

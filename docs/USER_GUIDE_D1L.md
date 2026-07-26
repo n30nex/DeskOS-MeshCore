@@ -28,10 +28,11 @@ confirmation. QR sharing is intentionally absent from RC1; URI import remains
 available.
 
 Public and channel views support send, receive, retained history, search and
-unread state. Public display names have the `sender_name_unverified` boundary
-and never alias-match into a direct-message destination. Direct-message
-compose requires the complete public key of a retained verified chat contact.
-Heard-only, truncated, mismatched and non-chat identities remain read-only.
+unread state. Public display names have the `sender_name_unverified` boundary.
+A displayed name never alias-matches into a direct-message destination.
+Direct-message compose requires the complete public key of a retained verified
+chat contact. Heard-only, truncated, mismatched and non-chat identities remain
+read-only.
 
 DM rows report queued, transmitted, acknowledged, retrying or failed state.
 Opening or refreshing a thread does not silently retry a failed message.
@@ -67,8 +68,8 @@ Markers follow the bounded retained-node list and update when newer signed
 data replaces an advert.
 
 Interactive Map supports one-finger pan, **-**, **+**, and **Center** from zoom
-8 through 18, limited by the selected provider. Completed tiles are reused
-from SD.
+8 through 18, limited by the selected provider.
+Completed tiles are reused from SD.
 
 The built-in OpenStreetMap Standard source displays
 `(c) OpenStreetMap contributors` and fetches only the visible current-view 3×3
@@ -139,8 +140,8 @@ reset state. Retained history is not redirected there.
   is required only for authorized background/offline Map download.
 - Foreign, non-FAT32 or unmountable media is preserved and reported.
 - A missing/unusable card activates a prominent degraded notice.
-- Degraded mode keeps basic live RF Public/channel/DM chat available, but
-  retained history, Map download/cache and exports are unavailable.
+- Degraded live-only mode keeps basic live RF Public/channel/DM chat available,
+  but retained history, Map download/cache and exports are unavailable.
 - DeskOS does not silently redirect history into default NVS.
 
 Use **Tools → Storage** before removing media or diagnosing a card.
