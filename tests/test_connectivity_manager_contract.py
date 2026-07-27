@@ -183,6 +183,56 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
     assert app_main.index("d1l_connectivity_init()") < app_main.index("d1l_ui_phase1_start()")
 
 
+def test_wifi_status_uses_event_cached_signal_without_live_driver_poll():
+    source = read("main/comms/connectivity_manager.c")
+
+    fill_status = source[
+        source.index("static void fill_status"):
+        source.index("esp_err_t d1l_connectivity_prepare_reboot")
+    ]
+    assert "wifi_signal_snapshot" in fill_status
+    assert "esp_wifi_sta_get_ap_info" not in fill_status
+    assert "esp_wifi_sta_get_rssi" not in fill_status
+
+    event_handler = source[
+        source.index("static void wifi_event_handler"):
+        source.index("static void stop_wifi_runtime")
+    ]
+    connected = event_handler[
+        event_handler.index("WIFI_EVENT_STA_CONNECTED"):
+        event_handler.index("IP_EVENT_STA_GOT_IP")
+    ]
+    disconnected = event_handler[
+        event_handler.index("WIFI_EVENT_STA_DISCONNECTED"):
+        event_handler.index("WIFI_EVENT_STA_START")
+    ]
+    assert "wifi_event_sta_connected_t" in connected
+    assert "event->channel" in connected
+    assert "event->bssid" in connected
+    assert disconnected.index("wifi_link_cache_clear()") < disconnected.index(
+        "if (suppress_retry)"
+    )
+
+    scan = source[
+        source.index("esp_err_t d1l_connectivity_wifi_scan"):
+        source.index("esp_err_t d1l_connectivity_wifi_connect")
+    ]
+    assert "wifi_signal_update_from_scan(&records[i])" in scan
+    scan_update = source[
+        source.index("static bool wifi_signal_update_from_scan"):
+        source.index("static d1l_wifi_failure_class_t")
+    ]
+    assert "s_wifi_bssid_valid" in scan_update
+    assert "memcmp(s_wifi_bssid, ap->bssid" in scan_update
+
+    disconnect = source[
+        source.index("esp_err_t d1l_connectivity_wifi_disconnect"):
+        source.index("esp_err_t d1l_connectivity_set_wifi_enabled")
+    ]
+    assert "wifi_link_cache_clear()" in disconnect
+    assert source.count("wifi_link_cache_clear()") >= 6
+
+
 def test_console_command_snapshots_leave_internal_heap_for_late_wifi_start():
     console = read("main/comms/usb_console.c")
     app_model = read("main/app/app_model.c")

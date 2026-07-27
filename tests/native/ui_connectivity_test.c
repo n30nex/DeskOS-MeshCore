@@ -54,6 +54,10 @@ static void test_wifi_truth_models_offline_connected_and_scan_states(void)
                   "Scan ok  3/4 networks  strongest Mesh Lab") == 0);
     assert(strcmp(view.toggle_label, "Disable") == 0);
     assert(strcmp(view.password_placeholder, "Saved; enter to replace") == 0);
+
+    input.rssi_dbm = 0;
+    d1l_ui_connectivity_wifi_view(&input, &view);
+    assert(strcmp(view.link_line, "IP 192.0.2.5  RSSI --  ch 6") == 0);
 }
 
 static void test_ble_never_implies_unmeasured_transport(void)

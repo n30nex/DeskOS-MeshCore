@@ -19,9 +19,15 @@ void d1l_ui_connectivity_wifi_view(const d1l_ui_wifi_view_input_t *input,
              "State %s  build %s", safe_text(input->state, "off"),
              input->build_enabled ? "enabled" : "not built");
     if (input->connected && input->ip && input->ip[0]) {
-        snprintf(out_view->link_line, sizeof(out_view->link_line),
-                 "IP %s  RSSI %d  ch %u", input->ip, input->rssi_dbm,
-                 (unsigned)input->channel);
+        if (input->rssi_dbm < 0) {
+            snprintf(out_view->link_line, sizeof(out_view->link_line),
+                     "IP %s  RSSI %d  ch %u", input->ip, input->rssi_dbm,
+                     (unsigned)input->channel);
+        } else {
+            snprintf(out_view->link_line, sizeof(out_view->link_line),
+                     "IP %s  RSSI --  ch %u", input->ip,
+                     (unsigned)input->channel);
+        }
     } else {
         snprintf(out_view->link_line, sizeof(out_view->link_line),
                  "Last %s", safe_text(input->last_error, "none"));

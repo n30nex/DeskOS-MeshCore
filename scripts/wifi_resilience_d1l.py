@@ -247,7 +247,10 @@ def connected_status_ok(status: dict, target_ssid: str) -> bool:
         and status["state"] == "connected"
         and status["live_network"] is True
         and _valid_ip(status["ip"])
-        and -127 <= status["rssi_dbm"] < 0
+        and (
+            status["rssi_dbm"] == 0
+            or -127 <= status["rssi_dbm"] < 0
+        )
         and 1 <= status["channel"] <= 14
         and status["retry_task_stack_high_water_bytes"] >= WIFI_RETRY_STACK_MIN_BYTES
         and status["safe_mode"] is False
