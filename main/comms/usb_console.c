@@ -3746,6 +3746,44 @@ static void print_map_provider_repair_fields(
         repair && repair->canonical_reverify_attempted ?
             esp_err_to_name(repair->canonical_reverify_io_result) :
             "NOT_ATTEMPTED");
+    printf(",\"canonical_initial_hash_calculated\":%s,"
+           "\"canonical_initial_sha256\":",
+           bool_json(repair && repair->canonical_initial_hash_calculated));
+    print_json_string(repair ? repair->canonical_initial_sha256 : "");
+    printf(",\"canonical_before_reverify_hash_calculated\":%s,"
+           "\"canonical_before_reverify_sha256\":",
+           bool_json(
+               repair &&
+               repair->canonical_before_reverify_hash_calculated));
+    print_json_string(
+        repair ? repair->canonical_before_reverify_sha256 : "");
+    printf(",\"canonical_before_reverify_hash_matches_initial\":%s,"
+           "\"canonical_reverify_hash_calculated\":%s,"
+           "\"canonical_reverify_sha256\":",
+           bool_json(
+               repair &&
+               repair->canonical_before_reverify_hash_matches_initial),
+           bool_json(
+               repair && repair->canonical_reverify_hash_calculated));
+    print_json_string(repair ? repair->canonical_reverify_sha256 : "");
+    printf(",\"canonical_reverify_first_mismatch_found\":%s,"
+           "\"canonical_reverify_first_mismatch_index\":%u,"
+           "\"canonical_reverify_first_mismatch_before_byte\":%u,"
+           "\"canonical_reverify_first_mismatch_read_byte\":%u",
+           bool_json(
+               repair &&
+               repair->canonical_reverify_first_mismatch_found),
+           repair ?
+               (unsigned)repair->canonical_reverify_first_mismatch_index :
+               0U,
+           repair ?
+               (unsigned)repair->
+                   canonical_reverify_first_mismatch_before_byte :
+               0U,
+           repair ?
+               (unsigned)repair->
+                   canonical_reverify_first_mismatch_read_byte :
+               0U);
     printf(",\"source_id\":");
     print_json_string(repair ? repair->source_id : "");
     printf(",\"stage_path\":");

@@ -74,8 +74,13 @@ typedef struct {
     bool backup_copy_uncertain;
     bool backup_bytes_verified;
     bool backup_hash_verified;
+    bool canonical_initial_hash_calculated;
+    bool canonical_before_reverify_hash_calculated;
+    bool canonical_before_reverify_hash_matches_initial;
     bool canonical_reverify_attempted;
+    bool canonical_reverify_hash_calculated;
     bool canonical_reverify_bytes_match;
+    bool canonical_reverify_first_mismatch_found;
     bool canonical_delete_attempted;
     bool canonical_delete_performed;
     bool canonical_delete_uncertain;
@@ -91,14 +96,21 @@ typedef struct {
     bool final_builtin_exact;
     size_t before_bytes;
     size_t canonical_reverify_bytes;
+    size_t canonical_reverify_first_mismatch_index;
     size_t final_bytes;
     esp_err_t canonical_reverify_io_result;
+    uint8_t canonical_reverify_first_mismatch_before_byte;
+    uint8_t canonical_reverify_first_mismatch_read_byte;
     char action[D1L_MAP_PROVIDER_ACTION_MAX + 1U];
     char recovery_stage[D1L_MAP_PROVIDER_RECOVERY_STAGE_MAX + 1U];
     char source_id[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
     char stage_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
     char backup_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
     char preserved_backup_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
+    char canonical_initial_sha256[D1L_MAP_PROVIDER_SHA256_HEX_LENGTH + 1U];
+    char canonical_before_reverify_sha256[
+        D1L_MAP_PROVIDER_SHA256_HEX_LENGTH + 1U];
+    char canonical_reverify_sha256[D1L_MAP_PROVIDER_SHA256_HEX_LENGTH + 1U];
 } d1l_map_provider_repair_result_t;
 
 typedef struct {

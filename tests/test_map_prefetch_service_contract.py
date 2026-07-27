@@ -231,8 +231,30 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     assert invalid_flow.index("ret = read_provider_path(") < (
         invalid_flow.index("write_provider_create_new(")
     )
+    initial_read = repair.index(
+        "ret = read_provider_path("
+    )
+    initial_hash = repair.index(
+        "canonical_initial_hash_calculated ="
+    )
+    initial_parse = repair.index(
+        "ret = parse_provider_config(before, &provider);"
+    )
+    assert initial_read < initial_hash < initial_parse
+    before_reverify_hash = invalid_flow.index(
+        "canonical_before_reverify_hash_calculated ="
+    )
+    reverify_read = invalid_flow.index(
+        "const esp_err_t reverify_ret = read_provider_path("
+    )
+    reverify_hash = invalid_flow.index(
+        "canonical_reverify_hash_calculated ="
+    )
+    assert before_reverify_hash < reverify_read < reverify_hash
     assert "canonical_reverify_io_result = reverify_ret;" in invalid_flow
     assert "canonical_reverify_bytes_match" in invalid_flow
+    assert "memcmp(verify, before, before_size) == 0" in invalid_flow
+    assert "canonical_reverify_first_mismatch_index = i;" in invalid_flow
     assert (
         "out_result->stage_path, D1L_MAP_PROVIDER_CONFIG_PATH, false"
         in repair
@@ -243,4 +265,12 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     assert '"retained_worker_quiesce_attempted\\":%s' in console
     assert '"retained_worker_quiesced\\":%s' in console
     assert '"canonical_reverify_io_code\\":' in console
+    assert '"canonical_initial_sha256\\":' in console
+    assert '"canonical_before_reverify_sha256\\":' in console
+    assert (
+        '"canonical_before_reverify_hash_matches_initial\\":%s'
+        in console
+    )
+    assert '"canonical_reverify_sha256\\":' in console
+    assert '"canonical_reverify_first_mismatch_index\\":%u' in console
     assert '"rollback_attempted\\":false' in console

@@ -1198,6 +1198,13 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     } else if (ret != ESP_OK) {
         goto done;
     } else {
+        out_result->canonical_initial_hash_calculated =
+            provider_sha256_hex(
+                before, before_size, out_result->canonical_initial_sha256);
+        if (!out_result->canonical_initial_hash_calculated) {
+            ret = ESP_FAIL;
+            goto done;
+        }
         ret = parse_provider_config(before, &provider);
         if (ret == ESP_OK) {
             out_result->before_valid = true;
@@ -1311,12 +1318,50 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
          * immediate re-read so the exact invalid bytes cannot race another
          * bridge file user before the create-new backup copy.
          */
+        out_result->canonical_before_reverify_hash_calculated =
+            provider_sha256_hex(
+                before, before_size,
+                out_result->canonical_before_reverify_sha256);
+        if (!out_result->canonical_before_reverify_hash_calculated) {
+            ret = ESP_FAIL;
+            goto done;
+        }
+        out_result->canonical_before_reverify_hash_matches_initial =
+            out_result->canonical_initial_hash_calculated &&
+            strcmp(
+                out_result->canonical_initial_sha256,
+                out_result->canonical_before_reverify_sha256) == 0;
+
         out_result->canonical_reverify_attempted = true;
         const esp_err_t reverify_ret = read_provider_path(
             D1L_MAP_PROVIDER_CONFIG_PATH, verify, sizeof(verify),
             &verify_size);
         out_result->canonical_reverify_io_result = reverify_ret;
         out_result->canonical_reverify_bytes = verify_size;
+        if (reverify_ret == ESP_OK) {
+            out_result->canonical_reverify_hash_calculated =
+                provider_sha256_hex(
+                    verify, verify_size,
+                    out_result->canonical_reverify_sha256);
+            if (!out_result->canonical_reverify_hash_calculated) {
+                ret = ESP_FAIL;
+                goto done;
+            }
+            const size_t shared_size =
+                verify_size < before_size ? verify_size : before_size;
+            for (size_t i = 0U; i < shared_size; ++i) {
+                if ((uint8_t)before[i] == (uint8_t)verify[i]) {
+                    continue;
+                }
+                out_result->canonical_reverify_first_mismatch_found = true;
+                out_result->canonical_reverify_first_mismatch_index = i;
+                out_result->canonical_reverify_first_mismatch_before_byte =
+                    (uint8_t)before[i];
+                out_result->canonical_reverify_first_mismatch_read_byte =
+                    (uint8_t)verify[i];
+                break;
+            }
+        }
         out_result->canonical_reverify_bytes_match =
             reverify_ret == ESP_OK &&
             verify_size == before_size &&
