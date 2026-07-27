@@ -133,7 +133,7 @@ def test_provider_recovery_inspection_is_exact_and_read_only():
     recovery_inspector = provider.split(
         "esp_err_t d1l_map_tile_provider_inspect_recovery", 1
     )[1].split(
-        "esp_err_t d1l_map_tile_provider_repair_invalid_default", 1
+        "static void provider_repair_set_stage", 1
     )[0]
     assert "d1l_rp2040_bridge_file_stat(" in path_inspector
     assert "read_provider_path(" in path_inspector
@@ -169,12 +169,15 @@ def test_provider_recovery_inspection_is_exact_and_read_only():
     assert "d1l_map_tile_provider_refresh(" not in command_body
 
 
-def test_invalid_provider_repair_copies_then_commits_forward_only():
+def test_invalid_provider_repair_preserves_then_commits_forward_only():
     provider = read("main/map/map_tile_provider.c")
+    header = read("main/map/map_tile_provider.h")
     console = read("main/comms/usb_console.c")
     repair = provider.split(
-        "esp_err_t d1l_map_tile_provider_repair_invalid_default", 1
-    )[1].split("bool d1l_map_tile_provider_path", 1)[0]
+        "static esp_err_t repair_invalid_default_internal", 1
+    )[1].split(
+        "esp_err_t d1l_map_tile_provider_repair_invalid_default(", 1
+    )[0]
     quiesce_helper = provider.split(
         "static esp_err_t provider_repair_quiesce_storage", 1
     )[1].split("static esp_err_t verify_invalid_provider_copy", 1)[0]
@@ -208,29 +211,30 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     assert "verify_invalid_provider_copy(" in repair
     assert "d1l_rp2040_bridge_file_delete(" in repair
     assert "d1l_rp2040_bridge_file_rename(" in repair
-    assert (
-        "D1L_MAP_PROVIDER_CONFIG_PATH, out_result->backup_path"
-        not in repair
-    )
 
     backup_copy = repair.index("write_provider_create_new(")
-    backup_verify = repair.index("verify_invalid_provider_copy(")
-    canonical_delete = repair.index("d1l_rp2040_bridge_file_delete(")
-    final_rename = repair.index("d1l_rp2040_bridge_file_rename(")
+    backup_verify = repair.index(
+        "verify_invalid_provider_copy(", backup_copy
+    )
+    canonical_delete = repair.index(
+        "d1l_rp2040_bridge_file_delete(", backup_verify
+    )
+    final_rename = repair.index(
+        "out_result->stage_path, D1L_MAP_PROVIDER_CONFIG_PATH, false"
+    )
     final_validate = repair.index(
         "validate_default_provider_path(", final_rename
     )
     assert backup_copy < backup_verify < canonical_delete < final_rename
     assert final_rename < final_validate
-    invalid_flow = repair.split(
-        'provider_repair_set_stage(out_result, "stage_verified");', 1
-    )[1].split("} else {", 1)[0]
-    assert invalid_flow.index("provider_repair_quiesce_storage(") < (
-        invalid_flow.index("ret = read_provider_path(")
+    invalid_start = repair.index("if (repair_invalid) {")
+    invalid_quiesce = repair.index(
+        "provider_repair_quiesce_storage(", invalid_start
     )
-    assert invalid_flow.index("ret = read_provider_path(") < (
-        invalid_flow.index("write_provider_create_new(")
+    invalid_reread = repair.index(
+        "const esp_err_t reverify_ret = read_provider_path(", invalid_start
     )
+    assert invalid_quiesce < invalid_reread < backup_copy
     initial_read = repair.index(
         "ret = read_provider_path("
     )
@@ -241,20 +245,20 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
         "ret = parse_provider_config(before, &provider);"
     )
     assert initial_read < initial_hash < initial_parse
-    before_reverify_hash = invalid_flow.index(
+    before_reverify_hash = repair.index(
         "canonical_before_reverify_hash_calculated ="
     )
-    reverify_read = invalid_flow.index(
+    reverify_read = repair.index(
         "const esp_err_t reverify_ret = read_provider_path("
     )
-    reverify_hash = invalid_flow.index(
+    reverify_hash = repair.index(
         "canonical_reverify_hash_calculated ="
     )
     assert before_reverify_hash < reverify_read < reverify_hash
-    assert "canonical_reverify_io_result = reverify_ret;" in invalid_flow
-    assert "canonical_reverify_bytes_match" in invalid_flow
-    assert "memcmp(verify, before, before_size) == 0" in invalid_flow
-    assert "canonical_reverify_first_mismatch_index = i;" in invalid_flow
+    assert "canonical_reverify_io_result = reverify_ret;" in repair
+    assert "canonical_reverify_bytes_match" in repair
+    assert "memcmp(verify, before, before_size) == 0" in repair
+    assert "canonical_reverify_first_mismatch_index = i;" in repair
     assert (
         "out_result->stage_path, D1L_MAP_PROVIDER_CONFIG_PATH, false"
         in repair
@@ -274,3 +278,95 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     assert '"canonical_reverify_sha256\\":' in console
     assert '"canonical_reverify_first_mismatch_index\\":%u' in console
     assert '"rollback_attempted\\":false' in console
+
+    assert (
+        'D1L_MAP_PROVIDER_UNSTABLE_BACKUP_PATH_FORMAT \\\n'
+        '    "map/offline-provider.invalid-unstable-rc1-%03u.json"'
+    ) in provider
+    latest_unstable = provider.split(
+        "static esp_err_t find_latest_unstable_backup", 1
+    )[1].split("esp_err_t d1l_map_tile_provider_refresh", 1)[0]
+    assert "d1l_rp2040_bridge_file_stat(" in latest_unstable
+    assert "stat.is_directory" in latest_unstable
+    assert "read_provider_path(" not in latest_unstable
+    assert "parse_provider_config(" not in latest_unstable
+
+    instability_proof = repair.index(
+        "out_result->unstable_source_proven ="
+    )
+    atomic_rename = repair.index(
+        "const esp_err_t rename_ret = d1l_rp2040_bridge_file_rename("
+    )
+    canonical_stat = repair.index(
+        "const esp_err_t canonical_stat_ret = provider_path_exists(",
+        atomic_rename,
+    )
+    backup_stat = repair.index(
+        "const esp_err_t backup_stat_ret = provider_path_exists(",
+        atomic_rename,
+    )
+    atomic_state = repair.index(
+        "if (!canonical_exists && backup_exists)", atomic_rename
+    )
+    assert reverify_hash < instability_proof < atomic_rename
+    assert (
+        "D1L_MAP_PROVIDER_CONFIG_PATH, out_result->backup_path,\n"
+        "                false"
+    ) in repair
+    assert atomic_rename < canonical_stat < backup_stat < atomic_state
+    assert "out_result->backup_path_fresh = true;" in repair
+    assert "out_result->backup_presence_verified = backup_exists;" in repair
+
+    resume = repair.split(
+        "A previous forward attempt already preserved the invalid canonical",
+        1,
+    )[1].split(
+        'provider_repair_set_stage(out_result, "final_rename");', 1
+    )[0]
+    unstable_resume = resume.split(
+        "if (unstable_source_authorized) {", 1
+    )[1].split("} else {", 1)[0]
+    assert "provider_path_exists(" in unstable_resume
+    assert "verify_invalid_provider_copy(" not in unstable_resume
+    assert "backup_presence_verified" in unstable_resume
+    assert "verify_invalid_provider_copy(" in resume
+    assert "canonical_missing_unstable" in repair
+    assert "repaired_invalid_unstable" in repair
+    assert "resumed_missing_unstable" in repair
+
+    assert (
+        "d1l_map_tile_provider_repair_invalid_default_unstable"
+        in header
+    )
+    assert (
+        "return repair_invalid_default_internal(storage, out_result, false);"
+        in provider
+    )
+    assert (
+        "return repair_invalid_default_internal(storage, out_result, true);"
+        in provider
+    )
+    assert (
+        '"map provider repair-invalid-unstable", '
+        "D1L_RELEASE_COMMAND_MUTATION"
+    ) in console
+    assert (
+        "d1l_map_tile_provider_repair_invalid_default_unstable("
+        in console
+    )
+    assert "cmd_map_provider_repair_invalid_unstable();" in console
+    for receipt in (
+        '"unstable_source_authorized\\":%s',
+        '"unstable_source_proven\\":%s',
+        '"backup_atomic_rename_attempted\\":%s',
+        '"backup_atomic_rename_performed\\":%s',
+        '"backup_atomic_rename_uncertain\\":%s',
+        '"backup_presence_verified\\":%s',
+        '"exact_original_bytes_claimed\\":%s',
+        '"backup_atomic_rename_non_replacing\\":true',
+        '"public_rf_tx\\":false',
+        '"formats_sd\\":false',
+        '"nvs_mutated\\":false',
+        '"tile_cache_mutated\\":false',
+    ):
+        assert receipt in console

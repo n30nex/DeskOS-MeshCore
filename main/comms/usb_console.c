@@ -367,6 +367,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "map provider repair-invalid", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_EXACT(
+        "map provider repair-invalid-unstable", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_EXACT(
         "storage map-policy", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_TOKEN(
@@ -3769,7 +3772,14 @@ static void print_map_provider_repair_fields(
     printf(",\"canonical_reverify_first_mismatch_found\":%s,"
            "\"canonical_reverify_first_mismatch_index\":%u,"
            "\"canonical_reverify_first_mismatch_before_byte\":%u,"
-           "\"canonical_reverify_first_mismatch_read_byte\":%u",
+           "\"canonical_reverify_first_mismatch_read_byte\":%u,"
+           "\"unstable_source_authorized\":%s,"
+           "\"unstable_source_proven\":%s,"
+           "\"backup_atomic_rename_attempted\":%s,"
+           "\"backup_atomic_rename_performed\":%s,"
+           "\"backup_atomic_rename_uncertain\":%s,"
+           "\"backup_presence_verified\":%s,"
+           "\"exact_original_bytes_claimed\":%s",
            bool_json(
                repair &&
                repair->canonical_reverify_first_mismatch_found),
@@ -3780,10 +3790,17 @@ static void print_map_provider_repair_fields(
                (unsigned)repair->
                    canonical_reverify_first_mismatch_before_byte :
                0U,
-           repair ?
-               (unsigned)repair->
-                   canonical_reverify_first_mismatch_read_byte :
-               0U);
+            repair ?
+                (unsigned)repair->
+                    canonical_reverify_first_mismatch_read_byte :
+                0U,
+            bool_json(repair && repair->unstable_source_authorized),
+            bool_json(repair && repair->unstable_source_proven),
+            bool_json(repair && repair->backup_atomic_rename_attempted),
+            bool_json(repair && repair->backup_atomic_rename_performed),
+            bool_json(repair && repair->backup_atomic_rename_uncertain),
+            bool_json(repair && repair->backup_presence_verified),
+            bool_json(repair && repair->exact_original_bytes_claimed));
     printf(",\"source_id\":");
     print_json_string(repair ? repair->source_id : "");
     printf(",\"stage_path\":");
@@ -3794,6 +3811,7 @@ static void print_map_provider_repair_fields(
     print_json_string(repair ? repair->preserved_backup_path : "");
     printf(",\"valid_provider_preserved\":%s,"
            "\"backup_copy_create_new_only\":true,"
+           "\"backup_atomic_rename_non_replacing\":true,"
            "\"forward_only\":true,\"non_replacing_renames_only\":true,"
            "\"delete_performed\":%s,\"replace_performed\":false,"
            "\"rollback_attempted\":false,"
@@ -3806,18 +3824,26 @@ static void print_map_provider_repair_fields(
            bool_json(repair && repair->canonical_delete_performed));
 }
 
-static void cmd_map_provider_repair_invalid(void)
+static void cmd_map_provider_repair_invalid_mode(
+    bool unstable_source_authorized)
 {
+    const char *command = unstable_source_authorized ?
+        "map provider repair-invalid-unstable" :
+        "map provider repair-invalid";
     d1l_storage_status_t storage = {0};
     d1l_storage_status(&storage);
     d1l_map_provider_repair_result_t repair = {0};
-    const esp_err_t ret =
+    const esp_err_t ret = unstable_source_authorized ?
+        d1l_map_tile_provider_repair_invalid_default_unstable(
+            &storage, &repair) :
         d1l_map_tile_provider_repair_invalid_default(&storage, &repair);
     if (ret != ESP_OK) {
         printf(
             "{\"schema\":%d,\"ok\":false,"
-            "\"cmd\":\"map provider repair-invalid\",\"code\":",
+            "\"cmd\":",
             D1L_CONSOLE_SCHEMA);
+        print_json_string(command);
+        printf(",\"code\":");
         print_json_string(esp_err_to_name(ret));
         print_map_provider_repair_fields(&repair);
         printf(",\"hint\":");
@@ -3832,9 +3858,24 @@ static void cmd_map_provider_repair_invalid(void)
                     !repair.retained_worker_quiesced ?
                 "retained worker quiesce could not be acquired; no recovery "
                 "mutation was started" :
+            repair.backup_atomic_rename_uncertain ?
+                "atomic backup rename outcome is uncertain; inspect the "
+                "reported canonical, backup, and stage paths before retrying" :
+            repair.backup_atomic_rename_attempted &&
+                    !repair.backup_atomic_rename_performed ?
+                "atomic backup rename did not establish canonical-absent and "
+                "backup-present state; no final commit was attempted" :
+            repair.unstable_source_authorized &&
+                    repair.canonical_reverify_attempted &&
+                    !repair.unstable_source_proven ?
+                "owned full-file source instability was not reproduced; the "
+                "canonical entry was not renamed" :
             repair.canonical_missing_recoverable ?
-                "canonical is absent; the verified backup and exact stage "
-                "remain available for a forward-only retry" :
+                (repair.unstable_source_authorized ?
+                    "canonical is absent; the atomically renamed backup "
+                    "entry and exact stage remain for a forward-only retry" :
+                    "canonical is absent; the verified backup and exact stage "
+                    "remain available for a forward-only retry") :
             repair.final_rename_uncertain ?
                 "final rename outcome is uncertain; inspect the exact "
                 "recovery paths before retrying" :
@@ -3850,9 +3891,19 @@ static void cmd_map_provider_repair_invalid(void)
         return;
     }
 
-    ok_begin("map provider repair-invalid");
+    ok_begin(command);
     print_map_provider_repair_fields(&repair);
     printf("}\n");
+}
+
+static void cmd_map_provider_repair_invalid(void)
+{
+    cmd_map_provider_repair_invalid_mode(false);
+}
+
+static void cmd_map_provider_repair_invalid_unstable(void)
+{
+    cmd_map_provider_repair_invalid_mode(true);
 }
 
 static void print_storage_setup_payload(const d1l_storage_status_t *status)
@@ -8917,6 +8968,7 @@ static void cmd_help(void)
            "\"map center set <lat> <lon>\",\"map center clear\",\"map tiles status\","
            "\"map acceptance status\",\"map acceptance open\","
            "\"map provider recovery-inspect\",\"map provider repair-invalid\","
+           "\"map provider repair-invalid-unstable\","
            "\"mesh status\",\"companion status\",\"rp2040 status\","
            "\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\","
            "\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\","
@@ -9300,6 +9352,9 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_map_acceptance_open();
     } else if (strcmp(line, "map provider recovery-inspect") == 0) {
         cmd_map_provider_recovery_inspect();
+    } else if (
+        strcmp(line, "map provider repair-invalid-unstable") == 0) {
+        cmd_map_provider_repair_invalid_unstable();
     } else if (strcmp(line, "map provider repair-invalid") == 0) {
         cmd_map_provider_repair_invalid();
     } else if (strcmp(line, "settings onboarding status") == 0) {

@@ -74,6 +74,13 @@ typedef struct {
     bool backup_copy_uncertain;
     bool backup_bytes_verified;
     bool backup_hash_verified;
+    bool unstable_source_authorized;
+    bool unstable_source_proven;
+    bool backup_atomic_rename_attempted;
+    bool backup_atomic_rename_performed;
+    bool backup_atomic_rename_uncertain;
+    bool backup_presence_verified;
+    bool exact_original_bytes_claimed;
     bool canonical_initial_hash_calculated;
     bool canonical_before_reverify_hash_calculated;
     bool canonical_before_reverify_hash_matches_initial;
@@ -146,6 +153,9 @@ bool d1l_map_tile_provider_uses_osm_standard(
 esp_err_t d1l_map_tile_provider_refresh(
     const d1l_storage_status_t *storage);
 esp_err_t d1l_map_tile_provider_repair_invalid_default(
+    const d1l_storage_status_t *storage,
+    d1l_map_provider_repair_result_t *out_result);
+esp_err_t d1l_map_tile_provider_repair_invalid_default_unstable(
     const d1l_storage_status_t *storage,
     d1l_map_provider_repair_result_t *out_result);
 esp_err_t d1l_map_tile_provider_inspect_recovery(

@@ -16,6 +16,8 @@
     "map/offline-provider.stage-rc1-%03u.json"
 #define D1L_MAP_PROVIDER_BACKUP_PATH_FORMAT \
     "map/offline-provider.invalid-rc1-%03u.json"
+#define D1L_MAP_PROVIDER_UNSTABLE_BACKUP_PATH_FORMAT \
+    "map/offline-provider.invalid-unstable-rc1-%03u.json"
 #define D1L_MAP_PROVIDER_FIXED_BACKUP_PATH \
     "map/offline-provider.invalid-rc1.json"
 #define D1L_MAP_PROVIDER_PATH_SEQUENCE_MAX 999U
@@ -896,6 +898,49 @@ static esp_err_t find_preserved_invalid_backup(
     return first_invalid_ret;
 }
 
+static esp_err_t find_latest_unstable_backup(
+    char *out_path,
+    size_t out_path_size)
+{
+    if (!out_path || out_path_size == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    out_path[0] = '\0';
+    bool found = false;
+    for (unsigned sequence = 1U;
+         sequence <= D1L_MAP_PROVIDER_PATH_SEQUENCE_MAX;
+         ++sequence) {
+        char candidate[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
+        const int written = snprintf(
+            candidate, sizeof(candidate),
+            D1L_MAP_PROVIDER_UNSTABLE_BACKUP_PATH_FORMAT, sequence);
+        if (written <= 0 || (size_t)written >= sizeof(candidate)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        d1l_rp2040_file_result_t stat = {0};
+        const esp_err_t ret = d1l_rp2040_bridge_file_stat(
+            candidate, &stat, D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (!stat.exists) {
+            return found ? ESP_OK : ESP_ERR_NOT_FOUND;
+        }
+        if (stat.is_directory) {
+            out_path[0] = '\0';
+            return ESP_ERR_INVALID_STATE;
+        }
+        const int copied = snprintf(
+            out_path, out_path_size, "%s", candidate);
+        if (copied <= 0 || (size_t)copied >= out_path_size) {
+            out_path[0] = '\0';
+            return ESP_ERR_INVALID_SIZE;
+        }
+        found = true;
+    }
+    return found ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
 esp_err_t d1l_map_tile_provider_refresh(
     const d1l_storage_status_t *storage)
 {
@@ -1107,17 +1152,21 @@ static esp_err_t verify_invalid_provider_copy(
         return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
     }
     result->backup_preserved = true;
+    result->exact_original_bytes_claimed = true;
     return ESP_OK;
 }
 
-esp_err_t d1l_map_tile_provider_repair_invalid_default(
+static esp_err_t repair_invalid_default_internal(
     const d1l_storage_status_t *storage,
-    d1l_map_provider_repair_result_t *out_result)
+    d1l_map_provider_repair_result_t *out_result,
+    bool unstable_source_authorized)
 {
     if (!out_result) {
         return ESP_ERR_INVALID_ARG;
     }
     memset(out_result, 0, sizeof(*out_result));
+    out_result->unstable_source_authorized =
+        unstable_source_authorized;
     snprintf(
         out_result->action, sizeof(out_result->action), "%s",
         "failed_closed");
@@ -1149,6 +1198,7 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     bool retained_worker_quiesced = false;
     bool canonical_exists = false;
     bool stage_exists = false;
+    bool backup_exists = false;
     esp_err_t ret = ESP_OK;
 
     /*
@@ -1179,22 +1229,30 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
         D1L_MAP_PROVIDER_CONFIG_PATH, before, sizeof(before), &before_size);
     if (ret == ESP_ERR_NOT_FOUND) {
         out_result->canonical_missing_before = true;
-        ret = find_preserved_invalid_backup(
-            out_result->preserved_backup_path,
-            sizeof(out_result->preserved_backup_path),
-            before, sizeof(before), &before_size);
+        ret = unstable_source_authorized ?
+            find_latest_unstable_backup(
+                out_result->preserved_backup_path,
+                sizeof(out_result->preserved_backup_path)) :
+            find_preserved_invalid_backup(
+                out_result->preserved_backup_path,
+                sizeof(out_result->preserved_backup_path),
+                before, sizeof(before), &before_size);
         if (ret != ESP_OK) {
             goto done;
         }
         out_result->recovery_resumed = true;
         out_result->backup_preexisting = true;
         out_result->backup_preserved = true;
+        out_result->backup_presence_verified =
+            unstable_source_authorized;
         snprintf(
             out_result->backup_path, sizeof(out_result->backup_path), "%s",
             out_result->preserved_backup_path);
         snprintf(
             out_result->action, sizeof(out_result->action), "%s",
-            "resuming_missing_canonical");
+            unstable_source_authorized ?
+                "resuming_missing_unstable" :
+                "resuming_missing_canonical");
     } else if (ret != ESP_OK) {
         goto done;
     } else {
@@ -1230,7 +1288,8 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
         repair_invalid = true;
         snprintf(
             out_result->action, sizeof(out_result->action), "%s",
-            "repairing_invalid");
+            unstable_source_authorized ?
+                "repairing_invalid_unstable" : "repairing_invalid");
     }
     out_result->before_bytes = before_size;
 
@@ -1264,7 +1323,9 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     }
     if (repair_invalid) {
         ret = select_absent_enumerated_path(
-            D1L_MAP_PROVIDER_BACKUP_PATH_FORMAT,
+            unstable_source_authorized ?
+                D1L_MAP_PROVIDER_UNSTABLE_BACKUP_PATH_FORMAT :
+                D1L_MAP_PROVIDER_BACKUP_PATH_FORMAT,
             out_result->backup_path, sizeof(out_result->backup_path));
         if (ret != ESP_OK) {
             goto done;
@@ -1366,77 +1427,163 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
             reverify_ret == ESP_OK &&
             verify_size == before_size &&
             memcmp(verify, before, before_size) == 0;
-        if (!out_result->canonical_reverify_bytes_match) {
-            ret = reverify_ret == ESP_OK ?
-                ESP_ERR_INVALID_STATE : reverify_ret;
-            goto done;
-        }
+        out_result->unstable_source_proven =
+            unstable_source_authorized &&
+            out_result->canonical_before_reverify_hash_matches_initial &&
+            reverify_ret == ESP_OK &&
+            out_result->canonical_reverify_hash_calculated &&
+            !out_result->canonical_reverify_bytes_match;
 
-        provider_repair_set_stage(out_result, "backup_create");
-        d1l_provider_create_new_result_t backup_copy = {0};
-        ret = write_provider_create_new(
-            out_result->backup_path, before, before_size, &backup_copy);
-        out_result->backup_copy_attempted = backup_copy.attempted;
-        out_result->backup_copy_performed = backup_copy.performed;
-        out_result->backup_copy_uncertain =
-            backup_copy.completion_uncertain;
-        out_result->backup_path_fresh = backup_copy.create_new;
-        out_result->mutation_performed =
-            out_result->mutation_performed || backup_copy.performed;
-        if (backup_copy.create_new) {
+        if (unstable_source_authorized) {
+            if (!out_result->unstable_source_proven) {
+                ret = reverify_ret == ESP_OK ?
+                    ESP_ERR_INVALID_STATE : reverify_ret;
+                goto done;
+            }
+
+            /*
+             * The two owned CRC-valid full-file snapshots disagree while the
+             * original RAM snapshot is hash-stable. Do not copy either
+             * observation or claim its bytes are the original. A non-replacing
+             * rename preserves the canonical directory entry itself at a path
+             * proven absent before the operation.
+             */
+            provider_repair_set_stage(
+                out_result, "backup_atomic_rename");
+            out_result->backup_atomic_rename_attempted = true;
+            const esp_err_t rename_ret = d1l_rp2040_bridge_file_rename(
+                D1L_MAP_PROVIDER_CONFIG_PATH, out_result->backup_path,
+                false, &file, D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+            const esp_err_t canonical_stat_ret = provider_path_exists(
+                D1L_MAP_PROVIDER_CONFIG_PATH, &canonical_exists);
+            const esp_err_t backup_stat_ret = provider_path_exists(
+                out_result->backup_path, &backup_exists);
+            if (canonical_stat_ret != ESP_OK || backup_stat_ret != ESP_OK) {
+                out_result->backup_atomic_rename_uncertain = true;
+                ret = rename_ret != ESP_OK ? rename_ret :
+                    (canonical_stat_ret != ESP_OK ?
+                        canonical_stat_ret : backup_stat_ret);
+                goto done;
+            }
+            out_result->backup_presence_verified = backup_exists;
+            if (!canonical_exists && backup_exists) {
+                out_result->backup_atomic_rename_performed = true;
+                out_result->backup_path_fresh = true;
+                out_result->backup_preserved = true;
+                out_result->canonical_absent_before_final_rename = true;
+                out_result->canonical_missing_recoverable = true;
+                out_result->mutation_performed = true;
+                snprintf(
+                    out_result->preserved_backup_path,
+                    sizeof(out_result->preserved_backup_path), "%s",
+                    out_result->backup_path);
+                snprintf(
+                    out_result->action, sizeof(out_result->action), "%s",
+                    "canonical_missing_unstable");
+                ret = ESP_OK;
+            } else if (canonical_exists && !backup_exists) {
+                ret = rename_ret != ESP_OK ?
+                    rename_ret : ESP_ERR_INVALID_STATE;
+                goto done;
+            } else {
+                out_result->backup_atomic_rename_uncertain = true;
+                ret = rename_ret != ESP_OK ?
+                    rename_ret : ESP_ERR_INVALID_STATE;
+                goto done;
+            }
+        } else {
+            if (!out_result->canonical_reverify_bytes_match) {
+                ret = reverify_ret == ESP_OK ?
+                    ESP_ERR_INVALID_STATE : reverify_ret;
+                goto done;
+            }
+
+            provider_repair_set_stage(out_result, "backup_create");
+            d1l_provider_create_new_result_t backup_copy = {0};
+            ret = write_provider_create_new(
+                out_result->backup_path, before, before_size, &backup_copy);
+            out_result->backup_copy_attempted = backup_copy.attempted;
+            out_result->backup_copy_performed = backup_copy.performed;
+            out_result->backup_copy_uncertain =
+                backup_copy.completion_uncertain;
+            out_result->backup_path_fresh = backup_copy.create_new;
+            out_result->mutation_performed =
+                out_result->mutation_performed || backup_copy.performed;
+            if (backup_copy.create_new) {
+                snprintf(
+                    out_result->preserved_backup_path,
+                    sizeof(out_result->preserved_backup_path), "%s",
+                    out_result->backup_path);
+            }
+            if (ret != ESP_OK) {
+                goto done;
+            }
             snprintf(
-                out_result->preserved_backup_path,
-                sizeof(out_result->preserved_backup_path), "%s",
-                out_result->backup_path);
-        }
-        if (ret != ESP_OK) {
-            goto done;
-        }
-        snprintf(
-            out_result->action, sizeof(out_result->action), "%s",
-            "repair_incomplete_forward");
+                out_result->action, sizeof(out_result->action), "%s",
+                "repair_incomplete_forward");
 
-        provider_repair_set_stage(out_result, "backup_verify");
-        ret = verify_invalid_provider_copy(
-            out_result->preserved_backup_path, before, before_size,
-            verify, sizeof(verify), out_result);
-        if (ret != ESP_OK) {
-            goto done;
-        }
+            provider_repair_set_stage(out_result, "backup_verify");
+            ret = verify_invalid_provider_copy(
+                out_result->preserved_backup_path, before, before_size,
+                verify, sizeof(verify), out_result);
+            if (ret != ESP_OK) {
+                goto done;
+            }
 
-        provider_repair_set_stage(out_result, "canonical_delete");
-        out_result->canonical_delete_attempted = true;
-        const esp_err_t delete_ret = d1l_rp2040_bridge_file_delete(
-            D1L_MAP_PROVIDER_CONFIG_PATH, &file,
-            D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
-        const esp_err_t canonical_stat_ret = provider_path_exists(
-            D1L_MAP_PROVIDER_CONFIG_PATH, &canonical_exists);
-        if (canonical_stat_ret != ESP_OK) {
-            out_result->canonical_delete_uncertain = true;
-            ret = delete_ret != ESP_OK ? delete_ret : canonical_stat_ret;
-            goto done;
+            provider_repair_set_stage(out_result, "canonical_delete");
+            out_result->canonical_delete_attempted = true;
+            const esp_err_t delete_ret = d1l_rp2040_bridge_file_delete(
+                D1L_MAP_PROVIDER_CONFIG_PATH, &file,
+                D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+            const esp_err_t canonical_stat_ret = provider_path_exists(
+                D1L_MAP_PROVIDER_CONFIG_PATH, &canonical_exists);
+            if (canonical_stat_ret != ESP_OK) {
+                out_result->canonical_delete_uncertain = true;
+                ret = delete_ret != ESP_OK ?
+                    delete_ret : canonical_stat_ret;
+                goto done;
+            }
+            if (canonical_exists) {
+                ret = delete_ret != ESP_OK ?
+                    delete_ret : ESP_ERR_INVALID_STATE;
+                goto done;
+            }
+            out_result->canonical_delete_performed = true;
+            out_result->canonical_absent_before_final_rename = true;
+            out_result->mutation_performed = true;
+            out_result->canonical_missing_recoverable = true;
+            snprintf(
+                out_result->action, sizeof(out_result->action), "%s",
+                "canonical_missing_recoverable");
         }
-        if (canonical_exists) {
-            ret = delete_ret != ESP_OK ? delete_ret : ESP_ERR_INVALID_STATE;
-            goto done;
-        }
-        out_result->canonical_delete_performed = true;
-        out_result->canonical_absent_before_final_rename = true;
-        out_result->mutation_performed = true;
-        out_result->canonical_missing_recoverable = true;
-        snprintf(
-            out_result->action, sizeof(out_result->action), "%s",
-            "canonical_missing_recoverable");
     } else {
         /*
          * A previous forward attempt already preserved the invalid canonical
-         * and left the canonical path absent. Re-verify that preserved backup
-         * and the absence before resuming; never move the backup back.
+         * and left the canonical path absent. For the normal path, re-verify
+         * the exact copied bytes. For an explicitly authorized unstable-source
+         * recovery, only verify that the atomically renamed directory entry is
+         * still present: its bytes were never claimed or trusted. Never move
+         * either backup back.
          */
-        provider_repair_set_stage(out_result, "backup_verify");
-        ret = verify_invalid_provider_copy(
-            out_result->preserved_backup_path, before, before_size,
-            verify, sizeof(verify), out_result);
+        provider_repair_set_stage(
+            out_result,
+            unstable_source_authorized ?
+                "backup_atomic_verify" : "backup_verify");
+        if (unstable_source_authorized) {
+            ret = provider_path_exists(
+                out_result->preserved_backup_path, &backup_exists);
+            if (ret == ESP_OK && !backup_exists) {
+                ret = ESP_ERR_NOT_FOUND;
+            }
+            out_result->backup_presence_verified =
+                ret == ESP_OK && backup_exists;
+            out_result->backup_preserved =
+                out_result->backup_presence_verified;
+        } else {
+            ret = verify_invalid_provider_copy(
+                out_result->preserved_backup_path, before, before_size,
+                verify, sizeof(verify), out_result);
+        }
         if (ret != ESP_OK) {
             goto done;
         }
@@ -1458,7 +1605,9 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
         out_result->canonical_missing_recoverable = true;
         snprintf(
             out_result->action, sizeof(out_result->action), "%s",
-            "canonical_missing_recoverable");
+            unstable_source_authorized ?
+                "canonical_missing_unstable" :
+                "canonical_missing_recoverable");
     }
 
     provider_repair_set_stage(out_result, "final_rename");
@@ -1481,7 +1630,9 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
             if (out_result->canonical_missing_recoverable) {
                 snprintf(
                     out_result->action, sizeof(out_result->action), "%s",
-                    "canonical_missing_recoverable");
+                    unstable_source_authorized ?
+                        "canonical_missing_unstable" :
+                        "canonical_missing_recoverable");
             }
         } else {
             out_result->final_rename_uncertain = true;
@@ -1511,8 +1662,13 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
         provider.source_id);
     snprintf(
         out_result->action, sizeof(out_result->action), "%s",
-        out_result->recovery_resumed ?
-            "resumed_missing_canonical" : "repaired_invalid");
+        unstable_source_authorized ?
+            (out_result->recovery_resumed ?
+                "resumed_missing_unstable" :
+                "repaired_invalid_unstable") :
+            (out_result->recovery_resumed ?
+                "resumed_missing_canonical" :
+                "repaired_invalid"));
     provider_repair_set_stage(out_result, "complete");
 
 publish:
@@ -1536,6 +1692,20 @@ done:
     memset(verify, 0, sizeof(verify));
     provider_io_release();
     return ret;
+}
+
+esp_err_t d1l_map_tile_provider_repair_invalid_default(
+    const d1l_storage_status_t *storage,
+    d1l_map_provider_repair_result_t *out_result)
+{
+    return repair_invalid_default_internal(storage, out_result, false);
+}
+
+esp_err_t d1l_map_tile_provider_repair_invalid_default_unstable(
+    const d1l_storage_status_t *storage,
+    d1l_map_provider_repair_result_t *out_result)
+{
+    return repair_invalid_default_internal(storage, out_result, true);
 }
 
 bool d1l_map_tile_provider_path(
