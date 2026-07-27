@@ -41,6 +41,47 @@ def test_interrupted_tile_commit_uses_checksum_and_atomic_recovery():
         "rename_cache_metadata"
     )
 
+    assert "repair_cache_journal" in store
+    assert "rebuild_cache_journal_prefix" in store
+    assert "d1l_map_tile_cache_journal_repair_plan" in store
+    assert "reconcile_cache_intent" in store
+    assert "s_cache_state_loaded = false;" in store
+
+
+def test_store_serializes_transactions_and_evicts_only_validated_actual_size():
+    store = read("main/storage/map_tile_store.c")
+
+    assert "D1L_MAP_TILE_STORE_TRANSACTION_TIMEOUT_MS" in store
+    assert "xSemaphoreCreateMutexStatic" in store
+    assert store.count("cache_transaction_take()") >= 3
+    assert store.count("cache_transaction_give()") >= 3
+
+    fetch = store[
+        store.index("static esp_err_t map_tile_store_fetch_network") :
+        store.index("esp_err_t d1l_map_tile_store_fetch")
+    ]
+    assert "prepare_cache_room" not in fetch
+    assert "cache_transaction_take" not in fetch
+    assert "d1l_rp2040_bridge_file_write" not in fetch
+    assert fetch.index("result.content_crc32 =") < fetch.index(
+        "persist_validated_tile("
+    )
+
+    persist = store[
+        store.index("static esp_err_t persist_validated_tile") :
+        store.index("static esp_err_t map_tile_store_fetch_network")
+    ]
+    assert persist.index("cache_transaction_take") < persist.index(
+        "d1l_rp2040_bridge_file_write"
+    )
+
+    commit = store[
+        store.index("static esp_err_t commit_cache_tile") :
+        store.index("static bool attribution_metadata_present")
+    ]
+    assert "prepare_cache_room(\n        provider, storage, result->bytes" in commit
+    assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" not in commit
+
 
 def test_cache_policy_native_vectors(tmp_path):
     compiler = shutil.which("gcc") or shutil.which("clang")

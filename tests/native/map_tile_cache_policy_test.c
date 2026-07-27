@@ -126,11 +126,37 @@ static void test_every_atomic_interruption_window_has_one_safe_plan(void)
         true, false, false, false, &plan));
 }
 
+static void test_journal_repair_keeps_only_valid_complete_prefix(void)
+{
+    d1l_map_tile_cache_journal_repair_plan_t plan = {0};
+
+    assert(d1l_map_tile_cache_journal_repair_plan(
+        69U, 32U, 64U, &plan));
+    assert(plan.rebuild);
+    assert(plan.valid_prefix_bytes == 64U);
+
+    assert(d1l_map_tile_cache_journal_repair_plan(
+        64U, 32U, 32U, &plan));
+    assert(plan.rebuild);
+    assert(plan.valid_prefix_bytes == 32U);
+
+    assert(d1l_map_tile_cache_journal_repair_plan(
+        64U, 32U, 64U, &plan));
+    assert(!plan.rebuild);
+    assert(plan.valid_prefix_bytes == 64U);
+
+    assert(!d1l_map_tile_cache_journal_repair_plan(
+        64U, 64U, 32U, &plan));
+    assert(!d1l_map_tile_cache_journal_repair_plan(
+        64U, 32U, 33U, &plan));
+}
+
 int main(void)
 {
     test_record_and_state_checksums_reject_damage();
     test_budget_evicts_oldest_records_only();
     test_invalid_coordinates_and_overflow_fail_closed();
     test_every_atomic_interruption_window_has_one_safe_plan();
+    test_journal_repair_keeps_only_valid_complete_prefix();
     return 0;
 }

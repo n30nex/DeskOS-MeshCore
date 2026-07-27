@@ -29,6 +29,11 @@ typedef struct {
     bool rename_metadata;
 } d1l_map_tile_cache_recovery_plan_t;
 
+typedef struct {
+    uint32_t valid_prefix_bytes;
+    bool rebuild;
+} d1l_map_tile_cache_journal_repair_plan_t;
+
 uint32_t d1l_map_tile_cache_crc32(const uint8_t *data, size_t length);
 uint32_t d1l_map_tile_cache_crc32_update(
     uint32_t crc,
@@ -74,3 +79,8 @@ bool d1l_map_tile_cache_recovery_plan(
     bool final_metadata_matches,
     bool temporary_metadata_matches,
     d1l_map_tile_cache_recovery_plan_t *plan);
+bool d1l_map_tile_cache_journal_repair_plan(
+    uint32_t file_size,
+    uint32_t committed_tail_offset,
+    uint32_t valid_complete_prefix_bytes,
+    d1l_map_tile_cache_journal_repair_plan_t *plan);

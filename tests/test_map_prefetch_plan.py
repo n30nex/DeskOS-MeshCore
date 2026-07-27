@@ -24,6 +24,10 @@ def test_prefetch_plan_is_registered_and_bounded():
     assert "candidate_bytes > out_plan->allocation_bytes" in source
     assert "cache_budget_bytes < card_allocation" in source
     assert "d1l_map_prefetch_plan_tile_at" in source
+    assert "d1l_map_prefetch_plan_build_with_viewport" in source
+    assert "select_priority_focuses" in source
+    assert "priority_zoom_tile_counts" in source
+    assert "priority_tiles" in header
 
 
 def test_prefetch_plan_native_vectors(tmp_path):

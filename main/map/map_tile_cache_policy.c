@@ -268,3 +268,27 @@ bool d1l_map_tile_cache_recovery_plan(
     };
     return true;
 }
+
+bool d1l_map_tile_cache_journal_repair_plan(
+    uint32_t file_size,
+    uint32_t committed_tail_offset,
+    uint32_t valid_complete_prefix_bytes,
+    d1l_map_tile_cache_journal_repair_plan_t *plan)
+{
+    const uint32_t complete_file_bytes =
+        file_size - (file_size % D1L_MAP_TILE_CACHE_RECORD_BYTES);
+    if (!plan ||
+        committed_tail_offset % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U ||
+        valid_complete_prefix_bytes %
+                D1L_MAP_TILE_CACHE_RECORD_BYTES !=
+            0U ||
+        valid_complete_prefix_bytes > complete_file_bytes ||
+        committed_tail_offset > valid_complete_prefix_bytes) {
+        return false;
+    }
+    *plan = (d1l_map_tile_cache_journal_repair_plan_t) {
+        .valid_prefix_bytes = valid_complete_prefix_bytes,
+        .rebuild = valid_complete_prefix_bytes != file_size,
+    };
+    return true;
+}
