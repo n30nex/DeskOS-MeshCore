@@ -4043,6 +4043,44 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
         is True
     )
 
+    fast_reply_ack_miss_after = json.loads(json.dumps(after))
+    fast_reply_ack_miss_after["counters"]["tx_dm_total"] += 1
+    fast_reply_ack_miss_after["counters"]["local_fast_reply_total"] += 1
+    fast_reply_ack_miss_after["counters"]["tx_dm_ack_miss_total"] += 1
+    fast_reply_ack_miss_flow = rf_accept.remote_peer_flow_validation(
+        before=before,
+        after=fast_reply_ack_miss_after,
+        before_validation=before_validation,
+        after_validation=after_validation,
+        d1l_public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        control=control,
+    )
+    assert fast_reply_ack_miss_flow["ok"] is True
+    assert (
+        fast_reply_ack_miss_flow["checks"][
+            "ack_miss_bounded_to_fast_reply"
+        ]
+        is True
+    )
+
+    unrelated_ack_miss_after = json.loads(json.dumps(after))
+    unrelated_ack_miss_after["counters"]["tx_dm_ack_miss_total"] += 1
+    unrelated_ack_miss_flow = rf_accept.remote_peer_flow_validation(
+        before=before,
+        after=unrelated_ack_miss_after,
+        before_validation=before_validation,
+        after_validation=after_validation,
+        d1l_public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        control=control,
+    )
+    assert unrelated_ack_miss_flow["ok"] is False
+    assert (
+        unrelated_ack_miss_flow["checks"][
+            "ack_miss_bounded_to_fast_reply"
+        ]
+        is False
+    )
+
     mismatched_after = json.loads(json.dumps(after))
     mismatched_after["counters"]["tx_dm_total"] += 1
     mismatched_flow = rf_accept.remote_peer_flow_validation(

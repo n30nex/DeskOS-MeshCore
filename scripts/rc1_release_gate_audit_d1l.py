@@ -752,6 +752,7 @@ def physical_evidence_contract(
     physical_receipt: Path,
     physical_evidence: Path,
     receipt: dict[str, Any],
+    repository_root: Path,
 ) -> tuple[bool, str | None]:
     physical_receipt = Path(physical_receipt)
     physical_evidence = Path(physical_evidence)
@@ -830,12 +831,14 @@ def physical_evidence_contract(
             from produce_rc1_bounded_physical_receipt_d1l import (
                 EvidenceError,
                 VALIDATORS,
+                validate_rf,
             )
         except ImportError:  # pragma: no cover - package import path used by pytest
             try:
                 from scripts.produce_rc1_bounded_physical_receipt_d1l import (
                     EvidenceError,
                     VALIDATORS,
+                    validate_rf,
                 )
             except ImportError:
                 return False, None
@@ -847,7 +850,16 @@ def physical_evidence_contract(
         semantic_outcomes: dict[str, bool | int] = {}
         try:
             for role in PHYSICAL_SOURCE_KINDS:
-                derived = VALIDATORS[role](source_payloads[role], candidate)
+                validator = VALIDATORS[role]
+                derived = (
+                    validator(
+                        source_payloads[role],
+                        candidate,
+                        evidence_root=repository_root,
+                    )
+                    if role == "rf" and validator is validate_rf
+                    else validator(source_payloads[role], candidate)
+                )
                 if set(semantic_outcomes).intersection(derived):
                     return False, None
                 semantic_outcomes.update(derived)
@@ -914,6 +926,7 @@ def audit(
             physical_receipt=physical_receipt,
             physical_evidence=physical_evidence,
             receipt=receipt,
+            repository_root=repository_root,
         )
     )
 
