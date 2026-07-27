@@ -137,7 +137,8 @@ static bool build_range(double min_latitude,
     return true;
 }
 
-static uint64_t map_allocation_bytes(uint32_t card_capacity_kb)
+static uint64_t map_allocation_bytes(uint32_t card_capacity_kb,
+                                     uint64_t cache_budget_bytes)
 {
     const uint64_t capacity_bytes =
         (uint64_t)card_capacity_kb * 1024ULL;
@@ -150,8 +151,11 @@ static uint64_t map_allocation_bytes(uint32_t card_capacity_kb)
         (capacity_bytes / 100ULL) *
         D1L_MAP_PREFETCH_CARD_ALLOCATION_PERCENT;
     const uint64_t after_reserve = capacity_bytes - reserve_bytes;
-    return percent_bytes < after_reserve ?
+    const uint64_t card_allocation =
+        percent_bytes < after_reserve ?
         percent_bytes : after_reserve;
+    return cache_budget_bytes < card_allocation ?
+        cache_budget_bytes : card_allocation;
 }
 
 bool d1l_map_prefetch_plan_build(
@@ -160,6 +164,7 @@ bool d1l_map_prefetch_plan_build(
     const d1l_map_prefetch_point_t *nodes,
     size_t node_count,
     uint32_t card_capacity_kb,
+    uint64_t cache_budget_bytes,
     uint32_t average_tile_bytes,
     uint8_t provider_max_zoom,
     d1l_map_prefetch_plan_t *out_plan)
@@ -169,6 +174,7 @@ bool d1l_map_prefetch_plan_build(
         center_lat_e7 > 900000000 ||
         center_lon_e7 < -1800000000LL ||
         center_lon_e7 > 1800000000LL ||
+        cache_budget_bytes == 0U ||
         average_tile_bytes == 0U ||
         provider_max_zoom < D1L_MAP_PREFETCH_MIN_ZOOM) {
         return false;
@@ -182,7 +188,7 @@ bool d1l_map_prefetch_plan_build(
     out_plan->reserve_bytes =
         D1L_MAP_PREFETCH_CARD_RESERVE_KB * 1024ULL;
     out_plan->allocation_bytes =
-        map_allocation_bytes(card_capacity_kb);
+        map_allocation_bytes(card_capacity_kb, cache_budget_bytes);
     if (out_plan->allocation_bytes == 0U) {
         return false;
     }

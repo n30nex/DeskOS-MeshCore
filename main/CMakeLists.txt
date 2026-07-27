@@ -42,6 +42,7 @@ idf_component_register(
         "map/map_point_projection.c"
         "map/map_prefetch_plan.c"
         "map/map_prefetch_service.c"
+        "map/map_tile_cache_policy.c"
         "map/map_tile_provider.c"
         "map/map_viewport_truth_transition.c"
         "map/map_png_decoder.c"

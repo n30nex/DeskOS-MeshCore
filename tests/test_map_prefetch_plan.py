@@ -22,6 +22,7 @@ def test_prefetch_plan_is_registered_and_bounded():
     assert "distance_km(center_geographic_latitude" in source
     assert "wrap_delta_longitude" in source
     assert "candidate_bytes > out_plan->allocation_bytes" in source
+    assert "cache_budget_bytes < card_allocation" in source
     assert "d1l_map_prefetch_plan_tile_at" in source
 
 

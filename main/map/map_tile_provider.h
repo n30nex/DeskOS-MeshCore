@@ -17,6 +17,9 @@
 #define D1L_MAP_PROVIDER_REQUEST_INTERVAL_DEFAULT_MS 250U
 #define D1L_MAP_PROVIDER_REQUEST_INTERVAL_MIN_MS 100U
 #define D1L_MAP_PROVIDER_REQUEST_INTERVAL_MAX_MS 5000U
+#define D1L_MAP_PROVIDER_CACHE_BUDGET_DEFAULT_MB 18432U
+#define D1L_MAP_PROVIDER_CACHE_BUDGET_MIN_MB 256U
+#define D1L_MAP_PROVIDER_CACHE_BUDGET_MAX_MB 24576U
 
 typedef struct {
     char source_id[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
@@ -30,6 +33,7 @@ typedef struct {
     uint8_t max_zoom;
     uint32_t average_tile_bytes;
     uint32_t minimum_request_interval_ms;
+    uint32_t cache_budget_mb;
 } d1l_map_tile_provider_t;
 
 void d1l_map_tile_provider_builtin(d1l_map_tile_provider_t *out_provider);

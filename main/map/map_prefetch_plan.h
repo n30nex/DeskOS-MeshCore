@@ -48,8 +48,9 @@ typedef struct {
 /*
  * Builds a deterministic tile pyramid around the configured device location
  * and every valid node no farther than 200 km from it. The highest provider
- * zoom that fits the fixed card allocation is selected; eight GiB always
- * remains outside the map allocation on a 32 GB-class or larger card.
+ * zoom that fits both the configured tile budget and the safe card allocation
+ * is selected; eight GiB always remains outside the map allocation on a
+ * 32 GB-class or larger card.
  */
 bool d1l_map_prefetch_plan_build(
     int32_t center_lat_e7,
@@ -57,6 +58,7 @@ bool d1l_map_prefetch_plan_build(
     const d1l_map_prefetch_point_t *nodes,
     size_t node_count,
     uint32_t card_capacity_kb,
+    uint64_t cache_budget_bytes,
     uint32_t average_tile_bytes,
     uint8_t provider_max_zoom,
     d1l_map_prefetch_plan_t *out_plan);

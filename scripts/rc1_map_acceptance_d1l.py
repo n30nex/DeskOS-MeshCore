@@ -55,6 +55,8 @@ MIN_32GB_CLASS_CAPACITY_KB = 28_000_000
 MIN_PROVIDER_ZOOM = 14
 MAX_PREFETCH_ZOOM = 18
 NODE_RADIUS_KM = 200
+MIN_CACHE_BUDGET_MB = 256
+MAX_CACHE_BUDGET_MB = 24576
 CONSOLE_BAUD = 115200
 COMMAND_TIMEOUT_SECONDS = 20.0
 BOOT_TIMEOUT_SECONDS = 45.0
@@ -97,10 +99,17 @@ class AcceptanceFailure(RuntimeError):
         self.code = code
 
 
-def _integer(value: object, *, minimum: int | None = None) -> int | None:
+def _integer(
+    value: object,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int | None:
     if type(value) is not int:
         return None
     if minimum is not None and value < minimum:
+        return None
+    if maximum is not None and value > maximum:
         return None
     return value
 
@@ -283,6 +292,11 @@ def validate_provider_status(
     sd = row.get("sd")
     markers = row.get("node_markers")
     prefetch = row.get("prefetch")
+    cache_budget_mb = _integer(
+        row.get("cache_budget_mb"),
+        minimum=MIN_CACHE_BUDGET_MB,
+        maximum=MAX_CACHE_BUDGET_MB,
+    )
     if (
         row.get("configured") is not True
         or row.get("authorized_provider") is not True
@@ -301,6 +315,7 @@ def validate_provider_status(
         or not attribution.strip()
         or not isinstance(license_url, str)
         or not license_url.startswith("https://")
+        or cache_budget_mb is None
     ):
         raise AcceptanceFailure(
             "provider_not_authorized",
@@ -349,6 +364,12 @@ def validate_provider_status(
         provider_zoom = _integer(
             row.get("provider_max_zoom"), minimum=MIN_PROVIDER_ZOOM
         )
+        allocation_bytes = _integer(
+            prefetch.get("allocation_bytes"), minimum=1
+        )
+        cache_used_bytes = _integer(
+            prefetch.get("cache_used_bytes"), minimum=0
+        )
         if (
             seen is None
             or included is None
@@ -366,7 +387,13 @@ def validate_provider_status(
             or prefetch.get("provider_configured") is not True
             or prefetch.get("background_prefetch_permitted") is not True
             or prefetch.get("source_id") != source_id
+            or prefetch.get("cache_budget_mb") != cache_budget_mb
             or prefetch.get("storage_reserve_reached") is not False
+            or allocation_bytes is None
+            or allocation_bytes > cache_budget_mb * 1024 * 1024
+            or cache_used_bytes is None
+            or cache_used_bytes > cache_budget_mb * 1024 * 1024
+            or _integer(prefetch.get("evicted_tiles"), minimum=0) is None
             or _integer(prefetch.get("total_tiles"), minimum=1) is None
             or _integer(prefetch.get("network_requests"), minimum=0) is None
             or _integer(prefetch.get("downloaded_tiles"), minimum=0) is None

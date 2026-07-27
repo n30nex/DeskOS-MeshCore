@@ -26,6 +26,7 @@ static const char s_default_provider_manifest[] =
     "\"tile_template\":\"z{z}/x{x}/y{y}.png\","
     "\"max_zoom\":15,"
     "\"average_tile_bytes\":65536,"
+    "\"cache_budget_mb\":18432,"
     "\"minimum_request_interval_ms\":1000}\n";
 
 _Static_assert(sizeof(s_default_provider_manifest) - 1U <=
@@ -263,6 +264,8 @@ void d1l_map_tile_provider_builtin(d1l_map_tile_provider_t *out_provider)
         D1L_MAP_PROVIDER_DEFAULT_AVERAGE_TILE_BYTES;
     out_provider->minimum_request_interval_ms =
         D1L_MAP_PROVIDER_REQUEST_INTERVAL_DEFAULT_MS;
+    out_provider->cache_budget_mb =
+        D1L_MAP_PROVIDER_CACHE_BUDGET_DEFAULT_MB;
 }
 
 static void ensure_initialized(void)
@@ -376,6 +379,8 @@ static esp_err_t parse_provider_config(
     uint32_t average_tile_bytes = 0U;
     uint32_t minimum_request_interval_ms =
         D1L_MAP_PROVIDER_REQUEST_INTERVAL_DEFAULT_MS;
+    uint32_t cache_budget_mb =
+        D1L_MAP_PROVIDER_CACHE_BUDGET_DEFAULT_MB;
     bool offline_allowed = false;
     bool background_allowed = false;
     if (!json_u32(json, "schema", &schema) || schema != 1U ||
@@ -413,6 +418,13 @@ static esp_err_t parse_provider_config(
              D1L_MAP_PROVIDER_REQUEST_INTERVAL_MAX_MS)) {
         return ESP_ERR_INVALID_RESPONSE;
     }
+    const char *cache_budget = json_value(json, "cache_budget_mb");
+    if (cache_budget && strncmp(cache_budget, "null", 4U) != 0 &&
+        (!json_u32(json, "cache_budget_mb", &cache_budget_mb) ||
+         cache_budget_mb < D1L_MAP_PROVIDER_CACHE_BUDGET_MIN_MB ||
+         cache_budget_mb > D1L_MAP_PROVIDER_CACHE_BUDGET_MAX_MB)) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
 
     const char *url = json_value(json, "network_url_template");
     if (url && strncmp(url, "null", 4U) != 0) {
@@ -441,6 +453,7 @@ static esp_err_t parse_provider_config(
     provider.max_zoom = (uint8_t)max_zoom;
     provider.average_tile_bytes = average_tile_bytes;
     provider.minimum_request_interval_ms = minimum_request_interval_ms;
+    provider.cache_budget_mb = cache_budget_mb;
     *out_provider = provider;
     return ESP_OK;
 }

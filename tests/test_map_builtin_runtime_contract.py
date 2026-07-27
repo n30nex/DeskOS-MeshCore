@@ -299,19 +299,25 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
     assert "d1l_rp2040_file_result_t read_result = {0}" in read_cache
     assert "read_result.eof !=" in read_cache
     assert "result.bytes != (size_t)expected_size || !saw_eof" in read_cache
+    assert "result.content_crc32 == metadata.content_crc32" in read_cache
     assert fetch.index("d1l_map_tile_png_valid(buffer, result.bytes)") < fetch.index(
-        "d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true"
+        "verify_tile_file(result.tmp_path, &verify_record)"
     )
-    assert fetch.index("d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true") < fetch.index(
+    assert fetch.index("verify_tile_file(result.tmp_path, &verify_record)") < fetch.index(
         "write_attribution_metadata(&provider, &result)"
+    ) < fetch.index("commit_cache_tile(&provider, status, &result)")
+    commit = body(
+        source,
+        "static esp_err_t commit_cache_tile",
+        "static bool attribution_metadata_present",
     )
-    metadata_failure = fetch.split(
-        "ret = write_attribution_metadata(&provider, &result);", 1
-    )[1].split(
-        'download_step(&result, "ok"', 1
-    )[0]
-    assert "d1l_rp2040_bridge_file_delete(result.path" in metadata_failure
-    assert "d1l_rp2040_bridge_file_delete(result.attribution_tmp_path" in metadata_failure
+    assert commit.index("write_cache_metadata_tmp(result, &record)") < commit.index(
+        "append_cache_intent(&paths, state, &record)"
+    ) < commit.index(
+        "d1l_rp2040_bridge_file_rename("
+    ) < commit.index("rename_cache_metadata(result)")
+    assert "write_cache_state(&paths, state)" in commit
+    assert "!result.cache_intent_recorded" in fetch
 
 
 def test_worker_publishes_immutable_psram_frames_without_lvgl_calls_or_replay():

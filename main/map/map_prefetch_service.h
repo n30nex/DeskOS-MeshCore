@@ -25,6 +25,7 @@ typedef struct {
     uint32_t retry_after_sec;
     uint32_t storage_capacity_kb;
     uint32_t storage_free_kb;
+    uint32_t cache_budget_mb;
     size_t nodes_seen;
     size_t nodes_included;
     size_t nodes_outside_radius;
@@ -34,7 +35,9 @@ typedef struct {
     uint64_t network_requests;
     uint64_t downloaded_tiles;
     uint64_t failed_tiles;
+    uint64_t evicted_tiles;
     uint64_t downloaded_bytes;
+    uint64_t cache_used_bytes;
     uint64_t estimated_bytes;
     uint64_t allocation_bytes;
     esp_err_t last_error;

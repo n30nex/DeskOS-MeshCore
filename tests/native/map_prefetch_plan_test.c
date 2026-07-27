@@ -10,7 +10,8 @@ static void test_local_area_uses_highest_provider_detail(void)
     d1l_map_prefetch_plan_t plan = {0};
     assert(d1l_map_prefetch_plan_build(
         434279770, -803164780, NULL, 0U,
-        CARD_32GB_CLASS_KB, 65536U, 18U, &plan));
+        CARD_32GB_CLASS_KB, 18ULL * 1024ULL * 1024ULL * 1024ULL,
+        65536U, 18U, &plan));
     assert(plan.valid);
     assert(plan.min_zoom == 8U);
     assert(plan.max_zoom == 18U);
@@ -33,7 +34,8 @@ static void test_radius_filter_and_capacity_select_detail(void)
     d1l_map_prefetch_plan_t plan = {0};
     assert(d1l_map_prefetch_plan_build(
         0, 0, nodes, sizeof(nodes) / sizeof(nodes[0]),
-        CARD_32GB_CLASS_KB, 65536U, 18U, &plan));
+        CARD_32GB_CLASS_KB, 18ULL * 1024ULL * 1024ULL * 1024ULL,
+        65536U, 18U, &plan));
     assert(plan.node_count_included == 4U);
     assert(plan.node_count_outside_radius == 1U);
     assert(plan.max_zoom >= 14U);
@@ -49,7 +51,8 @@ static void test_provider_limit_and_antimeridian_wrap(void)
     d1l_map_prefetch_plan_t plan = {0};
     assert(d1l_map_prefetch_plan_build(
         0, 1799000000, nodes, 1U,
-        CARD_32GB_CLASS_KB, 65536U, 14U, &plan));
+        CARD_32GB_CLASS_KB, 18ULL * 1024ULL * 1024ULL * 1024ULL,
+        65536U, 14U, &plan));
     assert(plan.node_count_included == 1U);
     assert(plan.max_zoom == 14U);
     assert(plan.range_count == 7U);
@@ -77,13 +80,26 @@ static void test_invalid_and_reserved_capacity_fail_closed(void)
     d1l_map_prefetch_plan_t plan = {0};
     assert(!d1l_map_prefetch_plan_build(
         0, 0, NULL, 0U,
-        8U * 1024U * 1024U, 65536U, 18U, &plan));
+        8U * 1024U * 1024U, 1024U, 65536U, 18U, &plan));
     assert(!d1l_map_prefetch_plan_build(
         0, 0, NULL, 0U,
-        CARD_32GB_CLASS_KB, 0U, 18U, &plan));
+        CARD_32GB_CLASS_KB, 1024U, 0U, 18U, &plan));
     assert(!d1l_map_prefetch_plan_build(
         0, 0, NULL, 0U,
-        CARD_32GB_CLASS_KB, 65536U, 7U, &plan));
+        CARD_32GB_CLASS_KB, 1024U, 65536U, 7U, &plan));
+}
+
+static void test_configured_cache_budget_caps_card_allocation(void)
+{
+    const uint64_t budget = 64ULL * 1024ULL * 1024ULL;
+    d1l_map_prefetch_plan_t plan = {0};
+    assert(d1l_map_prefetch_plan_build(
+        434279770, -803164780, NULL, 0U,
+        CARD_32GB_CLASS_KB, budget, 65536U, 18U, &plan));
+    assert(plan.valid);
+    assert(plan.allocation_bytes == budget);
+    assert(plan.estimated_bytes <= budget);
+    assert(plan.max_zoom < 18U);
 }
 
 int main(void)
@@ -92,5 +108,6 @@ int main(void)
     test_radius_filter_and_capacity_select_detail();
     test_provider_limit_and_antimeridian_wrap();
     test_invalid_and_reserved_capacity_fail_closed();
+    test_configured_cache_budget_caps_card_allocation();
     return 0;
 }

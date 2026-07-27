@@ -69,6 +69,7 @@ def provider_status(
         "provider_max_zoom": 18,
         "minimum_request_interval_ms": 250,
         "average_tile_bytes": 65536,
+        "cache_budget_mb": 18432,
         "device_location": dict(LOCATION),
         "wifi": {
             "setting_enabled": True,
@@ -110,9 +111,12 @@ def provider_status(
             "network_requests": network_requests,
             "downloaded_tiles": downloaded_tiles,
             "failed_tiles": 0,
+            "evicted_tiles": 0,
             "downloaded_bytes": downloaded_tiles * 65536,
+            "cache_used_bytes": downloaded_tiles * 65536,
             "estimated_bytes": 6_553_600,
             "allocation_bytes": 18_000_000_000,
+            "cache_budget_mb": 18432,
             "phase": "downloading",
             "message": "Downloading the local node map in the background",
         },
@@ -317,6 +321,28 @@ def test_provider_and_download_validation_fail_closed_on_osm_or_no_delta():
     ):
         runner.validate_download_progress(
             copy.deepcopy(before), before, location=LOCATION
+        )
+
+
+def test_provider_validation_rejects_budget_mismatch_or_overuse():
+    mismatch = provider_status()
+    mismatch["prefetch"]["cache_budget_mb"] = 1024
+    with pytest.raises(
+        runner.AcceptanceFailure, match="200 km node plan"
+    ):
+        runner.validate_provider_status(
+            mismatch, location=LOCATION, require_plan=True
+        )
+
+    over_budget = provider_status()
+    over_budget["prefetch"]["cache_used_bytes"] = (
+        over_budget["cache_budget_mb"] * 1024 * 1024 + 1
+    )
+    with pytest.raises(
+        runner.AcceptanceFailure, match="200 km node plan"
+    ):
+        runner.validate_provider_status(
+            over_budget, location=LOCATION, require_plan=True
         )
 
 
