@@ -531,6 +531,9 @@ def test_controlled_peer_dm_ingest_is_bounded(
         if row["operation"] == "peer_after_dm"
     )
     peer_after_dm["snapshot"]["counters"]["rx_dm_total"] = dm_count
+    peer_after_dm["snapshot_sha256"] = hashlib.sha256(
+        gate.canonical_json(peer_after_dm["snapshot"])
+    ).hexdigest()
     if accepted:
         assert validate(transcript, monkeypatch)["path"] is True
     else:
