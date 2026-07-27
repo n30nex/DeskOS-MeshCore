@@ -39,6 +39,8 @@ extern "C" {
 #define D1L_MESHCORE_ADMIN_MUTATION_REPLY_MAX_BYTES 64U
 #define D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES 160U
 #define D1L_MESHCORE_ADMIN_MAX_CLI_REPLY_BYTES 160U
+#define D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES \
+    ((D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U) + 2U)
 /* Room login uses the current request timestamp as its sync cursor. This
  * starts a live current-session console without replaying older posts. */
 
@@ -71,6 +73,13 @@ typedef enum {
     D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST,
     D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS,
 } d1l_meshcore_admin_query_t;
+
+typedef enum {
+    D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED = 0,
+    D1L_MESHCORE_ADMIN_CLI_READ_ONLY,
+    D1L_MESHCORE_ADMIN_CLI_MUTATION,
+    D1L_MESHCORE_ADMIN_CLI_SENSITIVE,
+} d1l_meshcore_admin_cli_policy_t;
 
 typedef enum {
     D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED = 0,
@@ -241,9 +250,17 @@ bool d1l_meshcore_admin_begin_mutation(
 bool d1l_meshcore_admin_cancel_mutation(
     d1l_meshcore_admin_session_t *session,
     d1l_meshcore_admin_mutation_t mutation, uint32_t tag);
+d1l_meshcore_admin_cli_policy_t d1l_meshcore_admin_cli_command_policy(
+    const char *command);
 bool d1l_meshcore_admin_cli_command_valid(const char *command);
 bool d1l_meshcore_admin_cli_command_sensitive(const char *command);
 bool d1l_meshcore_admin_cli_command_read_only(const char *command);
+bool d1l_meshcore_admin_cli_command_allowed(
+    const char *command, d1l_meshcore_admin_role_t role,
+    uint8_t permissions);
+bool d1l_meshcore_admin_format_acl_command(
+    const char *full_public_key_hex, uint8_t permissions,
+    char *out_command, size_t out_command_size);
 bool d1l_meshcore_admin_begin_cli_command(
     d1l_meshcore_admin_session_t *session, uint32_t tag,
     bool sensitive, uint64_t now_us, uint64_t request_deadline_us);

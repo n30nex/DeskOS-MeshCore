@@ -159,8 +159,17 @@ static bool s_update_install_armed;
 static bool s_update_reboot_armed;
 static d1l_meshcore_admin_mutation_t s_admin_mutation_armed =
     D1L_MESHCORE_ADMIN_MUTATION_NONE;
+typedef enum {
+    D1L_UI_ADMIN_CLI_ORIGIN_NONE = 0,
+    D1L_UI_ADMIN_CLI_ORIGIN_GENERIC,
+    D1L_UI_ADMIN_CLI_ORIGIN_ACL,
+    D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_ON,
+    D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_OFF,
+} d1l_ui_admin_cli_origin_t;
 static char s_admin_cli_armed[
     D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] EXT_RAM_BSS_ATTR;
+static d1l_ui_admin_cli_origin_t s_admin_cli_armed_origin =
+    D1L_UI_ADMIN_CLI_ORIGIN_NONE;
 static bool s_admin_cli_secure_input;
 static bool s_admin_rendered_generation_valid;
 static uint32_t s_admin_rendered_dm_revision;
@@ -1644,7 +1653,30 @@ static void clear_admin_cli_confirmation(void)
 {
     d1l_meshcore_admin_secure_zero(
         s_admin_cli_armed, sizeof(s_admin_cli_armed));
+    s_admin_cli_armed_origin = D1L_UI_ADMIN_CLI_ORIGIN_NONE;
     s_admin_cli_deadline = 0U;
+}
+
+static bool admin_cli_allowed_for_current_session(const char *command)
+{
+    d1l_meshcore_admin_snapshot_t status = {0};
+    d1l_meshcore_service_admin_snapshot(&status);
+    return status.state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+           d1l_meshcore_admin_cli_command_allowed(
+               command, status.role, status.permissions);
+}
+
+static void arm_admin_cli_command(
+    const char *command, d1l_ui_admin_cli_origin_t origin)
+{
+    clear_admin_cli_confirmation();
+    if (!command || origin == D1L_UI_ADMIN_CLI_ORIGIN_NONE) {
+        return;
+    }
+    snprintf(s_admin_cli_armed, sizeof(s_admin_cli_armed), "%s", command);
+    s_admin_cli_armed_origin = origin;
+    s_admin_cli_deadline =
+        lv_tick_get() + D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS;
 }
 
 static void hide_service_sheets(void)
@@ -7152,7 +7184,18 @@ static bool render_admin_service_sheet(void)
         &s_service_sheets_controller, &status,
         s_admin_target_fingerprint,
         s_admin_mutation_armed,
-        s_admin_cli_armed[0] != '\0',
+        s_admin_cli_armed[0] != '\0' &&
+            s_admin_cli_armed_origin ==
+                D1L_UI_ADMIN_CLI_ORIGIN_GENERIC,
+        s_admin_cli_armed[0] != '\0' &&
+            s_admin_cli_armed_origin ==
+                D1L_UI_ADMIN_CLI_ORIGIN_ACL,
+        s_admin_cli_armed[0] != '\0' &&
+            s_admin_cli_armed_origin ==
+                D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_ON,
+        s_admin_cli_armed[0] != '\0' &&
+            s_admin_cli_armed_origin ==
+                D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_OFF,
         s_admin_cli_secure_input,
         s_admin_room_transcript,
         service_sheets_action_handler, NULL);
@@ -7403,6 +7446,98 @@ static void service_sheets_action_handler(
         (void)render_admin_service_sheet();
         return;
     }
+    case D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY: {
+        char command[D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
+        if (s_admin_cli_armed_origin == D1L_UI_ADMIN_CLI_ORIGIN_ACL &&
+            s_admin_cli_armed[0] != '\0' &&
+            confirmation_active(true, s_admin_cli_deadline)) {
+            snprintf(command, sizeof(command), "%s", s_admin_cli_armed);
+            clear_admin_cli_confirmation();
+            const esp_err_t result =
+                d1l_meshcore_service_admin_request_cli(command, true);
+            d1l_meshcore_admin_secure_zero(command, sizeof(command));
+            show_toast("ACL change", result);
+            (void)render_admin_service_sheet();
+            return;
+        }
+        char edit[D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES + 1U] = {0};
+        char public_key_hex[
+            (D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U) + 1U] = {0};
+        clear_admin_cli_confirmation();
+        const bool edit_valid =
+            d1l_ui_service_sheets_take_admin_acl(
+                &s_service_sheets_controller, edit, sizeof(edit)) &&
+            strlen(edit) == D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES &&
+            edit[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U] == ' ' &&
+            edit[(D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U) + 1U] >= '0' &&
+            edit[(D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U) + 1U] <= '3';
+        if (edit_valid) {
+            memcpy(
+                public_key_hex, edit,
+                D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U);
+            const uint8_t permissions = (uint8_t)(
+                edit[(D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U) + 1U] -
+                '0');
+            if (!d1l_meshcore_admin_format_acl_command(
+                    public_key_hex, permissions,
+                    command, sizeof(command)) ||
+                !admin_cli_allowed_for_current_session(command)) {
+                command[0] = '\0';
+            }
+        }
+        d1l_meshcore_admin_secure_zero(edit, sizeof(edit));
+        d1l_meshcore_admin_secure_zero(
+            public_key_hex, sizeof(public_key_hex));
+        if (command[0] == '\0') {
+            d1l_meshcore_admin_secure_zero(command, sizeof(command));
+            show_toast_text(
+                "Use a full 64-hex public key and permission 0, 1, 2 or 3",
+                true);
+            (void)render_admin_service_sheet();
+            return;
+        }
+        arm_admin_cli_command(command, D1L_UI_ADMIN_CLI_ORIGIN_ACL);
+        d1l_meshcore_admin_secure_zero(command, sizeof(command));
+        show_toast_text("Tap Confirm ACL within 5 seconds", true);
+        (void)render_admin_service_sheet();
+        return;
+    }
+    case D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_ON:
+    case D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_OFF: {
+        const bool enable =
+            action == D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_ON;
+        const d1l_ui_admin_cli_origin_t origin = enable ?
+            D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_ON :
+            D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_OFF;
+        const char *command = enable ?
+            "set allow.read.only on" : "set allow.read.only off";
+        if (s_admin_cli_armed_origin == origin &&
+            s_admin_cli_armed[0] != '\0' &&
+            confirmation_active(true, s_admin_cli_deadline)) {
+            char confirmed[
+                D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
+            snprintf(confirmed, sizeof(confirmed), "%s", s_admin_cli_armed);
+            clear_admin_cli_confirmation();
+            const esp_err_t result =
+                d1l_meshcore_service_admin_request_cli(confirmed, true);
+            d1l_meshcore_admin_secure_zero(confirmed, sizeof(confirmed));
+            show_toast("Room guest access", result);
+        } else if (!admin_cli_allowed_for_current_session(command)) {
+            clear_admin_cli_confirmation();
+            show_toast_text(
+                "Room admin permission and compatible firmware required",
+                true);
+        } else {
+            arm_admin_cli_command(command, origin);
+            show_toast_text(
+                enable ?
+                    "Tap Confirm Guest On within 5 seconds" :
+                    "Tap Confirm Guest Off within 5 seconds",
+                true);
+        }
+        (void)render_admin_service_sheet();
+        return;
+    }
     case D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE:
         clear_admin_cli_confirmation();
         s_admin_cli_secure_input = !s_admin_cli_secure_input;
@@ -7415,7 +7550,9 @@ static void service_sheets_action_handler(
         return;
     case D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND: {
         char command[D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
-        if (s_admin_cli_armed[0] != '\0' &&
+        if (s_admin_cli_armed_origin ==
+                D1L_UI_ADMIN_CLI_ORIGIN_GENERIC &&
+            s_admin_cli_armed[0] != '\0' &&
             confirmation_active(true, s_admin_cli_deadline)) {
             snprintf(command, sizeof(command), "%s", s_admin_cli_armed);
             clear_admin_cli_confirmation();
@@ -7429,9 +7566,12 @@ static void service_sheets_action_handler(
         clear_admin_cli_confirmation();
         if (!d1l_ui_service_sheets_take_admin_cli(
                 &s_service_sheets_controller, command, sizeof(command)) ||
-            !d1l_meshcore_admin_cli_command_valid(command)) {
+            !d1l_meshcore_admin_cli_command_valid(command) ||
+            !admin_cli_allowed_for_current_session(command)) {
             d1l_meshcore_admin_secure_zero(command, sizeof(command));
-            show_toast_text("Enter one valid single-line command", true);
+            show_toast_text(
+                "Command is unsupported for this authenticated server",
+                true);
             (void)render_admin_service_sheet();
             return;
         }
@@ -7453,10 +7593,8 @@ static void service_sheets_action_handler(
             (void)render_admin_service_sheet();
             return;
         }
-        snprintf(s_admin_cli_armed, sizeof(s_admin_cli_armed), "%s",
-                 command);
-        s_admin_cli_deadline =
-            lv_tick_get() + D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS;
+        arm_admin_cli_command(
+            command, D1L_UI_ADMIN_CLI_ORIGIN_GENERIC);
         d1l_meshcore_admin_secure_zero(command, sizeof(command));
         show_toast_text(
             "Tap Confirm Command within 5 seconds", true);

@@ -35,6 +35,10 @@ enum {
     BINDING_ADMIN_LOGIN,
     BINDING_ADMIN_ROOM_FOCUS,
     BINDING_ADMIN_ROOM_SEND,
+    BINDING_ADMIN_ACL_FOCUS,
+    BINDING_ADMIN_ACL_APPLY,
+    BINDING_ADMIN_ROOM_READ_ONLY_ON,
+    BINDING_ADMIN_ROOM_READ_ONLY_OFF,
     BINDING_ADMIN_CLI_FOCUS,
     BINDING_ADMIN_CLI_SEND,
     BINDING_ADMIN_CLI_SECURE_TOGGLE,
@@ -77,6 +81,10 @@ static void clear_admin_sensitive_input(
     if (controller->admin_room_textarea &&
         lv_obj_is_valid(controller->admin_room_textarea)) {
         lv_textarea_set_text(controller->admin_room_textarea, "");
+    }
+    if (controller->admin_acl_textarea &&
+        lv_obj_is_valid(controller->admin_acl_textarea)) {
+        lv_textarea_set_text(controller->admin_acl_textarea, "");
     }
     if (controller->admin_cli_textarea &&
         lv_obj_is_valid(controller->admin_cli_textarea)) {
@@ -153,6 +161,19 @@ static void admin_room_focus_event_cb(lv_event_t *event)
         controller->admin_room_textarea, NULL);
 }
 
+static void admin_acl_focus_event_cb(lv_event_t *event)
+{
+    d1l_ui_service_binding_t *binding = event ?
+        (d1l_ui_service_binding_t *)lv_event_get_user_data(event) : NULL;
+    if (!binding_current(binding)) {
+        return;
+    }
+    d1l_ui_service_sheets_controller_t *controller = binding->controller;
+    (void)d1l_ui_keyboard_focus_textarea_from_event(
+        controller->admin_keyboard, event,
+        controller->admin_acl_textarea, NULL);
+}
+
 static void admin_keyboard_event_cb(lv_event_t *event)
 {
     d1l_ui_service_binding_t *binding = event ?
@@ -179,6 +200,9 @@ static void admin_keyboard_event_cb(lv_event_t *event)
         D1L_UI_SERVICE_ACTION_ADMIN_LOGIN;
     if (active_textarea == binding->controller->admin_room_textarea) {
         action = D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND;
+    } else if (active_textarea ==
+               binding->controller->admin_acl_textarea) {
+        action = D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY;
     } else if (active_textarea ==
                binding->controller->admin_cli_textarea) {
         action = D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND;
@@ -366,6 +390,7 @@ static bool begin_render(
     if (sheet == controller->admin_sheet) {
         controller->admin_password_textarea = NULL;
         controller->admin_room_textarea = NULL;
+        controller->admin_acl_textarea = NULL;
         controller->admin_cli_textarea = NULL;
         controller->admin_keyboard = NULL;
     }
@@ -665,6 +690,9 @@ bool d1l_ui_service_sheets_render_admin(
     const char *selected_fingerprint,
     d1l_meshcore_admin_mutation_t armed_mutation,
     bool cli_command_armed,
+    bool acl_command_armed,
+    bool room_read_only_on_armed,
+    bool room_read_only_off_armed,
     bool cli_secure_input,
     const char *room_transcript,
     d1l_ui_service_action_handler_t action_handler,
@@ -924,9 +952,39 @@ bool d1l_ui_service_sheets_render_admin(
 
         int32_t cli_y = content_y;
         if (room_session) {
+            int32_t room_y = content_y;
+            if (can_mutate) {
+                lv_obj_t *room_access_title = create_label(
+                    sheet, "Room guest access", 0x5EEAD4);
+                position_dot(room_access_title, 8, room_y, 408);
+                complete = room_access_title && complete;
+                complete = create_button(
+                    controller, sheet,
+                    room_read_only_on_armed ?
+                        "Confirm Guest On" : "Enable Guest Read",
+                    8, room_y + 28, 190, 44,
+                    BINDING_ADMIN_ROOM_READ_ONLY_ON,
+                    D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_ON) != NULL &&
+                    complete;
+                complete = create_button(
+                    controller, sheet,
+                    room_read_only_off_armed ?
+                        "Confirm Guest Off" : "Disable Guest Read",
+                    210, room_y + 28, 190, 44,
+                    BINDING_ADMIN_ROOM_READ_ONLY_OFF,
+                    D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_OFF) != NULL &&
+                    complete;
+                lv_obj_t *room_access_help = create_label(
+                    sheet,
+                    "Controls allow.read.only. Each change requires a second tap and a peer-confirmed response.",
+                    0x93C5FD);
+                position_wrap(room_access_help, 8, room_y + 82, 408);
+                complete = room_access_help && complete;
+                room_y += 132;
+            }
             lv_obj_t *room_title = create_label(
                 sheet, "Live room console", 0x5EEAD4);
-            position_dot(room_title, 8, content_y, 408);
+            position_dot(room_title, 8, room_y, 408);
             complete = room_title && complete;
 
             lv_obj_t *transcript = create_label(
@@ -934,7 +992,7 @@ bool d1l_ui_service_sheets_render_admin(
                 room_transcript && room_transcript[0] ?
                     room_transcript : "No room posts received yet.",
                 0xE5EDF5);
-            position_wrap(transcript, 8, content_y + 26, 408);
+            position_wrap(transcript, 8, room_y + 26, 408);
             if (transcript) {
                 lv_obj_set_height(transcript, 132);
             }
@@ -943,7 +1001,7 @@ bool d1l_ui_service_sheets_render_admin(
             if (can_post_room) {
                 lv_obj_t *post_label = create_label(
                     sheet, "Room message", 0xE5EDF5);
-                position_dot(post_label, 8, content_y + 166, 408);
+                position_dot(post_label, 8, room_y + 166, 408);
                 complete = post_label && complete;
 
                 controller->admin_room_textarea =
@@ -953,7 +1011,7 @@ bool d1l_ui_service_sheets_render_admin(
                         controller->admin_room_textarea, 408, 40);
                     lv_obj_set_pos(
                         controller->admin_room_textarea, 8,
-                        content_y + 190);
+                        room_y + 190);
                     lv_textarea_set_one_line(
                         controller->admin_room_textarea, true);
                     lv_textarea_set_max_length(
@@ -993,7 +1051,7 @@ bool d1l_ui_service_sheets_render_admin(
                 complete = controller->admin_room_textarea && complete;
                 complete = create_button(
                     controller, sheet, "Send Room Post",
-                    8, content_y + 240, 184, 44,
+                    8, room_y + 240, 184, 44,
                     BINDING_ADMIN_ROOM_SEND,
                     D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND) != NULL &&
                     complete;
@@ -1001,25 +1059,90 @@ bool d1l_ui_service_sheets_render_admin(
                     sheet,
                     "Posts use the authenticated room session. Guest permission is read-only.",
                     0x93C5FD);
-                position_wrap(room_help, 8, content_y + 294, 408);
+                position_wrap(room_help, 8, room_y + 294, 408);
                 complete = room_help && complete;
                 needs_keyboard = true;
                 initial_keyboard_target =
                     controller->admin_room_textarea;
-                keyboard_y = content_y + 368;
-                cli_y = content_y + 340;
+                keyboard_y = room_y + 368;
+                cli_y = room_y + 340;
             } else {
                 lv_obj_t *read_only = create_label(
                     sheet,
                     "Guest permission: live room posts are read-only.",
                     0xFBBF24);
-                position_wrap(read_only, 8, content_y + 166, 408);
+                position_wrap(read_only, 8, room_y + 166, 408);
                 complete = read_only && complete;
-                cli_y = content_y + 216;
+                cli_y = room_y + 216;
             }
         }
 
         if (can_mutate) {
+            lv_obj_t *acl_title = create_label(
+                sheet, "Access-list editor", 0x5EEAD4);
+            position_dot(acl_title, 8, cli_y, 408);
+            complete = acl_title && complete;
+            lv_obj_t *acl_help = create_label(
+                sheet,
+                "Enter the full 64-hex public key and permission: 0 remove, 1 read, 2 write, 3 admin.",
+                0x93C5FD);
+            position_wrap(acl_help, 8, cli_y + 26, 408);
+            complete = acl_help && complete;
+
+            controller->admin_acl_textarea = lv_textarea_create(sheet);
+            if (controller->admin_acl_textarea) {
+                lv_obj_set_size(controller->admin_acl_textarea, 408, 40);
+                lv_obj_set_pos(
+                    controller->admin_acl_textarea, 8, cli_y + 78);
+                lv_textarea_set_one_line(
+                    controller->admin_acl_textarea, true);
+                lv_textarea_set_max_length(
+                    controller->admin_acl_textarea,
+                    D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES);
+                lv_textarea_set_placeholder_text(
+                    controller->admin_acl_textarea,
+                    acl_command_armed ?
+                        "ACL change armed; tap Confirm ACL" :
+                        "64-hex-public-key 0|1|2|3");
+                lv_textarea_set_text(controller->admin_acl_textarea, "");
+                lv_obj_set_style_radius(
+                    controller->admin_acl_textarea, 8, 0);
+                lv_obj_set_style_bg_color(
+                    controller->admin_acl_textarea,
+                    lv_color_hex(0x071018), 0);
+                lv_obj_set_style_border_color(
+                    controller->admin_acl_textarea,
+                    lv_color_hex(0x263241), 0);
+                lv_obj_set_style_text_color(
+                    controller->admin_acl_textarea,
+                    lv_color_hex(0xF4F7FB), 0);
+                d1l_ui_service_binding_t *focus_binding = set_binding(
+                    controller, BINDING_ADMIN_ACL_FOCUS,
+                    D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY);
+                if (focus_binding) {
+                    lv_obj_add_event_cb(
+                        controller->admin_acl_textarea,
+                        admin_acl_focus_event_cb,
+                        LV_EVENT_FOCUSED, focus_binding);
+                    lv_obj_add_event_cb(
+                        controller->admin_acl_textarea,
+                        admin_acl_focus_event_cb,
+                        LV_EVENT_CLICKED, focus_binding);
+                }
+            }
+            complete = controller->admin_acl_textarea && complete;
+            complete = create_button(
+                controller, sheet,
+                acl_command_armed ? "Confirm ACL" : "Apply ACL Change",
+                8, cli_y + 128, 184, 44,
+                BINDING_ADMIN_ACL_APPLY,
+                D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY) != NULL && complete;
+            needs_keyboard = true;
+            if (!initial_keyboard_target) {
+                initial_keyboard_target = controller->admin_acl_textarea;
+            }
+            cli_y += 190;
+
             lv_obj_t *cli_title = create_label(
                 sheet, "Authenticated server command", 0x5EEAD4);
             position_dot(cli_title, 8, cli_y, 408);
@@ -1066,7 +1189,7 @@ bool d1l_ui_service_sheets_render_admin(
                         "Command armed; tap Confirm Command" :
                         (cli_secure_input ?
                             "Type a password/key command" :
-                            "e.g. neighbors, get name, region"));
+                            "e.g. ver, get name, region"));
                 lv_textarea_set_text(controller->admin_cli_textarea, "");
                 lv_obj_set_style_radius(
                     controller->admin_cli_textarea, 8, 0);
@@ -1110,7 +1233,7 @@ bool d1l_ui_service_sheets_render_admin(
 
             lv_obj_t *cli_help = create_label(
                 sheet,
-                "Read-only commands send immediately. Changes, advert, reboot and power actions require a second tap. Use Secure Input for passwords, secrets or private keys. Responses are bounded; sensitive responses are hidden.",
+                "Read-only commands send immediately. Only documented role-compatible commands are accepted; unsupported, serial-only, OTA, reboot and power commands fail closed. Changes require a second tap. Use Secure Input for passwords, secrets or private keys. Responses are bounded; sensitive responses are hidden.",
                 0x93C5FD);
             position_wrap(cli_help, 8, cli_y + 274, 408);
             complete = cli_help && complete;
@@ -1306,6 +1429,33 @@ bool d1l_ui_service_sheets_take_admin_cli(
     return true;
 }
 
+bool d1l_ui_service_sheets_take_admin_acl(
+    d1l_ui_service_sheets_controller_t *controller,
+    char *out_acl_edit,
+    size_t out_acl_edit_size)
+{
+    if (!controller || !out_acl_edit ||
+        out_acl_edit_size < D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES + 1U ||
+        !controller->admin_acl_textarea ||
+        !lv_obj_is_valid(controller->admin_acl_textarea)) {
+        return false;
+    }
+    const char *edit =
+        lv_textarea_get_text(controller->admin_acl_textarea);
+    const size_t edit_len = edit ?
+        strnlen(edit, D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES + 1U) :
+        D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES + 1U;
+    if (edit_len == 0U ||
+        edit_len > D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES) {
+        clear_admin_sensitive_input(controller);
+        return false;
+    }
+    memcpy(out_acl_edit, edit, edit_len);
+    out_acl_edit[edit_len] = '\0';
+    clear_admin_sensitive_input(controller);
+    return true;
+}
+
 bool d1l_ui_service_sheets_take_admin_room_post(
     d1l_ui_service_sheets_controller_t *controller,
     char *out_text,
@@ -1346,6 +1496,7 @@ bool d1l_ui_service_sheets_admin_edit_has_text(
     return controller &&
         (admin_textarea_has_text(controller->admin_password_textarea) ||
          admin_textarea_has_text(controller->admin_room_textarea) ||
+         admin_textarea_has_text(controller->admin_acl_textarea) ||
          admin_textarea_has_text(controller->admin_cli_textarea));
 }
 

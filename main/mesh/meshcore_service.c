@@ -6543,6 +6543,15 @@ static esp_err_t meshcore_service_handle_admin_cli(
         ret = ESP_ERR_INVALID_ARG;
         goto admin_cli_cleanup;
     }
+    if (!d1l_meshcore_admin_cli_command_allowed(
+            command, context.binding.role, context.permissions)) {
+        ret =
+            (context.permissions &
+             D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) ==
+                    D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ?
+                ESP_ERR_NOT_SUPPORTED : ESP_ERR_NOT_ALLOWED;
+        goto admin_cli_cleanup;
+    }
     const bool sensitive =
         d1l_meshcore_admin_cli_command_sensitive(command);
     const bool read_only =

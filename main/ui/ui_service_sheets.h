@@ -12,7 +12,7 @@
 
 typedef struct _lv_obj_t lv_obj_t;
 
-#define D1L_UI_SERVICE_SHEETS_BINDING_COUNT 29U
+#define D1L_UI_SERVICE_SHEETS_BINDING_COUNT 33U
 #define D1L_UI_SERVICE_SHEETS_CONTROLLER_MAX_BYTES 640U
 #define D1L_UI_TERMINAL_PREVIEW_COUNT 6U
 
@@ -40,6 +40,9 @@ typedef enum {
     D1L_UI_SERVICE_ACTION_ADMIN_CLEAR_STATS,
     D1L_UI_SERVICE_ACTION_ADMIN_ADVERTISE_ZERO_HOP,
     D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND,
+    D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY,
+    D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_ON,
+    D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_OFF,
     D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND,
     D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE,
     D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT,
@@ -79,6 +82,7 @@ typedef struct d1l_ui_service_sheets_controller {
     lv_obj_t *admin_sheet;
     lv_obj_t *admin_password_textarea;
     lv_obj_t *admin_room_textarea;
+    lv_obj_t *admin_acl_textarea;
     lv_obj_t *admin_cli_textarea;
     lv_obj_t *admin_keyboard;
     d1l_ui_service_action_handler_t action_handler;
@@ -119,6 +123,9 @@ bool d1l_ui_service_sheets_render_admin(
     const char *selected_fingerprint,
     d1l_meshcore_admin_mutation_t armed_mutation,
     bool cli_command_armed,
+    bool acl_command_armed,
+    bool room_read_only_on_armed,
+    bool room_read_only_off_armed,
     bool cli_secure_input,
     const char *room_transcript,
     d1l_ui_service_action_handler_t action_handler,
@@ -131,6 +138,10 @@ bool d1l_ui_service_sheets_take_admin_cli(
     d1l_ui_service_sheets_controller_t *controller,
     char *out_command,
     size_t out_command_size);
+bool d1l_ui_service_sheets_take_admin_acl(
+    d1l_ui_service_sheets_controller_t *controller,
+    char *out_acl_edit,
+    size_t out_acl_edit_size);
 bool d1l_ui_service_sheets_take_admin_room_post(
     d1l_ui_service_sheets_controller_t *controller,
     char *out_text,

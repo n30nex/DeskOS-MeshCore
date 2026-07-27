@@ -543,20 +543,63 @@ static int test_bounded_cli_session_and_redaction(void)
 {
     CHECK(d1l_meshcore_admin_cli_command_valid("neighbors"));
     CHECK(d1l_meshcore_admin_cli_command_read_only("neighbors"));
-    CHECK(d1l_meshcore_admin_cli_command_read_only("NEIGHBORS"));
+    CHECK(!d1l_meshcore_admin_cli_command_valid("NEIGHBORS"));
     CHECK(d1l_meshcore_admin_cli_command_read_only("get name"));
     CHECK(d1l_meshcore_admin_cli_command_read_only("region list allowed"));
     CHECK(d1l_meshcore_admin_cli_command_read_only("region get home"));
     CHECK(!d1l_meshcore_admin_cli_command_read_only("region put test"));
     CHECK(!d1l_meshcore_admin_cli_command_read_only("set name repeater"));
+    CHECK(d1l_meshcore_admin_cli_command_policy("set name repeater") ==
+          D1L_MESHCORE_ADMIN_CLI_MUTATION);
     CHECK(d1l_meshcore_admin_cli_command_sensitive(
         "set guest.password secret"));
-    CHECK(d1l_meshcore_admin_cli_command_sensitive(
+    CHECK(!d1l_meshcore_admin_cli_command_valid(
         "PASSWORD new-secret"));
+    CHECK(d1l_meshcore_admin_cli_command_sensitive(
+        "password new-secret"));
     CHECK(d1l_meshcore_admin_cli_command_sensitive(
         "set bridge.secret secret"));
     CHECK(!d1l_meshcore_admin_cli_command_read_only(
         "get guest.password"));
+    CHECK(!d1l_meshcore_admin_cli_command_valid("help"));
+    CHECK(!d1l_meshcore_admin_cli_command_valid("reboot"));
+    CHECK(!d1l_meshcore_admin_cli_command_valid("start ota"));
+    CHECK(!d1l_meshcore_admin_cli_command_valid("get prv.key"));
+    CHECK(!d1l_meshcore_admin_cli_command_valid("set freq 915.0"));
+    CHECK(d1l_meshcore_admin_cli_command_read_only("get freq"));
+    CHECK(d1l_meshcore_admin_cli_command_allowed(
+        "neighbors", D1L_MESHCORE_ADMIN_ROLE_REPEATER,
+        D1L_MESHCORE_ADMIN_PERMISSION_ADMIN));
+    CHECK(!d1l_meshcore_admin_cli_command_allowed(
+        "neighbors", D1L_MESHCORE_ADMIN_ROLE_ROOM,
+        D1L_MESHCORE_ADMIN_PERMISSION_ADMIN));
+    CHECK(d1l_meshcore_admin_cli_command_allowed(
+        "get allow.read.only", D1L_MESHCORE_ADMIN_ROLE_ROOM,
+        D1L_MESHCORE_ADMIN_PERMISSION_ADMIN));
+    CHECK(!d1l_meshcore_admin_cli_command_allowed(
+        "get allow.read.only", D1L_MESHCORE_ADMIN_ROLE_REPEATER,
+        D1L_MESHCORE_ADMIN_PERMISSION_ADMIN));
+    CHECK(!d1l_meshcore_admin_cli_command_allowed(
+        "ver", D1L_MESHCORE_ADMIN_ROLE_REPEATER,
+        D1L_MESHCORE_ADMIN_PERMISSION_READ_ONLY));
+    static const char acl_key[] =
+        "00112233445566778899aabbccddeeff"
+        "00112233445566778899aabbccddeeff";
+    char acl_command[D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
+    CHECK(d1l_meshcore_admin_format_acl_command(
+        acl_key, D1L_MESHCORE_ADMIN_PERMISSION_WRITE,
+        acl_command, sizeof(acl_command)));
+    CHECK(strcmp(
+        acl_command,
+        "setperm 00112233445566778899aabbccddeeff"
+        "00112233445566778899aabbccddeeff 2") == 0);
+    CHECK(d1l_meshcore_admin_cli_command_policy(acl_command) ==
+          D1L_MESHCORE_ADMIN_CLI_MUTATION);
+    CHECK(!d1l_meshcore_admin_format_acl_command(
+        "0011", D1L_MESHCORE_ADMIN_PERMISSION_WRITE,
+        acl_command, sizeof(acl_command)));
+    CHECK(!d1l_meshcore_admin_format_acl_command(
+        acl_key, 4U, acl_command, sizeof(acl_command)));
     CHECK(!d1l_meshcore_admin_cli_command_valid(" neighbors"));
     CHECK(!d1l_meshcore_admin_cli_command_valid("neighbors\n"));
 

@@ -139,6 +139,45 @@ def test_admin_mutations_are_exactly_allowlisted_and_locally_confirmed() -> None
         "".join(ui.split())
 
 
+def test_remote_cli_is_documented_role_aware_and_fails_closed() -> None:
+    dispatch_h = read("main/mesh/meshcore_admin_dispatch.h")
+    dispatch = read("main/mesh/meshcore_admin_dispatch.c")
+    service = read("main/mesh/meshcore_service.c")
+
+    for policy in (
+        "D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED",
+        "D1L_MESHCORE_ADMIN_CLI_READ_ONLY",
+        "D1L_MESHCORE_ADMIN_CLI_MUTATION",
+        "D1L_MESHCORE_ADMIN_CLI_SENSITIVE",
+    ):
+        assert policy in dispatch_h
+    assert "d1l_meshcore_admin_cli_command_allowed" in dispatch_h
+    assert "d1l_meshcore_admin_format_acl_command" in dispatch_h
+    assert '{"allow.read.only", CLI_ROLE_ROOM' in dispatch
+    assert '{"neighbors", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_REPEATER}' \
+        in dispatch
+    assert '{"prv.key", CLI_ROLE_BOTH, false, true, true}' in dispatch
+    assert '{"freq", CLI_ROLE_BOTH, true, false, false}' in dispatch
+    assert '"reboot"' not in body(
+        dispatch,
+        "static const cli_exact_rule_t CLI_EXACT_RULES[]",
+        "static bool cli_command_shape_valid",
+    )
+    assert '"start ota"' not in dispatch
+
+    handler = body(
+        service,
+        "static esp_err_t meshcore_service_handle_admin_cli",
+        "static esp_err_t meshcore_service_handle_admin_logout",
+    )
+    allowed = handler.index("d1l_meshcore_admin_cli_command_allowed(")
+    packet = handler.index("d1l_meshcore_admin_build_cli_packet(")
+    assert allowed < packet
+    assert "context.binding.role, context.permissions" in handler
+    assert "ESP_ERR_NOT_SUPPORTED" in handler
+    assert "ESP_ERR_NOT_ALLOWED" in handler
+
+
 def test_runtime_snapshot_redacts_all_authority_material() -> None:
     runtime_h = read("main/mesh/meshcore_admin_runtime.h")
     runtime_c = read("main/mesh/meshcore_admin_runtime.c")
