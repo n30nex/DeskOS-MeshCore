@@ -201,6 +201,15 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     )
     assert backup_copy < backup_verify < canonical_delete < final_rename
     assert final_rename < final_validate
+    invalid_flow = repair.split(
+        'provider_repair_set_stage(out_result, "stage_verified");', 1
+    )[1].split("} else {", 1)[0]
+    assert invalid_flow.index("provider_repair_pause_storage(") < (
+        invalid_flow.index("ret = read_provider_path(")
+    )
+    assert invalid_flow.index("ret = read_provider_path(") < (
+        invalid_flow.index("write_provider_create_new(")
+    )
     assert (
         "out_result->stage_path, D1L_MAP_PROVIDER_CONFIG_PATH, false"
         in repair

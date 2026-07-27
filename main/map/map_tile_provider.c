@@ -1245,9 +1245,11 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     provider_repair_set_stage(out_result, "stage_verified");
 
     if (repair_invalid) {
+        provider_repair_pause_storage(out_result, &manager_paused);
         /*
-         * Re-read immediately before the first mutation. The exact invalid
-         * bytes must still be the bytes that were parsed and staged against.
+         * Pause storage traffic before this immediate re-read so the exact
+         * invalid bytes cannot race another bridge file user before the
+         * create-new backup copy.
          */
         ret = read_provider_path(
             D1L_MAP_PROVIDER_CONFIG_PATH, verify, sizeof(verify),
@@ -1258,7 +1260,6 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
             goto done;
         }
 
-        provider_repair_pause_storage(out_result, &manager_paused);
         provider_repair_set_stage(out_result, "backup_create");
         d1l_provider_create_new_result_t backup_copy = {0};
         ret = write_provider_create_new(
