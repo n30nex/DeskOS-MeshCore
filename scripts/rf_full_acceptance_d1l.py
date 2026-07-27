@@ -2758,7 +2758,14 @@ def remote_peer_flow_validation(
         "status_time_advanced": before_written is not None
         and after_written is not None
         and after_written >= before_written,
-        "one_d1l_dm_received": deltas["rx_dm_total"] == 1,
+        # The controlled listener observes each semantic DM through both its
+        # subscription callback and fetch poll before its worker deduplicates
+        # them. Accept one or both bounded ingest events; the exact D1L
+        # command/message/packet correlation below remains the transaction
+        # identity proof.
+        "d1l_dm_ingest_bounded": isinstance(deltas["rx_dm_total"], int)
+        and not isinstance(deltas["rx_dm_total"], bool)
+        and 1 <= deltas["rx_dm_total"] <= 2,
         "peer_dm_send_observed": isinstance(tx_delta, int)
         and not isinstance(tx_delta, bool)
         and 1 <= tx_delta <= 2,
