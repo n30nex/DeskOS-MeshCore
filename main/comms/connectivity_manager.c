@@ -1324,6 +1324,14 @@ esp_err_t d1l_connectivity_prepare_reboot(void)
 
 esp_err_t d1l_connectivity_init(void)
 {
+    if (!release_wifi_user_control_available()) {
+        portENTER_CRITICAL(&s_wifi_policy_lock);
+        d1l_wifi_retry_policy_init(&s_wifi_policy, false, false);
+        portEXIT_CRITICAL(&s_wifi_policy_lock);
+        set_wifi_last_error("unsupported_in_release_profile");
+        return ESP_OK;
+    }
+
 #ifdef CONFIG_ESP_WIFI_ENABLED
     if (!s_wifi_network_mutex) {
         s_wifi_network_mutex = xSemaphoreCreateMutex();
@@ -1333,14 +1341,6 @@ esp_err_t d1l_connectivity_init(void)
         }
     }
 #endif
-
-    if (!release_wifi_user_control_available()) {
-        portENTER_CRITICAL(&s_wifi_policy_lock);
-        d1l_wifi_retry_policy_init(&s_wifi_policy, false, false);
-        portEXIT_CRITICAL(&s_wifi_policy_lock);
-        set_wifi_last_error("unsupported_in_release_profile");
-        return ESP_OK;
-    }
 
     d1l_settings_t settings = {0};
     (void)d1l_settings_public_snapshot(&settings);
