@@ -68,6 +68,25 @@ def test_owner_uses_separate_bounded_command_lanes_and_tested_selector() -> None
     assert "uxQueueMessagesWaiting(s_radio_event_queue)" in task
     assert "uxQueueMessagesWaiting(s_priority_command_queue)" in task
     assert "uxQueueMessagesWaiting(s_service_queue)" in task
+    urgent_ack = task.index("const bool urgent_ack_response")
+    urgent_dispatch = task.index(
+        "work = D1L_MESH_OWNER_WORK_PRIORITY_COMMAND;", urgent_ack
+    )
+    choose = task.index("d1l_mesh_owner_scheduler_choose")
+    assert urgent_ack < urgent_dispatch < choose
+    urgent_body = task[
+        task.index("if (urgent_ack_response)", urgent_ack):
+        task.index("} else {", urgent_ack)
+    ]
+    assert "s_pending_ack_tx.active && !s_tx_busy" in task
+    assert "scheduler.radio_event_burst = 0U" in urgent_body
+    assert "scheduler.priority_command_burst++" in urgent_body
+    ack_queue = body(
+        service,
+        "static esp_err_t meshcore_service_send_ack_async",
+        "void d1l_meshcore_service_init",
+    )
+    assert "xQueueSendToFront(s_priority_command_queue" in ack_queue
     assert "const bool rx_recovery_deferred = rx_recovery && s_tx_busy" in task
     assert "rx_recovery && !rx_recovery_deferred" in task
     assert "d1l_mesh_terminal_lane_publish_slot" in guard
@@ -89,7 +108,6 @@ def test_owner_uses_separate_bounded_command_lanes_and_tested_selector() -> None
     )
     take_rx_recovery = task.index("const bool rx_recovery")
     reserve = task.index("d1l_mesh_terminal_lane_try_reserve_owner")
-    choose = task.index("d1l_mesh_owner_scheduler_choose")
     first_receive = task.index("xQueueReceive")
     validate = task.index("d1l_mesh_terminal_lane_owner_still_reserved", first_receive)
     admit = task.index("meshcore_request_admit(&cmd)")

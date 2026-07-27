@@ -526,6 +526,30 @@ def test_owner_automatically_reconciles_background_durable_ack():
     assert "pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS)" in task
 
 
+def test_outbound_ack_cas_is_deferred_to_the_retained_worker():
+    source = read("main/mesh/meshcore_service.c")
+    store = read("main/mesh/dm_store.c")
+    header = read("main/mesh/dm_store.h")
+    transition = body(
+        source,
+        "static d1l_pending_dm_ack_transition_result_t transition_pending_dm_ack",
+        "static esp_err_t transition_pending_dm_retry",
+    )
+    deferred = body(
+        store,
+        "esp_err_t d1l_dm_store_transition_delivery_deferred",
+        "esp_err_t d1l_dm_store_transition_delivery_retry",
+    )
+
+    assert "d1l_dm_store_transition_delivery_deferred(" in header
+    assert "d1l_dm_store_transition_delivery_deferred(" in transition
+    assert "d1l_dm_store_transition_delivery(" not in transition
+    assert "false, 0U, false, outcome" in deferred
+    assert "d1l_dm_store_flush()" not in deferred
+    assert "if (!outcome.durable)" in transition
+    assert "s_pending_dm_tx.ack_persistence_pending = true" in transition
+
+
 def test_actual_radio_callbacks_remain_storage_free_and_bounded():
     source = read("main/mesh/meshcore_service.c")
     callbacks = source.split(

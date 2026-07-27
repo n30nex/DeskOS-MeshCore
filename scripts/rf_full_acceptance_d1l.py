@@ -3319,7 +3319,7 @@ def correlated_listener_transaction(
     final_route: dict | None,
     outbound_token: str,
     fingerprint: str,
-    inbound_text: str = RADIO_LISTENER_REPLY,
+    inbound_token: str,
 ) -> dict:
     new_messages = new_entries_by_seq(
         baseline_messages, final_messages
@@ -3340,7 +3340,7 @@ def correlated_listener_transaction(
         row
         for row in new_messages
         if row.get("direction") == "rx"
-        and row.get("text") == inbound_text
+        and row.get("text") == inbound_token
         and entry_matches_fingerprint(
             final_messages, row, fingerprint
         )
@@ -3365,6 +3365,14 @@ def correlated_listener_transaction(
         if isinstance(reply_ack_response, dict)
         else {}
     )
+    reply_ack_hash = reply.get("ack_hash")
+    reply_ack_hash = (
+        reply_ack_hash
+        if isinstance(reply_ack_hash, int)
+        and not isinstance(reply_ack_hash, bool)
+        and 0 < reply_ack_hash <= 0xFFFFFFFF
+        else None
+    )
     tx_row_ok = (
         bool(tx)
         and not contains_token(baseline_messages, outbound_token)
@@ -3382,6 +3390,8 @@ def correlated_listener_transaction(
     )
     reply_ack_ok = (
         bool(reply)
+        and reply.get("delivered") is True
+        and reply_ack_hash is not None
         and reply_ack_response.get("identity_valid") is True
         and reply_ack_response.get("state") == "sent"
         and isinstance(
@@ -3391,13 +3401,7 @@ def correlated_listener_transaction(
             reply_ack_response.get("dispatch_count"), bool
         )
         and reply_ack_response["dispatch_count"] >= 1
-        and reply_ack_response.get("last_kind")
-        in {
-            "direct_ack",
-            "flood_ack",
-            "flood_ack_path",
-            "path_ack",
-        }
+        and reply_ack_response.get("last_kind") == "direct_ack"
         and reply_ack_response.get("last_error") == "ESP_OK"
     )
     ack_note = (
@@ -3405,23 +3409,21 @@ def correlated_listener_transaction(
         if ack_hash is not None
         else ""
     )
-    packet_rows = [
+    ack_packet_rows = [
         row
         for row in new_packets
         if row.get("direction") == "rx"
         and row.get("kind") == "dm_ack"
         and row.get("note") == ack_note
     ]
-    route_rows = [
+    ack_route_rows = [
         row
         for row in new_routes
         if fingerprints_equal(row.get("target"), fingerprint)
         and row.get("kind") == "dm_ack"
         and row.get("direction") == "rx"
-        and row.get("route") == "direct"
+        and row.get("route") in {"direct", "flood"}
     ]
-    packet = packet_rows[0] if len(packet_rows) == 1 else {}
-    route = route_rows[0] if len(route_rows) == 1 else {}
     metadata_pairs = (
         ("rssi_dbm", "last_rssi_dbm"),
         ("snr_tenths", "last_snr_tenths"),
@@ -3429,50 +3431,177 @@ def correlated_listener_transaction(
         ("path_hops", "path_hops"),
         ("payload_len", "payload_len"),
     )
-    packet_metadata_ok = (
-        isinstance(packet.get("rssi_dbm"), int)
-        and not isinstance(packet.get("rssi_dbm"), bool)
-        and isinstance(packet.get("snr_tenths"), int)
-        and not isinstance(packet.get("snr_tenths"), bool)
-        and isinstance(packet.get("path_hash_bytes"), int)
-        and not isinstance(packet.get("path_hash_bytes"), bool)
-        and 0 <= packet["path_hash_bytes"] <= 64
-        and isinstance(packet.get("path_hops"), int)
-        and not isinstance(packet.get("path_hops"), bool)
-        and 0 <= packet["path_hops"] <= 64
-        and isinstance(packet.get("payload_len"), int)
-        and not isinstance(packet.get("payload_len"), bool)
-        and 0 < packet["payload_len"] <= 65535
-    )
-    packet_route_metadata_match = (
-        bool(packet and route)
-        and packet_metadata_ok
-        and all(
-            packet.get(packet_field) == route.get(route_field)
-            for packet_field, route_field in metadata_pairs
+
+    def packet_route_metadata_matches(
+        packet_row: dict, route_row: dict
+    ) -> bool:
+        packet_metadata_ok = (
+            isinstance(packet_row.get("rssi_dbm"), int)
+            and not isinstance(packet_row.get("rssi_dbm"), bool)
+            and isinstance(packet_row.get("snr_tenths"), int)
+            and not isinstance(packet_row.get("snr_tenths"), bool)
+            and isinstance(packet_row.get("path_hash_bytes"), int)
+            and not isinstance(packet_row.get("path_hash_bytes"), bool)
+            and 0 <= packet_row["path_hash_bytes"] <= 64
+            and isinstance(packet_row.get("path_hops"), int)
+            and not isinstance(packet_row.get("path_hops"), bool)
+            and 0 <= packet_row["path_hops"] <= 64
+            and isinstance(packet_row.get("payload_len"), int)
+            and not isinstance(packet_row.get("payload_len"), bool)
+            and 0 < packet_row["payload_len"] <= 65535
         )
+        return bool(
+            packet_row
+            and route_row
+            and packet_metadata_ok
+            and all(
+                packet_row.get(packet_field)
+                == route_row.get(route_field)
+                for packet_field, route_field in metadata_pairs
+            )
+        )
+
+    ack_route = (
+        ack_route_rows[0] if len(ack_route_rows) == 1 else {}
     )
+    path_note = (
+        f"path {RADIO_LISTENER_CONTACT_NAME} "
+        f"hops={ack_route.get('path_hops')}"
+    )
+    path_packet_rows = [
+        row
+        for row in new_packets
+        if row.get("direction") == "rx"
+        and row.get("kind") == "path_return"
+        and row.get("note") == path_note
+        and packet_route_metadata_matches(row, ack_route)
+    ]
+    if len(ack_packet_rows) == 1:
+        ack_packet = ack_packet_rows[0]
+    elif len(ack_packet_rows) == 0 and len(path_packet_rows) == 1:
+        ack_packet = path_packet_rows[0]
+    else:
+        ack_packet = {}
+    packet_route_metadata_match = (
+        packet_route_metadata_matches(ack_packet, ack_route)
+    )
+
+    inbound_packet_note = (
+        f"{RADIO_LISTENER_CONTACT_NAME}: {inbound_token}"
+    )
+    direct_inbound_packet_rows = [
+        row
+        for row in new_packets
+        if row.get("direction") == "rx"
+        and row.get("kind") == "dm_text"
+        and row.get("note") == inbound_packet_note
+    ]
+    direct_inbound_route_rows = [
+        row
+        for row in new_routes
+        if fingerprints_equal(row.get("target"), fingerprint)
+        and row.get("kind") == "dm_text"
+        and row.get("direction") == "rx"
+        and row.get("route") == "direct"
+    ]
+    direct_inbound_packet = (
+        direct_inbound_packet_rows[0]
+        if len(direct_inbound_packet_rows) == 1
+        else {}
+    )
+    direct_inbound_route = (
+        direct_inbound_route_rows[0]
+        if len(direct_inbound_route_rows) == 1
+        else {}
+    )
+    direct_inbound_metadata_match = packet_route_metadata_matches(
+        direct_inbound_packet, direct_inbound_route
+    )
+
+    direct_ack_note = (
+        f"direct_ack {reply_ack_hash} {RADIO_LISTENER_CONTACT_NAME}"
+        if reply_ack_hash is not None
+        else ""
+    )
+    direct_ack_packet_rows = [
+        row
+        for row in new_packets
+        if row.get("direction") == "tx"
+        and row.get("kind") == "dm_ack"
+        and row.get("note") == direct_ack_note
+    ]
+    direct_ack_route_rows = [
+        row
+        for row in new_routes
+        if fingerprints_equal(row.get("target"), fingerprint)
+        and row.get("kind") == "dm_ack"
+        and row.get("direction") == "tx"
+        and row.get("route") == "direct"
+    ]
+    direct_ack_packet = (
+        direct_ack_packet_rows[0]
+        if len(direct_ack_packet_rows) == 1
+        else {}
+    )
+    direct_ack_route = (
+        direct_ack_route_rows[0]
+        if len(direct_ack_route_rows) == 1
+        else {}
+    )
+    direct_ack_metadata_match = packet_route_metadata_matches(
+        direct_ack_packet, direct_ack_route
+    )
+
     ack_path_ok = (
         tx_row_ok
-        and reply_ack_ok
-        and len(packet_rows) == 1
+        and len(ack_route_rows) == 1
+        and (
+            len(ack_packet_rows) == 1
+            or (
+                len(ack_packet_rows) == 0
+                and len(path_packet_rows) == 1
+            )
+        )
         and packet_route_metadata_match
     )
     direct_route_ok = (
-        ack_path_ok
-        and len(route_rows) == 1
-        and route.get("route") == "direct"
+        reply_ack_ok
+        and len(direct_inbound_packet_rows) == 1
+        and len(direct_inbound_route_rows) == 1
+        and direct_inbound_metadata_match
+        and len(direct_ack_packet_rows) == 1
+        and len(direct_ack_route_rows) == 1
+        and direct_ack_metadata_match
     )
     return {
         "ok": ack_path_ok and direct_route_ok,
         "outbound_dm_seq": _positive_seq(tx.get("seq")),
         "inbound_reply_seq": _positive_seq(reply.get("seq")),
         "ack_hash": ack_hash,
+        "inbound_ack_hash": reply_ack_hash,
         "reply_ack_state": reply_ack_response.get("state"),
         "reply_ack_kind": reply_ack_response.get("last_kind"),
-        "packet_seq": _positive_seq(packet.get("seq")),
-        "route_seq": _positive_seq(route.get("seq")),
+        "packet_seq": _positive_seq(ack_packet.get("seq")),
+        "packet_kind": ack_packet.get("kind"),
+        "route_seq": _positive_seq(ack_route.get("seq")),
+        "ack_route": ack_route.get("route"),
         "packet_route_metadata_match": packet_route_metadata_match,
+        "direct_inbound_packet_seq": _positive_seq(
+            direct_inbound_packet.get("seq")
+        ),
+        "direct_inbound_route_seq": _positive_seq(
+            direct_inbound_route.get("seq")
+        ),
+        "direct_inbound_metadata_match": (
+            direct_inbound_metadata_match
+        ),
+        "direct_ack_packet_seq": _positive_seq(
+            direct_ack_packet.get("seq")
+        ),
+        "direct_ack_route_seq": _positive_seq(
+            direct_ack_route.get("seq")
+        ),
+        "direct_ack_metadata_match": direct_ack_metadata_match,
         "ack_path_ok": ack_path_ok,
         "direct_route_ok": direct_route_ok,
     }
@@ -4010,7 +4139,7 @@ def build_report(
             final_route=route_result,
             outbound_token=outbound_token,
             fingerprint=fingerprint,
-            inbound_text=inbound_text,
+            inbound_token=inbound_text,
         )
         if listener_mode
         else None

@@ -66,3 +66,18 @@ def test_dm_deferred_ack_unloaded_path_performs_no_storage_io(tmp_path):
         text=True,
     )
     assert completed.stdout.strip() == "native DM deferred ACK unloaded path: ok"
+
+
+def test_dm_deferred_delivery_ack_waits_for_retained_flush(tmp_path):
+    executable = _build_native_dm_harness(tmp_path)
+    completed = subprocess.run(
+        [str(executable), "deferred-delivery-ack"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert (
+        completed.stdout.strip()
+        == "native DM deferred delivery ACK persistence: ok"
+    )

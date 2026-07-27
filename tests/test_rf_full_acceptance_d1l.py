@@ -1594,7 +1594,10 @@ def test_listener_contact_import_requires_exact_key_and_canonical_chat():
 def test_listener_transaction_correlates_new_token_hash_packet_and_route():
     fingerprint = "0123456789ABCDEF"
     canonical = fingerprint.lower()
-    token = "rf_exact_out"
+    outbound_token = "rf_exact_out"
+    inbound_token = "rf_exact_in"
+    outbound_ack_hash = 1234567890
+    inbound_ack_hash = 987654321
     baseline_messages = {
         "fingerprint": canonical,
         "entries": [
@@ -1613,10 +1616,12 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
                 "seq": 2,
                 "fingerprint": canonical,
                 "direction": "tx",
-                "text": f"core acceptance test {token}",
+                "text": (
+                    f"core acceptance test {outbound_token}"
+                ),
                 "acked": True,
                 "delivered": True,
-                "ack_hash": 1234567890,
+                "ack_hash": outbound_ack_hash,
                 "ack_response": {
                     "identity_valid": False,
                     "state": "legacy_unverified",
@@ -1629,7 +1634,10 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
                 "seq": 3,
                 "fingerprint": canonical,
                 "direction": "rx",
-                "text": rf_accept.RADIO_LISTENER_REPLY,
+                "text": inbound_token,
+                "delivered": True,
+                "ack_hash": inbound_ack_hash,
+                "path_hops": 0,
                 "ack_response": {
                     "identity_valid": True,
                     "state": "sent",
@@ -1656,13 +1664,37 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
             {
                 "seq": 11,
                 "direction": "rx",
-                "kind": "dm_ack",
-                "note": "ack 1234567890 CoreTestPeer",
+                "kind": "path_return",
+                "note": "path CoreTestPeer hops=0",
                 "rssi_dbm": -70,
                 "snr_tenths": 80,
                 "path_hash_bytes": 1,
                 "path_hops": 0,
-                "payload_len": 12,
+                "payload_len": 22,
+            },
+            {
+                "seq": 12,
+                "direction": "rx",
+                "kind": "dm_text",
+                "note": f"CoreTestPeer: {inbound_token}",
+                "rssi_dbm": -68,
+                "snr_tenths": 75,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 38,
+            },
+            {
+                "seq": 13,
+                "direction": "tx",
+                "kind": "dm_ack",
+                "note": (
+                    f"direct_ack {inbound_ack_hash} CoreTestPeer"
+                ),
+                "rssi_dbm": 0,
+                "snr_tenths": 0,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 8,
             },
         ]
     }
@@ -1684,12 +1716,36 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
                 "target": canonical,
                 "kind": "dm_ack",
                 "direction": "rx",
-                "route": "direct",
+                "route": "flood",
                 "last_rssi_dbm": -70,
                 "last_snr_tenths": 80,
                 "path_hash_bytes": 1,
                 "path_hops": 0,
-                "payload_len": 12,
+                "payload_len": 22,
+            },
+            {
+                "seq": 22,
+                "target": canonical,
+                "kind": "dm_text",
+                "direction": "rx",
+                "route": "direct",
+                "last_rssi_dbm": -68,
+                "last_snr_tenths": 75,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 38,
+            },
+            {
+                "seq": 23,
+                "target": canonical,
+                "kind": "dm_ack",
+                "direction": "tx",
+                "route": "direct",
+                "last_rssi_dbm": 0,
+                "last_snr_tenths": 0,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 8,
             }
         ]
     }
@@ -1701,23 +1757,56 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         final_packets=final_packets,
         baseline_route=baseline_route,
         final_route=final_route,
-        outbound_token=token,
+        outbound_token=outbound_token,
         fingerprint=fingerprint,
+        inbound_token=inbound_token,
     )
 
     assert result == {
         "ok": True,
         "outbound_dm_seq": 2,
         "inbound_reply_seq": 3,
-        "ack_hash": 1234567890,
+        "ack_hash": outbound_ack_hash,
+        "inbound_ack_hash": inbound_ack_hash,
         "reply_ack_state": "sent",
         "reply_ack_kind": "direct_ack",
         "packet_seq": 11,
+        "packet_kind": "path_return",
         "route_seq": 21,
+        "ack_route": "flood",
         "packet_route_metadata_match": True,
+        "direct_inbound_packet_seq": 12,
+        "direct_inbound_route_seq": 22,
+        "direct_inbound_metadata_match": True,
+        "direct_ack_packet_seq": 13,
+        "direct_ack_route_seq": 23,
+        "direct_ack_metadata_match": True,
         "ack_path_ok": True,
         "direct_route_ok": True,
     }
+
+    exact_ack_packets = json.loads(json.dumps(final_packets))
+    exact_ack_packets["entries"][1].update(
+        {
+            "kind": "dm_ack",
+            "note": (
+                f"ack {outbound_ack_hash} CoreTestPeer"
+            ),
+        }
+    )
+    exact_ack = rf_accept.correlated_listener_transaction(
+        baseline_messages=baseline_messages,
+        final_messages=final_messages,
+        baseline_packets=baseline_packets,
+        final_packets=exact_ack_packets,
+        baseline_route=baseline_route,
+        final_route=final_route,
+        outbound_token=outbound_token,
+        fingerprint=fingerprint,
+        inbound_token=inbound_token,
+    )
+    assert exact_ack["ok"] is True
+    assert exact_ack["packet_kind"] == "dm_ack"
 
     stale_only = rf_accept.correlated_listener_transaction(
         baseline_messages=baseline_messages,
@@ -1726,12 +1815,13 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         final_packets=baseline_packets,
         baseline_route=baseline_route,
         final_route=baseline_route,
-        outbound_token=token,
+        outbound_token=outbound_token,
         fingerprint=fingerprint,
+        inbound_token=inbound_token,
     )
     assert stale_only["ok"] is False
-    wrong_hash = json.loads(json.dumps(final_packets))
-    wrong_hash["entries"][-1]["note"] = "ack 7 CoreTestPeer"
+    wrong_hash = json.loads(json.dumps(exact_ack_packets))
+    wrong_hash["entries"][1]["note"] = "ack 7 CoreTestPeer"
     assert rf_accept.correlated_listener_transaction(
         baseline_messages=baseline_messages,
         final_messages=final_messages,
@@ -1739,13 +1829,14 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         final_packets=wrong_hash,
         baseline_route=baseline_route,
         final_route=final_route,
-        outbound_token=token,
+        outbound_token=outbound_token,
         fingerprint=fingerprint,
+        inbound_token=inbound_token,
     )["ok"] is False
 
-    copied_packet = json.loads(json.dumps(final_packets))
-    duplicate = dict(copied_packet["entries"][-1])
-    duplicate["seq"] = 12
+    copied_packet = json.loads(json.dumps(exact_ack_packets))
+    duplicate = dict(copied_packet["entries"][1])
+    duplicate["seq"] = 14
     copied_packet["entries"].append(duplicate)
     assert rf_accept.correlated_listener_transaction(
         baseline_messages=baseline_messages,
@@ -1754,12 +1845,13 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         final_packets=copied_packet,
         baseline_route=baseline_route,
         final_route=final_route,
-        outbound_token=token,
+        outbound_token=outbound_token,
         fingerprint=fingerprint,
+        inbound_token=inbound_token,
     )["ok"] is False
 
     tampered_route = json.loads(json.dumps(final_route))
-    tampered_route["entries"][-1]["last_rssi_dbm"] = -71
+    tampered_route["entries"][0]["last_rssi_dbm"] = -71
     assert rf_accept.correlated_listener_transaction(
         baseline_messages=baseline_messages,
         final_messages=final_messages,
@@ -1767,12 +1859,13 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         final_packets=final_packets,
         baseline_route=baseline_route,
         final_route=tampered_route,
-        outbound_token=token,
+        outbound_token=outbound_token,
         fingerprint=fingerprint,
+        inbound_token=inbound_token,
     )["ok"] is False
 
     stale_sequence = json.loads(json.dumps(final_packets))
-    stale_sequence["entries"][-1]["seq"] = 9
+    stale_sequence["entries"][1]["seq"] = 9
     assert rf_accept.correlated_listener_transaction(
         baseline_messages=baseline_messages,
         final_messages=final_messages,
@@ -1780,9 +1873,44 @@ def test_listener_transaction_correlates_new_token_hash_packet_and_route():
         final_packets=stale_sequence,
         baseline_route=baseline_route,
         final_route=final_route,
-        outbound_token=token,
+        outbound_token=outbound_token,
         fingerprint=fingerprint,
+        inbound_token=inbound_token,
     )["ok"] is False
+
+    tampered_direct = json.loads(json.dumps(final_route))
+    tampered_direct["entries"][1]["last_snr_tenths"] = 74
+    direct_result = rf_accept.correlated_listener_transaction(
+        baseline_messages=baseline_messages,
+        final_messages=final_messages,
+        baseline_packets=baseline_packets,
+        final_packets=final_packets,
+        baseline_route=baseline_route,
+        final_route=tampered_direct,
+        outbound_token=outbound_token,
+        fingerprint=fingerprint,
+        inbound_token=inbound_token,
+    )
+    assert direct_result["ack_path_ok"] is True
+    assert direct_result["direct_route_ok"] is False
+
+    missing_direct_ack = json.loads(json.dumps(final_packets))
+    missing_direct_ack["entries"][3]["note"] = (
+        "direct_ack 1 CoreTestPeer"
+    )
+    direct_ack_result = rf_accept.correlated_listener_transaction(
+        baseline_messages=baseline_messages,
+        final_messages=final_messages,
+        baseline_packets=baseline_packets,
+        final_packets=missing_direct_ack,
+        baseline_route=baseline_route,
+        final_route=final_route,
+        outbound_token=outbound_token,
+        fingerprint=fingerprint,
+        inbound_token=inbound_token,
+    )
+    assert direct_ack_result["ack_path_ok"] is True
+    assert direct_ack_result["direct_route_ok"] is False
 
 
 def remote_status(
@@ -3635,6 +3763,7 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
         **contact,
     }
     ack_hash = 1234567890
+    inbound_ack_hash = 987654321
     baseline_messages = {
         "ok": True,
         "fingerprint": fingerprint,
@@ -3668,6 +3797,9 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
                 "fingerprint": fingerprint,
                 "direction": "rx",
                 "text": "rf_remote_in",
+                "delivered": True,
+                "ack_hash": inbound_ack_hash,
+                "path_hops": 0,
                 "ack_response": {
                     "identity_valid": True,
                     "state": "sent",
@@ -3691,16 +3823,37 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
             {
                 "seq": 11,
                 "direction": "rx",
-                "kind": "dm_ack",
-                "note": (
-                    f"ack {ack_hash} "
-                    f"{rf_accept.RADIO_LISTENER_CONTACT_NAME}"
-                ),
+                "kind": "path_return",
+                "note": "path CoreTestPeer hops=0",
                 "rssi_dbm": -70,
                 "snr_tenths": 80,
                 "path_hash_bytes": 1,
                 "path_hops": 0,
-                "payload_len": 12,
+                "payload_len": 22,
+            },
+            {
+                "seq": 12,
+                "direction": "rx",
+                "kind": "dm_text",
+                "note": "CoreTestPeer: rf_remote_in",
+                "rssi_dbm": -68,
+                "snr_tenths": 75,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 38,
+            },
+            {
+                "seq": 13,
+                "direction": "tx",
+                "kind": "dm_ack",
+                "note": (
+                    f"direct_ack {inbound_ack_hash} CoreTestPeer"
+                ),
+                "rssi_dbm": 0,
+                "snr_tenths": 0,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 8,
             },
         ],
     }
@@ -3726,12 +3879,36 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
                 "target": fingerprint,
                 "kind": "dm_ack",
                 "direction": "rx",
-                "route": "direct",
+                "route": "flood",
                 "last_rssi_dbm": -70,
                 "last_snr_tenths": 80,
                 "path_hash_bytes": 1,
                 "path_hops": 0,
-                "payload_len": 12,
+                "payload_len": 22,
+            },
+            {
+                "seq": 22,
+                "target": fingerprint,
+                "kind": "dm_text",
+                "direction": "rx",
+                "route": "direct",
+                "last_rssi_dbm": -68,
+                "last_snr_tenths": 75,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 38,
+            },
+            {
+                "seq": 23,
+                "target": fingerprint,
+                "kind": "dm_ack",
+                "direction": "tx",
+                "route": "direct",
+                "last_rssi_dbm": 0,
+                "last_snr_tenths": 0,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 8,
             }
         ],
     }
