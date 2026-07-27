@@ -15,7 +15,7 @@
 #include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
 
-#define D1L_MAP_WORKER_STACK_BYTES 12288U
+#define D1L_MAP_WORKER_STACK_BYTES 20480U
 #define D1L_MAP_WORKER_PRIORITY 2U
 #define D1L_MAP_SD_POLL_MS 500U
 #define D1L_MAP_WIFI_POLL_MS 500U
@@ -286,6 +286,17 @@ static void note_failure(uint32_t generation, const char *phase, const char *mes
     }
 }
 
+static void note_worker_stack(void)
+{
+    const uint32_t free_bytes =
+        (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+    if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_map.status.worker_stack_bytes = D1L_MAP_WORKER_STACK_BYTES;
+        s_map.status.worker_stack_free_bytes = free_bytes;
+        xSemaphoreGive(s_map.lock);
+    }
+}
+
 static bool wait_for_wifi(uint32_t generation)
 {
     while (generation_continue(&generation)) {
@@ -419,6 +430,7 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
                 plan->tiles[i].zoom, plan->tiles[i].x, plan->tiles[i].y, &storage,
                 true, s_map.compressed, D1L_MAP_TILE_DOWNLOAD_MAX_BYTES,
                 &compressed_len, generation_continue, &generation, &tile_result);
+            note_worker_stack();
             if (ret == ESP_OK) {
                 if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
                     if (s_map.status.generation == generation) {
@@ -593,6 +605,7 @@ esp_err_t d1l_map_view_service_init(void)
     s_map.status.current_view_only = true;
     s_map.status.public_rf_tx = false;
     s_map.status.formats_sd = false;
+    s_map.status.worker_stack_bytes = D1L_MAP_WORKER_STACK_BYTES;
     d1l_map_tile_provider_t provider = {0};
     d1l_map_tile_provider_builtin(&provider);
     set_provider_locked(&provider);

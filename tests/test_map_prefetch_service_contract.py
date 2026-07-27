@@ -85,6 +85,25 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     assert "status->cache_used_bytes = result.cache_used_bytes" in service
 
 
+def test_map_https_workers_have_measured_internal_stack_headroom():
+    prefetch = read("main/map/map_prefetch_service.c")
+    prefetch_header = read("main/map/map_prefetch_service.h")
+    view = read("main/map/map_view_service.c")
+    view_header = read("main/map/map_view_service.h")
+    console = read("main/comms/usb_console.c")
+
+    assert "#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES 20480U" in prefetch
+    assert "#define D1L_MAP_WORKER_STACK_BYTES 20480U" in view
+    assert "uxTaskGetStackHighWaterMark(NULL)" in prefetch
+    assert "uxTaskGetStackHighWaterMark(NULL)" in view
+    assert "worker_stack_bytes" in prefetch_header
+    assert "worker_stack_free_bytes" in prefetch_header
+    assert "worker_stack_bytes" in view_header
+    assert "worker_stack_free_bytes" in view_header
+    assert console.count('\\"worker_stack_bytes\\":%lu') >= 2
+    assert console.count('\\"worker_stack_free_bytes\\":%lu') >= 2
+
+
 def test_map_ui_exposes_provider_and_background_state():
     ui = read("main/ui/ui_map.c")
     view_header = read("main/map/map_view_service.h")

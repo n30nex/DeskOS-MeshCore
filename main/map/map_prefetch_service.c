@@ -17,7 +17,7 @@
 #include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
 
-#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES 12288U
+#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES 20480U
 #define D1L_MAP_PREFETCH_WORKER_PRIORITY (tskIDLE_PRIORITY + 1U)
 #define D1L_MAP_PREFETCH_POLL_MS 5000U
 #define D1L_MAP_PREFETCH_ERROR_BACKOFF_SEC 30U
@@ -77,6 +77,10 @@ static void publish_status(
     portENTER_CRITICAL(&s_status_lock);
     s_status = *status;
     s_status.network_requests = s_network_requests_total;
+    s_status.worker_stack_bytes =
+        D1L_MAP_PREFETCH_WORKER_STACK_BYTES;
+    s_status.worker_stack_free_bytes =
+        (uint32_t)uxTaskGetStackHighWaterMark(NULL);
     portEXIT_CRITICAL(&s_status_lock);
 }
 
@@ -637,6 +641,8 @@ esp_err_t d1l_map_prefetch_service_init(void)
     portENTER_CRITICAL(&s_status_lock);
     memset(&s_status, 0, sizeof(s_status));
     s_status.initialized = true;
+    s_status.worker_stack_bytes =
+        D1L_MAP_PREFETCH_WORKER_STACK_BYTES;
     snprintf(s_status.phase, sizeof(s_status.phase), "%s", "starting");
     snprintf(s_status.message, sizeof(s_status.message), "%s",
              "Checking background map requirements");

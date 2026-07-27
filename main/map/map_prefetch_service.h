@@ -26,6 +26,8 @@ typedef struct {
     uint32_t storage_capacity_kb;
     uint32_t storage_free_kb;
     uint32_t cache_budget_mb;
+    uint32_t worker_stack_bytes;
+    uint32_t worker_stack_free_bytes;
     size_t nodes_seen;
     size_t nodes_included;
     size_t nodes_outside_radius;

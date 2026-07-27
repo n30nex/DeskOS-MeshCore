@@ -3351,7 +3351,7 @@ static void cmd_map_tiles_status(void)
     printf(",\"provider_configured\":%s,"
            "\"background_prefetch_permitted\":%s,"
            "\"provider_max_zoom\":%u,"
-           "\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"decode_total_us\":%lu,\"decode_max_us\":%lu,\"decode_samples\":%u,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
+           "\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"decode_total_us\":%lu,\"decode_max_us\":%lu,\"decode_samples\":%u,\"worker_stack_bytes\":%lu,\"worker_stack_free_bytes\":%lu,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
            bool_json(status.provider_configured),
            bool_json(status.background_prefetch_permitted),
            (unsigned)status.provider_max_zoom,
@@ -3363,7 +3363,10 @@ static void cmd_map_tiles_status(void)
            (unsigned long)status.retry_after_sec,
            (unsigned long)status.decode_total_us,
            (unsigned long)status.decode_max_us,
-           (unsigned)status.decode_samples, (long)status.lat_e7,
+           (unsigned)status.decode_samples,
+           (unsigned long)status.worker_stack_bytes,
+           (unsigned long)status.worker_stack_free_bytes,
+           (long)status.lat_e7,
            (long)status.lon_e7, (unsigned)status.width, (unsigned)status.height,
            (unsigned)status.zoom, (unsigned)status.planned_tiles,
            (unsigned)status.attempted_tiles, (unsigned)status.cache_hits,
@@ -3470,7 +3473,9 @@ static void cmd_map_acceptance_status(void)
            "\"cache_used_bytes\":%" PRIu64 ","
            "\"estimated_bytes\":%" PRIu64 ","
            "\"allocation_bytes\":%" PRIu64 ","
-           "\"cache_budget_mb\":%lu,\"source_id\":",
+           "\"cache_budget_mb\":%lu,"
+           "\"worker_stack_bytes\":%lu,"
+           "\"worker_stack_free_bytes\":%lu,\"source_id\":",
            D1L_MAP_PREFETCH_NODE_RADIUS_KM,
            bool_json(nodes_accounted),
            (unsigned long)prefetch.marker_generation,
@@ -3493,7 +3498,9 @@ static void cmd_map_acceptance_status(void)
            prefetch.evicted_tiles, prefetch.downloaded_bytes,
            prefetch.cache_used_bytes, prefetch.estimated_bytes,
            prefetch.allocation_bytes,
-           (unsigned long)prefetch.cache_budget_mb);
+           (unsigned long)prefetch.cache_budget_mb,
+           (unsigned long)prefetch.worker_stack_bytes,
+           (unsigned long)prefetch.worker_stack_free_bytes);
     print_json_string(prefetch.source_id);
     printf(",\"phase\":");
     print_json_string(prefetch.phase);

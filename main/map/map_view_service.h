@@ -26,6 +26,8 @@ typedef struct {
     uint32_t retry_after_sec;
     uint32_t decode_total_us;
     uint32_t decode_max_us;
+    uint32_t worker_stack_bytes;
+    uint32_t worker_stack_free_bytes;
     int32_t lat_e7;
     int32_t lon_e7;
     uint16_t width;
