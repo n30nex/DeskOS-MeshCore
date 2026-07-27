@@ -9,5 +9,6 @@
   "tile_template": "z{z}/x{x}/y{y}.png",
   "max_zoom": 15,
   "average_tile_bytes": 65536,
+  "cache_budget_mb": 18432,
   "minimum_request_interval_ms": 1000
 }

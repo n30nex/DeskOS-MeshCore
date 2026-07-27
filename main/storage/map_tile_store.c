@@ -8,6 +8,9 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "map/map_tile_cache_policy.h"
 #include "map/map_tile_provider.h"
 #include "platform/time_service.h"
 #include "storage/storage_status_policy.h"
@@ -17,6 +20,11 @@
 #define D1L_MAP_TILE_CANARY_Y 2U
 #define D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000
 #define D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U
+#define D1L_MAP_TILE_CACHE_JOURNAL_NAME "cache-journal.v1"
+#define D1L_MAP_TILE_CACHE_JOURNAL_TMP_NAME "cache-journal-repair.tmp"
+#define D1L_MAP_TILE_CACHE_STATE_NAME "cache-state.v1"
+#define D1L_MAP_TILE_CACHE_STATE_TMP_NAME "cache-state.tmp"
+#define D1L_MAP_TILE_STORE_TRANSACTION_TIMEOUT_MS 30000U
 
 bool d1l_map_tile_store_coord_valid(uint8_t z, uint32_t x, uint32_t y)
 {
@@ -53,11 +61,25 @@ static bool tile_result_paths(
     const size_t path_length = strlen(result->path);
     if (path_length < 4U ||
         strcmp(&result->path[path_length - 4U], ".png") != 0 ||
-        path_length + 1U >= sizeof(result->tmp_path)) {
+        path_length + 6U >= sizeof(result->metadata_tmp_path)) {
         return false;
     }
-    memcpy(result->tmp_path, result->path, path_length - 4U);
-    memcpy(&result->tmp_path[path_length - 4U], ".tmp", 5U);
+    const int tmp_written = snprintf(
+        result->tmp_path, sizeof(result->tmp_path), "%.*s.tmp",
+        (int)(path_length - 4U), result->path);
+    const int metadata_written = snprintf(
+        result->metadata_path, sizeof(result->metadata_path), "%.*s.meta",
+        (int)(path_length - 4U), result->path);
+    const int metadata_tmp_written = snprintf(
+        result->metadata_tmp_path, sizeof(result->metadata_tmp_path),
+        "%.*s.meta.tmp", (int)(path_length - 4U), result->path);
+    if (tmp_written <= 0 || metadata_written <= 0 ||
+        metadata_tmp_written <= 0 ||
+        (size_t)tmp_written >= sizeof(result->tmp_path) ||
+        (size_t)metadata_written >= sizeof(result->metadata_path) ||
+        (size_t)metadata_tmp_written >= sizeof(result->metadata_tmp_path)) {
+        return false;
+    }
     return d1l_map_tile_provider_attribution_path(
                provider, false, result->attribution_path,
                sizeof(result->attribution_path)) &&
@@ -345,6 +367,8 @@ static void init_download_result(d1l_map_tile_download_result_t *result,
     result->provider_configured = provider->configured;
     result->background_prefetch_permitted =
         provider->background_prefetch_permitted;
+    result->cache_budget_bytes =
+        (uint64_t)provider->cache_budget_mb * 1024ULL * 1024ULL;
     result->public_rf_tx = false;
     result->formats_sd = false;
     result->last_error = ESP_OK;
@@ -365,6 +389,1010 @@ static void cleanup_partial(const d1l_map_tile_download_result_t *result)
     d1l_rp2040_file_result_t file = {0};
     (void)d1l_rp2040_bridge_file_delete(result->tmp_path, &file,
                                         D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (result->metadata_tmp_path[0]) {
+        (void)d1l_rp2040_bridge_file_delete(
+            result->metadata_tmp_path, &file,
+            D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    }
+}
+
+typedef struct {
+    char journal[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char journal_tmp[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char state[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char state_tmp[D1L_RP2040_FILE_PATH_MAX + 1U];
+} d1l_map_tile_cache_paths_t;
+
+static StaticSemaphore_t s_cache_transaction_mutex_storage;
+static SemaphoreHandle_t s_cache_transaction_mutex;
+static portMUX_TYPE s_cache_transaction_init_lock =
+    portMUX_INITIALIZER_UNLOCKED;
+static d1l_map_tile_cache_state_t s_cache_state;
+static bool s_cache_state_loaded;
+static char s_cache_state_source[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
+static uint32_t s_cache_state_capacity_kb;
+static uint32_t s_cache_state_manager_attempt;
+
+static esp_err_t cache_transaction_take(void)
+{
+    if (!s_cache_transaction_mutex) {
+        portENTER_CRITICAL(&s_cache_transaction_init_lock);
+        if (!s_cache_transaction_mutex) {
+            s_cache_transaction_mutex = xSemaphoreCreateMutexStatic(
+                &s_cache_transaction_mutex_storage);
+        }
+        portEXIT_CRITICAL(&s_cache_transaction_init_lock);
+    }
+    if (!s_cache_transaction_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+    TickType_t ticks = pdMS_TO_TICKS(
+        D1L_MAP_TILE_STORE_TRANSACTION_TIMEOUT_MS);
+    if (ticks == 0U) {
+        ticks = 1U;
+    }
+    return xSemaphoreTake(s_cache_transaction_mutex, ticks) == pdTRUE ?
+        ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static void cache_transaction_give(void)
+{
+    if (s_cache_transaction_mutex) {
+        xSemaphoreGive(s_cache_transaction_mutex);
+    }
+}
+
+static bool cache_control_paths(
+    const d1l_map_tile_provider_t *provider,
+    d1l_map_tile_cache_paths_t *paths)
+{
+    if (!provider || !paths || provider->source_id[0] == '\0') {
+        return false;
+    }
+    const char *directory = provider->configured ?
+        provider->source_id : "openstreetmap";
+    const int journal = snprintf(
+        paths->journal, sizeof(paths->journal),
+        "map/tiles/%s/%s", directory,
+        D1L_MAP_TILE_CACHE_JOURNAL_NAME);
+    const int journal_tmp = snprintf(
+        paths->journal_tmp, sizeof(paths->journal_tmp),
+        "map/tiles/%s/%s", directory,
+        D1L_MAP_TILE_CACHE_JOURNAL_TMP_NAME);
+    const int state = snprintf(
+        paths->state, sizeof(paths->state),
+        "map/tiles/%s/%s", directory,
+        D1L_MAP_TILE_CACHE_STATE_NAME);
+    const int state_tmp = snprintf(
+        paths->state_tmp, sizeof(paths->state_tmp),
+        "map/tiles/%s/%s", directory,
+        D1L_MAP_TILE_CACHE_STATE_TMP_NAME);
+    return journal > 0 && journal_tmp > 0 &&
+           state > 0 && state_tmp > 0 &&
+           (size_t)journal < sizeof(paths->journal) &&
+           (size_t)journal_tmp < sizeof(paths->journal_tmp) &&
+           (size_t)state < sizeof(paths->state) &&
+           (size_t)state_tmp < sizeof(paths->state_tmp);
+}
+
+static bool cache_records_equal(
+    const d1l_map_tile_cache_record_t *left,
+    const d1l_map_tile_cache_record_t *right)
+{
+    return left && right &&
+           left->sequence == right->sequence &&
+           left->size == right->size &&
+           left->content_crc32 == right->content_crc32 &&
+           left->zoom == right->zoom &&
+           left->x == right->x &&
+           left->y == right->y;
+}
+
+static bool cache_record_matches_tile(
+    const d1l_map_tile_cache_record_t *record,
+    uint8_t z,
+    uint32_t x,
+    uint32_t y)
+{
+    return record && record->zoom == z &&
+           record->x == x && record->y == y;
+}
+
+static bool file_result_missing(
+    esp_err_t ret,
+    const d1l_rp2040_file_result_t *file)
+{
+    return ret == ESP_ERR_NOT_FOUND ||
+           (ret == ESP_OK && file && file->ok &&
+            !file->exists) ||
+           (file && strcmp(file->err, "not_found") == 0);
+}
+
+static esp_err_t delete_file_allow_missing(const char *path)
+{
+    if (!path || path[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    const esp_err_t ret = d1l_rp2040_bridge_file_delete(
+        path, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    return file_result_missing(ret, &file) ? ESP_OK : ret;
+}
+
+static esp_err_t read_file_exact(
+    const char *path,
+    uint32_t offset,
+    uint8_t *buffer,
+    size_t length)
+{
+    if (!path || !buffer || length == 0U ||
+        offset > UINT32_MAX - length) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t done = 0U;
+    while (done < length) {
+        const size_t remaining = length - done;
+        const size_t chunk = remaining < D1L_RP2040_FILE_CHUNK_MAX ?
+            remaining : D1L_RP2040_FILE_CHUNK_MAX;
+        d1l_rp2040_file_result_t file = {0};
+        const esp_err_t ret = d1l_rp2040_bridge_file_read(
+            path, offset + (uint32_t)done, &buffer[done],
+            chunk, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        if (ret != ESP_OK || !file.ok ||
+            file.offset != offset + (uint32_t)done ||
+            file.length == 0U || file.length > chunk) {
+            return ret == ESP_OK ? ESP_FAIL : ret;
+        }
+        done += file.length;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t read_cache_record(
+    const char *path,
+    uint32_t offset,
+    d1l_map_tile_cache_record_t *record)
+{
+    if (!record) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t encoded[D1L_MAP_TILE_CACHE_RECORD_BYTES];
+    const esp_err_t ret = read_file_exact(
+        path, offset, encoded, sizeof(encoded));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    return d1l_map_tile_cache_record_decode(encoded, record) ?
+        ESP_OK : ESP_ERR_INVALID_CRC;
+}
+
+static esp_err_t read_cache_metadata(
+    const char *path,
+    d1l_map_tile_cache_record_t *record)
+{
+    if (!path || !record) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    const esp_err_t stat_ret = d1l_rp2040_bridge_file_stat(
+        path, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (file_result_missing(stat_ret, &file)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (stat_ret != ESP_OK || !file.ok || !file.exists ||
+        file.is_directory ||
+        file.size != D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+        return stat_ret == ESP_OK ? ESP_ERR_INVALID_SIZE : stat_ret;
+    }
+    return read_cache_record(path, 0U, record);
+}
+
+static esp_err_t write_atomic_blob(
+    const char *path,
+    const char *tmp_path,
+    const uint8_t *data,
+    size_t length)
+{
+    if (!path || !tmp_path || !data || length == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = delete_file_allow_missing(tmp_path);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    size_t offset = 0U;
+    while (offset < length) {
+        const size_t remaining = length - offset;
+        const size_t chunk = remaining < D1L_RP2040_FILE_CHUNK_MAX ?
+            remaining : D1L_RP2040_FILE_CHUNK_MAX;
+        ret = d1l_rp2040_bridge_file_write(
+            tmp_path, (uint32_t)offset, &data[offset], chunk,
+            offset == 0U, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        if (ret != ESP_OK || file.length != (uint32_t)chunk) {
+            (void)delete_file_allow_missing(tmp_path);
+            return ret == ESP_OK ? ESP_FAIL : ret;
+        }
+        offset += chunk;
+    }
+    uint8_t verify[D1L_MAP_TILE_CACHE_STATE_BYTES];
+    if (length > sizeof(verify)) {
+        (void)delete_file_allow_missing(tmp_path);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    ret = read_file_exact(tmp_path, 0U, verify, length);
+    if (ret != ESP_OK || memcmp(data, verify, length) != 0) {
+        memset(verify, 0, sizeof(verify));
+        (void)delete_file_allow_missing(tmp_path);
+        return ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret;
+    }
+    memset(verify, 0, sizeof(verify));
+    ret = d1l_rp2040_bridge_file_rename(
+        tmp_path, path, true, &file,
+        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        (void)delete_file_allow_missing(tmp_path);
+    }
+    return ret;
+}
+
+static esp_err_t write_cache_state(
+    const d1l_map_tile_cache_paths_t *paths,
+    const d1l_map_tile_cache_state_t *state)
+{
+    if (!paths || !state) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t encoded[D1L_MAP_TILE_CACHE_STATE_BYTES];
+    if (!d1l_map_tile_cache_state_encode(state, encoded)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t ret = write_atomic_blob(
+        paths->state, paths->state_tmp, encoded, sizeof(encoded));
+    memset(encoded, 0, sizeof(encoded));
+    return ret;
+}
+
+static esp_err_t write_cache_metadata_tmp(
+    const d1l_map_tile_download_result_t *result,
+    const d1l_map_tile_cache_record_t *record)
+{
+    if (!result || !record ||
+        result->metadata_tmp_path[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t encoded[D1L_MAP_TILE_CACHE_RECORD_BYTES];
+    if (!d1l_map_tile_cache_record_encode(record, encoded)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = delete_file_allow_missing(
+        result->metadata_tmp_path);
+    if (ret != ESP_OK) {
+        memset(encoded, 0, sizeof(encoded));
+        return ret;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    ret = d1l_rp2040_bridge_file_write(
+        result->metadata_tmp_path, 0U, encoded, sizeof(encoded),
+        true, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (ret == ESP_OK &&
+        (file.length != sizeof(encoded) ||
+         file.size != sizeof(encoded))) {
+        ret = ESP_FAIL;
+    }
+    d1l_map_tile_cache_record_t verify = {0};
+    if (ret == ESP_OK) {
+        ret = read_cache_metadata(
+            result->metadata_tmp_path, &verify);
+    }
+    if (ret == ESP_OK &&
+        !cache_records_equal(record, &verify)) {
+        ret = ESP_ERR_INVALID_CRC;
+    }
+    memset(encoded, 0, sizeof(encoded));
+    memset(&verify, 0, sizeof(verify));
+    if (ret != ESP_OK) {
+        (void)delete_file_allow_missing(
+            result->metadata_tmp_path);
+    }
+    return ret;
+}
+
+static esp_err_t append_cache_intent(
+    const d1l_map_tile_cache_paths_t *paths,
+    const d1l_map_tile_cache_state_t *state,
+    const d1l_map_tile_cache_record_t *record)
+{
+    if (!paths || !state || !record) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t encoded[D1L_MAP_TILE_CACHE_RECORD_BYTES];
+    if (!d1l_map_tile_cache_record_encode(record, encoded)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    const esp_err_t ret = d1l_rp2040_bridge_file_append(
+        paths->journal, encoded, sizeof(encoded), &file,
+        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    memset(encoded, 0, sizeof(encoded));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    return file.offset == state->tail_offset &&
+           file.length == D1L_MAP_TILE_CACHE_RECORD_BYTES &&
+           file.size ==
+               state->tail_offset + D1L_MAP_TILE_CACHE_RECORD_BYTES ?
+        ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+static esp_err_t rename_cache_metadata(
+    const d1l_map_tile_download_result_t *result)
+{
+    if (!result || result->metadata_path[0] == '\0' ||
+        result->metadata_tmp_path[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    return d1l_rp2040_bridge_file_rename(
+        result->metadata_tmp_path, result->metadata_path, true,
+        &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+}
+
+static esp_err_t verify_tile_file(
+    const char *path,
+    const d1l_map_tile_cache_record_t *record)
+{
+    if (!path || !record) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    esp_err_t ret = d1l_rp2040_bridge_file_stat(
+        path, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (file_result_missing(ret, &file)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (ret != ESP_OK || !file.ok || !file.exists ||
+        file.is_directory || file.size != record->size ||
+        file.size > D1L_MAP_TILE_DOWNLOAD_MAX_BYTES) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_SIZE : ret;
+    }
+    uint8_t chunk[D1L_RP2040_FILE_CHUNK_MAX];
+    uint8_t header[24] = {0};
+    size_t header_length = 0U;
+    uint32_t crc = 0U;
+    uint32_t offset = 0U;
+    while (offset < record->size) {
+        const size_t remaining = (size_t)record->size - offset;
+        const size_t wanted = remaining < sizeof(chunk) ?
+            remaining : sizeof(chunk);
+        d1l_rp2040_file_result_t read = {0};
+        ret = d1l_rp2040_bridge_file_read(
+            path, offset, chunk, wanted, &read,
+            D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        if (ret != ESP_OK || !read.ok ||
+            read.offset != offset || read.length == 0U ||
+            read.length > wanted) {
+            memset(chunk, 0, sizeof(chunk));
+            return ret == ESP_OK ? ESP_FAIL : ret;
+        }
+        if (header_length < sizeof(header)) {
+            const size_t header_remaining =
+                sizeof(header) - header_length;
+            const size_t copy = read.length < header_remaining ?
+                read.length : header_remaining;
+            memcpy(&header[header_length], chunk, copy);
+            header_length += copy;
+        }
+        crc = d1l_map_tile_cache_crc32_update(
+            crc, chunk, read.length);
+        offset += read.length;
+    }
+    memset(chunk, 0, sizeof(chunk));
+    return header_length == sizeof(header) &&
+           d1l_map_tile_png_valid(header, sizeof(header)) &&
+           crc == record->content_crc32 ?
+        ESP_OK : ESP_ERR_INVALID_CRC;
+}
+
+static esp_err_t recover_interrupted_record(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_map_tile_cache_record_t *record)
+{
+    if (!provider || !record) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_map_tile_download_result_t result = {
+        .z = record->zoom,
+        .x = record->x,
+        .y = record->y,
+    };
+    if (!tile_result_paths(provider, &result)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_map_tile_cache_record_t final_metadata = {0};
+    d1l_map_tile_cache_record_t temporary_metadata = {0};
+    const esp_err_t final_metadata_ret = read_cache_metadata(
+        result.metadata_path, &final_metadata);
+    const esp_err_t temporary_metadata_ret = read_cache_metadata(
+        result.metadata_tmp_path, &temporary_metadata);
+    const bool final_metadata_matches =
+        final_metadata_ret == ESP_OK &&
+        cache_records_equal(record, &final_metadata);
+    const bool temporary_metadata_matches =
+        temporary_metadata_ret == ESP_OK &&
+        cache_records_equal(record, &temporary_metadata);
+    const esp_err_t final_tile_ret =
+        verify_tile_file(result.path, record);
+    const esp_err_t temporary_tile_ret =
+        verify_tile_file(result.tmp_path, record);
+    d1l_map_tile_cache_recovery_plan_t recovery = {0};
+    if (!d1l_map_tile_cache_recovery_plan(
+            final_tile_ret == ESP_OK,
+            temporary_tile_ret == ESP_OK,
+            final_metadata_matches,
+            temporary_metadata_matches,
+            &recovery)) {
+        if (!final_metadata_matches &&
+            !temporary_metadata_matches) {
+            const esp_err_t reason =
+                temporary_metadata_ret != ESP_ERR_NOT_FOUND ?
+                    temporary_metadata_ret : final_metadata_ret;
+            return reason == ESP_OK ?
+                ESP_ERR_INVALID_CRC : reason;
+        }
+        return temporary_tile_ret != ESP_ERR_NOT_FOUND ?
+            temporary_tile_ret : final_tile_ret;
+    }
+    esp_err_t ret = ESP_OK;
+    if (recovery.rename_tile) {
+        d1l_rp2040_file_result_t file = {0};
+        ret = d1l_rp2040_bridge_file_rename(
+            result.tmp_path, result.path, true, &file,
+            D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    if (recovery.rename_metadata) {
+        ret = rename_cache_metadata(&result);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    (void)delete_file_allow_missing(result.tmp_path);
+    (void)delete_file_allow_missing(result.metadata_tmp_path);
+    return ESP_OK;
+}
+
+static esp_err_t rebuild_cache_journal_prefix(
+    const d1l_map_tile_cache_paths_t *paths,
+    uint32_t valid_prefix_bytes)
+{
+    if (!paths ||
+        valid_prefix_bytes % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = delete_file_allow_missing(paths->journal_tmp);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (valid_prefix_bytes == 0U) {
+        return delete_file_allow_missing(paths->journal);
+    }
+    uint8_t encoded[D1L_RP2040_FILE_CHUNK_MAX];
+    uint8_t verify[D1L_RP2040_FILE_CHUNK_MAX];
+    d1l_rp2040_file_result_t file = {0};
+    for (uint32_t offset = 0U; offset < valid_prefix_bytes;) {
+        const uint32_t remaining = valid_prefix_bytes - offset;
+        const size_t chunk =
+            remaining < sizeof(encoded) ? remaining : sizeof(encoded);
+        ret = read_file_exact(
+            paths->journal, offset, encoded, chunk);
+        if (ret != ESP_OK) {
+            goto rebuild_failed;
+        }
+        ret = d1l_rp2040_bridge_file_write(
+            paths->journal_tmp, offset, encoded, chunk,
+            offset == 0U, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        if (ret != ESP_OK ||
+            file.offset != offset ||
+            file.length != chunk ||
+            file.size != offset + chunk) {
+            ret = ret == ESP_OK ? ESP_FAIL : ret;
+            goto rebuild_failed;
+        }
+        ret = read_file_exact(
+            paths->journal_tmp, offset, verify, chunk);
+        if (ret != ESP_OK ||
+            memcmp(encoded, verify, chunk) != 0) {
+            ret = ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret;
+            goto rebuild_failed;
+        }
+        offset += (uint32_t)chunk;
+    }
+    memset(encoded, 0, sizeof(encoded));
+    memset(verify, 0, sizeof(verify));
+    ret = d1l_rp2040_bridge_file_rename(
+        paths->journal_tmp, paths->journal, true, &file,
+        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        (void)delete_file_allow_missing(paths->journal_tmp);
+    }
+    return ret;
+
+rebuild_failed:
+    memset(encoded, 0, sizeof(encoded));
+    memset(verify, 0, sizeof(verify));
+    (void)delete_file_allow_missing(paths->journal_tmp);
+    return ret;
+}
+
+static uint32_t cache_next_sequence(uint32_t sequence)
+{
+    return sequence == UINT32_MAX ? 1U : sequence + 1U;
+}
+
+static esp_err_t repair_cache_journal(
+    const d1l_map_tile_cache_paths_t *paths,
+    const d1l_map_tile_cache_state_t *state,
+    uint32_t *size)
+{
+    if (!paths || !state || !size) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *size = 0U;
+    d1l_rp2040_file_result_t file = {0};
+    const esp_err_t ret = d1l_rp2040_bridge_file_stat(
+        paths->journal, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (file_result_missing(ret, &file)) {
+        (void)delete_file_allow_missing(paths->journal_tmp);
+        return ESP_OK;
+    }
+    if (ret != ESP_OK || !file.ok || !file.exists ||
+        file.is_directory) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_SIZE : ret;
+    }
+
+    const uint32_t complete_bytes =
+        file.size -
+        (file.size % D1L_MAP_TILE_CACHE_RECORD_BYTES);
+    if (state->tail_offset > complete_bytes) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint32_t valid_prefix_bytes = state->tail_offset;
+    uint32_t expected_sequence = state->next_sequence;
+    while (valid_prefix_bytes < complete_bytes) {
+        d1l_map_tile_cache_record_t record = {0};
+        const esp_err_t read_ret = read_cache_record(
+            paths->journal, valid_prefix_bytes, &record);
+        if (read_ret == ESP_ERR_INVALID_CRC ||
+            read_ret == ESP_ERR_INVALID_SIZE) {
+            break;
+        }
+        if (read_ret != ESP_OK) {
+            return read_ret;
+        }
+        if (record.sequence != expected_sequence) {
+            break;
+        }
+        expected_sequence = cache_next_sequence(record.sequence);
+        valid_prefix_bytes += D1L_MAP_TILE_CACHE_RECORD_BYTES;
+    }
+
+    d1l_map_tile_cache_journal_repair_plan_t plan = {0};
+    if (!d1l_map_tile_cache_journal_repair_plan(
+            file.size, state->tail_offset,
+            valid_prefix_bytes, &plan)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (plan.rebuild) {
+        const esp_err_t rebuild_ret = rebuild_cache_journal_prefix(
+            paths, plan.valid_prefix_bytes);
+        if (rebuild_ret != ESP_OK) {
+            return rebuild_ret;
+        }
+    } else {
+        (void)delete_file_allow_missing(paths->journal_tmp);
+    }
+    *size = plan.valid_prefix_bytes;
+    return ESP_OK;
+}
+
+static esp_err_t repair_cache_head(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_map_tile_cache_paths_t *paths,
+    d1l_map_tile_cache_state_t *state)
+{
+    if (!provider || !paths || !state) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    bool changed = false;
+    while (state->head_offset < state->tail_offset) {
+        d1l_map_tile_cache_record_t record = {0};
+        esp_err_t ret = read_cache_record(
+            paths->journal, state->head_offset, &record);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        d1l_map_tile_download_result_t result = {
+            .z = record.zoom,
+            .x = record.x,
+            .y = record.y,
+        };
+        if (!tile_result_paths(provider, &result)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        d1l_map_tile_cache_record_t metadata = {0};
+        const esp_err_t metadata_ret = read_cache_metadata(
+            result.metadata_path, &metadata);
+        d1l_rp2040_file_result_t tile = {0};
+        const esp_err_t tile_ret = d1l_rp2040_bridge_file_stat(
+            result.path, &tile, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        const bool tile_missing =
+            file_result_missing(tile_ret, &tile);
+        if (tile_ret != ESP_OK && !tile_missing) {
+            return tile_ret;
+        }
+        if (metadata_ret == ESP_OK &&
+            cache_records_equal(&record, &metadata) &&
+            tile_ret == ESP_OK && tile.ok && tile.exists &&
+            !tile.is_directory && tile.size == record.size) {
+            break;
+        }
+        if (metadata_ret == ESP_OK &&
+            cache_records_equal(&record, &metadata) &&
+            tile_missing) {
+            ret = delete_file_allow_missing(result.metadata_path);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+        } else if (metadata_ret == ESP_OK &&
+                   cache_records_equal(&record, &metadata) &&
+                   !tile_missing) {
+            ret = delete_file_allow_missing(result.path);
+            if (ret == ESP_OK) {
+                ret = delete_file_allow_missing(
+                    result.metadata_path);
+            }
+            if (ret != ESP_OK) {
+                return ret;
+            }
+        } else if (metadata_ret == ESP_ERR_NOT_FOUND &&
+                   !tile_missing) {
+            return ESP_ERR_INVALID_STATE;
+        } else if (metadata_ret != ESP_OK &&
+                   metadata_ret != ESP_ERR_NOT_FOUND) {
+            return metadata_ret;
+        }
+        if (!d1l_map_tile_cache_state_note_evict(
+                state, &record)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        changed = true;
+    }
+    return changed ? write_cache_state(paths, state) : ESP_OK;
+}
+
+static esp_err_t recover_cache_tail(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_map_tile_cache_paths_t *paths,
+    uint32_t journal_size,
+    d1l_map_tile_cache_state_t *state)
+{
+    if (!provider || !paths || !state ||
+        state->tail_offset > journal_size) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    while (state->tail_offset < journal_size) {
+        d1l_map_tile_cache_record_t record = {0};
+        esp_err_t ret = read_cache_record(
+            paths->journal, state->tail_offset, &record);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (record.sequence != state->next_sequence) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        ret = recover_interrupted_record(provider, &record);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (!d1l_map_tile_cache_state_note_commit(
+                state, &record)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        ret = write_cache_state(paths, state);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    return ESP_OK;
+}
+
+static esp_err_t load_cache_state(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_storage_status_t *storage,
+    d1l_map_tile_cache_paths_t *paths,
+    d1l_map_tile_cache_state_t **state)
+{
+    if (!provider || !storage || !paths || !state ||
+        !cache_control_paths(provider, paths)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_cache_state_loaded &&
+        strcmp(s_cache_state_source, provider->source_id) == 0 &&
+        s_cache_state_capacity_kb == storage->capacity_kb &&
+        s_cache_state_manager_attempt == storage->manager_attempt) {
+        *state = &s_cache_state;
+        return ESP_OK;
+    }
+
+    d1l_map_tile_cache_state_t loaded = {0};
+    d1l_rp2040_file_result_t state_file = {0};
+    esp_err_t ret = d1l_rp2040_bridge_file_stat(
+        paths->state, &state_file,
+        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (file_result_missing(ret, &state_file)) {
+        d1l_map_tile_cache_state_init(&loaded);
+    } else {
+        if (ret != ESP_OK || !state_file.ok ||
+            !state_file.exists || state_file.is_directory ||
+            state_file.size != D1L_MAP_TILE_CACHE_STATE_BYTES) {
+            return ret == ESP_OK ? ESP_ERR_INVALID_SIZE : ret;
+        }
+        uint8_t encoded[D1L_MAP_TILE_CACHE_STATE_BYTES];
+        ret = read_file_exact(
+            paths->state, 0U, encoded, sizeof(encoded));
+        if (ret != ESP_OK ||
+            !d1l_map_tile_cache_state_decode(
+                encoded, &loaded)) {
+            memset(encoded, 0, sizeof(encoded));
+            return ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret;
+        }
+        memset(encoded, 0, sizeof(encoded));
+    }
+
+    uint32_t journal_size = 0U;
+    ret = repair_cache_journal(paths, &loaded, &journal_size);
+    if (ret != ESP_OK || loaded.tail_offset > journal_size) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    ret = repair_cache_head(
+        provider, paths, &loaded);
+    if (ret == ESP_OK) {
+        ret = recover_cache_tail(
+            provider, paths, journal_size, &loaded);
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    s_cache_state = loaded;
+    snprintf(s_cache_state_source,
+             sizeof(s_cache_state_source), "%s",
+             provider->source_id);
+    s_cache_state_capacity_kb = storage->capacity_kb;
+    s_cache_state_manager_attempt = storage->manager_attempt;
+    s_cache_state_loaded = true;
+    *state = &s_cache_state;
+    return ESP_OK;
+}
+
+static esp_err_t prepare_cache_room(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_storage_status_t *storage,
+    uint64_t required_bytes,
+    d1l_map_tile_download_result_t *result)
+{
+    if (!provider || !storage || !result ||
+        provider->cache_budget_mb == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_map_tile_cache_paths_t paths = {0};
+    d1l_map_tile_cache_state_t *state = NULL;
+    esp_err_t ret = load_cache_state(
+        provider, storage, &paths, &state);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const uint64_t budget_bytes =
+        (uint64_t)provider->cache_budget_mb * 1024ULL * 1024ULL;
+    result->cache_budget_bytes = budget_bytes;
+    if (required_bytes == 0U ||
+        required_bytes > budget_bytes) {
+        return ESP_ERR_NO_MEM;
+    }
+    while (!d1l_map_tile_cache_state_has_room(
+               state, budget_bytes, required_bytes)) {
+        if (state->head_offset >= state->tail_offset) {
+            return ESP_ERR_NO_MEM;
+        }
+        d1l_map_tile_cache_record_t record = {0};
+        ret = read_cache_record(
+            paths.journal, state->head_offset, &record);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        d1l_map_tile_download_result_t oldest = {
+            .z = record.zoom,
+            .x = record.x,
+            .y = record.y,
+        };
+        if (!tile_result_paths(provider, &oldest)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        char *tile_path = oldest.path;
+        char *metadata_path = oldest.metadata_path;
+        d1l_map_tile_cache_record_t metadata = {0};
+        const esp_err_t metadata_ret =
+            read_cache_metadata(metadata_path, &metadata);
+        if (metadata_ret == ESP_OK &&
+            cache_records_equal(&record, &metadata)) {
+            ret = d1l_rp2040_bridge_file_delete(tile_path,
+                &result->file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+            if (!file_result_missing(ret, &result->file) &&
+                ret != ESP_OK) {
+                return ret;
+            }
+            ret = d1l_rp2040_bridge_file_delete(metadata_path,
+                &result->file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+            if (!file_result_missing(ret, &result->file) &&
+                ret != ESP_OK) {
+                return ret;
+            }
+        } else if (metadata_ret != ESP_ERR_NOT_FOUND &&
+                   metadata_ret != ESP_OK) {
+            return metadata_ret;
+        }
+        (void)delete_file_allow_missing(oldest.tmp_path);
+        (void)delete_file_allow_missing(oldest.metadata_tmp_path);
+        if (!d1l_map_tile_cache_state_note_evict(
+                state, &record)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        ret = write_cache_state(&paths, state);
+        if (ret != ESP_OK) {
+            s_cache_state_loaded = false;
+            return ret;
+        }
+        ++result->evicted_tiles;
+    }
+    result->cache_used_bytes = state->live_bytes;
+    return ESP_OK;
+}
+
+static esp_err_t reconcile_cache_intent(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_storage_status_t *storage,
+    d1l_map_tile_download_result_t *result,
+    const d1l_map_tile_cache_record_t *record,
+    uint32_t original_tail_offset,
+    esp_err_t original_error)
+{
+    if (!provider || !storage || !result || !record ||
+        original_tail_offset >
+            UINT32_MAX - D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint32_t committed_tail_offset =
+        original_tail_offset + D1L_MAP_TILE_CACHE_RECORD_BYTES;
+    s_cache_state_loaded = false;
+    d1l_map_tile_cache_paths_t paths = {0};
+    d1l_map_tile_cache_state_t *state = NULL;
+    const esp_err_t ret = load_cache_state(
+        provider, storage, &paths, &state);
+    if (ret != ESP_OK || !state) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    if (state->tail_offset == original_tail_offset &&
+        state->next_sequence == record->sequence) {
+        result->cache_intent_recorded = false;
+        return original_error;
+    }
+    if (state->tail_offset != committed_tail_offset ||
+        state->next_sequence != cache_next_sequence(record->sequence)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_map_tile_cache_record_t metadata = {0};
+    const esp_err_t metadata_ret = read_cache_metadata(
+        result->metadata_path, &metadata);
+    const esp_err_t tile_ret = verify_tile_file(
+        result->path, record);
+    if (metadata_ret != ESP_OK ||
+        !cache_records_equal(record, &metadata) ||
+        tile_ret != ESP_OK) {
+        return metadata_ret != ESP_OK ? metadata_ret : tile_ret;
+    }
+    result->rename_replace = true;
+    result->cache_used_bytes = state->live_bytes;
+    return ESP_OK;
+}
+
+static esp_err_t commit_cache_tile(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_storage_status_t *storage,
+    d1l_map_tile_download_result_t *result)
+{
+    if (!provider || !storage || !result ||
+        result->bytes == 0U ||
+        result->bytes > UINT32_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = prepare_cache_room(
+        provider, storage, result->bytes, result);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_map_tile_cache_paths_t paths = {0};
+    d1l_map_tile_cache_state_t *state = NULL;
+    ret = load_cache_state(
+        provider, storage, &paths, &state);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const uint64_t budget_bytes =
+        (uint64_t)provider->cache_budget_mb * 1024ULL * 1024ULL;
+    if (!d1l_map_tile_cache_state_has_room(
+            state, budget_bytes, result->bytes)) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (state->tail_offset >
+        UINT32_MAX - D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    const uint32_t original_tail_offset = state->tail_offset;
+    d1l_map_tile_cache_record_t record = {0};
+    if (!d1l_map_tile_cache_record_init(
+            state->next_sequence, result->z, result->x, result->y,
+            (uint32_t)result->bytes, result->content_crc32,
+            &record)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ret = write_cache_metadata_tmp(result, &record);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    /*
+     * Once append is attempted, preserve both validated temporary files on
+     * failure. The bridge reply can be lost after the durable append; the
+     * next open decides from the checksummed journal instead of destroying
+     * the only recoverable copy.
+     */
+    result->cache_intent_recorded = true;
+    ret = append_cache_intent(&paths, state, &record);
+    if (ret != ESP_OK) {
+        return reconcile_cache_intent(
+            provider, storage, result, &record,
+            original_tail_offset, ret);
+    }
+    ret = d1l_rp2040_bridge_file_rename(
+        result->tmp_path, result->path, true, &result->file,
+        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        return reconcile_cache_intent(
+            provider, storage, result, &record,
+            original_tail_offset, ret);
+    }
+    result->rename_replace = true;
+    ret = rename_cache_metadata(result);
+    if (ret != ESP_OK) {
+        return reconcile_cache_intent(
+            provider, storage, result, &record,
+            original_tail_offset, ret);
+    }
+    if (!d1l_map_tile_cache_state_note_commit(
+            state, &record)) {
+        return reconcile_cache_intent(
+            provider, storage, result, &record,
+            original_tail_offset, ESP_ERR_INVALID_STATE);
+    }
+    ret = write_cache_state(&paths, state);
+    if (ret != ESP_OK) {
+        return reconcile_cache_intent(
+            provider, storage, result, &record,
+            original_tail_offset, ret);
+    }
+    result->cache_used_bytes = state->live_bytes;
+    return ESP_OK;
 }
 
 static bool attribution_metadata_present(
@@ -379,7 +1407,7 @@ static bool attribution_metadata_present(
     return ret == ESP_OK && file.ok && file.exists && !file.is_directory && file.size > 0U;
 }
 
-esp_err_t d1l_map_tile_store_cached(
+static esp_err_t map_tile_store_cached_locked(
     uint8_t z,
     uint32_t x,
     uint32_t y,
@@ -400,13 +1428,30 @@ esp_err_t d1l_map_tile_store_cached(
     if (!result.path[0]) {
         return ESP_ERR_INVALID_ARG;
     }
+    d1l_map_tile_cache_paths_t cache_paths = {0};
+    d1l_map_tile_cache_state_t *cache_state = NULL;
+    const esp_err_t cache_ret = load_cache_state(
+        &provider, status, &cache_paths, &cache_state);
+    if (cache_ret != ESP_OK || !cache_state) {
+        return cache_ret == ESP_OK ?
+            ESP_ERR_INVALID_STATE : cache_ret;
+    }
+    d1l_map_tile_cache_record_t metadata = {0};
+    const esp_err_t metadata_ret = read_cache_metadata(
+        result.metadata_path, &metadata);
+    if (metadata_ret != ESP_OK ||
+        !cache_record_matches_tile(&metadata, z, x, y)) {
+        return metadata_ret == ESP_OK ?
+            ESP_ERR_INVALID_CRC : metadata_ret;
+    }
     d1l_rp2040_file_result_t file = {0};
     const esp_err_t ret = d1l_rp2040_bridge_file_stat(
         result.path, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK) {
         return ret;
     }
-    if (!file.ok || !file.exists || file.is_directory || file.size == 0U ||
+    if (!file.ok || !file.exists || file.is_directory ||
+        file.size != metadata.size ||
         file.size > D1L_MAP_TILE_DOWNLOAD_MAX_BYTES) {
         return ESP_ERR_NOT_FOUND;
     }
@@ -417,7 +1462,28 @@ esp_err_t d1l_map_tile_store_cached(
     return ESP_OK;
 }
 
-esp_err_t d1l_map_tile_store_read(uint8_t z,
+esp_err_t d1l_map_tile_store_cached(
+    uint8_t z,
+    uint32_t x,
+    uint32_t y,
+    const d1l_storage_status_t *status,
+    bool *out_cached)
+{
+    if (out_cached) {
+        *out_cached = false;
+    }
+    const esp_err_t lock_ret = cache_transaction_take();
+    if (lock_ret != ESP_OK) {
+        return lock_ret;
+    }
+    const esp_err_t ret = map_tile_store_cached_locked(
+        z, x, y, status, out_cached);
+    cache_transaction_give();
+    return ret;
+}
+
+static esp_err_t map_tile_store_read_locked(
+                                  uint8_t z,
                                   uint32_t x,
                                   uint32_t y,
                                   const d1l_storage_status_t *status,
@@ -453,11 +1519,34 @@ esp_err_t d1l_map_tile_store_read(uint8_t z,
         *out_result = result;
         return result.last_error;
     }
+    d1l_map_tile_cache_paths_t cache_paths = {0};
+    d1l_map_tile_cache_state_t *cache_state = NULL;
+    esp_err_t ret = load_cache_state(
+        &provider, status, &cache_paths, &cache_state);
+    if (ret != ESP_OK || !cache_state) {
+        download_step(
+            &result, "cache_state",
+            ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret, NULL);
+        *out_result = result;
+        return result.last_error;
+    }
+    d1l_map_tile_cache_record_t metadata = {0};
+    ret = read_cache_metadata(
+        result.metadata_path, &metadata);
+    if (ret != ESP_OK ||
+        !cache_record_matches_tile(&metadata, z, x, y)) {
+        download_step(
+            &result, "cache_metadata",
+            ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret, NULL);
+        *out_result = result;
+        return result.last_error;
+    }
 
     d1l_rp2040_file_result_t file = {0};
-    esp_err_t ret = d1l_rp2040_bridge_file_stat(result.path, &file,
-                                                D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
-    if (ret != ESP_OK || !file.ok || !file.exists || file.is_directory || file.size == 0U ||
+    ret = d1l_rp2040_bridge_file_stat(result.path, &file,
+                                      D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK || !file.ok || !file.exists || file.is_directory ||
+        file.size != metadata.size ||
         file.size > D1L_MAP_TILE_DOWNLOAD_MAX_BYTES || file.size > buffer_size) {
         download_step(&result, "cache_miss", ret == ESP_OK ? ESP_ERR_NOT_FOUND : ret, &file);
         *out_result = result;
@@ -505,12 +1594,52 @@ esp_err_t d1l_map_tile_store_read(uint8_t z,
         *out_result = result;
         return result.last_error;
     }
+    result.content_crc32 = d1l_map_tile_cache_crc32(
+        buffer, result.bytes);
+    result.checksum_verified =
+        result.content_crc32 == metadata.content_crc32;
+    if (!result.checksum_verified) {
+        download_step(
+            &result, "cache_checksum",
+            ESP_ERR_INVALID_CRC, &file);
+        *out_result = result;
+        return result.last_error;
+    }
     result.cache_hit = true;
     result.attribution_saved = true;
     download_step(&result, "cache_hit", ESP_OK, &file);
     *out_len = result.bytes;
     *out_result = result;
     return ESP_OK;
+}
+
+esp_err_t d1l_map_tile_store_read(uint8_t z,
+                                  uint32_t x,
+                                  uint32_t y,
+                                  const d1l_storage_status_t *status,
+                                  uint8_t *buffer,
+                                  size_t buffer_size,
+                                  size_t *out_len,
+                                  d1l_map_tile_continue_cb_t should_continue,
+                                  void *continue_context,
+                                  d1l_map_tile_download_result_t *out_result)
+{
+    const esp_err_t lock_ret = cache_transaction_take();
+    if (lock_ret != ESP_OK) {
+        if (out_len) {
+            *out_len = 0U;
+        }
+        if (out_result) {
+            memset(out_result, 0, sizeof(*out_result));
+            out_result->last_error = lock_ret;
+        }
+        return lock_ret;
+    }
+    const esp_err_t ret = map_tile_store_read_locked(
+        z, x, y, status, buffer, buffer_size, out_len,
+        should_continue, continue_context, out_result);
+    cache_transaction_give();
+    return ret;
 }
 
 typedef struct {
@@ -547,7 +1676,114 @@ static bool png_content_type(const char *content_type)
             content_type[sizeof(expected) - 1U] == ' ');
 }
 
-esp_err_t d1l_map_tile_store_fetch(uint8_t z,
+static bool cache_metadata_matches_candidate(
+    const d1l_map_tile_cache_record_t *metadata,
+    const d1l_map_tile_download_result_t *result)
+{
+    return metadata && result &&
+           cache_record_matches_tile(
+               metadata, result->z, result->x, result->y) &&
+           metadata->size == result->bytes &&
+           metadata->content_crc32 == result->content_crc32;
+}
+
+static esp_err_t persist_validated_tile(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_storage_status_t *storage,
+    const uint8_t *buffer,
+    d1l_map_tile_download_result_t *result)
+{
+    if (!provider || !storage || !buffer || !result ||
+        result->bytes == 0U || !result->png_valid) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = cache_transaction_take();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    bool candidate_tmp_owned = false;
+    d1l_map_tile_cache_paths_t paths = {0};
+    d1l_map_tile_cache_state_t *state = NULL;
+    ret = load_cache_state(
+        provider, storage, &paths, &state);
+    if (ret != ESP_OK || !state) {
+        ret = ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+        goto persist_done;
+    }
+    result->cache_budget_bytes =
+        (uint64_t)provider->cache_budget_mb * 1024ULL * 1024ULL;
+    result->cache_used_bytes = state->live_bytes;
+
+    /*
+     * Another network worker may have committed the same response while this
+     * worker was outside the mutex. Reuse that exact checksummed tile rather
+     * than disturbing its files or consuming a second journal sequence.
+     */
+    d1l_map_tile_cache_record_t metadata = {0};
+    const esp_err_t metadata_ret = read_cache_metadata(
+        result->metadata_path, &metadata);
+    if (metadata_ret == ESP_OK &&
+        cache_metadata_matches_candidate(&metadata, result) &&
+        verify_tile_file(result->path, &metadata) == ESP_OK) {
+        result->cache_hit = true;
+        result->checksum_verified = true;
+        result->attribution_saved = true;
+        ret = ESP_OK;
+        goto persist_done;
+    }
+
+    cleanup_partial(result);
+    candidate_tmp_owned = true;
+    result->checksum_verified = false;
+    d1l_rp2040_file_result_t file = {0};
+    for (size_t offset = 0U; offset < result->bytes;) {
+        const size_t remaining = result->bytes - offset;
+        const size_t chunk =
+            remaining < D1L_RP2040_FILE_CHUNK_MAX ?
+                remaining : D1L_RP2040_FILE_CHUNK_MAX;
+        ret = d1l_rp2040_bridge_file_write(
+            result->tmp_path, (uint32_t)offset,
+            &buffer[offset], chunk, offset == 0U,
+            &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        if (ret != ESP_OK ||
+            file.offset != offset ||
+            file.length != chunk ||
+            file.size != offset + chunk) {
+            ret = ret == ESP_OK ? ESP_FAIL : ret;
+            goto persist_done;
+        }
+        result->write_tmp = true;
+        offset += chunk;
+    }
+    d1l_map_tile_cache_record_t verify_record = {0};
+    if (!d1l_map_tile_cache_record_init(
+            1U, result->z, result->x, result->y,
+            (uint32_t)result->bytes, result->content_crc32,
+            &verify_record)) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto persist_done;
+    }
+    ret = verify_tile_file(result->tmp_path, &verify_record);
+    if (ret != ESP_OK) {
+        goto persist_done;
+    }
+    result->checksum_verified = true;
+    ret = write_attribution_metadata(provider, result);
+    if (ret == ESP_OK) {
+        ret = commit_cache_tile(provider, storage, result);
+    }
+
+persist_done:
+    if (ret != ESP_OK && candidate_tmp_owned &&
+        !result->cache_intent_recorded) {
+        cleanup_partial(result);
+    }
+    cache_transaction_give();
+    return ret;
+}
+
+static esp_err_t map_tile_store_fetch_network(
+                                   uint8_t z,
                                    uint32_t x,
                                    uint32_t y,
                                    const d1l_storage_status_t *status,
@@ -635,8 +1871,6 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
         return result.last_error;
     }
 
-    d1l_rp2040_file_result_t file = {0};
-    cleanup_partial(&result);
     ret = esp_http_client_open(client, 0);
     if (ret != ESP_OK) {
         download_step(&result, "http_open", ret, NULL);
@@ -712,16 +1946,6 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
             continue;
         }
         idle_reads = 0;
-        ret = d1l_rp2040_bridge_file_write(result.tmp_path, (uint32_t)result.bytes,
-                                           &buffer[result.bytes], (size_t)read_len,
-                                           result.bytes == 0U, &file,
-                                           D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
-        if (ret != ESP_OK || file.length != (uint32_t)read_len) {
-            download_step(&result, "write_tmp", ret == ESP_OK ? ESP_FAIL : ret, &file);
-            ret = result.last_error;
-            goto fetch_done;
-        }
-        result.write_tmp = true;
         result.bytes += (size_t)read_len;
     }
     if (!esp_http_client_is_complete_data_received(client) || result.bytes == 0U ||
@@ -736,38 +1960,47 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
         ret = result.last_error;
         goto fetch_done;
     }
-
-    ret = d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true, &file,
-                                        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        download_step(&result, "rename_final", ret, &file);
+    result.content_crc32 = d1l_map_tile_cache_crc32(
+        buffer, result.bytes);
+    if (!continue_allowed(should_continue, continue_context)) {
+        result.cancelled = true;
+        download_step(
+            &result, "cancelled",
+            ESP_ERR_INVALID_STATE, NULL);
+        ret = result.last_error;
         goto fetch_done;
     }
-    result.rename_replace = true;
-    ret = write_attribution_metadata(&provider, &result);
+    ret = persist_validated_tile(
+        &provider, status, buffer, &result);
     if (ret != ESP_OK) {
-        /* A cache entry is only valid when its required attribution metadata
-         * commits too.  Do not leave a newly-renamed tile paired with stale or
-         * absent metadata for the next boot to accept. */
-        d1l_rp2040_file_result_t delete_result = {0};
-        (void)d1l_rp2040_bridge_file_delete(result.path, &delete_result,
-                                            D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
-        (void)d1l_rp2040_bridge_file_delete(result.attribution_tmp_path, &delete_result,
-                                            D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
-        result.rename_replace = false;
+        download_step(&result, "cache_persist", ret, &result.file);
         goto fetch_done;
     }
-    download_step(&result, "ok", ESP_OK, &file);
+    download_step(&result, "ok", ESP_OK, &result.file);
     *out_len = result.bytes;
 
 fetch_done:
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    if (ret != ESP_OK || result.last_error != ESP_OK) {
-        cleanup_partial(&result);
-    }
     *out_result = result;
     return result.last_error;
+}
+
+esp_err_t d1l_map_tile_store_fetch(uint8_t z,
+                                   uint32_t x,
+                                   uint32_t y,
+                                   const d1l_storage_status_t *status,
+                                   bool wifi_connected,
+                                   uint8_t *buffer,
+                                   size_t buffer_size,
+                                   size_t *out_len,
+                                   d1l_map_tile_continue_cb_t should_continue,
+                                   void *continue_context,
+                                   d1l_map_tile_download_result_t *out_result)
+{
+    return map_tile_store_fetch_network(
+        z, x, y, status, wifi_connected, buffer, buffer_size,
+        out_len, should_continue, continue_context, out_result);
 }
 
 esp_err_t d1l_map_tile_store_write_canary(const char *token,

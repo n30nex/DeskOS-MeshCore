@@ -1862,10 +1862,11 @@ static void map_render_cache_status(lv_obj_t *parent,
 
     char source_status[96];
     if (view_status.provider_configured) {
-        snprintf(source_status, sizeof(source_status), "%s - %s",
+        snprintf(source_status, sizeof(source_status), "%s - %s - %lu MB",
                  view_status.source_id[0] != '\0' ?
                     view_status.source_id : "SD provider",
-                 prefetch_value);
+                 prefetch_value,
+                 (unsigned long)prefetch.cache_budget_mb);
     } else {
         snprintf(source_status, sizeof(source_status), "%s",
                  "Built-in OpenStreetMap - interactive cache only");

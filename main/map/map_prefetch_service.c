@@ -28,9 +28,13 @@ typedef struct {
     uint32_t storage_backend_generation;
     uint32_t storage_capacity_kb;
     uint32_t average_tile_bytes;
+    uint32_t cache_budget_mb;
     int32_t center_lat_e7;
     int32_t center_lon_e7;
+    int32_t viewport_lat_e6;
+    int32_t viewport_lon_e6;
     uint8_t provider_max_zoom;
+    bool viewport_valid;
     char source_id[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
 } d1l_map_prefetch_key_t;
 
@@ -96,9 +100,13 @@ static bool key_equal(const d1l_map_prefetch_key_t *left,
                right->storage_backend_generation &&
            left->storage_capacity_kb == right->storage_capacity_kb &&
            left->average_tile_bytes == right->average_tile_bytes &&
+           left->cache_budget_mb == right->cache_budget_mb &&
            left->center_lat_e7 == right->center_lat_e7 &&
            left->center_lon_e7 == right->center_lon_e7 &&
+           left->viewport_lat_e6 == right->viewport_lat_e6 &&
+           left->viewport_lon_e6 == right->viewport_lon_e6 &&
            left->provider_max_zoom == right->provider_max_zoom &&
+           left->viewport_valid == right->viewport_valid &&
            strcmp(left->source_id, right->source_id) == 0;
 }
 
@@ -300,6 +308,8 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
             s_tile_buffer, D1L_MAP_TILE_DOWNLOAD_MAX_BYTES,
             &downloaded_len, prefetch_continue,
             &mutable_continuation, &result);
+        status->evicted_tiles += result.evicted_tiles;
+        status->cache_used_bytes = result.cache_used_bytes;
         if (ret == ESP_OK) {
             ++status->downloaded_tiles;
             ++status->visited_tiles;
@@ -400,6 +410,7 @@ static void prefetch_worker(void *context)
                 .provider_configured = provider.configured,
                 .background_prefetch_permitted =
                     provider.background_prefetch_permitted,
+                .cache_budget_mb = provider.cache_budget_mb,
             };
             snprintf(status.source_id, sizeof(status.source_id), "%s",
                      provider.source_id);
@@ -420,6 +431,7 @@ static void prefetch_worker(void *context)
                 .sd_ready = true,
                 .provider_configured = true,
                 .background_prefetch_permitted = true,
+                .cache_budget_mb = provider.cache_budget_mb,
             };
             snprintf(status.source_id, sizeof(status.source_id), "%s",
                      provider.source_id);
@@ -439,6 +451,7 @@ static void prefetch_worker(void *context)
                 .sd_ready = true,
                 .provider_configured = true,
                 .background_prefetch_permitted = true,
+                .cache_budget_mb = provider.cache_budget_mb,
             };
             snprintf(status.source_id, sizeof(status.source_id), "%s",
                      provider.source_id);
@@ -459,6 +472,7 @@ static void prefetch_worker(void *context)
                 .sd_ready = true,
                 .provider_configured = true,
                 .background_prefetch_permitted = true,
+                .cache_budget_mb = provider.cache_budget_mb,
                 .retry_after_sec = (uint32_t)(
                     (s_backoff_until_us - now_us + 999999LL) /
                     1000000LL),
@@ -475,10 +489,27 @@ static void prefetch_worker(void *context)
         const uint32_t marker_generation =
             d1l_node_store_marker_generation();
         const size_t marker_count = collect_points();
+        d1l_map_view_status_t last_view = {0};
+        d1l_map_view_service_status(&last_view);
+        d1l_map_prefetch_point_t viewport = {0};
+        const bool viewport_valid =
+            last_view.generation != 0U &&
+            last_view.width > 0U && last_view.height > 0U &&
+            last_view.lat_e7 >= -900000000 &&
+            last_view.lat_e7 <= 900000000 &&
+            last_view.lon_e7 >= -1800000000LL &&
+            last_view.lon_e7 <= 1800000000LL;
+        if (viewport_valid) {
+            viewport.lat_e6 = last_view.lat_e7 / 10;
+            viewport.lon_e6 = last_view.lon_e7 / 10;
+        }
         d1l_map_prefetch_plan_t plan = {0};
-        if (!d1l_map_prefetch_plan_build(
+        if (!d1l_map_prefetch_plan_build_with_viewport(
                 settings.map_lat_e7, settings.map_lon_e7,
-                s_points, marker_count, storage.capacity_kb,
+                s_points, marker_count,
+                viewport_valid ? &viewport : NULL,
+                storage.capacity_kb,
+                (uint64_t)provider.cache_budget_mb * 1024ULL * 1024ULL,
                 provider.average_tile_bytes, provider.max_zoom,
                 &plan)) {
             publish_waiting(
@@ -492,9 +523,13 @@ static void prefetch_worker(void *context)
             .marker_generation = marker_generation,
             .storage_capacity_kb = storage.capacity_kb,
             .average_tile_bytes = provider.average_tile_bytes,
+            .cache_budget_mb = provider.cache_budget_mb,
             .center_lat_e7 = settings.map_lat_e7,
             .center_lon_e7 = settings.map_lon_e7,
+            .viewport_lat_e6 = viewport.lat_e6,
+            .viewport_lon_e6 = viewport.lon_e6,
             .provider_max_zoom = provider.max_zoom,
+            .viewport_valid = viewport_valid,
         };
         snprintf(key.source_id, sizeof(key.source_id), "%s",
                  provider.source_id);
@@ -530,6 +565,7 @@ static void prefetch_worker(void *context)
             .sd_ready = true,
             .provider_configured = true,
             .background_prefetch_permitted = true,
+            .cache_budget_mb = provider.cache_budget_mb,
             .selected_max_zoom = plan.max_zoom,
             .marker_generation = marker_generation,
             .storage_capacity_kb = storage.capacity_kb,
