@@ -361,6 +361,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "map acceptance open", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_EXACT(
+        "map provider recovery-inspect", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_EXACT(
         "map provider repair-invalid", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_EXACT(
@@ -3519,6 +3522,117 @@ static void cmd_map_acceptance_open(void)
            "\"arbitrary_url_accepted\":false,"
            "\"arbitrary_location_accepted\":false,"
            "\"public_rf_tx\":false,\"formats_sd\":false}\n");
+}
+
+static const char *map_provider_inspection_parse_status(
+    const d1l_map_provider_path_inspection_t *inspection)
+{
+    if (!inspection) {
+        return "unknown";
+    }
+    if (inspection->exists && inspection->is_directory) {
+        return "directory";
+    }
+    if (inspection->io_result != ESP_OK) {
+        return inspection->exists ? "read_failed" : "unknown";
+    }
+    if (!inspection->exists) {
+        return "absent";
+    }
+    if (!inspection->read_ok) {
+        return "read_failed";
+    }
+    if (inspection->parse_valid) {
+        return "valid";
+    }
+    if (inspection->parse_invalid) {
+        return "invalid";
+    }
+    return "unknown";
+}
+
+static void print_map_provider_path_inspection(
+    const char *name,
+    const d1l_map_provider_path_inspection_t *inspection)
+{
+    printf(",\"%s\":{\"path\":", name ? name : "unknown");
+    print_json_string(inspection ? inspection->path : "");
+    printf(",\"io_code\":");
+    print_json_string(esp_err_to_name(
+        inspection ? inspection->io_result : ESP_ERR_INVALID_ARG));
+    printf(",\"exists\":%s,\"is_directory\":%s,\"bytes\":%u,"
+           "\"read_ok\":%s,\"hash_calculated\":%s,\"sha256\":",
+           bool_json(inspection && inspection->exists),
+           bool_json(inspection && inspection->is_directory),
+           inspection ? (unsigned)inspection->bytes : 0U,
+           bool_json(inspection && inspection->read_ok),
+           bool_json(inspection && inspection->hash_calculated));
+    print_json_string(inspection ? inspection->sha256 : "");
+    printf(",\"parse_status\":");
+    print_json_string(map_provider_inspection_parse_status(inspection));
+    printf(",\"parse_valid\":%s,\"parse_invalid\":%s,"
+           "\"builtin_exact\":%s,\"source_id\":",
+           bool_json(inspection && inspection->parse_valid),
+           bool_json(inspection && inspection->parse_invalid),
+           bool_json(inspection && inspection->builtin_exact));
+    print_json_string(inspection ? inspection->source_id : "");
+    printf(",\"fat_attributes_valid\":%s,\"fat_attributes\":%lu,"
+           "\"fat_read_only\":%s}",
+           bool_json(inspection && inspection->attributes_valid),
+           inspection ? (unsigned long)inspection->attributes : 0UL,
+           bool_json(
+               inspection && inspection->attributes_valid &&
+               (inspection->attributes &
+                D1L_RP2040_FILE_ATTRIBUTE_READ_ONLY) != 0U));
+}
+
+static void print_map_provider_recovery_inspection_fields(
+    const d1l_map_provider_recovery_inspection_t *inspection)
+{
+    printf(",\"complete\":%s,\"provider_lock_busy\":%s,"
+           "\"canonical_backup_bytes_equal\":%s",
+           bool_json(inspection && inspection->complete),
+           bool_json(inspection && inspection->provider_lock_busy),
+           bool_json(
+               inspection && inspection->canonical_backup_bytes_equal));
+    print_map_provider_path_inspection(
+        "canonical", inspection ? &inspection->canonical : NULL);
+    print_map_provider_path_inspection(
+        "stage_001", inspection ? &inspection->stage_001 : NULL);
+    print_map_provider_path_inspection(
+        "backup_001", inspection ? &inspection->backup_001 : NULL);
+    printf(",\"read_only\":true,\"mutation_performed\":false,"
+           "\"public_rf_tx\":false,\"formats_sd\":false,"
+           "\"nvs_mutated\":false,\"tile_cache_mutated\":false");
+}
+
+static void cmd_map_provider_recovery_inspect(void)
+{
+    d1l_storage_status_t storage = {0};
+    d1l_storage_status(&storage);
+    d1l_map_provider_recovery_inspection_t inspection = {0};
+    const esp_err_t ret =
+        d1l_map_tile_provider_inspect_recovery(&storage, &inspection);
+    if (ret != ESP_OK) {
+        printf(
+            "{\"schema\":%d,\"ok\":false,"
+            "\"cmd\":\"map provider recovery-inspect\",\"code\":",
+            D1L_CONSOLE_SCHEMA);
+        print_json_string(esp_err_to_name(ret));
+        print_map_provider_recovery_inspection_fields(&inspection);
+        printf(",\"hint\":");
+        print_json_string(
+            inspection.provider_lock_busy ?
+                "provider refresh owns the lock; retry this read-only command" :
+                "one or more exact recovery paths could not be read; no files "
+                "were changed");
+        printf("}\n");
+        return;
+    }
+
+    ok_begin("map provider recovery-inspect");
+    print_map_provider_recovery_inspection_fields(&inspection);
+    printf("}\n");
 }
 
 static void print_map_provider_repair_fields(
@@ -8640,6 +8754,7 @@ static void cmd_help(void)
                "\"unavailable_status_commands\":[\"wifi status\","
                "\"ble status\",\"map center\",\"map tiles status\","
                "\"map acceptance status\","
+               "\"map provider recovery-inspect\","
                "\"channels\",\"routes trace status\",\"roomservers\","
                "\"repeaters\",\"repeater ping status\"],"
                "\"unavailable_features\":[\"map\","
@@ -8677,6 +8792,7 @@ static void cmd_help(void)
            "\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\","
            "\"map center set <lat> <lon>\",\"map center clear\",\"map tiles status\","
            "\"map acceptance status\",\"map acceptance open\","
+           "\"map provider recovery-inspect\",\"map provider repair-invalid\","
            "\"mesh status\",\"companion status\",\"rp2040 status\","
            "\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\","
            "\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\","
@@ -9058,6 +9174,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_map_acceptance_status();
     } else if (strcmp(line, "map acceptance open") == 0) {
         cmd_map_acceptance_open();
+    } else if (strcmp(line, "map provider recovery-inspect") == 0) {
+        cmd_map_provider_recovery_inspect();
     } else if (strcmp(line, "map provider repair-invalid") == 0) {
         cmd_map_provider_repair_invalid();
     } else if (strcmp(line, "settings onboarding status") == 0) {

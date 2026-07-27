@@ -591,12 +591,15 @@ static esp_err_t write_default_provider_stage(
     return ESP_OK;
 }
 
-static bool default_provider_hash_matches(const char *buffer, size_t size)
+static bool provider_sha256(
+    const char *buffer,
+    size_t size,
+    uint8_t digest[32])
 {
-    if (!buffer || size != D1L_MAP_PROVIDER_DEFAULT_MANIFEST_BYTES) {
+    if (!buffer || !digest) {
         return false;
     }
-    uint8_t digest[sizeof(s_default_provider_manifest_sha256)] = {0};
+    memset(digest, 0, 32U);
     mbedtls_sha256_context context;
     mbedtls_sha256_init(&context);
     int hash_ret = mbedtls_sha256_starts(&context, 0);
@@ -608,8 +611,38 @@ static bool default_provider_hash_matches(const char *buffer, size_t size)
         hash_ret = mbedtls_sha256_finish(&context, digest);
     }
     mbedtls_sha256_free(&context);
+    return hash_ret == 0;
+}
+
+static bool provider_sha256_hex(
+    const char *buffer,
+    size_t size,
+    char out_hex[D1L_MAP_PROVIDER_SHA256_HEX_LENGTH + 1U])
+{
+    if (!out_hex) {
+        return false;
+    }
+    out_hex[0] = '\0';
+    uint8_t digest[32] = {0};
+    if (!provider_sha256(buffer, size, digest)) {
+        return false;
+    }
+    for (size_t i = 0U; i < sizeof(digest); ++i) {
+        (void)snprintf(&out_hex[i * 2U], 3U, "%02x", digest[i]);
+    }
+    out_hex[D1L_MAP_PROVIDER_SHA256_HEX_LENGTH] = '\0';
+    memset(digest, 0, sizeof(digest));
+    return true;
+}
+
+static bool default_provider_hash_matches(const char *buffer, size_t size)
+{
+    if (!buffer || size != D1L_MAP_PROVIDER_DEFAULT_MANIFEST_BYTES) {
+        return false;
+    }
+    uint8_t digest[sizeof(s_default_provider_manifest_sha256)] = {0};
     const bool matches =
-        hash_ret == 0 &&
+        provider_sha256(buffer, size, digest) &&
         memcmp(
             digest, s_default_provider_manifest_sha256,
             sizeof(s_default_provider_manifest_sha256)) == 0;
@@ -663,6 +696,76 @@ static esp_err_t validate_default_provider_path(
         return ret;
     }
     return validate_default_provider_buffer(buffer, size, out_validation);
+}
+
+static esp_err_t inspect_provider_path(
+    const char *path,
+    d1l_map_provider_path_inspection_t *out_inspection,
+    char *buffer,
+    size_t buffer_size)
+{
+    if (!path || !out_inspection || !buffer || buffer_size < 2U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out_inspection, 0, sizeof(*out_inspection));
+    snprintf(
+        out_inspection->path, sizeof(out_inspection->path), "%s", path);
+
+    d1l_rp2040_file_result_t stat = {0};
+    esp_err_t ret = d1l_rp2040_bridge_file_stat(
+        path, &stat, D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+    out_inspection->io_result = ret;
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    out_inspection->exists = stat.exists;
+    out_inspection->is_directory = stat.is_directory;
+    out_inspection->attributes_valid = stat.attributes_valid;
+    out_inspection->attributes = stat.attributes;
+    out_inspection->bytes = stat.size;
+    if (!stat.exists) {
+        return ESP_OK;
+    }
+    if (stat.is_directory) {
+        out_inspection->io_result = ESP_ERR_INVALID_STATE;
+        return out_inspection->io_result;
+    }
+
+    size_t bytes = 0U;
+    ret = read_provider_path(path, buffer, buffer_size, &bytes);
+    out_inspection->io_result = ret;
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    out_inspection->read_ok = true;
+    out_inspection->bytes = bytes;
+    out_inspection->hash_calculated = provider_sha256_hex(
+        buffer, bytes, out_inspection->sha256);
+    if (!out_inspection->hash_calculated) {
+        out_inspection->io_result = ESP_FAIL;
+        return out_inspection->io_result;
+    }
+
+    d1l_map_tile_provider_t provider = {0};
+    const esp_err_t parse_ret = parse_provider_config(buffer, &provider);
+    if (parse_ret == ESP_OK) {
+        out_inspection->parse_valid = true;
+        snprintf(
+            out_inspection->source_id,
+            sizeof(out_inspection->source_id), "%s", provider.source_id);
+    } else if (parse_ret == ESP_ERR_INVALID_RESPONSE) {
+        out_inspection->parse_invalid = true;
+    } else {
+        out_inspection->io_result = parse_ret;
+        return parse_ret;
+    }
+
+    d1l_default_provider_validation_t validation = {0};
+    out_inspection->builtin_exact =
+        validate_default_provider_buffer(
+            buffer, bytes, &validation) == ESP_OK;
+    out_inspection->io_result = ESP_OK;
+    return ESP_OK;
 }
 
 static esp_err_t seed_default_provider_config(void)
@@ -829,6 +932,70 @@ esp_err_t d1l_map_tile_provider_refresh(
     memset(json, 0, sizeof(json));
     provider_io_release();
     return ret;
+}
+
+esp_err_t d1l_map_tile_provider_inspect_recovery(
+    const d1l_storage_status_t *storage,
+    d1l_map_provider_recovery_inspection_t *out_inspection)
+{
+    if (!out_inspection) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out_inspection, 0, sizeof(*out_inspection));
+    snprintf(
+        out_inspection->canonical.path,
+        sizeof(out_inspection->canonical.path), "%s",
+        D1L_MAP_PROVIDER_CONFIG_PATH);
+    snprintf(
+        out_inspection->stage_001.path,
+        sizeof(out_inspection->stage_001.path), "%s",
+        D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH);
+    snprintf(
+        out_inspection->backup_001.path,
+        sizeof(out_inspection->backup_001.path), "%s",
+        D1L_MAP_PROVIDER_RECOVERY_BACKUP_001_PATH);
+    if (!storage || !d1l_map_tile_store_sd_ready(storage)) {
+        out_inspection->canonical.io_result = ESP_ERR_NOT_SUPPORTED;
+        out_inspection->stage_001.io_result = ESP_ERR_NOT_SUPPORTED;
+        out_inspection->backup_001.io_result = ESP_ERR_NOT_SUPPORTED;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!provider_io_claim()) {
+        out_inspection->provider_lock_busy = true;
+        out_inspection->canonical.io_result = ESP_ERR_INVALID_STATE;
+        out_inspection->stage_001.io_result = ESP_ERR_INVALID_STATE;
+        out_inspection->backup_001.io_result = ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char buffer[D1L_MAP_PROVIDER_CONFIG_MAX_BYTES + 1U];
+    esp_err_t first_error = inspect_provider_path(
+        D1L_MAP_PROVIDER_CONFIG_PATH, &out_inspection->canonical,
+        buffer, sizeof(buffer));
+    const esp_err_t stage_ret = inspect_provider_path(
+        D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH,
+        &out_inspection->stage_001, buffer, sizeof(buffer));
+    if (first_error == ESP_OK && stage_ret != ESP_OK) {
+        first_error = stage_ret;
+    }
+    const esp_err_t backup_ret = inspect_provider_path(
+        D1L_MAP_PROVIDER_RECOVERY_BACKUP_001_PATH,
+        &out_inspection->backup_001, buffer, sizeof(buffer));
+    if (first_error == ESP_OK && backup_ret != ESP_OK) {
+        first_error = backup_ret;
+    }
+
+    out_inspection->complete = first_error == ESP_OK;
+    out_inspection->canonical_backup_bytes_equal =
+        out_inspection->canonical.read_ok &&
+        out_inspection->backup_001.read_ok &&
+        out_inspection->canonical.bytes == out_inspection->backup_001.bytes &&
+        strcmp(
+            out_inspection->canonical.sha256,
+            out_inspection->backup_001.sha256) == 0;
+    memset(buffer, 0, sizeof(buffer));
+    provider_io_release();
+    return first_error;
 }
 
 esp_err_t d1l_map_tile_provider_repair_invalid_default(

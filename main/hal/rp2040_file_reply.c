@@ -305,6 +305,30 @@ esp_err_t d1l_rp2040_file_reply_parse(
         result->exists = exists;
         result->is_directory = strcmp(kind, "dir") == 0;
         result->size = size;
+        const char *attributes_valid_value = NULL;
+        size_t attributes_valid_length = 0U;
+        const char *attributes_value = NULL;
+        size_t attributes_length = 0U;
+        const bool has_attributes_valid = token_value_span(
+            line, "attr_valid", &attributes_valid_value,
+            &attributes_valid_length);
+        const bool has_attributes = token_value_span(
+            line, "attr", &attributes_value, &attributes_length);
+        if (has_attributes_valid != has_attributes) {
+            return bad_response(result);
+        }
+        if (has_attributes_valid) {
+            uint32_t attributes = 0U;
+            if (!parse_bool_token(
+                    line, "attr_valid", &result->attributes_valid) ||
+                !parse_u32_token(line, "attr", &attributes) ||
+                attributes > UINT8_MAX ||
+                (!result->attributes_valid && attributes != 0U) ||
+                (!exists && result->attributes_valid)) {
+                return bad_response(result);
+            }
+            result->attributes = attributes;
+        }
     } else if (strcmp(expected_op, "read") == 0) {
         if (!parse_u32_token(line, "off", &result->offset) ||
             !parse_u32_token(line, "len", &result->length) ||

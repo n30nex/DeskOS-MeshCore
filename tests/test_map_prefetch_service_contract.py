@@ -106,3 +106,59 @@ def test_map_ui_exposes_provider_and_background_state():
     assert "provider_max_zoom" in view_header
     assert "s_map.status.provider_max_zoom = provider->max_zoom" in view_source
     assert "provider.max_zoom" in ui
+
+
+def test_provider_recovery_inspection_is_exact_and_read_only():
+    header = read("main/map/map_tile_provider.h")
+    provider = read("main/map/map_tile_provider.c")
+    console = read("main/comms/usb_console.c")
+
+    assert (
+        'D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH \\\n'
+        '    "map/offline-provider.stage-rc1-001.json"'
+    ) in header
+    assert (
+        'D1L_MAP_PROVIDER_RECOVERY_BACKUP_001_PATH \\\n'
+        '    "map/offline-provider.invalid-rc1-001.json"'
+    ) in header
+
+    path_inspector = provider.split(
+        "static esp_err_t inspect_provider_path", 1
+    )[1].split("static esp_err_t seed_default_provider_config", 1)[0]
+    recovery_inspector = provider.split(
+        "esp_err_t d1l_map_tile_provider_inspect_recovery", 1
+    )[1].split(
+        "esp_err_t d1l_map_tile_provider_repair_invalid_default", 1
+    )[0]
+    assert "d1l_rp2040_bridge_file_stat(" in path_inspector
+    assert "read_provider_path(" in path_inspector
+    assert "provider_sha256_hex(" in path_inspector
+    assert "parse_provider_config(" in path_inspector
+    assert "D1L_MAP_PROVIDER_CONFIG_PATH" in recovery_inspector
+    assert "D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH" in recovery_inspector
+    assert "D1L_MAP_PROVIDER_RECOVERY_BACKUP_001_PATH" in recovery_inspector
+    for mutator in (
+        "seed_default_provider_config",
+        "d1l_map_tile_provider_refresh",
+        "d1l_rp2040_bridge_file_create",
+        "d1l_rp2040_bridge_file_write",
+        "d1l_rp2040_bridge_file_rename",
+        "d1l_rp2040_bridge_file_delete",
+    ):
+        assert mutator not in path_inspector
+        assert mutator not in recovery_inspector
+
+    rule = console.split(
+        '"map provider recovery-inspect", D1L_RELEASE_COMMAND_READ_ONLY', 1
+    )
+    assert len(rule) == 2
+    command_body = console.split(
+        "static void cmd_map_provider_recovery_inspect", 1
+    )[1].split("static void print_map_provider_repair_fields", 1)[0]
+    output_body = console.split(
+        "static void print_map_provider_recovery_inspection_fields", 1
+    )[1].split("static void cmd_map_provider_recovery_inspect", 1)[0]
+    assert "d1l_map_tile_provider_inspect_recovery(" in command_body
+    assert '"read_only\\":true' in output_body
+    assert '"mutation_performed\\":false' in output_body
+    assert "d1l_map_tile_provider_refresh(" not in command_body

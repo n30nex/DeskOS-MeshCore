@@ -2649,17 +2649,25 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     out += " v=1 id=";
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=stat exists=";
-    File file = SD.open(full_path, FILE_READ);
-    if (!file) {
-        out += "0 kind=none size=0 note=ok";
+    FsFile file;
+    if (!file.open(full_path, O_RDONLY)) {
+        out += "0 kind=none size=0 attr_valid=0 attr=0 note=ok";
         reply_stream->println(out);
         reply_stream->flush();
         return;
     }
+    const bool is_directory = file.isDir();
+    const int attributes = file.attrib();
     out += "1 kind=";
-    out += file.isDirectory() ? "dir" : "file";
+    out += is_directory ? "dir" : "file";
     out += " size=";
-    out += String(static_cast<unsigned long>(file.isDirectory() ? 0 : file.size()));
+    out += String(static_cast<unsigned long>(
+        is_directory ? 0 : file.fileSize()));
+    out += " attr_valid=";
+    out += (attributes >= 0 ? "1" : "0");
+    out += " attr=";
+    out += String(static_cast<unsigned long>(
+        attributes >= 0 ? attributes : 0));
     out += " note=ok";
     file.close();
     reply_stream->println(out);

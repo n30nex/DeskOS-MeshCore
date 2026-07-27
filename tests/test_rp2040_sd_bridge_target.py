@@ -516,6 +516,17 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "rename replace backup path must fit the .bak suffix" in sketch
     assert "max file path buffer must include the replace backup suffix" in sketch
     assert "SD.open(full_path, FILE_READ)" in sketch
+    stat_body = sketch.split("void handle_file_stat", 1)[1].split(
+        "void handle_file_read", 1
+    )[0]
+    assert "FsFile file;" in stat_body
+    assert "file.open(full_path, O_RDONLY)" in stat_body
+    assert "file.attrib()" in stat_body
+    assert "attr_valid=" in stat_body
+    assert "SD.remove" not in stat_body
+    assert "SD.rename" not in stat_body
+    assert "O_WRONLY" not in stat_body
+    assert "O_CREAT" not in stat_body
     create_body = sketch.split("void handle_file_create", 1)[1].split(
         "bool prepare_file_write_target", 1
     )[0]

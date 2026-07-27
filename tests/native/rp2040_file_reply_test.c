@@ -87,11 +87,18 @@ static void test_stat_requires_canonical_complete_tokens(void)
                "kind=file size=22 note=ok",
                12U, "stat", NULL, 0U, &result) == ESP_OK);
     assert(result.exists && !result.is_directory && result.size == 22U);
+    assert(!result.attributes_valid && result.attributes == 0U);
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=12 ok=1 op=stat exists=1 "
+               "kind=file size=22 attr_valid=1 attr=33 note=ok",
+               12U, "stat", NULL, 0U, &result) == ESP_OK);
+    assert(result.attributes_valid && result.attributes == 33U);
     assert(d1l_rp2040_file_reply_parse(
                "DESKOS_SD_FILE v=1 id=12 ok=1 op=stat exists=0 "
-               "kind=none size=0 note=ok",
+               "kind=none size=0 attr_valid=0 attr=0 note=ok",
                12U, "stat", NULL, 0U, &result) == ESP_OK);
     assert(!result.exists && !result.is_directory && result.size == 0U);
+    assert(!result.attributes_valid && result.attributes == 0U);
 
     assert(d1l_rp2040_file_reply_parse(
                "DESKOS_SD_FILE v=1 id=12 ok=1 op=stat kind=file "
@@ -104,6 +111,14 @@ static void test_stat_requires_canonical_complete_tokens(void)
     assert(d1l_rp2040_file_reply_parse(
                "DESKOS_SD_FILE v=1 id=12 ok=1 op=stat exists=0 "
                "kind=none note=ok",
+               12U, "stat", NULL, 0U, &result) == ESP_FAIL);
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=12 ok=1 op=stat exists=1 "
+               "kind=file size=22 attr=1 note=ok",
+               12U, "stat", NULL, 0U, &result) == ESP_FAIL);
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=12 ok=1 op=stat exists=1 "
+               "kind=file size=22 attr_valid=1 attr=256 note=ok",
                12U, "stat", NULL, 0U, &result) == ESP_FAIL);
 }
 

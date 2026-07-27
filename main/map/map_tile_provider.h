@@ -13,9 +13,14 @@
 #define D1L_MAP_PROVIDER_ATTRIBUTION_MAX 64U
 #define D1L_MAP_PROVIDER_LICENSE_URL_MAX 128U
 #define D1L_MAP_PROVIDER_CONFIG_PATH "map/offline-provider.json"
+#define D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH \
+    "map/offline-provider.stage-rc1-001.json"
+#define D1L_MAP_PROVIDER_RECOVERY_BACKUP_001_PATH \
+    "map/offline-provider.invalid-rc1-001.json"
 #define D1L_MAP_PROVIDER_CONFIG_MAX_BYTES 1024U
 #define D1L_MAP_PROVIDER_BACKUP_PATH_MAX 64U
 #define D1L_MAP_PROVIDER_ACTION_MAX 31U
+#define D1L_MAP_PROVIDER_SHA256_HEX_LENGTH 64U
 #define D1L_MAP_PROVIDER_DEFAULT_MANIFEST_BYTES 530U
 #define D1L_MAP_PROVIDER_DEFAULT_MANIFEST_SHA256 \
     "e7da7a256954617f808b16f1306b8684c91025a67cd49841a26efbc2ca253984"
@@ -67,6 +72,32 @@ typedef struct {
     char preserved_backup_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
 } d1l_map_provider_repair_result_t;
 
+typedef struct {
+    esp_err_t io_result;
+    bool exists;
+    bool is_directory;
+    bool attributes_valid;
+    bool read_ok;
+    bool hash_calculated;
+    bool parse_valid;
+    bool parse_invalid;
+    bool builtin_exact;
+    size_t bytes;
+    uint32_t attributes;
+    char path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
+    char sha256[D1L_MAP_PROVIDER_SHA256_HEX_LENGTH + 1U];
+    char source_id[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
+} d1l_map_provider_path_inspection_t;
+
+typedef struct {
+    bool provider_lock_busy;
+    bool complete;
+    bool canonical_backup_bytes_equal;
+    d1l_map_provider_path_inspection_t canonical;
+    d1l_map_provider_path_inspection_t stage_001;
+    d1l_map_provider_path_inspection_t backup_001;
+} d1l_map_provider_recovery_inspection_t;
+
 void d1l_map_tile_provider_builtin(d1l_map_tile_provider_t *out_provider);
 void d1l_map_tile_provider_snapshot(d1l_map_tile_provider_t *out_provider);
 bool d1l_map_tile_provider_uses_osm_standard(
@@ -76,6 +107,9 @@ esp_err_t d1l_map_tile_provider_refresh(
 esp_err_t d1l_map_tile_provider_repair_invalid_default(
     const d1l_storage_status_t *storage,
     d1l_map_provider_repair_result_t *out_result);
+esp_err_t d1l_map_tile_provider_inspect_recovery(
+    const d1l_storage_status_t *storage,
+    d1l_map_provider_recovery_inspection_t *out_inspection);
 bool d1l_map_tile_provider_path(
     const d1l_map_tile_provider_t *provider,
     uint8_t z,

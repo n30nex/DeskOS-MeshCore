@@ -11,6 +11,7 @@
 #define D1L_RP2040_SD_DIAG_LINE_MAX 4096U
 #define D1L_RP2040_FILE_PATH_MAX 96U
 #define D1L_RP2040_FILE_CHUNK_MAX 192U
+#define D1L_RP2040_FILE_ATTRIBUTE_READ_ONLY 0x01U
 #define D1L_RP2040_STOCK_PROBE_MAX_BYTES 192U
 #define D1L_RP2040_BAUD_PROBE_MAX_RESULTS 8U
 
@@ -108,9 +109,11 @@ typedef struct {
     bool response_truncated;
     bool exists;
     bool is_directory;
+    bool attributes_valid;
     bool eof;
     uint16_t request_id;
     uint32_t size;
+    uint32_t attributes;
     uint32_t offset;
     uint32_t length;
     uint32_t crc32;
