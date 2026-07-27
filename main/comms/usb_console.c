@@ -3663,6 +3663,9 @@ static void print_map_provider_repair_fields(
            "\"backup_hash_verified\":%s,"
            "\"storage_manager_paused\":%s,"
            "\"storage_manager_resumed\":%s,"
+           "\"storage_manager_quiesce_attempted\":%s,"
+           "\"storage_manager_quiesced\":%s,"
+           "\"storage_manager_quiesce_released\":%s,"
            "\"canonical_delete_attempted\":%s,"
            "\"canonical_delete_performed\":%s,"
            "\"canonical_delete_uncertain\":%s,"
@@ -3700,6 +3703,11 @@ static void print_map_provider_repair_fields(
            bool_json(repair && repair->backup_hash_verified),
            bool_json(repair && repair->storage_manager_paused),
            bool_json(repair && repair->storage_manager_resumed),
+           bool_json(
+               repair && repair->storage_manager_quiesce_attempted),
+           bool_json(repair && repair->storage_manager_quiesced),
+           bool_json(
+               repair && repair->storage_manager_quiesce_released),
            bool_json(repair && repair->canonical_delete_attempted),
            bool_json(repair && repair->canonical_delete_performed),
            bool_json(repair && repair->canonical_delete_uncertain),
@@ -3759,6 +3767,10 @@ static void cmd_map_provider_repair_invalid(void)
         print_json_string(
             repair.provider_lock_busy ?
                 "provider refresh owns the lock; retry this command" :
+            repair.storage_manager_quiesce_attempted &&
+                    !repair.storage_manager_quiesced ?
+                "storage manager quiesce could not be acquired; no recovery "
+                "mutation was started" :
             repair.canonical_missing_recoverable ?
                 "canonical is absent; the verified backup and exact stage "
                 "remain available for a forward-only retry" :

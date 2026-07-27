@@ -175,12 +175,14 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     repair = provider.split(
         "esp_err_t d1l_map_tile_provider_repair_invalid_default", 1
     )[1].split("bool d1l_map_tile_provider_path", 1)[0]
-    pause_helper = provider.split(
-        "static void provider_repair_pause_storage", 1
+    quiesce_helper = provider.split(
+        "static esp_err_t provider_repair_quiesce_storage", 1
     )[1].split("static esp_err_t verify_invalid_provider_copy", 1)[0]
 
-    assert "d1l_storage_manager_pause(" in pause_helper
-    assert "d1l_storage_manager_resume();" in repair
+    assert "d1l_storage_manager_quiesce_begin(" in quiesce_helper
+    assert "d1l_storage_manager_pause(" not in quiesce_helper
+    assert "d1l_storage_manager_quiesce_end();" in repair
+    assert "d1l_storage_manager_resume();" not in repair
     assert "D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH" in repair
     assert "out_result->stage_reused = true;" in repair
     assert "write_provider_create_new(" in repair
@@ -204,7 +206,7 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     invalid_flow = repair.split(
         'provider_repair_set_stage(out_result, "stage_verified");', 1
     )[1].split("} else {", 1)[0]
-    assert invalid_flow.index("provider_repair_pause_storage(") < (
+    assert invalid_flow.index("provider_repair_quiesce_storage(") < (
         invalid_flow.index("ret = read_provider_path(")
     )
     assert invalid_flow.index("ret = read_provider_path(") < (

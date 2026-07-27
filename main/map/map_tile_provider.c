@@ -19,7 +19,7 @@
     "map/offline-provider.invalid-rc1.json"
 #define D1L_MAP_PROVIDER_PATH_SEQUENCE_MAX 999U
 #define D1L_MAP_PROVIDER_DEFAULT_AVERAGE_TILE_BYTES (64U * 1024U)
-#define D1L_MAP_PROVIDER_REPAIR_MANAGER_PAUSE_MS 180000U
+#define D1L_MAP_PROVIDER_REPAIR_MANAGER_QUIESCE_TIMEOUT_MS 15000U
 
 static const char s_default_provider_manifest[] =
     "{\"schema\":1,"
@@ -1024,16 +1024,26 @@ static void provider_repair_set_stage(
         stage ? stage : "unknown");
 }
 
-static void provider_repair_pause_storage(
+static esp_err_t provider_repair_quiesce_storage(
     d1l_map_provider_repair_result_t *result,
-    bool *manager_paused)
+    bool *manager_quiesced)
 {
-    if (!result || !manager_paused || *manager_paused) {
-        return;
+    if (!result || !manager_quiesced) {
+        return ESP_ERR_INVALID_ARG;
     }
-    d1l_storage_manager_pause(D1L_MAP_PROVIDER_REPAIR_MANAGER_PAUSE_MS);
-    *manager_paused = true;
+    if (*manager_quiesced) {
+        return ESP_OK;
+    }
+    result->storage_manager_quiesce_attempted = true;
+    const esp_err_t ret = d1l_storage_manager_quiesce_begin(
+        D1L_MAP_PROVIDER_REPAIR_MANAGER_QUIESCE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    *manager_quiesced = true;
     result->storage_manager_paused = true;
+    result->storage_manager_quiesced = true;
+    return ESP_OK;
 }
 
 static esp_err_t verify_invalid_provider_copy(
@@ -1116,7 +1126,7 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     bool fixed_backup_exists = false;
     bool repair_invalid = false;
     bool stage_001_exists = false;
-    bool manager_paused = false;
+    bool manager_quiesced = false;
     bool canonical_exists = false;
     bool stage_exists = false;
     esp_err_t ret = provider_path_exists(
@@ -1216,7 +1226,12 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     }
 
     if (!out_result->stage_reused) {
-        provider_repair_pause_storage(out_result, &manager_paused);
+        provider_repair_set_stage(out_result, "storage_quiesce");
+        ret = provider_repair_quiesce_storage(
+            out_result, &manager_quiesced);
+        if (ret != ESP_OK) {
+            goto done;
+        }
         provider_repair_set_stage(out_result, "stage_create");
         d1l_provider_create_new_result_t stage_write = {0};
         ret = write_default_provider_stage(
@@ -1245,11 +1260,17 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     provider_repair_set_stage(out_result, "stage_verified");
 
     if (repair_invalid) {
-        provider_repair_pause_storage(out_result, &manager_paused);
+        provider_repair_set_stage(out_result, "storage_quiesce");
+        ret = provider_repair_quiesce_storage(
+            out_result, &manager_quiesced);
+        if (ret != ESP_OK) {
+            goto done;
+        }
+        provider_repair_set_stage(out_result, "canonical_reverify");
         /*
-         * Pause storage traffic before this immediate re-read so the exact
-         * invalid bytes cannot race another bridge file user before the
-         * create-new backup copy.
+         * Hold bounded storage-manager sequence ownership before this
+         * immediate re-read so the exact invalid bytes cannot race another
+         * bridge file user before the create-new backup copy.
          */
         ret = read_provider_path(
             D1L_MAP_PROVIDER_CONFIG_PATH, verify, sizeof(verify),
@@ -1328,7 +1349,12 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
         if (ret != ESP_OK) {
             goto done;
         }
-        provider_repair_pause_storage(out_result, &manager_paused);
+        provider_repair_set_stage(out_result, "storage_quiesce");
+        ret = provider_repair_quiesce_storage(
+            out_result, &manager_quiesced);
+        if (ret != ESP_OK) {
+            goto done;
+        }
         provider_repair_set_stage(
             out_result, "canonical_absence_verify");
         ret = provider_path_exists(
@@ -1406,9 +1432,10 @@ publish:
     ret = ESP_OK;
 
 done:
-    if (manager_paused) {
-        d1l_storage_manager_resume();
+    if (manager_quiesced) {
+        d1l_storage_manager_quiesce_end();
         out_result->storage_manager_resumed = true;
+        out_result->storage_manager_quiesce_released = true;
     }
     memset(before, 0, sizeof(before));
     memset(verify, 0, sizeof(verify));

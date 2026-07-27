@@ -62,6 +62,9 @@ typedef struct {
     bool backup_preserved;
     bool storage_manager_paused;
     bool storage_manager_resumed;
+    bool storage_manager_quiesce_attempted;
+    bool storage_manager_quiesced;
+    bool storage_manager_quiesce_released;
     bool stage_reused;
     bool backup_copy_attempted;
     bool backup_copy_performed;
