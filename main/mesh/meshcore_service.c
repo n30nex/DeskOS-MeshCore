@@ -7992,12 +7992,6 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
      * and can expire behind a legitimate retained RX event before the actual
      * channel TX is even queued.
      */
-    if (s_tx_busy) {
-        secure_zero_channel_key(&channel_key);
-        s_status.rejected_commands++;
-        return ESP_ERR_INVALID_STATE;
-    }
-
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
     uint8_t raw_len = 0;
     d1l_settings_t settings_snapshot = {0};

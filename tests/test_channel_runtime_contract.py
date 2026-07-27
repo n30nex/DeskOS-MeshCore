@@ -131,6 +131,7 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     assert hash_index < pending_index < radio_index
     assert "D1L_MESHCORE_SERVICE_CMD_START_RX" not in send
     assert "D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS" in send
+    assert "if (s_tx_busy)" not in send
     assert "d1l_channel_store_find_unique_hash" not in send
     assert "secure_zero_channel_key(&channel_key)" in send
 
