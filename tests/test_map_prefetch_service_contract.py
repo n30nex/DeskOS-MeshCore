@@ -191,6 +191,17 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
         repair.index("d1l_storage_manager_quiesce_end();")
     )
     assert "d1l_storage_manager_resume();" not in repair
+    first_recovery_quiesce = repair.index(
+        "provider_repair_quiesce_storage("
+    )
+    first_path_preflight = repair.index(
+        "ret = provider_path_exists("
+    )
+    first_canonical_read = repair.index(
+        "ret = read_provider_path("
+    )
+    assert first_recovery_quiesce < first_path_preflight
+    assert first_path_preflight < first_canonical_read
     assert "D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH" in repair
     assert "out_result->stage_reused = true;" in repair
     assert "write_provider_create_new(" in repair

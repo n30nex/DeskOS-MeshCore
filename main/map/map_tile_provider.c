@@ -1149,7 +1149,26 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     bool retained_worker_quiesced = false;
     bool canonical_exists = false;
     bool stage_exists = false;
-    esp_err_t ret = provider_path_exists(
+    esp_err_t ret = ESP_OK;
+
+    /*
+     * A provider file is larger than one bridge chunk, so its stat/read
+     * snapshot is not one RP2040 exchange. Acquire the established manager ->
+     * retained-producer ownership order before the first canonical read and
+     * keep it through every stage/backup read and forward mutation. Otherwise
+     * a preflight buffer assembled while another producer uses the bridge can
+     * differ from the stable reread even though both individual reads report
+     * ESP_OK and the same byte count.
+     */
+    provider_repair_set_stage(out_result, "storage_quiesce");
+    ret = provider_repair_quiesce_storage(
+        out_result, &manager_quiesced, &retained_worker_quiesced);
+    if (ret != ESP_OK) {
+        goto done;
+    }
+    provider_repair_set_stage(out_result, "preflight");
+
+    ret = provider_path_exists(
         D1L_MAP_PROVIDER_FIXED_BACKUP_PATH, &fixed_backup_exists);
     if (ret != ESP_OK) {
         goto done;
