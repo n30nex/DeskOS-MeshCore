@@ -82,6 +82,8 @@ def test_meshcore_service_rejects_139_byte_or_invalid_utf8_text_without_truncati
     assert "D1L_MESHCORE_SERVICE_CMD_START_RX" not in public_sender
     assert "meshcore_service_queue_public_raw(" in public_sender
     assert "meshcore_service_send_raw_kind(" not in public_sender
+    assert "append_packet_log_deferred(" in public_sender
+    assert "append_packet_log(\"tx\"" not in public_sender
     assert "if (s_tx_busy)" not in public_sender
     assert "validate_user_text(cmd->dm_text)" in dm_sender
     assert dm_sender.index("validate_user_text(cmd->dm_text)") < dm_sender.index(

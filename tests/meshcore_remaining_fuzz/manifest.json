@@ -53,7 +53,7 @@
     "main/mesh/meshcore_path_state.c": "a6a5f42bc95f511115f1b9da12e4853fb868646ebc34ffaaeae85eb15cb72a58",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
-    "main/mesh/meshcore_service.c": "2aa0355a2cc58dcaaeea8e757717cd12a4d42df7770342f1e2c65f80b237b72e",
+    "main/mesh/meshcore_service.c": "62b8ec157f6518181de2e38d2488b729393db683422226cf991288e71906d546",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "fe42a573ec801a7bef1ce7bf3a4e3243b2382d0a816ed6f93c91b1f4992542e8",
     "scripts/meshcore_conformance_d1l.py": "f4a4a2a1abd5d68b37cbcbc181b0337abda9fe6d57a611908d81142014d9f696",
@@ -74,7 +74,7 @@
     "tests/native/meshcore_route_selection_test.c": "6c318ccab70eed048687ecf6fb728cc2d3a01fbacb358ce0eac7b9dc55c7f988",
     "tests/native/settings_envelope_test.c": "158353ab42c51142e05bb3b0f180aafdc12167ece20372a4a50cc2ae6924cd7a",
     "tests/test_meshcore_conformance_contract.py": "7432baa8f8776fb079214fe083cb1f211fb61b5025e766a6014e7595f3a5ea2b",
-    "tests/test_meshcore_public_rf_contract.py": "79e5fc6b30c241bc239325865c0a000275bc33e811d02a866cbcf0fcc48676af",
+    "tests/test_meshcore_public_rf_contract.py": "927a78a1f81d83d2a36ae32c4f7753964f986371c2d46f60203d0c8e50361a73",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },

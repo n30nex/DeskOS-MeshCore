@@ -8085,8 +8085,14 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         ESP_LOGW(TAG, "route store channel tx failed: %s",
                  esp_err_to_name(route_ret));
     }
-    append_packet_log("tx", packet_kind, 0, 0, settings->path_hash_bytes, 0, raw_len,
-                      raw, raw_len, text);
+    /*
+     * The common retained-store worker owns persistence.  A synchronous
+     * packet-log flush here can hold the compose/UI caller for several
+     * seconds even though RF ownership was already transferred above.
+     */
+    append_packet_log_deferred(
+        "tx", packet_kind, 0, 0, settings->path_hash_bytes, 0, raw_len,
+        raw, raw_len, text);
     secure_zero_bytes(raw, sizeof(raw));
     return ESP_OK;
 }
