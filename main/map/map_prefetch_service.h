@@ -26,6 +26,8 @@ typedef struct {
     uint32_t storage_capacity_kb;
     uint32_t storage_free_kb;
     uint32_t cache_budget_mb;
+    uint32_t worker_stack_bytes;
+    uint32_t worker_stack_free_bytes;
     size_t nodes_seen;
     size_t nodes_included;
     size_t nodes_outside_radius;
@@ -47,5 +49,7 @@ typedef struct {
 } d1l_map_prefetch_status_t;
 
 esp_err_t d1l_map_prefetch_service_init(void);
+/* Wake the single shared map/TLS worker after a visible-map lease changes. */
+esp_err_t d1l_map_prefetch_service_wake(void);
 void d1l_map_prefetch_service_status(
     d1l_map_prefetch_status_t *out_status);

@@ -10,13 +10,12 @@
 #include "freertos/task.h"
 
 #include "comms/connectivity_manager.h"
+#include "map/map_prefetch_service.h"
 #include "map/map_png_decoder.h"
 #include "map/map_tile_provider.h"
 #include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
 
-#define D1L_MAP_WORKER_STACK_BYTES 12288U
-#define D1L_MAP_WORKER_PRIORITY 2U
 #define D1L_MAP_SD_POLL_MS 500U
 #define D1L_MAP_WIFI_POLL_MS 500U
 #define D1L_MAP_TILE_GAP_MS 100U
@@ -24,7 +23,6 @@
 
 typedef struct {
     SemaphoreHandle_t lock;
-    TaskHandle_t worker;
     d1l_map_view_status_t status;
     d1l_map_tile_plan_t plan;
     uint16_t *frames[2];
@@ -286,6 +284,18 @@ static void note_failure(uint32_t generation, const char *phase, const char *mes
     }
 }
 
+static void note_worker_stack(void)
+{
+    const uint32_t free_bytes =
+        (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+    if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_map.status.worker_stack_bytes =
+            D1L_MAP_SHARED_WORKER_STACK_BYTES;
+        s_map.status.worker_stack_free_bytes = free_bytes;
+        xSemaphoreGive(s_map.lock);
+    }
+}
+
 static bool wait_for_wifi(uint32_t generation)
 {
     while (generation_continue(&generation)) {
@@ -419,6 +429,7 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
                 plan->tiles[i].zoom, plan->tiles[i].x, plan->tiles[i].y, &storage,
                 true, s_map.compressed, D1L_MAP_TILE_DOWNLOAD_MAX_BYTES,
                 &compressed_len, generation_continue, &generation, &tile_result);
+            note_worker_stack();
             if (ret == ESP_OK) {
                 if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
                     if (s_map.status.generation == generation) {
@@ -514,49 +525,45 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
     }
 }
 
-static void map_worker(void *context)
+void d1l_map_view_service_run_pending(void)
 {
-    (void)context;
+    if (!s_map.lock) {
+        return;
+    }
     while (true) {
-        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        while (true) {
-            d1l_map_tile_plan_t plan = {0};
-            uint32_t generation = 0U;
-            if (xSemaphoreTake(s_map.lock, portMAX_DELAY) == pdTRUE) {
-                if (!s_map.status.visible) {
-                    s_map.status.worker_running = false;
-                    xSemaphoreGive(s_map.lock);
-                    break;
-                }
-                if (completed_frame_locked()) {
-                    s_map.status.worker_running = false;
-                    set_message_locked("ready", "Map ready");
-                    xSemaphoreGive(s_map.lock);
-                    break;
-                }
-                plan = s_map.plan;
-                generation = s_map.status.generation;
+        d1l_map_tile_plan_t plan = {0};
+        uint32_t generation = 0U;
+        if (xSemaphoreTake(s_map.lock, portMAX_DELAY) == pdTRUE) {
+            if (!s_map.status.visible) {
+                s_map.status.worker_running = false;
                 xSemaphoreGive(s_map.lock);
+                break;
             }
-
-            /* The generation snapshot above is authoritative.  Drain any
-             * notifications that led to it so a request superseded while the
-             * previous generation was running cannot replay this same plan a
-             * second time after it completes.  A later request still changes
-             * generation and is detected by the rerun check below. */
-            (void)ulTaskNotifyTake(pdTRUE, 0U);
-
-            run_generation(&plan, generation);
-            if (xSemaphoreTake(s_map.lock, portMAX_DELAY) == pdTRUE) {
-                if (s_map.status.generation == generation) {
-                    s_map.status.worker_running = false;
-                }
-                const bool rerun = s_map.status.visible &&
-                                   s_map.status.generation != generation;
+            if (completed_frame_locked()) {
+                s_map.status.worker_running = false;
+                set_message_locked("ready", "Map ready");
                 xSemaphoreGive(s_map.lock);
-                if (!rerun) {
-                    break;
-                }
+                break;
+            }
+            plan = s_map.plan;
+            generation = s_map.status.generation;
+            xSemaphoreGive(s_map.lock);
+        }
+
+        /* The generation snapshot above is authoritative. Drain the wake that
+         * selected it so a superseded request cannot replay the same plan. */
+        (void)ulTaskNotifyTake(pdTRUE, 0U);
+
+        run_generation(&plan, generation);
+        if (xSemaphoreTake(s_map.lock, portMAX_DELAY) == pdTRUE) {
+            if (s_map.status.generation == generation) {
+                s_map.status.worker_running = false;
+            }
+            const bool rerun = s_map.status.visible &&
+                               s_map.status.generation != generation;
+            xSemaphoreGive(s_map.lock);
+            if (!rerun) {
+                break;
             }
         }
     }
@@ -593,20 +600,12 @@ esp_err_t d1l_map_view_service_init(void)
     s_map.status.current_view_only = true;
     s_map.status.public_rf_tx = false;
     s_map.status.formats_sd = false;
+    s_map.status.worker_stack_bytes =
+        D1L_MAP_SHARED_WORKER_STACK_BYTES;
     d1l_map_tile_provider_t provider = {0};
     d1l_map_tile_provider_builtin(&provider);
     set_provider_locked(&provider);
     set_message_locked("idle", "Open Map to load the current view");
-    if (xTaskCreate(map_worker, "d1l_map", D1L_MAP_WORKER_STACK_BYTES, NULL,
-                    D1L_MAP_WORKER_PRIORITY, &s_map.worker) != pdPASS) {
-        heap_caps_free(s_map.frames[0]);
-        heap_caps_free(s_map.frames[1]);
-        heap_caps_free(s_map.compressed);
-        heap_caps_free(s_map.decoded_tile);
-        vSemaphoreDelete(s_map.lock);
-        memset(&s_map, 0, sizeof(s_map));
-        return ESP_ERR_NO_MEM;
-    }
     s_map.status.initialized = true;
     return ESP_OK;
 }
@@ -644,12 +643,25 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
     if (!force_reload && same_plan &&
         (s_map.status.visible || completed_frame_locked())) {
         s_map.status.visible = true;
+        const uint32_t generation = s_map.status.generation;
         if (completed_frame_locked()) {
             s_map.status.worker_running = false;
             set_message_locked("ready", "Map ready");
         }
-        *out_generation = s_map.status.generation;
         xSemaphoreGive(s_map.lock);
+        ret = d1l_map_prefetch_service_wake();
+        if (ret != ESP_OK) {
+            if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                if (s_map.status.generation == generation) {
+                    s_map.status.visible = false;
+                    set_message_locked("worker_unavailable",
+                                       "Map worker is unavailable");
+                }
+                xSemaphoreGive(s_map.lock);
+            }
+            return ret;
+        }
+        *out_generation = generation;
         return ESP_OK;
     }
     uint32_t generation = s_map.status.generation + 1U;
@@ -675,8 +687,19 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
     s_map.status.planned_tiles = plan.count;
     set_message_locked("queued", "Loading current map view");
     xSemaphoreGive(s_map.lock);
+    ret = d1l_map_prefetch_service_wake();
+    if (ret != ESP_OK) {
+        if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(1000)) == pdTRUE) {
+            if (s_map.status.generation == generation) {
+                s_map.status.visible = false;
+                set_message_locked("worker_unavailable",
+                                   "Map worker is unavailable");
+            }
+            xSemaphoreGive(s_map.lock);
+        }
+        return ret;
+    }
     *out_generation = generation;
-    xTaskNotifyGive(s_map.worker);
     return ESP_OK;
 }
 
@@ -708,9 +731,7 @@ void d1l_map_view_service_release_visible(uint32_t generation)
         set_message_locked("hidden", "Map is not visible");
     }
     xSemaphoreGive(s_map.lock);
-    if (s_map.worker) {
-        xTaskNotifyGive(s_map.worker);
-    }
+    (void)d1l_map_prefetch_service_wake();
 }
 
 void d1l_map_view_service_status(d1l_map_view_status_t *out_status)

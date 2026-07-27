@@ -8,6 +8,8 @@
 
 #include "map/map_math.h"
 
+#define D1L_MAP_SHARED_WORKER_STACK_BYTES 20480U
+
 typedef struct {
     bool initialized;
     bool visible;
@@ -26,6 +28,8 @@ typedef struct {
     uint32_t retry_after_sec;
     uint32_t decode_total_us;
     uint32_t decode_max_us;
+    uint32_t worker_stack_bytes;
+    uint32_t worker_stack_free_bytes;
     int32_t lat_e7;
     int32_t lon_e7;
     uint16_t width;
@@ -58,6 +62,9 @@ typedef struct {
 } d1l_map_view_frame_t;
 
 esp_err_t d1l_map_view_service_init(void);
+/* Runs pending visible-map work on the single map/TLS worker. Only the
+ * background map service owns that worker and may call this entry point. */
+void d1l_map_view_service_run_pending(void);
 esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
                                                int32_t lon_e7,
                                                uint8_t zoom,

@@ -183,6 +183,115 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
     assert app_main.index("d1l_connectivity_init()") < app_main.index("d1l_ui_phase1_start()")
 
 
+def test_wifi_status_uses_event_cached_signal_without_live_driver_poll():
+    source = read("main/comms/connectivity_manager.c")
+
+    fill_status = source[
+        source.index("static void fill_status"):
+        source.index("esp_err_t d1l_connectivity_prepare_reboot")
+    ]
+    assert "wifi_signal_snapshot" in fill_status
+    assert "esp_wifi_sta_get_ap_info" not in fill_status
+    assert "esp_wifi_sta_get_rssi" not in fill_status
+
+    event_handler = source[
+        source.index("static void wifi_event_handler"):
+        source.index("static void stop_wifi_runtime")
+    ]
+    connected = event_handler[
+        event_handler.index("WIFI_EVENT_STA_CONNECTED"):
+        event_handler.index("IP_EVENT_STA_GOT_IP")
+    ]
+    disconnected = event_handler[
+        event_handler.index("WIFI_EVENT_STA_DISCONNECTED"):
+        event_handler.index("WIFI_EVENT_STA_START")
+    ]
+    assert "wifi_event_sta_connected_t" in connected
+    assert "event->channel" in connected
+    assert "event->bssid" in connected
+    assert disconnected.index("wifi_link_cache_clear()") < disconnected.index(
+        "if (suppress_retry)"
+    )
+
+    scan = source[
+        source.index("esp_err_t d1l_connectivity_wifi_scan"):
+        source.index("esp_err_t d1l_connectivity_wifi_connect")
+    ]
+    assert "wifi_signal_update_from_scan(&records[i])" in scan
+    scan_update = source[
+        source.index("static bool wifi_signal_update_from_scan"):
+        source.index("static d1l_wifi_failure_class_t")
+    ]
+    assert "s_wifi_bssid_valid" in scan_update
+    assert "memcmp(s_wifi_bssid, ap->bssid" in scan_update
+
+
+def test_wifi_driver_teardown_is_bounded_by_network_quiesce():
+    source = read("main/comms/connectivity_manager.c")
+    shutdown_begin = source[
+        source.index("static esp_err_t wifi_shutdown_begin"):
+        source.index("static void wifi_shutdown_end")
+    ]
+    quiesce_begin = source[
+        source.index("static esp_err_t wifi_network_quiesce_begin"):
+        source.index("static void wifi_network_quiesce_end")
+    ]
+    disable = source[
+        source.index("esp_err_t d1l_connectivity_set_wifi_enabled"):
+        source.index("esp_err_t d1l_connectivity_set_ble_enabled")
+    ]
+    disable_path = disable[
+        disable.index("if (!enabled)"):
+        disable.index("settings.ble_companion_enabled = false")
+    ]
+    ble = source[
+        source.index("esp_err_t d1l_connectivity_set_ble_enabled"):
+        source.index("esp_err_t d1l_connectivity_save_wifi_profile")
+    ]
+    prepare_reboot = source[
+        source.index("esp_err_t d1l_connectivity_prepare_reboot"):
+        source.index("esp_err_t d1l_connectivity_init")
+    ]
+    status = source[
+        source.index("static void fill_status"):
+        source.index("esp_err_t d1l_connectivity_prepare_reboot")
+    ]
+
+    assert shutdown_begin.index("take_wifi_control()") < shutdown_begin.index(
+        "wifi_network_quiesce_begin("
+    )
+    assert quiesce_begin.index(
+        "s_wifi_network_cancel_requested = true"
+    ) < quiesce_begin.index("xSemaphoreTake(s_wifi_network_mutex")
+    stop_index = disable_path.index("stop_wifi_runtime()")
+    assert disable_path.index("wifi_shutdown_begin(") < disable_path.index(
+        "d1l_settings_update_fields("
+    ) < disable_path.index(
+        "d1l_wifi_retry_policy_disable"
+    ) < stop_index < disable_path.index("wifi_shutdown_end(", stop_index)
+    save_failure = disable_path.split(
+        "ret = d1l_settings_update_fields(", 1
+    )[1].split("portENTER_CRITICAL", 1)[0]
+    assert save_failure.index("wifi_shutdown_end(") < save_failure.index(
+        "return ret;"
+    )
+    ble_stop_index = ble.index("stop_wifi_runtime()")
+    assert ble.index("wifi_shutdown_begin(") < ble.index(
+        "d1l_settings_update_fields("
+    ) < ble_stop_index < ble.index("wifi_shutdown_end(", ble_stop_index)
+    assert prepare_reboot.index("wifi_shutdown_begin(") < prepare_reboot.index(
+        "esp_wifi_stop()"
+    ) < prepare_reboot.index("wifi_shutdown_end(")
+    assert "s_wifi_connected && !network_cancel_requested" in status
+
+    disconnect = source[
+        source.index("esp_err_t d1l_connectivity_wifi_disconnect"):
+        source.index("esp_err_t d1l_connectivity_set_wifi_enabled")
+    ]
+    assert "wifi_link_cache_clear()" in disconnect
+    assert source.count("wifi_link_cache_clear()") >= 6
+
+
 def test_console_command_snapshots_leave_internal_heap_for_late_wifi_start():
     console = read("main/comms/usb_console.c")
     app_model = read("main/app/app_model.c")

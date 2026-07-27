@@ -570,6 +570,15 @@ def test_connected_status_requires_one_kib_retry_stack_margin():
     assert wifi.connected_status_ok(wifi.wifi_status_snapshot(exact), TARGET) is True
 
 
+def test_connected_status_accepts_truthful_unknown_rssi_until_scan():
+    status = FakeWifiDevice(enabled=True).status()
+    status["rssi_dbm"] = 0
+
+    assert wifi.connected_status_ok(
+        wifi.wifi_status_snapshot(status), TARGET
+    ) is True
+
+
 def test_health_summary_allows_expected_active_allocation_after_recovery():
     first = wifi.health_snapshot(FakeWifiDevice().health())
     transient = copy.deepcopy(first)

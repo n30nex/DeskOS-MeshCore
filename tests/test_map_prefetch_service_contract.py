@@ -85,6 +85,58 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     assert "status->cache_used_bytes = result.cache_used_bytes" in service
 
 
+def test_map_https_paths_share_one_measured_internal_worker_stack():
+    prefetch = read("main/map/map_prefetch_service.c")
+    prefetch_header = read("main/map/map_prefetch_service.h")
+    view = read("main/map/map_view_service.c")
+    view_header = read("main/map/map_view_service.h")
+    console = read("main/comms/usb_console.c")
+    dispatcher = prefetch.split(
+        "static void prefetch_worker(void *context)", 1
+    )[1].split("esp_err_t d1l_map_prefetch_service_init", 1)[0]
+
+    assert "#define D1L_MAP_SHARED_WORKER_STACK_BYTES 20480U" in view_header
+    assert (
+        "#define D1L_MAP_PREFETCH_WORKER_PRIORITY (tskIDLE_PRIORITY + 1U)"
+        in prefetch
+    )
+    assert "#define D1L_MAP_VISIBLE_WORKER_PRIORITY 2U" in prefetch
+    assert (
+        "#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES \\\n"
+        "    D1L_MAP_SHARED_WORKER_STACK_BYTES"
+    ) in prefetch
+    assert "uxTaskGetStackHighWaterMark(NULL)" in prefetch
+    assert "uxTaskGetStackHighWaterMark(NULL)" in view
+    assert prefetch.count("xTaskCreate(") == 1
+    assert "xTaskCreate(" not in view
+    assert "run_prefetch_pass()" in dispatcher
+    assert "d1l_map_view_service_run_pending()" in prefetch
+    assert "static __attribute__((noinline)) void run_prefetch_pass" in prefetch
+    assert "static __attribute__((noinline)) void publish_visible_pause" in prefetch
+    assert "publish_visible_pause()" in dispatcher
+    assert (
+        dispatcher.index(
+            "vTaskPrioritySet(NULL, D1L_MAP_VISIBLE_WORKER_PRIORITY)"
+        )
+        < dispatcher.index("d1l_map_view_service_run_pending()")
+        < dispatcher.index(
+            "vTaskPrioritySet(NULL, D1L_MAP_PREFETCH_WORKER_PRIORITY)"
+        )
+    )
+    assert "d1l_settings_t" not in dispatcher
+    assert "d1l_map_prefetch_plan_t" not in dispatcher
+    assert "d1l_map_prefetch_status_t" not in dispatcher
+    assert "ulTaskNotifyTake(" in prefetch
+    assert "xTaskNotifyGive(worker)" in prefetch
+    assert view.count("d1l_map_prefetch_service_wake()") == 3
+    assert "worker_stack_bytes" in prefetch_header
+    assert "worker_stack_free_bytes" in prefetch_header
+    assert "worker_stack_bytes" in view_header
+    assert "worker_stack_free_bytes" in view_header
+    assert console.count('\\"worker_stack_bytes\\":%lu') >= 2
+    assert console.count('\\"worker_stack_free_bytes\\":%lu') >= 2
+
+
 def test_map_ui_exposes_provider_and_background_state():
     ui = read("main/ui/ui_map.c")
     view_header = read("main/map/map_view_service.h")
