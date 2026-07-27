@@ -128,7 +128,7 @@
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "60ff5504552f17acce7c4858afb0ea6a9a3420c4352098a70c2b8834b06e4f31",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "d4d8b41cf5ed9c056ee53294dba4ac8f4cf99446f1b9946ac929f4005afb440e",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
