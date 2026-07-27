@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "hal/rp2040_bridge.h"
 #include "mbedtls/sha256.h"
+#include "mesh/route_store_worker.h"
 #include "storage/map_tile_store.h"
 
 #define D1L_MAP_PROVIDER_FILE_TIMEOUT_MS 10000U
@@ -1026,23 +1027,41 @@ static void provider_repair_set_stage(
 
 static esp_err_t provider_repair_quiesce_storage(
     d1l_map_provider_repair_result_t *result,
-    bool *manager_quiesced)
+    bool *manager_quiesced,
+    bool *retained_worker_quiesced)
 {
-    if (!result || !manager_quiesced) {
+    if (!result || !manager_quiesced || !retained_worker_quiesced) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (*manager_quiesced) {
+    if (!*manager_quiesced) {
+        result->storage_manager_quiesce_attempted = true;
+        const esp_err_t manager_ret = d1l_storage_manager_quiesce_begin(
+            D1L_MAP_PROVIDER_REPAIR_MANAGER_QUIESCE_TIMEOUT_MS);
+        if (manager_ret != ESP_OK) {
+            return manager_ret;
+        }
+        *manager_quiesced = true;
+        result->storage_manager_paused = true;
+        result->storage_manager_quiesced = true;
+    }
+    if (*retained_worker_quiesced) {
         return ESP_OK;
     }
-    result->storage_manager_quiesce_attempted = true;
-    const esp_err_t ret = d1l_storage_manager_quiesce_begin(
+
+    /*
+     * Match the storage manager's established lock order. The common retained
+     * worker owns Public/DM/packet/route/node/contact/checkpoint SD traffic;
+     * holding only the manager sequence still permits that producer to begin a
+     * bridge file exchange between recovery reads and forward mutations.
+     */
+    result->retained_worker_quiesce_attempted = true;
+    const esp_err_t retained_ret = d1l_route_store_worker_quiesce_begin(
         D1L_MAP_PROVIDER_REPAIR_MANAGER_QUIESCE_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        return ret;
+    if (retained_ret != ESP_OK) {
+        return retained_ret;
     }
-    *manager_quiesced = true;
-    result->storage_manager_paused = true;
-    result->storage_manager_quiesced = true;
+    *retained_worker_quiesced = true;
+    result->retained_worker_quiesced = true;
     return ESP_OK;
 }
 
@@ -1127,6 +1146,7 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     bool repair_invalid = false;
     bool stage_001_exists = false;
     bool manager_quiesced = false;
+    bool retained_worker_quiesced = false;
     bool canonical_exists = false;
     bool stage_exists = false;
     esp_err_t ret = provider_path_exists(
@@ -1228,7 +1248,7 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     if (!out_result->stage_reused) {
         provider_repair_set_stage(out_result, "storage_quiesce");
         ret = provider_repair_quiesce_storage(
-            out_result, &manager_quiesced);
+            out_result, &manager_quiesced, &retained_worker_quiesced);
         if (ret != ESP_OK) {
             goto done;
         }
@@ -1262,7 +1282,7 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
     if (repair_invalid) {
         provider_repair_set_stage(out_result, "storage_quiesce");
         ret = provider_repair_quiesce_storage(
-            out_result, &manager_quiesced);
+            out_result, &manager_quiesced, &retained_worker_quiesced);
         if (ret != ESP_OK) {
             goto done;
         }
@@ -1272,12 +1292,19 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
          * immediate re-read so the exact invalid bytes cannot race another
          * bridge file user before the create-new backup copy.
          */
-        ret = read_provider_path(
+        out_result->canonical_reverify_attempted = true;
+        const esp_err_t reverify_ret = read_provider_path(
             D1L_MAP_PROVIDER_CONFIG_PATH, verify, sizeof(verify),
             &verify_size);
-        if (ret != ESP_OK || verify_size != before_size ||
-            memcmp(verify, before, before_size) != 0) {
-            ret = ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+        out_result->canonical_reverify_io_result = reverify_ret;
+        out_result->canonical_reverify_bytes = verify_size;
+        out_result->canonical_reverify_bytes_match =
+            reverify_ret == ESP_OK &&
+            verify_size == before_size &&
+            memcmp(verify, before, before_size) == 0;
+        if (!out_result->canonical_reverify_bytes_match) {
+            ret = reverify_ret == ESP_OK ?
+                ESP_ERR_INVALID_STATE : reverify_ret;
             goto done;
         }
 
@@ -1351,7 +1378,7 @@ esp_err_t d1l_map_tile_provider_repair_invalid_default(
         }
         provider_repair_set_stage(out_result, "storage_quiesce");
         ret = provider_repair_quiesce_storage(
-            out_result, &manager_quiesced);
+            out_result, &manager_quiesced, &retained_worker_quiesced);
         if (ret != ESP_OK) {
             goto done;
         }
@@ -1432,6 +1459,10 @@ publish:
     ret = ESP_OK;
 
 done:
+    if (retained_worker_quiesced) {
+        d1l_route_store_worker_quiesce_end();
+        out_result->retained_worker_quiesce_released = true;
+    }
     if (manager_quiesced) {
         d1l_storage_manager_quiesce_end();
         out_result->storage_manager_resumed = true;

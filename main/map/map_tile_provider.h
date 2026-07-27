@@ -65,12 +65,17 @@ typedef struct {
     bool storage_manager_quiesce_attempted;
     bool storage_manager_quiesced;
     bool storage_manager_quiesce_released;
+    bool retained_worker_quiesce_attempted;
+    bool retained_worker_quiesced;
+    bool retained_worker_quiesce_released;
     bool stage_reused;
     bool backup_copy_attempted;
     bool backup_copy_performed;
     bool backup_copy_uncertain;
     bool backup_bytes_verified;
     bool backup_hash_verified;
+    bool canonical_reverify_attempted;
+    bool canonical_reverify_bytes_match;
     bool canonical_delete_attempted;
     bool canonical_delete_performed;
     bool canonical_delete_uncertain;
@@ -85,7 +90,9 @@ typedef struct {
     bool final_valid;
     bool final_builtin_exact;
     size_t before_bytes;
+    size_t canonical_reverify_bytes;
     size_t final_bytes;
+    esp_err_t canonical_reverify_io_result;
     char action[D1L_MAP_PROVIDER_ACTION_MAX + 1U];
     char recovery_stage[D1L_MAP_PROVIDER_RECOVERY_STAGE_MAX + 1U];
     char source_id[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];

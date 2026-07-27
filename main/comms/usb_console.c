@@ -3727,6 +3727,25 @@ static void print_map_provider_repair_fields(
            repair ? (unsigned)repair->final_bytes : 0U,
            (unsigned)D1L_MAP_PROVIDER_DEFAULT_MANIFEST_BYTES);
     print_json_string(D1L_MAP_PROVIDER_DEFAULT_MANIFEST_SHA256);
+    printf(",\"retained_worker_quiesce_attempted\":%s,"
+           "\"retained_worker_quiesced\":%s,"
+           "\"retained_worker_quiesce_released\":%s,"
+           "\"canonical_reverify_attempted\":%s,"
+           "\"canonical_reverify_bytes\":%u,"
+           "\"canonical_reverify_bytes_match\":%s,"
+           "\"canonical_reverify_io_code\":",
+           bool_json(
+               repair && repair->retained_worker_quiesce_attempted),
+           bool_json(repair && repair->retained_worker_quiesced),
+           bool_json(
+               repair && repair->retained_worker_quiesce_released),
+           bool_json(repair && repair->canonical_reverify_attempted),
+           repair ? (unsigned)repair->canonical_reverify_bytes : 0U,
+           bool_json(repair && repair->canonical_reverify_bytes_match));
+    print_json_string(
+        repair && repair->canonical_reverify_attempted ?
+            esp_err_to_name(repair->canonical_reverify_io_result) :
+            "NOT_ATTEMPTED");
     printf(",\"source_id\":");
     print_json_string(repair ? repair->source_id : "");
     printf(",\"stage_path\":");
@@ -3770,6 +3789,10 @@ static void cmd_map_provider_repair_invalid(void)
             repair.storage_manager_quiesce_attempted &&
                     !repair.storage_manager_quiesced ?
                 "storage manager quiesce could not be acquired; no recovery "
+                "mutation was started" :
+            repair.retained_worker_quiesce_attempted &&
+                    !repair.retained_worker_quiesced ?
+                "retained worker quiesce could not be acquired; no recovery "
                 "mutation was started" :
             repair.canonical_missing_recoverable ?
                 "canonical is absent; the verified backup and exact stage "

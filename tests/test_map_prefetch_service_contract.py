@@ -180,8 +180,16 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     )[1].split("static esp_err_t verify_invalid_provider_copy", 1)[0]
 
     assert "d1l_storage_manager_quiesce_begin(" in quiesce_helper
+    assert "d1l_route_store_worker_quiesce_begin(" in quiesce_helper
+    assert quiesce_helper.index(
+        "d1l_storage_manager_quiesce_begin("
+    ) < quiesce_helper.index("d1l_route_store_worker_quiesce_begin(")
     assert "d1l_storage_manager_pause(" not in quiesce_helper
+    assert "d1l_route_store_worker_quiesce_end();" in repair
     assert "d1l_storage_manager_quiesce_end();" in repair
+    assert repair.index("d1l_route_store_worker_quiesce_end();") < (
+        repair.index("d1l_storage_manager_quiesce_end();")
+    )
     assert "d1l_storage_manager_resume();" not in repair
     assert "D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH" in repair
     assert "out_result->stage_reused = true;" in repair
@@ -212,6 +220,8 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     assert invalid_flow.index("ret = read_provider_path(") < (
         invalid_flow.index("write_provider_create_new(")
     )
+    assert "canonical_reverify_io_result = reverify_ret;" in invalid_flow
+    assert "canonical_reverify_bytes_match" in invalid_flow
     assert (
         "out_result->stage_path, D1L_MAP_PROVIDER_CONFIG_PATH, false"
         in repair
@@ -219,4 +229,7 @@ def test_invalid_provider_repair_copies_then_commits_forward_only():
     assert "canonical_missing_recoverable" in repair
     assert '"delete_performed\\":%s' in console
     assert '"backup_copy_create_new_only\\":true' in console
+    assert '"retained_worker_quiesce_attempted\\":%s' in console
+    assert '"retained_worker_quiesced\\":%s' in console
+    assert '"canonical_reverify_io_code\\":' in console
     assert '"rollback_attempted\\":false' in console
