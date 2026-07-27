@@ -124,12 +124,13 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     ready_index = send.index("channel_message_generation_ready()")
     copy_index = send.index("d1l_channel_store_copy_protocol_key")
     timestamp_index = send.index("d1l_time_service_preflight_protocol_timestamp")
-    start_index = send.index("D1L_MESHCORE_SERVICE_CMD_START_RX")
     hash_index = send.index("d1l_meshcore_packet_hash_calculate")
     pending_index = send.index("remember_pending_channel_tx(channel_id, text,")
     radio_index = send.index("meshcore_service_send_raw")
-    assert ready_index < copy_index < timestamp_index < start_index
-    assert start_index < hash_index < pending_index < radio_index
+    assert ready_index < copy_index < timestamp_index < hash_index
+    assert hash_index < pending_index < radio_index
+    assert "D1L_MESHCORE_SERVICE_CMD_START_RX" not in send
+    assert "D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS" in send
     assert "d1l_channel_store_find_unique_hash" not in send
     assert "secure_zero_channel_key(&channel_key)" in send
 

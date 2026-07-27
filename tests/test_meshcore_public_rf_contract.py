@@ -77,8 +77,10 @@ def test_meshcore_service_rejects_139_byte_or_invalid_utf8_text_without_truncati
     assert "memcpy(&plain[5], text, message_len)" in dm_builder
     assert "validate_user_text(text)" in public_sender
     assert public_sender.index("validate_user_text(text)") < public_sender.index(
-        "meshcore_service_send_command(&start_cmd"
+        "meshcore_service_send_raw_kind("
     )
+    assert "D1L_MESHCORE_SERVICE_CMD_START_RX" not in public_sender
+    assert "D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS" in public_sender
     assert "validate_user_text(cmd->dm_text)" in dm_sender
     assert dm_sender.index("validate_user_text(cmd->dm_text)") < dm_sender.index(
         "d1l_meshcore_service_ensure_identity()"

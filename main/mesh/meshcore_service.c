@@ -87,6 +87,7 @@
 #define D1L_MESHCORE_OWNER_POLL_MS 250U
 #define D1L_MESHCORE_TX_WATCHDOG_GRACE_MS 250U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
+#define D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS 5000U
 #define D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS 5000U
 #define D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS 20U
 #define D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS 2000U
@@ -7985,15 +7986,12 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         s_status.rejected_commands++;
         return ret;
     }
-    d1l_meshcore_service_cmd_t start_cmd = {
-        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
-    };
-    ret = meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        secure_zero_channel_key(&channel_key);
-        s_status.rejected_commands++;
-        return ret;
-    }
+    /*
+     * SEND_RAW is already owner-dispatched and calls ensure_radio_started().
+     * A separate synchronous START_RX request doubles the admission window
+     * and can expire behind a legitimate retained RX event before the actual
+     * channel TX is even queued.
+     */
     if (s_tx_busy) {
         secure_zero_channel_key(&channel_key);
         s_status.rejected_commands++;
@@ -8038,7 +8036,7 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         return ret;
     }
     ret = meshcore_service_send_raw_kind(
-        raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS,
+        raw, raw_len, D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS,
         D1L_MESH_TX_OPERATION_PUBLIC);
     if (ret != ESP_OK) {
         clear_pending_channel_tx();
