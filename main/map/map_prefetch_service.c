@@ -19,8 +19,8 @@
 
 #define D1L_MAP_PREFETCH_WORKER_STACK_BYTES \
     D1L_MAP_SHARED_WORKER_STACK_BYTES
-#define D1L_MAP_PREFETCH_WORKER_PRIORITY \
-    D1L_MAP_SHARED_WORKER_PRIORITY
+#define D1L_MAP_PREFETCH_WORKER_PRIORITY (tskIDLE_PRIORITY + 1U)
+#define D1L_MAP_VISIBLE_WORKER_PRIORITY 2U
 #define D1L_MAP_PREFETCH_POLL_MS 5000U
 #define D1L_MAP_PREFETCH_ERROR_BACKOFF_SEC 30U
 #define D1L_MAP_PREFETCH_DEFAULT_RATE_BACKOFF_SEC 300U
@@ -601,7 +601,9 @@ static void prefetch_worker(void *context)
         }
 
         publish_visible_pause();
+        vTaskPrioritySet(NULL, D1L_MAP_VISIBLE_WORKER_PRIORITY);
         d1l_map_view_service_run_pending();
+        vTaskPrioritySet(NULL, D1L_MAP_PREFETCH_WORKER_PRIORITY);
         task_pause();
     }
 }

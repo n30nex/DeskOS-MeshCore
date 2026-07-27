@@ -9,7 +9,6 @@
 #include "map/map_math.h"
 
 #define D1L_MAP_SHARED_WORKER_STACK_BYTES 20480U
-#define D1L_MAP_SHARED_WORKER_PRIORITY 2U
 
 typedef struct {
     bool initialized;

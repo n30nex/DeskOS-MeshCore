@@ -96,7 +96,11 @@ def test_map_https_paths_share_one_measured_internal_worker_stack():
     )[1].split("esp_err_t d1l_map_prefetch_service_init", 1)[0]
 
     assert "#define D1L_MAP_SHARED_WORKER_STACK_BYTES 20480U" in view_header
-    assert "#define D1L_MAP_SHARED_WORKER_PRIORITY 2U" in view_header
+    assert (
+        "#define D1L_MAP_PREFETCH_WORKER_PRIORITY (tskIDLE_PRIORITY + 1U)"
+        in prefetch
+    )
+    assert "#define D1L_MAP_VISIBLE_WORKER_PRIORITY 2U" in prefetch
     assert (
         "#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES \\\n"
         "    D1L_MAP_SHARED_WORKER_STACK_BYTES"
@@ -110,6 +114,15 @@ def test_map_https_paths_share_one_measured_internal_worker_stack():
     assert "static __attribute__((noinline)) void run_prefetch_pass" in prefetch
     assert "static __attribute__((noinline)) void publish_visible_pause" in prefetch
     assert "publish_visible_pause()" in dispatcher
+    assert (
+        dispatcher.index(
+            "vTaskPrioritySet(NULL, D1L_MAP_VISIBLE_WORKER_PRIORITY)"
+        )
+        < dispatcher.index("d1l_map_view_service_run_pending()")
+        < dispatcher.index(
+            "vTaskPrioritySet(NULL, D1L_MAP_PREFETCH_WORKER_PRIORITY)"
+        )
+    )
     assert "d1l_settings_t" not in dispatcher
     assert "d1l_map_prefetch_plan_t" not in dispatcher
     assert "d1l_map_prefetch_status_t" not in dispatcher
