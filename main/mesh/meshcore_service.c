@@ -1640,7 +1640,7 @@ static d1l_pending_dm_ack_transition_result_t transition_pending_dm_ack(
     const uint64_t session_id = owner->session_id;
     const uint32_t expected_revision = owner->revision;
     d1l_dm_delivery_transition_outcome_t outcome = {0};
-    const esp_err_t ret = d1l_dm_store_transition_delivery(
+    const esp_err_t ret = d1l_dm_store_transition_delivery_deferred(
         session_id, D1L_DM_DELIVERY_AWAITING_ACK, expected_revision,
         D1L_DM_DELIVERY_ACKNOWLEDGED,
         D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &outcome);
@@ -6854,12 +6854,34 @@ static void meshcore_service_task(void *arg)
             forced_normal = held_forced_normal;
             received = true;
         } else {
-            work = d1l_mesh_owner_scheduler_choose(
-                &scheduler, false,
-                uxQueueMessagesWaiting(s_radio_event_queue) > 0U,
-                uxQueueMessagesWaiting(s_priority_command_queue) > 0U,
-                uxQueueMessagesWaiting(s_service_queue) > 0U,
-                &forced_normal);
+            const bool radio_event_available =
+                uxQueueMessagesWaiting(s_radio_event_queue) > 0U;
+            const bool priority_command_available =
+                uxQueueMessagesWaiting(s_priority_command_queue) > 0U;
+            const bool urgent_ack_response =
+                s_pending_ack_tx.active && !s_tx_busy &&
+                priority_command_available;
+            if (urgent_ack_response) {
+                /*
+                 * An inbound DM already reserved one bounded ACK response.
+                 * Dispatch it before another RX event can enter durable ACK
+                 * or PATH persistence and hold the sole owner past the peer's
+                 * acknowledgement deadline.  Only one pending ACK identity
+                 * exists, so this protocol-timing override is self-bounded.
+                 */
+                scheduler.radio_event_burst = 0U;
+                if (scheduler.priority_command_burst <
+                    D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX) {
+                    scheduler.priority_command_burst++;
+                }
+                work = D1L_MESH_OWNER_WORK_PRIORITY_COMMAND;
+            } else {
+                work = d1l_mesh_owner_scheduler_choose(
+                    &scheduler, false, radio_event_available,
+                    priority_command_available,
+                    uxQueueMessagesWaiting(s_service_queue) > 0U,
+                    &forced_normal);
+            }
             runtime_note_value_high_water(
                 scheduler.priority_command_burst,
                 &s_runtime_priority_burst_high_water);
@@ -7368,7 +7390,12 @@ static esp_err_t meshcore_service_send_ack_async(
         .ack_response = true,
     };
     memcpy(cmd.raw, raw, raw_len);
-    if (xQueueSend(s_priority_command_queue, &cmd, 0) != pdTRUE) {
+    /*
+     * ACK timing outranks older Admin/raw priority work.  The owner-side
+     * urgent dispatch below is only meaningful when this exact ACK is the
+     * next item removed from the shared priority lane.
+     */
+    if (xQueueSendToFront(s_priority_command_queue, &cmd, 0) != pdTRUE) {
         runtime_note_command_saturation(true);
         complete_pending_ack_tx(false, ESP_ERR_TIMEOUT);
         return ESP_ERR_TIMEOUT;

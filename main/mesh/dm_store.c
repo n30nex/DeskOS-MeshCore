@@ -3095,7 +3095,7 @@ static esp_err_t transition_delivery_internal(
     uint32_t expected_delivery_revision,
     d1l_dm_delivery_state_t next_state,
     d1l_dm_delivery_reason_t reason, esp_err_t error,
-    bool rebind_retry_ack, uint32_t retry_ack_hash,
+    bool rebind_retry_ack, uint32_t retry_ack_hash, bool flush_now,
     d1l_dm_delivery_transition_outcome_t *outcome)
 {
     if (outcome) {
@@ -3108,10 +3108,16 @@ static esp_err_t transition_delivery_internal(
     if (delivery_session_id == 0U || expected_delivery_revision == 0U ||
         !d1l_dm_delivery_state_valid(expected_state) ||
         !d1l_dm_delivery_state_valid(next_state) ||
-        !d1l_dm_delivery_reason_valid(reason)) {
+        !d1l_dm_delivery_reason_valid(reason) ||
+        (!flush_now &&
+         (expected_state != D1L_DM_DELIVERY_AWAITING_ACK ||
+          next_state != D1L_DM_DELIVERY_ACKNOWLEDGED ||
+          reason != D1L_DM_DELIVERY_REASON_ACK_RECEIVED ||
+          error != ESP_OK || rebind_retry_ack))) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = ensure_store_initialized();
+    esp_err_t ret = flush_now ? ensure_store_initialized() :
+                                require_store_loaded_without_io();
     if (ret != ESP_OK) {
         if (outcome) {
             outcome->error = ret;
@@ -3169,7 +3175,17 @@ static esp_err_t transition_delivery_internal(
             outcome->persistence_retry = true;
             outcome->previous_state = expected_state;
         }
+        const bool persistence_pending =
+            find_ack_persistence_pending_locked(
+                entry->delivery_session_id, entry->delivery_revision) != NULL;
         d1l_store_lock_give(&s_store_lock);
+        if (!flush_now) {
+            if (outcome) {
+                outcome->durable = !persistence_pending;
+                outcome->error = ESP_OK;
+            }
+            return ESP_OK;
+        }
         ret = d1l_dm_store_flush();
         if (outcome) {
             outcome->durable = ret == ESP_OK;
@@ -3223,6 +3239,13 @@ static esp_err_t transition_delivery_internal(
     }
     d1l_store_lock_give(&s_store_lock);
 
+    if (!flush_now) {
+        if (outcome) {
+            outcome->durable = false;
+            outcome->error = ESP_OK;
+        }
+        return ESP_OK;
+    }
     ret = d1l_dm_store_flush();
     if (outcome) {
         outcome->durable = ret == ESP_OK;
@@ -3241,7 +3264,20 @@ esp_err_t d1l_dm_store_transition_delivery(
 {
     return transition_delivery_internal(
         delivery_session_id, expected_state, expected_delivery_revision,
-        next_state, reason, error, false, 0U, outcome);
+        next_state, reason, error, false, 0U, true, outcome);
+}
+
+esp_err_t d1l_dm_store_transition_delivery_deferred(
+    uint64_t delivery_session_id,
+    d1l_dm_delivery_state_t expected_state,
+    uint32_t expected_delivery_revision,
+    d1l_dm_delivery_state_t next_state,
+    d1l_dm_delivery_reason_t reason, esp_err_t error,
+    d1l_dm_delivery_transition_outcome_t *outcome)
+{
+    return transition_delivery_internal(
+        delivery_session_id, expected_state, expected_delivery_revision,
+        next_state, reason, error, false, 0U, false, outcome);
 }
 
 esp_err_t d1l_dm_store_transition_delivery_retry(
@@ -3253,7 +3289,7 @@ esp_err_t d1l_dm_store_transition_delivery_retry(
         delivery_session_id, D1L_DM_DELIVERY_RETRY_WAIT,
         expected_delivery_revision, D1L_DM_DELIVERY_RETRY_TX,
         D1L_DM_DELIVERY_REASON_RETRY_STARTED, ESP_OK, true,
-        retry_ack_hash, outcome);
+        retry_ack_hash, true, outcome);
 }
 
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash,

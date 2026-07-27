@@ -1761,6 +1761,14 @@ static void test_deferred_ack_unloaded_fails_without_storage_io(void)
                1U, digest, 2U) == ESP_ERR_INVALID_STATE);
     assert(d1l_dm_store_complete_ack_dispatch_deferred(
                1U, digest, false, ESP_FAIL) == ESP_ERR_INVALID_STATE);
+    d1l_dm_delivery_transition_outcome_t delivery = {0};
+    assert(d1l_dm_store_transition_delivery_deferred(
+               1U, D1L_DM_DELIVERY_AWAITING_ACK, 1U,
+               D1L_DM_DELIVERY_ACKNOWLEDGED,
+               D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &delivery) ==
+           ESP_ERR_INVALID_STATE);
+    assert(!delivery.changed && !delivery.durable);
+    assert(delivery.error == ESP_ERR_INVALID_STATE);
     d1l_dm_entry_t row = {0};
     assert(!d1l_dm_store_find_rx_identity_loaded(digest, &row));
 
@@ -2316,6 +2324,66 @@ static void test_ack_persistence_failure_recovers_same_revision_durably(void)
 
     assert(d1l_dm_store_init() == ESP_OK);
     assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
+    assert(row.delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED);
+    assert(row.delivery_revision == 6U);
+    assert(row.acked && row.delivered);
+}
+
+static void test_deferred_delivery_ack_waits_for_retained_flush(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    const d1l_dm_store_append_outcome_t append =
+        append_awaiting_ack(0xAEAEU, "deferred-delivery-ack");
+    const uint32_t sd_writes_before = s_sd_write_count;
+    const uint32_t nvs_writes_before = s_nvs_write_count;
+    const size_t operations_before = s_operation_count;
+
+    d1l_dm_delivery_transition_outcome_t admitted = {0};
+    assert(d1l_dm_store_transition_delivery_deferred(
+               append.delivery_session_id,
+               D1L_DM_DELIVERY_AWAITING_ACK, 5U,
+               D1L_DM_DELIVERY_ACKNOWLEDGED,
+               D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &admitted) ==
+           ESP_OK);
+    assert(admitted.changed && !admitted.durable);
+    assert(!admitted.persistence_retry && admitted.error == ESP_OK);
+    assert(admitted.current_state == D1L_DM_DELIVERY_ACKNOWLEDGED);
+    assert(admitted.delivery_revision == 6U);
+    assert(s_sd_write_count == sd_writes_before);
+    assert(s_nvs_write_count == nvs_writes_before);
+    assert(s_operation_count == operations_before);
+    assert(d1l_dm_store_stats().persistence_dirty);
+
+    /* Until the worker persists the admitted revision, all public store
+     * queries retain the exact AWAITING_ACK owner truth. */
+    d1l_dm_entry_t row = {0};
+    assert(d1l_dm_store_find_delivery_session(
+        append.delivery_session_id, &row));
+    assert(row.delivery_state == D1L_DM_DELIVERY_AWAITING_ACK);
+    assert(row.delivery_revision == 5U);
+    assert(!row.acked && !row.delivered);
+
+    d1l_dm_delivery_transition_outcome_t replay = {0};
+    assert(d1l_dm_store_transition_delivery_deferred(
+               append.delivery_session_id,
+               D1L_DM_DELIVERY_AWAITING_ACK, 5U,
+               D1L_DM_DELIVERY_ACKNOWLEDGED,
+               D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &replay) ==
+           ESP_OK);
+    assert(!replay.changed && replay.persistence_retry && !replay.durable);
+    assert(replay.delivery_revision == 6U);
+    assert(s_sd_write_count == sd_writes_before);
+    assert(s_nvs_write_count == nvs_writes_before);
+    assert(s_operation_count == operations_before);
+
+    /* This is the same non-forced entry point used by the retained worker. */
+    assert(d1l_dm_store_flush_if_due() == ESP_OK);
+    assert(s_sd_write_count == sd_writes_before);
+    assert(s_nvs_write_count == nvs_writes_before + 1U);
+    assert(!d1l_dm_store_stats().persistence_dirty);
+    assert(d1l_dm_store_find_delivery_session(
+        append.delivery_session_id, &row));
     assert(row.delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED);
     assert(row.delivery_revision == 6U);
     assert(row.acked && row.delivered);
@@ -2968,6 +3036,11 @@ int main(int argc, char **argv)
         puts("native DM deferred ACK unloaded path: ok");
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "deferred-delivery-ack") == 0) {
+        test_deferred_delivery_ack_waits_for_retained_flush();
+        puts("native DM deferred delivery ACK persistence: ok");
+        return 0;
+    }
     assert(argc == 1);
     test_late_ready_merges_before_primary_write();
     test_replacement_generation_forces_read_before_write();
@@ -3016,6 +3089,7 @@ int main(int argc, char **argv)
     test_full_ring_preserves_nonterminal_tx_until_exact_terminal();
     test_full_ring_terminal_head_still_evicts_normally();
     test_ack_persistence_failure_recovers_same_revision_durably();
+    test_deferred_delivery_ack_waits_for_retained_flush();
     test_failed_ack_reboot_never_invents_delivery();
     test_delivery_transition_cas_survives_reboot_truthfully();
     test_v5_dual_backend_migration_session_id_is_deterministic();

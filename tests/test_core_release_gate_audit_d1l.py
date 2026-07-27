@@ -2190,6 +2190,7 @@ def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
         **contact,
     }
     ack_hash = 1234567890
+    inbound_ack_hash = 987654321
     baseline_messages = {
         "ok": True,
         "fingerprint": fingerprint,
@@ -2221,6 +2222,9 @@ def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
                 "fingerprint": fingerprint,
                 "direction": "rx",
                 "text": inbound_token,
+                "delivered": True,
+                "ack_hash": inbound_ack_hash,
+                "path_hops": 0,
                 "ack_response": {
                     "identity_valid": True,
                     "state": "sent",
@@ -2242,13 +2246,37 @@ def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
             {
                 "seq": 11,
                 "direction": "rx",
-                "kind": "dm_ack",
-                "note": (f"ack {ack_hash} {rf.RADIO_LISTENER_CONTACT_NAME}"),
+                "kind": "path_return",
+                "note": "path CoreTestPeer hops=0",
                 "rssi_dbm": -70,
                 "snr_tenths": 80,
                 "path_hash_bytes": 1,
                 "path_hops": 0,
-                "payload_len": 12,
+                "payload_len": 22,
+            },
+            {
+                "seq": 12,
+                "direction": "rx",
+                "kind": "dm_text",
+                "note": f"CoreTestPeer: {inbound_token}",
+                "rssi_dbm": -68,
+                "snr_tenths": 75,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 38,
+            },
+            {
+                "seq": 13,
+                "direction": "tx",
+                "kind": "dm_ack",
+                "note": (
+                    f"direct_ack {inbound_ack_hash} CoreTestPeer"
+                ),
+                "rssi_dbm": 0,
+                "snr_tenths": 0,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 8,
             },
         ],
     }
@@ -2274,12 +2302,36 @@ def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
                 "target": fingerprint,
                 "kind": "dm_ack",
                 "direction": "rx",
-                "route": "direct",
+                "route": "flood",
                 "last_rssi_dbm": -70,
                 "last_snr_tenths": 80,
                 "path_hash_bytes": 1,
                 "path_hops": 0,
-                "payload_len": 12,
+                "payload_len": 22,
+            },
+            {
+                "seq": 22,
+                "target": fingerprint,
+                "kind": "dm_text",
+                "direction": "rx",
+                "route": "direct",
+                "last_rssi_dbm": -68,
+                "last_snr_tenths": 75,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 38,
+            },
+            {
+                "seq": 23,
+                "target": fingerprint,
+                "kind": "dm_ack",
+                "direction": "tx",
+                "route": "direct",
+                "last_rssi_dbm": 0,
+                "last_snr_tenths": 0,
+                "path_hash_bytes": 1,
+                "path_hops": 0,
+                "payload_len": 8,
             }
         ],
     }

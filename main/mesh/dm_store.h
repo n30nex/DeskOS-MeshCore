@@ -191,6 +191,16 @@ esp_err_t d1l_dm_store_transition_delivery(
     d1l_dm_delivery_state_t next_state,
     d1l_dm_delivery_reason_t reason, esp_err_t error,
     d1l_dm_delivery_transition_outcome_t *outcome);
+/* Admits only the exact AWAITING_ACK -> ACKNOWLEDGED CAS in loaded RAM.
+ * The retained worker owns persistence; public delivery truth remains masked
+ * until that exact next revision is durable. */
+esp_err_t d1l_dm_store_transition_delivery_deferred(
+    uint64_t delivery_session_id,
+    d1l_dm_delivery_state_t expected_state,
+    uint32_t expected_delivery_revision,
+    d1l_dm_delivery_state_t next_state,
+    d1l_dm_delivery_reason_t reason, esp_err_t error,
+    d1l_dm_delivery_transition_outcome_t *outcome);
 /* Atomically advances RETRY_WAIT -> RETRY_TX and binds the ACK identity of
  * the rebuilt attempt to the same retained delivery session. */
 esp_err_t d1l_dm_store_transition_delivery_retry(

@@ -3303,7 +3303,7 @@ def remote_rf_gate(
         final_route=final_route,
         outbound_token=outbound_token,
         fingerprint=fingerprint,
-        inbound_text=inbound_token,
+        inbound_token=inbound_token,
     )
     ack_ok = (
         transaction_correlation.get("ack_path_ok") is True
@@ -3706,6 +3706,7 @@ def rf_gate(
         final_route=final_route,
         outbound_token=outbound_token,
         fingerprint=fingerprint,
+        inbound_token=rf_acceptance.RADIO_LISTENER_REPLY,
     )
     ack_ok = (
         transaction_correlation.get("ack_path_ok") is True
