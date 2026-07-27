@@ -259,7 +259,10 @@ bool d1l_meshcore_admin_fail(
          failure_state != D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS &&
          failure_state != D1L_MESHCORE_ADMIN_DISCONNECTED &&
          failure_state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL &&
-         failure_state != D1L_MESHCORE_ADMIN_RADIO_BUSY)) {
+         failure_state != D1L_MESHCORE_ADMIN_RADIO_BUSY &&
+         failure_state != D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED &&
+         failure_state != D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED &&
+         failure_state != D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED)) {
         return false;
     }
     const uint32_t generation = next_generation(session->generation);
@@ -296,7 +299,10 @@ bool d1l_meshcore_admin_begin_login(
          session->state != D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS &&
          session->state != D1L_MESHCORE_ADMIN_DISCONNECTED &&
          session->state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL &&
-         session->state != D1L_MESHCORE_ADMIN_RADIO_BUSY)) {
+         session->state != D1L_MESHCORE_ADMIN_RADIO_BUSY &&
+         session->state != D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED &&
+         session->state != D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED &&
+         session->state != D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED)) {
         return false;
     }
     const uint32_t generation = next_generation(session->generation);
@@ -523,10 +529,15 @@ d1l_meshcore_admin_accept_login_response(
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
     const uint32_t server_timestamp = read_le32(plaintext);
-    if (server_timestamp == 0U ||
-        replay_cache_contains(
+    if (server_timestamp == 0U) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+    }
+    if (replay_cache_contains(
             replay_cache, peer_public_key, plaintext, server_timestamp)) {
-        d1l_meshcore_admin_timeout(session);
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED);
         return D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED;
     }
 
@@ -1086,6 +1097,27 @@ d1l_meshcore_admin_cli_command_reply_profile(const char *command)
     if (command && strcmp(command, "get pwrmgt.support") == 0) {
         return D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE;
     }
+    if (command && strcmp(command, "get adc.multiplier") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_ADC_UNSUPPORTED;
+    }
+    if (command &&
+        (strcmp(command, "get pwrmgt.source") == 0 ||
+         strcmp(command, "get pwrmgt.bootreason") == 0 ||
+         strcmp(command, "get pwrmgt.bootmv") == 0)) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_POWER_MANAGEMENT_UNSUPPORTED;
+    }
+    if (command && strcmp(command, "gps") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_NOT_FOUND;
+    }
+    if (command && strcmp(command, "gps advert") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_ADVERT_ERROR;
+    }
+    if (command && strncmp(command, "region get ", 11U) == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_REGION_NOT_FOUND;
+    }
+    if (command && strncmp(command, "get ", 4U) == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE;
+    }
     return D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT;
 }
 
@@ -1144,7 +1176,7 @@ bool d1l_meshcore_admin_begin_cli_command(
             D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ||
         expected_firmware == 0U ||
         session->firmware_level != expected_firmware ||
-        reply_profile > D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE) {
+        reply_profile > D1L_MESHCORE_ADMIN_CLI_REPLY_REGION_NOT_FOUND) {
         return false;
     }
     if (authenticated_deadline_due(session, now_us)) {
@@ -1258,10 +1290,11 @@ static bool cli_reply_is_error(
         offset++;
     }
 
-    /* Strip an expected read-only prompt before classifying its payload. Only
-     * two command-specific upstream values may use words that otherwise
-     * identify a failure. */
+    /* A prompted read-only reply is a value, and several such values are
+     * user-controlled. Never infer failure from words inside that payload. */
+    bool read_only_value = false;
     if (read_only && offset < text_len && text[offset] == '>') {
+        read_only_value = true;
         offset++;
         while (offset < text_len &&
                (text[offset] == ' ' || text[offset] == '\t')) {
@@ -1277,6 +1310,38 @@ static bool cli_reply_is_error(
         (sensitive &&
          cli_reply_prefix(text, text_len, offset, "password now:"))) {
         return false;
+    }
+    if (read_only_value) {
+        return false;
+    }
+    if (read_only) {
+        switch (reply_profile) {
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE:
+            return cli_reply_exact(
+                text, text_len, offset, "error: unsupported");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE:
+            return cli_reply_prefix(text, text_len, offset, "??:");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_ADC_UNSUPPORTED:
+            return cli_reply_exact(
+                text, text_len, offset,
+                "error: unsupported by this board");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_POWER_MANAGEMENT_UNSUPPORTED:
+            return cli_reply_exact(
+                text, text_len, offset,
+                "error: power management not supported");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_NOT_FOUND:
+            return cli_reply_exact(
+                text, text_len, offset, "can't find gps");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_ADVERT_ERROR:
+            return cli_reply_exact(text, text_len, offset, "error");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_REGION_NOT_FOUND:
+            return cli_reply_exact(
+                text, text_len, offset, "err - unknown region");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT:
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE:
+        default:
+            return false;
+        }
     }
     static const char *const ERROR_PREFIXES[] = {
         "err", "error", "unknown", "??", "can't", "cannot",

@@ -1126,12 +1126,12 @@ d1l_meshcore_admin_runtime_dispatch_response(
                 s_replay_cache = candidate_replay;
             } else if (durable_ret == ESP_ERR_INVALID_RESPONSE) {
                 fail_session_locked(
-                    D1L_MESHCORE_ADMIN_TIMED_OUT,
+                    D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED,
                     ESP_ERR_INVALID_RESPONSE);
                 result = D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED;
             } else {
                 fail_session_locked(
-                    D1L_MESHCORE_ADMIN_DISCONNECTED, durable_ret);
+                    D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED, durable_ret);
                 durable_failure = durable_ret;
                 result = D1L_MESHCORE_ADMIN_RESPONSE_REJECTED;
             }

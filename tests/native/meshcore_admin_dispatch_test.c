@@ -226,7 +226,8 @@ static int test_login_replay_and_room_no_history(void)
     CHECK(d1l_meshcore_admin_accept_login_response(
               &session, &replay, PEER, login, sizeof(login), 500U) ==
           D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED);
-    CHECK(session.state == D1L_MESHCORE_ADMIN_TIMED_OUT);
+    CHECK(session.state ==
+          D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED);
     CHECK(all_zero(session.session_secret, sizeof(session.session_secret)));
 
     uint8_t room_request[D1L_MESHCORE_ADMIN_MAX_LOGIN_REQUEST_BYTES] = {0};
@@ -610,6 +611,21 @@ static int test_bounded_cli_session_and_redaction(void)
     CHECK(d1l_meshcore_admin_cli_command_reply_profile(
               "get pwrmgt.support") ==
           D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE);
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile("get name") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE);
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile(
+              "get adc.multiplier") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_ADC_UNSUPPORTED);
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile(
+              "get pwrmgt.source") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_POWER_MANAGEMENT_UNSUPPORTED);
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile("gps") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_NOT_FOUND);
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile("gps advert") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_ADVERT_ERROR);
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile(
+              "region get Waterloo") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_REGION_NOT_FOUND);
     CHECK(d1l_meshcore_admin_cli_command_reply_profile("neighbors") ==
           D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT);
 
@@ -668,8 +684,8 @@ static int test_bounded_cli_session_and_redaction(void)
     CHECK(d1l_meshcore_admin_accept_cli_response(
               &session, PEER, 0x5566778DU, unsupported_value,
               sizeof(unsupported_value) - 1U, 181U) ==
-          D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
-    CHECK(!session.cli_reply_success);
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.cli_reply_success);
 
     CHECK(d1l_meshcore_admin_begin_cli_command(
         &session, tag + 5U, false, true,
@@ -691,37 +707,95 @@ static int test_bounded_cli_session_and_redaction(void)
               sizeof(unknown_value) - 1U, 185U) ==
           D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
 
+    static const struct {
+        const char *text;
+        d1l_meshcore_admin_cli_reply_profile_t profile;
+    } user_controlled_read_only_values[] = {
+        {"> Unknown Valley", D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE},
+        {"> owner.info: error handling is unsupported / not supported",
+         D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE},
+        {"Unknown Valley", D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT},
+        {"Error: Valley", D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT},
+        {"> ERR: unsupported", D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE},
+    };
+    uint32_t value_tag = tag + 7U;
+    uint32_t value_timestamp = 0x55667790U;
+    for (size_t i = 0U;
+         i < sizeof(user_controlled_read_only_values) /
+                 sizeof(user_controlled_read_only_values[0]); ++i) {
+        CHECK(d1l_meshcore_admin_begin_cli_command(
+            &session, value_tag++, false, true,
+            user_controlled_read_only_values[i].profile,
+            186U + i, 270U + i));
+        CHECK(d1l_meshcore_admin_accept_cli_response(
+                  &session, PEER, value_timestamp++,
+                  (const uint8_t *)user_controlled_read_only_values[i].text,
+                  strlen(user_controlled_read_only_values[i].text),
+                  187U + i) ==
+              D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+        CHECK(session.cli_reply_success);
+    }
+
+    static const struct {
+        const char *text;
+        d1l_meshcore_admin_cli_reply_profile_t profile;
+    } exact_read_only_failures[] = {
+        {"ERROR: unsupported",
+         D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE},
+        {"??: name", D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE},
+        {"Error: unsupported by this board",
+         D1L_MESHCORE_ADMIN_CLI_REPLY_ADC_UNSUPPORTED},
+        {"ERROR: Power management not supported",
+         D1L_MESHCORE_ADMIN_CLI_REPLY_POWER_MANAGEMENT_UNSUPPORTED},
+        {"Can't find GPS", D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_NOT_FOUND},
+        {"error", D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_ADVERT_ERROR},
+        {"Err - unknown region",
+         D1L_MESHCORE_ADMIN_CLI_REPLY_REGION_NOT_FOUND},
+    };
+    uint32_t failure_tag = value_tag;
+    uint32_t failure_timestamp = value_timestamp;
+    for (size_t i = 0U;
+         i < sizeof(exact_read_only_failures) /
+                 sizeof(exact_read_only_failures[0]); ++i) {
+        CHECK(d1l_meshcore_admin_begin_cli_command(
+            &session, failure_tag++, false, true,
+            exact_read_only_failures[i].profile,
+            194U + i, 290U + i));
+        CHECK(d1l_meshcore_admin_accept_cli_response(
+                  &session, PEER, failure_timestamp++,
+                  (const uint8_t *)exact_read_only_failures[i].text,
+                  strlen(exact_read_only_failures[i].text), 195U + i) ==
+              D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
+        CHECK(!session.cli_reply_success);
+    }
+
     static const char *const pinned_failures[] = {
         "  (ERR: clock cannot go backwards)",
-        "> ERR: unsupported",
         "gps toggle not found",
         "gps provider not found",
         "Bridge not supported",
         "Board not supported",
-        "Can't find GPS",
         "??: bogus",
         "Error, invalid params",
         "Err - unable to put",
     };
-    uint32_t failure_tag = tag + 7U;
-    uint32_t failure_timestamp = 0x55667790U;
     for (size_t i = 0U;
          i < sizeof(pinned_failures) / sizeof(pinned_failures[0]); ++i) {
         CHECK(d1l_meshcore_admin_begin_cli_command(
-            &session, failure_tag++, false,
-            pinned_failures[i][0] == '>', D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT,
-            184U + i, 270U + i));
+            &session, failure_tag++, false, false,
+            D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT,
+            210U + i, 330U + i));
         CHECK(d1l_meshcore_admin_accept_cli_response(
                   &session, PEER, failure_timestamp++,
                   (const uint8_t *)pinned_failures[i],
-                  strlen(pinned_failures[i]), 185U + i) ==
+                  strlen(pinned_failures[i]), 211U + i) ==
               D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
         CHECK(!session.cli_reply_success);
     }
 
     CHECK(d1l_meshcore_admin_begin_cli_command(
         &session, failure_tag, false, false,
-        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 210U, 310U));
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 230U, 400U));
     CHECK(d1l_meshcore_admin_cancel_cli_command(
         &session, failure_tag));
     CHECK(session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED);
@@ -755,6 +829,8 @@ static int test_replay_capacity_and_deterministic_eviction(void)
     CHECK(d1l_meshcore_admin_accept_login_response(
               &session, &replay, PEER, login, sizeof(login), 650U) ==
           D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED);
+    CHECK(session.state ==
+          D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED);
     CHECK(replay.peers[0].next_response == 1U);
     d1l_meshcore_admin_reset(&session);
     CHECK(begin(&session, 800U, 100U, 300U));
@@ -762,6 +838,8 @@ static int test_replay_capacity_and_deterministic_eviction(void)
     CHECK(d1l_meshcore_admin_accept_login_response(
               &session, &replay, PEER, login, sizeof(login), 750U) ==
           D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED);
+    CHECK(session.state ==
+          D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED);
     return 0;
 }
 

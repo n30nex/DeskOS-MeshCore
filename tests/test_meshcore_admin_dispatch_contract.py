@@ -723,12 +723,18 @@ def test_admin_login_replay_guard_is_durable_and_fail_closed() -> None:
     runtime = read("main/mesh/meshcore_admin_runtime.c")
     dispatch = read("main/mesh/meshcore_admin_dispatch.c")
     header = read("main/mesh/meshcore_admin_dispatch.h")
+    usb = read("main/comms/usb_console.c")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
 
     for token in (
         "D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS",
         "D1L_MESHCORE_ADMIN_DISCONNECTED",
         "D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL",
         "D1L_MESHCORE_ADMIN_RADIO_BUSY",
+        "D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED",
+        "D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED",
+        "D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED",
     ):
         assert token in header
 
@@ -755,7 +761,8 @@ def test_admin_login_replay_guard_is_durable_and_fail_closed() -> None:
     )[0]
     assert receive.index("durable_replay_commit(") < \
         receive.index("s_session = candidate_session;")
-    assert "D1L_MESHCORE_ADMIN_DISCONNECTED, durable_ret" in receive
+    assert "D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED" in receive
+    assert "D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED, durable_ret" in receive
 
     accept = dispatch.split(
         "d1l_meshcore_admin_accept_login_response(", 1
@@ -765,3 +772,18 @@ def test_admin_login_replay_guard_is_durable_and_fail_closed() -> None:
     assert "server_timestamp <= entry->highest_server_timestamp" in dispatch
     assert "D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS" in accept
     assert "D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL" in accept
+    assert "D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED" in accept
+
+    for external_name in (
+        "volatile_replay_rejected",
+        "durable_replay_rejected",
+        "local_storage_failed",
+    ):
+        assert external_name in usb
+        assert external_name in sheets
+    for user_message in (
+        "recent login replay rejected",
+        "saved login replay rejected",
+        "local storage failed",
+    ):
+        assert user_message in phase1

@@ -1900,7 +1900,13 @@ static void more_view_input_from_snapshot(
         admin.state == D1L_MESHCORE_ADMIN_DISCONNECTED ? "disconnected" :
         admin.state == D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL ?
             "unsupported protocol" :
-        admin.state == D1L_MESHCORE_ADMIN_RADIO_BUSY ? "radio busy" : "idle";
+        admin.state == D1L_MESHCORE_ADMIN_RADIO_BUSY ? "radio busy" :
+        admin.state == D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED ?
+            "recent login replay rejected" :
+        admin.state == D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED ?
+            "saved login replay rejected" :
+        admin.state == D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED ?
+            "local storage failed" : "idle";
     *out_input = (d1l_ui_more_view_input_t) {
         .packet_count = snapshot->packet_count,
         .wifi_build_enabled = snapshot->wifi_build_enabled,

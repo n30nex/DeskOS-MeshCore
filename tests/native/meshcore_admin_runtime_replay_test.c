@@ -108,13 +108,22 @@ int main(void)
     d1l_meshcore_admin_runtime_snapshot(&snapshot);
     CHECK(snapshot.state == D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
 
+    /* The in-memory high-water produces a distinct, externally visible
+     * rejection before any durable-store lookup is needed. */
+    CHECK(dispatch_login(&binding, response, &result));
+    CHECK(result == D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED);
+    d1l_meshcore_admin_runtime_snapshot(&snapshot);
+    CHECK(snapshot.state ==
+          D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED);
+
     /* Runtime init models a local reboot: volatile rings are empty, but the
      * committed per-full-key server timestamp high-water remains. */
     d1l_meshcore_admin_runtime_init();
     CHECK(dispatch_login(&binding, response, &result));
     CHECK(result == D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED);
     d1l_meshcore_admin_runtime_snapshot(&snapshot);
-    CHECK(snapshot.state == D1L_MESHCORE_ADMIN_TIMED_OUT);
+    CHECK(snapshot.state ==
+          D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED);
 
     d1l_meshcore_admin_runtime_init();
     make_login_response(response, 0x55667789U, 2U);
@@ -136,11 +145,19 @@ int main(void)
 
     d1l_meshcore_admin_runtime_init();
     make_login_response(response, 0x5566778AU, 3U);
-    mock_nvs_fail_next_open(ESP_FAIL);
+    mock_nvs_fail_next_get(ESP_FAIL);
     CHECK(dispatch_login(&binding, response, &result));
     CHECK(result == D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
     d1l_meshcore_admin_runtime_snapshot(&snapshot);
-    CHECK(snapshot.state == D1L_MESHCORE_ADMIN_DISCONNECTED);
+    CHECK(snapshot.state == D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED);
+    CHECK(snapshot.last_error == ESP_FAIL);
+
+    make_login_response(response, 0x5566778BU, 4U);
+    mock_nvs_fail_next_commit(ESP_FAIL);
+    CHECK(dispatch_login(&binding, response, &result));
+    CHECK(result == D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
+    d1l_meshcore_admin_runtime_snapshot(&snapshot);
+    CHECK(snapshot.state == D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED);
     CHECK(snapshot.last_error == ESP_FAIL);
     puts("meshcore_admin_runtime_replay_test: ok");
     return 0;

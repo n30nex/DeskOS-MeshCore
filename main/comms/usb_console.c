@@ -7473,6 +7473,12 @@ static const char *admin_state_name(d1l_meshcore_admin_state_t state)
         return "unsupported_protocol";
     case D1L_MESHCORE_ADMIN_RADIO_BUSY:
         return "radio_busy";
+    case D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED:
+        return "volatile_replay_rejected";
+    case D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED:
+        return "durable_replay_rejected";
+    case D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED:
+        return "local_storage_failed";
     default:
         return "invalid";
     }
