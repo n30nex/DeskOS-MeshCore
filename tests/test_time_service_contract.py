@@ -455,8 +455,9 @@ def test_protocol_time_failure_returns_before_message_store_or_rf_side_effects()
         "d1l_dm_store_append_tx"
     )
     assert public.index("d1l_time_service_preflight_protocol_timestamp") < public.index(
-        "D1L_MESHCORE_SERVICE_CMD_START_RX"
+        "meshcore_service_send_raw_kind("
     )
+    assert "D1L_MESHCORE_SERVICE_CMD_START_RX" not in public
     assert public.index("d1l_settings_next_mesh_timestamp") < public.index(
         "remember_pending_channel_tx"
     )
