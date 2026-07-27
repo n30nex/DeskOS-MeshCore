@@ -107,8 +107,12 @@ def test_map_https_paths_share_one_measured_internal_worker_stack():
     assert "xTaskCreate(" not in view
     assert "run_prefetch_pass()" in dispatcher
     assert "d1l_map_view_service_run_pending()" in prefetch
+    assert "static __attribute__((noinline)) void run_prefetch_pass" in prefetch
+    assert "static __attribute__((noinline)) void publish_visible_pause" in prefetch
+    assert "publish_visible_pause()" in dispatcher
     assert "d1l_settings_t" not in dispatcher
     assert "d1l_map_prefetch_plan_t" not in dispatcher
+    assert "d1l_map_prefetch_status_t" not in dispatcher
     assert "ulTaskNotifyTake(" in prefetch
     assert "xTaskNotifyGive(worker)" in prefetch
     assert view.count("d1l_map_prefetch_service_wake()") == 3

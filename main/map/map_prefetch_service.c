@@ -369,7 +369,7 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
     publish_status(status);
 }
 
-static void run_prefetch_pass(void)
+static __attribute__((noinline)) void run_prefetch_pass(void)
 {
         d1l_settings_t settings = {0};
         if (d1l_settings_public_snapshot(&settings) != ESP_OK ||
@@ -578,6 +578,19 @@ static void run_prefetch_pass(void)
         task_pause();
 }
 
+static __attribute__((noinline)) void publish_visible_pause(void)
+{
+    d1l_map_prefetch_status_t status = {0};
+    d1l_map_prefetch_service_status(&status);
+    status.initialized = true;
+    status.running = false;
+    status.eligible = true;
+    status.paused_for_visible_map = true;
+    set_phase(&status, "paused_visible",
+              "Background map download paused while Map is open");
+    publish_status(&status);
+}
+
 static void prefetch_worker(void *context)
 {
     (void)context;
@@ -587,15 +600,7 @@ static void prefetch_worker(void *context)
             continue;
         }
 
-        d1l_map_prefetch_status_t status = {0};
-        d1l_map_prefetch_service_status(&status);
-        status.initialized = true;
-        status.running = false;
-        status.eligible = true;
-        status.paused_for_visible_map = true;
-        set_phase(&status, "paused_visible",
-                  "Background map download paused while Map is open");
-        publish_status(&status);
+        publish_visible_pause();
         d1l_map_view_service_run_pending();
         task_pause();
     }
