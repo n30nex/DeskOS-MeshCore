@@ -29,7 +29,7 @@ exact-candidate hardware gate.
 | Capability | RC1 status | DeskOS workflow |
 |---|---|---|
 | Verified target selection | Ready | Repeater/room actions require an exact retained full key and canonical role. |
-| Login and logout | Ready | Masked password entry, empty-password repeaters, explicit success/failure/timeout state and volatile authority cleared on logout or target switch. |
+| Login and logout | Ready | Masked password entry, empty-password repeater and room negotiation, peer-returned session permissions, explicit success/failure/timeout state and volatile authority cleared on logout or target switch. |
 | Route selection | Ready | Current proven direct route is preferred; bounded fallback and selected route state are visible. |
 | Status and telemetry | Ready | Authenticated status/counters and remote telemetry request/result are available on-device. |
 | Neighbours | Ready | Paged neighbour query with bounded full-key/contact resolution. |

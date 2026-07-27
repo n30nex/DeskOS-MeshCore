@@ -107,9 +107,10 @@ tiles remain usable and RF chat continues.
 ## Repeater and room administration
 
 Open a verified Repeater or Room node and choose **Admin**. Login uses the
-exact retained server key and a masked password; empty-password repeaters are
-supported. Leaving, logging out or switching targets clears volatile session
-authority.
+exact retained server key and a masked password. Repeater and room logins may
+request empty-password negotiation; the peer decides whether to accept it and
+returns the session permissions (guest, read-only, write or admin). Leaving,
+logging out or switching targets clears volatile session authority.
 
 The on-device admin surface provides:
 

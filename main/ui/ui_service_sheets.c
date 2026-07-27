@@ -1322,7 +1322,7 @@ bool d1l_ui_service_sheets_render_admin(
     } else {
         if (selected_fingerprint && selected_fingerprint[0]) {
             lv_obj_t *password_label = create_label(
-                sheet, "Password (empty allowed for repeaters)", 0x5EEAD4);
+                sheet, "Password (empty allowed by peer)", 0x5EEAD4);
             position_dot(password_label, 8, 232, 408);
             complete = password_label && complete;
 
