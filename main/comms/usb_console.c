@@ -361,6 +361,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "map acceptance open", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_EXACT(
+        "map provider repair-invalid", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_EXACT(
         "storage map-policy", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_TOKEN(
@@ -3516,6 +3519,45 @@ static void cmd_map_acceptance_open(void)
            "\"arbitrary_url_accepted\":false,"
            "\"arbitrary_location_accepted\":false,"
            "\"public_rf_tx\":false,\"formats_sd\":false}\n");
+}
+
+static void cmd_map_provider_repair_invalid(void)
+{
+    d1l_storage_status_t storage = {0};
+    d1l_storage_status(&storage);
+    d1l_map_provider_repair_result_t repair = {0};
+    const esp_err_t ret =
+        d1l_map_tile_provider_repair_invalid_default(&storage, &repair);
+    if (ret != ESP_OK) {
+        err_result(
+            "map provider repair-invalid", esp_err_to_name(ret),
+            "only a fully readable invalid provider is backed up and replaced");
+        return;
+    }
+
+    ok_begin("map provider repair-invalid");
+    printf(",\"action\":");
+    print_json_string(
+        repair.mutation_performed ? "repaired_invalid" : "preserved_valid");
+    printf(",\"mutation_performed\":%s,\"before_valid\":%s,"
+           "\"backup_preserved\":%s,\"final_valid\":%s,"
+           "\"final_builtin_exact\":%s,\"before_bytes\":%u,"
+           "\"final_bytes\":%u,\"source_id\":",
+           bool_json(repair.mutation_performed),
+           bool_json(repair.before_valid),
+           bool_json(repair.backup_preserved),
+           bool_json(repair.final_valid),
+           bool_json(repair.final_builtin_exact),
+           (unsigned)repair.before_bytes,
+           (unsigned)repair.final_bytes);
+    print_json_string(repair.source_id);
+    printf(",\"backup_path\":");
+    print_json_string(repair.backup_path);
+    printf(",\"valid_provider_preserved\":%s,"
+           "\"public_rf_tx\":false,\"formats_sd\":false,"
+           "\"nvs_mutated\":false,\"tile_cache_mutated\":false,"
+           "\"arbitrary_url_accepted\":false}\n",
+           bool_json(repair.before_valid && !repair.mutation_performed));
 }
 
 static void print_storage_setup_payload(const d1l_storage_status_t *status)
@@ -8959,6 +9001,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_map_acceptance_status();
     } else if (strcmp(line, "map acceptance open") == 0) {
         cmd_map_acceptance_open();
+    } else if (strcmp(line, "map provider repair-invalid") == 0) {
+        cmd_map_provider_repair_invalid();
     } else if (strcmp(line, "settings onboarding status") == 0) {
         cmd_settings_onboarding_status();
     } else if (strncmp(line, "settings onboarding complete ", 29) == 0) {

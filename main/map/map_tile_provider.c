@@ -11,6 +11,8 @@
 
 #define D1L_MAP_PROVIDER_FILE_TIMEOUT_MS 10000U
 #define D1L_MAP_PROVIDER_CONFIG_TMP_PATH "map/offline-provider.tmp"
+#define D1L_MAP_PROVIDER_INVALID_BACKUP_PATH \
+    "map/offline-provider.invalid-rc1.json"
 #define D1L_MAP_PROVIDER_DEFAULT_AVERAGE_TILE_BYTES (64U * 1024U)
 
 static const char s_default_provider_manifest[] =
@@ -35,6 +37,26 @@ _Static_assert(sizeof(s_default_provider_manifest) - 1U <=
 static portMUX_TYPE s_provider_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_map_tile_provider_t s_provider;
 static bool s_provider_initialized;
+static bool s_provider_io_busy;
+
+static bool provider_io_claim(void)
+{
+    bool claimed = false;
+    portENTER_CRITICAL(&s_provider_lock);
+    if (!s_provider_io_busy) {
+        s_provider_io_busy = true;
+        claimed = true;
+    }
+    portEXIT_CRITICAL(&s_provider_lock);
+    return claimed;
+}
+
+static void provider_io_release(void)
+{
+    portENTER_CRITICAL(&s_provider_lock);
+    s_provider_io_busy = false;
+    portEXIT_CRITICAL(&s_provider_lock);
+}
 
 static bool source_id_valid(const char *value)
 {
@@ -286,7 +308,7 @@ void d1l_map_tile_provider_snapshot(d1l_map_tile_provider_t *out_provider)
     portEXIT_CRITICAL(&s_provider_lock);
 }
 
-static esp_err_t seed_default_provider_config(void)
+static esp_err_t write_default_provider_temp(void)
 {
     const size_t payload_size = sizeof(s_default_provider_manifest) - 1U;
     d1l_rp2040_file_result_t file = {0};
@@ -309,13 +331,23 @@ static esp_err_t seed_default_provider_config(void)
         }
         offset += chunk;
     }
+    return ESP_OK;
+}
+
+static esp_err_t seed_default_provider_config(void)
+{
+    d1l_rp2040_file_result_t file = {0};
+    esp_err_t ret = write_default_provider_temp();
+    if (ret != ESP_OK) {
+        return ret;
+    }
 
     /*
      * Never replace an operator-supplied provider. If one appears between the
      * initial stat and this commit, the non-replacing rename fails closed and
      * refresh reads that file instead.
      */
-    const esp_err_t ret = d1l_rp2040_bridge_file_rename(
+    ret = d1l_rp2040_bridge_file_rename(
         D1L_MAP_PROVIDER_CONFIG_TMP_PATH, D1L_MAP_PROVIDER_CONFIG_PATH, false,
         &file, D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
     if (ret != ESP_OK) {
@@ -326,14 +358,20 @@ static esp_err_t seed_default_provider_config(void)
     return ret;
 }
 
-static esp_err_t read_provider_config(char *buffer, size_t buffer_size)
+static esp_err_t read_provider_path(const char *path,
+                                    char *buffer,
+                                    size_t buffer_size,
+                                    size_t *out_size)
 {
-    if (!buffer || buffer_size < 2U) {
+    if (!path || !buffer || buffer_size < 2U) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (out_size) {
+        *out_size = 0U;
     }
     d1l_rp2040_file_result_t stat = {0};
     esp_err_t ret = d1l_rp2040_bridge_file_stat(
-        D1L_MAP_PROVIDER_CONFIG_PATH, &stat,
+        path, &stat,
         D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
     if (ret != ESP_OK || !stat.ok || !stat.exists || stat.is_directory) {
         return ret == ESP_OK ? ESP_ERR_NOT_FOUND : ret;
@@ -350,7 +388,7 @@ static esp_err_t read_provider_config(char *buffer, size_t buffer_size)
                 remaining : D1L_RP2040_FILE_CHUNK_MAX;
         d1l_rp2040_file_result_t read = {0};
         ret = d1l_rp2040_bridge_file_read(
-            D1L_MAP_PROVIDER_CONFIG_PATH, (uint32_t)offset,
+            path, (uint32_t)offset,
             (uint8_t *)&buffer[offset], requested, &read,
             D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
         if (ret != ESP_OK || !read.ok || read.offset != offset ||
@@ -360,7 +398,16 @@ static esp_err_t read_provider_config(char *buffer, size_t buffer_size)
         offset += read.length;
     }
     buffer[offset] = '\0';
+    if (out_size) {
+        *out_size = offset;
+    }
     return ESP_OK;
+}
+
+static esp_err_t read_provider_config(char *buffer, size_t buffer_size)
+{
+    return read_provider_path(
+        D1L_MAP_PROVIDER_CONFIG_PATH, buffer, buffer_size, NULL);
 }
 
 static esp_err_t parse_provider_config(
@@ -452,6 +499,9 @@ esp_err_t d1l_map_tile_provider_refresh(
     if (!storage || !d1l_map_tile_store_sd_ready(storage)) {
         return ESP_ERR_NOT_SUPPORTED;
     }
+    if (!provider_io_claim()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     char json[D1L_MAP_PROVIDER_CONFIG_MAX_BYTES + 1U];
     esp_err_t read_ret = read_provider_config(json, sizeof(json));
     if (read_ret == ESP_ERR_NOT_FOUND) {
@@ -474,6 +524,174 @@ esp_err_t d1l_map_tile_provider_refresh(
         portEXIT_CRITICAL(&s_provider_lock);
     }
     memset(json, 0, sizeof(json));
+    provider_io_release();
+    return ret;
+}
+
+esp_err_t d1l_map_tile_provider_repair_invalid_default(
+    const d1l_storage_status_t *storage,
+    d1l_map_provider_repair_result_t *out_result)
+{
+    if (!out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out_result, 0, sizeof(*out_result));
+    snprintf(
+        out_result->backup_path, sizeof(out_result->backup_path), "%s",
+        D1L_MAP_PROVIDER_INVALID_BACKUP_PATH);
+    ensure_initialized();
+    if (!storage || !d1l_map_tile_store_sd_ready(storage)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!provider_io_claim()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char before[D1L_MAP_PROVIDER_CONFIG_MAX_BYTES + 1U];
+    char verify[D1L_MAP_PROVIDER_CONFIG_MAX_BYTES + 1U];
+    size_t before_size = 0U;
+    size_t verify_size = 0U;
+    d1l_map_tile_provider_t provider = {0};
+    d1l_rp2040_file_result_t file = {0};
+    esp_err_t ret = read_provider_path(
+        D1L_MAP_PROVIDER_CONFIG_PATH, before, sizeof(before), &before_size);
+    if (ret != ESP_OK) {
+        goto done;
+    }
+    out_result->before_bytes = before_size;
+
+    ret = parse_provider_config(before, &provider);
+    if (ret == ESP_OK) {
+        out_result->before_valid = true;
+        out_result->final_valid = true;
+        out_result->final_bytes = before_size;
+        out_result->final_builtin_exact =
+            before_size == sizeof(s_default_provider_manifest) - 1U &&
+            memcmp(
+                before, s_default_provider_manifest,
+                sizeof(s_default_provider_manifest) - 1U) == 0;
+        snprintf(
+            out_result->source_id, sizeof(out_result->source_id), "%s",
+            provider.source_id);
+        goto publish;
+    }
+    if (ret != ESP_ERR_INVALID_RESPONSE) {
+        goto done;
+    }
+
+    ret = d1l_rp2040_bridge_file_stat(
+        D1L_MAP_PROVIDER_INVALID_BACKUP_PATH, &file,
+        D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        goto done;
+    }
+    if (file.exists) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto done;
+    }
+
+    ret = write_default_provider_temp();
+    if (ret != ESP_OK) {
+        goto done;
+    }
+    ret = read_provider_path(
+        D1L_MAP_PROVIDER_CONFIG_TMP_PATH, verify, sizeof(verify),
+        &verify_size);
+    if (ret != ESP_OK ||
+        verify_size != sizeof(s_default_provider_manifest) - 1U ||
+        memcmp(
+            verify, s_default_provider_manifest,
+            sizeof(s_default_provider_manifest) - 1U) != 0) {
+        ret = ret == ESP_OK ? ESP_ERR_INVALID_RESPONSE : ret;
+        goto done;
+    }
+
+    ret = read_provider_path(
+        D1L_MAP_PROVIDER_CONFIG_PATH, verify, sizeof(verify), &verify_size);
+    if (ret != ESP_OK || verify_size != before_size ||
+        memcmp(verify, before, before_size) != 0) {
+        ret = ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+        goto done;
+    }
+
+    ret = d1l_rp2040_bridge_file_rename(
+        D1L_MAP_PROVIDER_CONFIG_PATH,
+        D1L_MAP_PROVIDER_INVALID_BACKUP_PATH, false, &file,
+        D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        goto done;
+    }
+    out_result->mutation_performed = true;
+
+    ret = read_provider_path(
+        D1L_MAP_PROVIDER_INVALID_BACKUP_PATH, verify, sizeof(verify),
+        &verify_size);
+    if (ret != ESP_OK || verify_size != before_size ||
+        memcmp(verify, before, before_size) != 0) {
+        ret = ret == ESP_OK ? ESP_ERR_INVALID_RESPONSE : ret;
+        (void)d1l_rp2040_bridge_file_rename(
+            D1L_MAP_PROVIDER_INVALID_BACKUP_PATH,
+            D1L_MAP_PROVIDER_CONFIG_PATH, false, &file,
+            D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+        goto done;
+    }
+    out_result->backup_preserved = true;
+
+    ret = d1l_rp2040_bridge_file_rename(
+        D1L_MAP_PROVIDER_CONFIG_TMP_PATH, D1L_MAP_PROVIDER_CONFIG_PATH, false,
+        &file, D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        (void)d1l_rp2040_bridge_file_rename(
+            D1L_MAP_PROVIDER_INVALID_BACKUP_PATH,
+            D1L_MAP_PROVIDER_CONFIG_PATH, false, &file,
+            D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+        goto done;
+    }
+
+    ret = read_provider_path(
+        D1L_MAP_PROVIDER_CONFIG_PATH, verify, sizeof(verify), &verify_size);
+    if (ret == ESP_OK) {
+        ret = parse_provider_config(verify, &provider);
+    }
+    if (ret != ESP_OK ||
+        verify_size != sizeof(s_default_provider_manifest) - 1U ||
+        memcmp(
+            verify, s_default_provider_manifest,
+            sizeof(s_default_provider_manifest) - 1U) != 0 ||
+        strcmp(provider.source_id, "nrcan-cbmt") != 0) {
+        if (ret == ESP_OK) {
+            ret = ESP_ERR_INVALID_RESPONSE;
+        }
+        if (d1l_rp2040_bridge_file_rename(
+                D1L_MAP_PROVIDER_CONFIG_PATH,
+                D1L_MAP_PROVIDER_CONFIG_TMP_PATH, false, &file,
+                D1L_MAP_PROVIDER_FILE_TIMEOUT_MS) == ESP_OK) {
+            (void)d1l_rp2040_bridge_file_rename(
+                D1L_MAP_PROVIDER_INVALID_BACKUP_PATH,
+                D1L_MAP_PROVIDER_CONFIG_PATH, false, &file,
+                D1L_MAP_PROVIDER_FILE_TIMEOUT_MS);
+        }
+        goto done;
+    }
+
+    out_result->final_valid = true;
+    out_result->final_builtin_exact = true;
+    out_result->final_bytes = verify_size;
+    snprintf(
+        out_result->source_id, sizeof(out_result->source_id), "%s",
+        provider.source_id);
+
+publish:
+    portENTER_CRITICAL(&s_provider_lock);
+    s_provider = provider;
+    s_provider_initialized = true;
+    portEXIT_CRITICAL(&s_provider_lock);
+    ret = ESP_OK;
+
+done:
+    memset(before, 0, sizeof(before));
+    memset(verify, 0, sizeof(verify));
+    provider_io_release();
     return ret;
 }
 
