@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -77,6 +78,14 @@ typedef struct {
 esp_err_t d1l_connectivity_init(void);
 esp_err_t d1l_connectivity_prepare_reboot(void);
 void d1l_connectivity_status(d1l_connectivity_status_t *out_status);
+/*
+ * Network clients hold this lease for the lifetime of driver-backed handles.
+ * Wi-Fi shutdown first requests cancellation, then drains the lease before
+ * stopping or destroying the Wi-Fi driver/netif.
+ */
+esp_err_t d1l_connectivity_network_lease_begin(uint32_t timeout_ms);
+void d1l_connectivity_network_lease_end(void);
+bool d1l_connectivity_network_cancel_requested(void);
 esp_err_t d1l_connectivity_wifi_scan(d1l_wifi_scan_result_t *out_result);
 esp_err_t d1l_connectivity_wifi_connect(void);
 esp_err_t d1l_connectivity_wifi_disconnect(void);

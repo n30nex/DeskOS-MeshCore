@@ -28,6 +28,7 @@
 #define D1L_WIFI_RETRY_TASK_STACK_BYTES 3072U
 #define D1L_WIFI_RETRY_TASK_PRIORITY 5U
 #define D1L_WIFI_CONTROL_LOCK_TIMEOUT_MS 10000U
+#define D1L_WIFI_NETWORK_QUIESCE_TIMEOUT_MS 20000U
 #define D1L_CONNECTIVITY_GUARD_LOCK_TIMEOUT_MS 10000U
 #define D1L_CONNECTIVITY_GUARD_STABLE_WINDOW_MS 30000U
 #define D1L_CONNECTIVITY_GUARD_NAMESPACE "d1l_conn"
@@ -59,7 +60,13 @@ static esp_event_handler_instance_t s_wifi_event_instance;
 static esp_event_handler_instance_t s_ip_event_instance;
 static TaskHandle_t s_wifi_retry_task;
 static SemaphoreHandle_t s_wifi_control_lock;
+static SemaphoreHandle_t s_wifi_network_mutex;
 static SemaphoreHandle_t s_boot_guard_lock;
+static TaskHandle_t s_wifi_network_lease_owner;
+static TaskHandle_t s_wifi_network_quiesce_requester;
+static TaskHandle_t s_wifi_network_quiesce_owner;
+static bool s_wifi_network_cancel_requested;
+static portMUX_TYPE s_wifi_network_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_boot_guard_stable_ack_pending;
 static uint64_t s_boot_guard_stable_ack_due_ms;
 static uint32_t s_boot_guard_stable_ack_record_generation;
@@ -479,6 +486,161 @@ static void give_wifi_control(void)
     }
 }
 
+bool d1l_connectivity_network_cancel_requested(void)
+{
+    portENTER_CRITICAL(&s_wifi_network_state_lock);
+    const bool requested = s_wifi_network_cancel_requested;
+    portEXIT_CRITICAL(&s_wifi_network_state_lock);
+    return requested;
+}
+
+esp_err_t d1l_connectivity_network_lease_begin(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U || !s_wifi_network_mutex) {
+        return timeout_ms == 0U ? ESP_ERR_INVALID_ARG :
+                                  ESP_ERR_INVALID_STATE;
+    }
+    if (d1l_connectivity_network_cancel_requested()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+    if (ticks == 0U) {
+        ticks = 1U;
+    }
+    if (xSemaphoreTake(s_wifi_network_mutex, ticks) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    bool acquired = false;
+    portENTER_CRITICAL(&s_wifi_network_state_lock);
+    if (!s_wifi_network_cancel_requested &&
+        s_wifi_network_lease_owner == NULL &&
+        s_wifi_network_quiesce_owner == NULL &&
+        s_wifi_started && s_wifi_connected) {
+        s_wifi_network_lease_owner = current;
+        acquired = true;
+    }
+    portEXIT_CRITICAL(&s_wifi_network_state_lock);
+    if (!acquired) {
+        (void)xSemaphoreGive(s_wifi_network_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
+void d1l_connectivity_network_lease_end(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    bool release = false;
+    portENTER_CRITICAL(&s_wifi_network_state_lock);
+    if (s_wifi_network_lease_owner == current) {
+        s_wifi_network_lease_owner = NULL;
+        release = true;
+    }
+    portEXIT_CRITICAL(&s_wifi_network_state_lock);
+    if (release && s_wifi_network_mutex) {
+        (void)xSemaphoreGive(s_wifi_network_mutex);
+    }
+}
+
+#ifdef CONFIG_ESP_WIFI_ENABLED
+static esp_err_t wifi_network_quiesce_begin(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U || !s_wifi_network_mutex) {
+        return timeout_ms == 0U ? ESP_ERR_INVALID_ARG :
+                                  ESP_ERR_INVALID_STATE;
+    }
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    bool registered = false;
+    portENTER_CRITICAL(&s_wifi_network_state_lock);
+    if (s_wifi_network_quiesce_requester == NULL &&
+        s_wifi_network_quiesce_owner == NULL) {
+        s_wifi_network_quiesce_requester = current;
+        s_wifi_network_cancel_requested = true;
+        registered = true;
+    }
+    portEXIT_CRITICAL(&s_wifi_network_state_lock);
+    if (!registered) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+    if (ticks == 0U) {
+        ticks = 1U;
+    }
+    if (xSemaphoreTake(s_wifi_network_mutex, ticks) != pdTRUE) {
+        portENTER_CRITICAL(&s_wifi_network_state_lock);
+        if (s_wifi_network_quiesce_requester == current) {
+            s_wifi_network_quiesce_requester = NULL;
+            s_wifi_network_cancel_requested = false;
+        }
+        portEXIT_CRITICAL(&s_wifi_network_state_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    bool acquired = false;
+    portENTER_CRITICAL(&s_wifi_network_state_lock);
+    if (s_wifi_network_quiesce_requester == current &&
+        s_wifi_network_lease_owner == NULL) {
+        s_wifi_network_quiesce_requester = NULL;
+        s_wifi_network_quiesce_owner = current;
+        acquired = true;
+    }
+    portEXIT_CRITICAL(&s_wifi_network_state_lock);
+    if (!acquired) {
+        (void)xSemaphoreGive(s_wifi_network_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
+static void wifi_network_quiesce_end(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    bool release = false;
+    portENTER_CRITICAL(&s_wifi_network_state_lock);
+    if (s_wifi_network_quiesce_owner == current) {
+        s_wifi_network_quiesce_owner = NULL;
+        s_wifi_network_cancel_requested = false;
+        release = true;
+    }
+    portEXIT_CRITICAL(&s_wifi_network_state_lock);
+    if (release && s_wifi_network_mutex) {
+        (void)xSemaphoreGive(s_wifi_network_mutex);
+    }
+}
+
+static esp_err_t wifi_shutdown_begin(bool *out_control_taken)
+{
+    if (!out_control_taken) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_control_taken = false;
+    if (s_wifi_control_lock) {
+        if (!take_wifi_control()) {
+            return ESP_ERR_TIMEOUT;
+        }
+        *out_control_taken = true;
+    }
+    const esp_err_t ret = wifi_network_quiesce_begin(
+        D1L_WIFI_NETWORK_QUIESCE_TIMEOUT_MS);
+    if (ret != ESP_OK && *out_control_taken) {
+        give_wifi_control();
+        *out_control_taken = false;
+    }
+    return ret;
+}
+
+static void wifi_shutdown_end(bool control_taken)
+{
+    wifi_network_quiesce_end();
+    if (control_taken) {
+        give_wifi_control();
+    }
+}
+#endif
+
 static bool wifi_signal_update_from_scan(const wifi_ap_record_t *ap)
 {
     if (!ap) {
@@ -790,6 +952,18 @@ static void stop_wifi_runtime(void)
     wifi_link_cache_clear();
 }
 
+static esp_err_t stop_wifi_runtime_safely(void)
+{
+    bool control_taken = false;
+    const esp_err_t quiesce_ret = wifi_shutdown_begin(&control_taken);
+    if (quiesce_ret != ESP_OK) {
+        return quiesce_ret;
+    }
+    stop_wifi_runtime();
+    wifi_shutdown_end(control_taken);
+    return ESP_OK;
+}
+
 static esp_err_t fail_closed_wifi_runtime(esp_err_t failure, const char *reason)
 {
     char original_reason[sizeof(s_wifi_last_error)];
@@ -800,7 +974,11 @@ static esp_err_t fail_closed_wifi_runtime(esp_err_t failure, const char *reason)
     d1l_wifi_retry_policy_disable(&s_wifi_policy);
     portEXIT_CRITICAL(&s_wifi_policy_lock);
     notify_wifi_retry_worker();
-    stop_wifi_runtime();
+    const esp_err_t stop_ret = stop_wifi_runtime_safely();
+    if (stop_ret != ESP_OK) {
+        set_wifi_last_error("network_quiesce_failed");
+        return stop_ret;
+    }
 
     d1l_settings_t safe_settings = {0};
     (void)d1l_settings_public_snapshot(&safe_settings);
@@ -973,6 +1151,23 @@ static void finish_wifi_scan_policy(void)
 }
 #endif
 
+#ifndef CONFIG_ESP_WIFI_ENABLED
+bool d1l_connectivity_network_cancel_requested(void)
+{
+    return false;
+}
+
+esp_err_t d1l_connectivity_network_lease_begin(uint32_t timeout_ms)
+{
+    (void)timeout_ms;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+void d1l_connectivity_network_lease_end(void)
+{
+}
+#endif
+
 static void fill_status(d1l_connectivity_status_t *out_status)
 {
     if (!out_status) {
@@ -985,6 +1180,8 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     const bool ble_available = release_ble_available();
     const bool observer_available = d1l_release_feature_available(
         D1L_RELEASE_FEATURE_OBSERVER_MQTT);
+    const bool network_cancel_requested =
+        d1l_connectivity_network_cancel_requested();
     d1l_ble_companion_status_t ble_status = {0};
     d1l_ble_companion_status(&ble_status);
     const d1l_wifi_retry_policy_t policy = wifi_policy_snapshot();
@@ -1012,8 +1209,10 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     out_status->ble_build_enabled =
         ble_available && build_ble_enabled();
     out_status->wifi_stack_active = wifi_available && s_wifi_started;
-    out_status->wifi_connected = wifi_available && s_wifi_connected;
-    out_status->wifi_connecting = wifi_available && s_wifi_connecting;
+    out_status->wifi_connected =
+        wifi_available && s_wifi_connected && !network_cancel_requested;
+    out_status->wifi_connecting =
+        wifi_available && s_wifi_connecting && !network_cancel_requested;
     out_status->wifi_retry_scheduled =
         wifi_available && policy.retry_scheduled;
     out_status->wifi_user_cancelled =
@@ -1102,13 +1301,14 @@ esp_err_t d1l_connectivity_prepare_reboot(void)
      * controlled ROM system-reset path bypasses shutdown handlers, so mirror
      * that handler without changing the persisted Wi-Fi setting or profile. */
     if (s_wifi_initialized) {
-        if (s_wifi_control_lock && !take_wifi_control()) {
-            return ble_ret == ESP_OK ? ESP_FAIL : ble_ret;
+        bool control_taken = false;
+        esp_err_t ret = wifi_shutdown_begin(&control_taken);
+        if (ret != ESP_OK) {
+            set_wifi_last_error("network_quiesce_failed");
+            return ble_ret == ESP_OK ? ret : ble_ret;
         }
-        esp_err_t ret = esp_wifi_stop();
-        if (s_wifi_control_lock) {
-            give_wifi_control();
-        }
+        ret = esp_wifi_stop();
+        wifi_shutdown_end(control_taken);
         if (ret != ESP_OK) {
             return ble_ret == ESP_OK ? ret : ble_ret;
         }
@@ -1124,6 +1324,16 @@ esp_err_t d1l_connectivity_prepare_reboot(void)
 
 esp_err_t d1l_connectivity_init(void)
 {
+#ifdef CONFIG_ESP_WIFI_ENABLED
+    if (!s_wifi_network_mutex) {
+        s_wifi_network_mutex = xSemaphoreCreateMutex();
+        if (!s_wifi_network_mutex) {
+            set_wifi_last_error("network_lease_unavailable");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+#endif
+
     if (!release_wifi_user_control_available()) {
         portENTER_CRITICAL(&s_wifi_policy_lock);
         d1l_wifi_retry_policy_init(&s_wifi_policy, false, false);
@@ -1564,10 +1774,21 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
     d1l_settings_t settings = {0};
     esp_err_t ret;
     if (!enabled) {
+#ifdef CONFIG_ESP_WIFI_ENABLED
+        bool control_taken = false;
+        ret = wifi_shutdown_begin(&control_taken);
+        if (ret != ESP_OK) {
+            set_wifi_last_error("network_quiesce_failed");
+            return ret;
+        }
+#endif
         settings.wifi_enabled = false;
         ret = d1l_settings_update_fields(
             &settings, D1L_SETTINGS_UPDATE_WIFI_ENABLED);
         if (ret != ESP_OK) {
+#ifdef CONFIG_ESP_WIFI_ENABLED
+            wifi_shutdown_end(control_taken);
+#endif
             return ret;
         }
         portENTER_CRITICAL(&s_wifi_policy_lock);
@@ -1575,14 +1796,8 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
         portEXIT_CRITICAL(&s_wifi_policy_lock);
 #ifdef CONFIG_ESP_WIFI_ENABLED
         notify_wifi_retry_worker();
-        if (s_wifi_control_lock && !take_wifi_control()) {
-            set_wifi_last_error("disable_control_failed");
-            return ESP_FAIL;
-        }
         stop_wifi_runtime();
-        if (s_wifi_control_lock) {
-            give_wifi_control();
-        }
+        wifi_shutdown_end(control_taken);
         const esp_err_t boot_guard_ret = clear_boot_guard();
 #else
         const esp_err_t boot_guard_ret = ESP_OK;
@@ -1618,7 +1833,11 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
                    D1L_SETTINGS_UPDATE_BLE_ENABLED);
     if (ret != ESP_OK) {
 #ifdef CONFIG_ESP_WIFI_ENABLED
-        stop_wifi_runtime();
+        const esp_err_t stop_ret = stop_wifi_runtime_safely();
+        if (stop_ret != ESP_OK) {
+            set_wifi_last_error("network_quiesce_failed");
+            return stop_ret;
+        }
         const esp_err_t guard_ret = clear_boot_guard();
         if (guard_ret != ESP_OK) {
             set_wifi_last_error("boot_guard_clear_failed");
@@ -1660,11 +1879,27 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
     if (enabled) {
         settings.wifi_enabled = false;
     }
+#ifdef CONFIG_ESP_WIFI_ENABLED
+    bool control_taken = false;
+    if (enabled) {
+        const esp_err_t quiesce_ret =
+            wifi_shutdown_begin(&control_taken);
+        if (quiesce_ret != ESP_OK) {
+            set_wifi_last_error("network_quiesce_failed");
+            return quiesce_ret;
+        }
+    }
+#endif
     const d1l_settings_update_mask_t update_mask =
         D1L_SETTINGS_UPDATE_BLE_ENABLED |
         (enabled ? D1L_SETTINGS_UPDATE_WIFI_ENABLED : 0U);
     const esp_err_t ret = d1l_settings_update_fields(&settings, update_mask);
     if (ret != ESP_OK) {
+#ifdef CONFIG_ESP_WIFI_ENABLED
+        if (enabled) {
+            wifi_shutdown_end(control_taken);
+        }
+#endif
         return ret;
     }
     if (enabled) {
@@ -1673,13 +1908,8 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
         portEXIT_CRITICAL(&s_wifi_policy_lock);
 #ifdef CONFIG_ESP_WIFI_ENABLED
         notify_wifi_retry_worker();
-        if (s_wifi_control_lock && !take_wifi_control()) {
-            return ESP_FAIL;
-        }
         stop_wifi_runtime();
-        if (s_wifi_control_lock) {
-            give_wifi_control();
-        }
+        wifi_shutdown_end(control_taken);
 #endif
     }
 #ifdef CONFIG_ESP_WIFI_ENABLED

@@ -147,12 +147,56 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
     )
     assert fetch.index("if (!wifi_connected)") < fetch.index("esp_http_client_init")
     assert fetch.index("if (!result.sd_ready)") < fetch.index("esp_http_client_init")
-    assert "continue_allowed(should_continue, continue_context)" in fetch
+    assert "map_network_continue(&continuation)" in fetch
     assert ".user_agent = D1L_MAP_TILE_USER_AGENT" in fetch
     assert ".crt_bundle_attach = esp_crt_bundle_attach" in fetch
     assert "result.status_code == 429" in fetch
     assert "png_content_type(headers.content_type)" in fetch
     assert "d1l_map_tile_png_valid(buffer, result.bytes)" in fetch
+
+
+def test_wifi_shutdown_drains_owner_closed_http_client_before_driver_teardown():
+    store = read("main/storage/map_tile_store.c")
+    connectivity = read("main/comms/connectivity_manager.c")
+    header = read("main/comms/connectivity_manager.h")
+    fetch = body(
+        store,
+        "static esp_err_t map_tile_store_fetch_network",
+        "\nesp_err_t d1l_map_tile_store_fetch",
+    )
+    network_done = fetch.split("network_done:", 1)[1]
+    after_init = fetch.split("client = esp_http_client_init(&config);", 1)[1].split(
+        "network_done:", 1
+    )[0]
+
+    assert "d1l_connectivity_network_lease_begin" in header
+    assert "d1l_connectivity_network_lease_end" in header
+    assert "d1l_connectivity_network_cancel_requested" in header
+    assert fetch.index(
+        "d1l_connectivity_network_lease_begin("
+    ) < fetch.index(
+        "d1l_time_service_wait_for_certificate_time("
+    ) < fetch.index(
+        "esp_http_client_init(&config)"
+    )
+    assert "return" not in after_init
+    assert fetch.count("map_network_continue(&continuation)") >= 5
+    assert fetch.index("esp_http_client_open(client, 0)") < fetch.index(
+        "map_network_continue(&continuation)",
+        fetch.index("esp_http_client_open(client, 0)"),
+    ) < fetch.index("esp_http_client_fetch_headers(client)")
+    assert network_done.index("esp_http_client_close(client)") < network_done.index(
+        "esp_http_client_cleanup(client)"
+    ) < network_done.index(
+        "d1l_connectivity_network_lease_end()"
+    ) < network_done.index(
+        "persist_validated_tile("
+    )
+    assert (
+        "!d1l_connectivity_network_cancel_requested()"
+        in store
+    )
+    assert "D1L_WIFI_NETWORK_QUIESCE_TIMEOUT_MS 20000U" in connectivity
 
 
 def test_osm_standard_tiles_are_dark_styled_locally_after_decode():

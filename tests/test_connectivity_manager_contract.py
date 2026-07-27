@@ -225,6 +225,65 @@ def test_wifi_status_uses_event_cached_signal_without_live_driver_poll():
     assert "s_wifi_bssid_valid" in scan_update
     assert "memcmp(s_wifi_bssid, ap->bssid" in scan_update
 
+
+def test_wifi_driver_teardown_is_bounded_by_network_quiesce():
+    source = read("main/comms/connectivity_manager.c")
+    shutdown_begin = source[
+        source.index("static esp_err_t wifi_shutdown_begin"):
+        source.index("static void wifi_shutdown_end")
+    ]
+    quiesce_begin = source[
+        source.index("static esp_err_t wifi_network_quiesce_begin"):
+        source.index("static void wifi_network_quiesce_end")
+    ]
+    disable = source[
+        source.index("esp_err_t d1l_connectivity_set_wifi_enabled"):
+        source.index("esp_err_t d1l_connectivity_set_ble_enabled")
+    ]
+    disable_path = disable[
+        disable.index("if (!enabled)"):
+        disable.index("settings.ble_companion_enabled = false")
+    ]
+    ble = source[
+        source.index("esp_err_t d1l_connectivity_set_ble_enabled"):
+        source.index("esp_err_t d1l_connectivity_save_wifi_profile")
+    ]
+    prepare_reboot = source[
+        source.index("esp_err_t d1l_connectivity_prepare_reboot"):
+        source.index("esp_err_t d1l_connectivity_init")
+    ]
+    status = source[
+        source.index("static void fill_status"):
+        source.index("esp_err_t d1l_connectivity_prepare_reboot")
+    ]
+
+    assert shutdown_begin.index("take_wifi_control()") < shutdown_begin.index(
+        "wifi_network_quiesce_begin("
+    )
+    assert quiesce_begin.index(
+        "s_wifi_network_cancel_requested = true"
+    ) < quiesce_begin.index("xSemaphoreTake(s_wifi_network_mutex")
+    stop_index = disable_path.index("stop_wifi_runtime()")
+    assert disable_path.index("wifi_shutdown_begin(") < disable_path.index(
+        "d1l_settings_update_fields("
+    ) < disable_path.index(
+        "d1l_wifi_retry_policy_disable"
+    ) < stop_index < disable_path.index("wifi_shutdown_end(", stop_index)
+    save_failure = disable_path.split(
+        "ret = d1l_settings_update_fields(", 1
+    )[1].split("portENTER_CRITICAL", 1)[0]
+    assert save_failure.index("wifi_shutdown_end(") < save_failure.index(
+        "return ret;"
+    )
+    ble_stop_index = ble.index("stop_wifi_runtime()")
+    assert ble.index("wifi_shutdown_begin(") < ble.index(
+        "d1l_settings_update_fields("
+    ) < ble_stop_index < ble.index("wifi_shutdown_end(", ble_stop_index)
+    assert prepare_reboot.index("wifi_shutdown_begin(") < prepare_reboot.index(
+        "esp_wifi_stop()"
+    ) < prepare_reboot.index("wifi_shutdown_end(")
+    assert "s_wifi_connected && !network_cancel_requested" in status
+
     disconnect = source[
         source.index("esp_err_t d1l_connectivity_wifi_disconnect"):
         source.index("esp_err_t d1l_connectivity_set_wifi_enabled")

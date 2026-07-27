@@ -10,6 +10,7 @@
 #include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "comms/connectivity_manager.h"
 #include "map/map_tile_cache_policy.h"
 #include "map/map_tile_provider.h"
 #include "platform/time_service.h"
@@ -19,6 +20,7 @@
 #define D1L_MAP_TILE_CANARY_X 1U
 #define D1L_MAP_TILE_CANARY_Y 2U
 #define D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000
+#define D1L_MAP_TILE_NETWORK_LEASE_TIMEOUT_MS 1000U
 #define D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U
 #define D1L_MAP_TILE_CACHE_JOURNAL_NAME "cache-journal.v1"
 #define D1L_MAP_TILE_CACHE_JOURNAL_TMP_NAME "cache-journal-repair.tmp"
@@ -344,6 +346,21 @@ bool d1l_map_tile_png_valid(const uint8_t *data, size_t len)
 static bool continue_allowed(d1l_map_tile_continue_cb_t should_continue, void *context)
 {
     return !should_continue || should_continue(context);
+}
+
+typedef struct {
+    d1l_map_tile_continue_cb_t caller;
+    void *caller_context;
+} d1l_map_network_continue_t;
+
+static bool map_network_continue(void *context)
+{
+    const d1l_map_network_continue_t *continuation =
+        (const d1l_map_network_continue_t *)context;
+    return continuation &&
+           !d1l_connectivity_network_cancel_requested() &&
+           continue_allowed(
+               continuation->caller, continuation->caller_context);
 }
 
 static void init_download_result(d1l_map_tile_download_result_t *result,
@@ -1832,24 +1849,40 @@ static esp_err_t map_tile_store_fetch_network(
         *out_result = result;
         return result.last_error;
     }
-    if (!continue_allowed(should_continue, continue_context)) {
+    d1l_map_network_continue_t continuation = {
+        .caller = should_continue,
+        .caller_context = continue_context,
+    };
+    if (!map_network_continue(&continuation)) {
         result.cancelled = true;
         download_step(&result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
         *out_result = result;
         return result.last_error;
     }
-    esp_err_t ret = d1l_time_service_wait_for_certificate_time(
-        D1L_TIME_TLS_WAIT_TIMEOUT_MS, D1L_TIME_TLS_WAIT_SLICE_MS,
-        should_continue, continue_context);
+    esp_err_t ret = d1l_connectivity_network_lease_begin(
+        D1L_MAP_TILE_NETWORK_LEASE_TIMEOUT_MS);
     if (ret != ESP_OK) {
-        if (!continue_allowed(should_continue, continue_context)) {
+        result.cancelled = !map_network_continue(&continuation);
+        download_step(
+            &result, result.cancelled ? "cancelled" : "network_lease",
+            ret, NULL);
+        *out_result = result;
+        return result.last_error;
+    }
+    esp_http_client_handle_t client = NULL;
+    bool persist_tile = false;
+
+    ret = d1l_time_service_wait_for_certificate_time(
+        D1L_TIME_TLS_WAIT_TIMEOUT_MS, D1L_TIME_TLS_WAIT_SLICE_MS,
+        map_network_continue, &continuation);
+    if (ret != ESP_OK) {
+        if (!map_network_continue(&continuation)) {
             result.cancelled = true;
             download_step(&result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
         } else {
             download_step(&result, "time_sync", ret, NULL);
         }
-        *out_result = result;
-        return result.last_error;
+        goto network_done;
     }
 
     map_http_headers_t headers = {0};
@@ -1864,23 +1897,32 @@ static esp_err_t map_tile_store_fetch_network(
         .event_handler = map_http_event,
         .user_data = &headers,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
+    client = esp_http_client_init(&config);
     if (!client) {
         download_step(&result, "http_init", ESP_FAIL, NULL);
-        *out_result = result;
-        return result.last_error;
+        goto network_done;
     }
 
     ret = esp_http_client_open(client, 0);
     if (ret != ESP_OK) {
         download_step(&result, "http_open", ret, NULL);
-        goto fetch_done;
+        goto network_done;
+    }
+    if (!map_network_continue(&continuation)) {
+        result.cancelled = true;
+        download_step(&result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
+        goto network_done;
     }
     const int64_t content_length = esp_http_client_fetch_headers(client);
+    if (!map_network_continue(&continuation)) {
+        result.cancelled = true;
+        download_step(&result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
+        goto network_done;
+    }
     if (content_length < 0) {
         download_step(&result, "fetch_headers", ESP_FAIL, NULL);
         ret = result.last_error;
-        goto fetch_done;
+        goto network_done;
     }
     const bool chunked = esp_http_client_is_chunked_response(client);
     /* ESP-IDF reports zero both for chunked/non-positive responses.  Only a
@@ -1894,31 +1936,31 @@ static esp_err_t map_tile_store_fetch_network(
     if (result.status_code == 429) {
         download_step(&result, "rate_limited", ESP_ERR_TIMEOUT, NULL);
         ret = result.last_error;
-        goto fetch_done;
+        goto network_done;
     }
     if (result.status_code != 200) {
         download_step(&result, "http_status", ESP_FAIL, NULL);
         ret = result.last_error;
-        goto fetch_done;
+        goto network_done;
     }
     if (!result.content_type_valid) {
         download_step(&result, "content_type", ESP_ERR_INVALID_RESPONSE, NULL);
         ret = result.last_error;
-        goto fetch_done;
+        goto network_done;
     }
     if (content_length_known && content_length > (int64_t)download_limit) {
         download_step(&result, "content_length", ESP_ERR_INVALID_SIZE, NULL);
         ret = result.last_error;
-        goto fetch_done;
+        goto network_done;
     }
 
     int idle_reads = 0;
     while (!esp_http_client_is_complete_data_received(client)) {
-        if (!continue_allowed(should_continue, continue_context)) {
+        if (!map_network_continue(&continuation)) {
             result.cancelled = true;
             download_step(&result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
             ret = result.last_error;
-            goto fetch_done;
+            goto network_done;
         }
         const size_t remaining = download_limit - result.bytes;
         const size_t want = remaining < D1L_RP2040_FILE_CHUNK_MAX ?
@@ -1926,18 +1968,18 @@ static esp_err_t map_tile_store_fetch_network(
         if (want == 0U) {
             download_step(&result, "too_large", ESP_ERR_INVALID_SIZE, NULL);
             ret = result.last_error;
-            goto fetch_done;
+            goto network_done;
         }
         const int read_len = esp_http_client_read(client, (char *)&buffer[result.bytes], want);
         if (read_len < 0) {
             download_step(&result, "http_read", ESP_FAIL, NULL);
             ret = result.last_error;
-            goto fetch_done;
+            goto network_done;
         }
         if ((size_t)read_len > want) {
             download_step(&result, "too_large", ESP_ERR_INVALID_SIZE, NULL);
             ret = result.last_error;
-            goto fetch_done;
+            goto network_done;
         }
         if (read_len == 0) {
             if (++idle_reads > 3) {
@@ -1952,36 +1994,42 @@ static esp_err_t map_tile_store_fetch_network(
         (content_length_known && result.bytes != (size_t)content_length)) {
         download_step(&result, "http_incomplete", ESP_FAIL, NULL);
         ret = result.last_error;
-        goto fetch_done;
+        goto network_done;
     }
     result.png_valid = d1l_map_tile_png_valid(buffer, result.bytes);
     if (!result.png_valid) {
         download_step(&result, "png", ESP_ERR_INVALID_RESPONSE, NULL);
         ret = result.last_error;
-        goto fetch_done;
+        goto network_done;
     }
     result.content_crc32 = d1l_map_tile_cache_crc32(
         buffer, result.bytes);
-    if (!continue_allowed(should_continue, continue_context)) {
+    if (!map_network_continue(&continuation)) {
         result.cancelled = true;
         download_step(
             &result, "cancelled",
             ESP_ERR_INVALID_STATE, NULL);
         ret = result.last_error;
-        goto fetch_done;
+        goto network_done;
     }
-    ret = persist_validated_tile(
-        &provider, status, buffer, &result);
-    if (ret != ESP_OK) {
-        download_step(&result, "cache_persist", ret, &result.file);
-        goto fetch_done;
-    }
-    download_step(&result, "ok", ESP_OK, &result.file);
-    *out_len = result.bytes;
+    persist_tile = true;
 
-fetch_done:
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
+network_done:
+    if (client) {
+        (void)esp_http_client_close(client);
+        (void)esp_http_client_cleanup(client);
+    }
+    d1l_connectivity_network_lease_end();
+    if (persist_tile) {
+        ret = persist_validated_tile(
+            &provider, status, buffer, &result);
+        if (ret != ESP_OK) {
+            download_step(&result, "cache_persist", ret, &result.file);
+        } else {
+            download_step(&result, "ok", ESP_OK, &result.file);
+            *out_len = result.bytes;
+        }
+    }
     *out_result = result;
     return result.last_error;
 }
