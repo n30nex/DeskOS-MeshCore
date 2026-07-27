@@ -125,6 +125,9 @@ Guest/admin role checks are enforced locally and by the remote response.
 Sensitive commands and passwords are not persistently retained or logged;
 sensitive replies are redacted and volatile confirmation input is wiped.
 Remote mutations require a second local confirmation.
+The exact role-aware command surface and USB wrapper syntax are listed in
+[ADMIN_REMOTE_CLI_ALLOWLIST.md](ADMIN_REMOTE_CLI_ALLOWLIST.md). Commands
+outside that list fail closed.
 
 ## SD-first storage and degraded mode
 

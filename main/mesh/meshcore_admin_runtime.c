@@ -6,10 +6,14 @@
 
 #include "mesh/meshcore_wire.h"
 #include "mesh/store_lock.h"
+#include "nvs.h"
 
 #define D1L_MESHCORE_ADMIN_ANON_REQUEST_TYPE 0x07U
 #define D1L_MESHCORE_ADMIN_REQUEST_TYPE 0x00U
 #define D1L_MESHCORE_TXT_TYPE_CLI_DATA 0x01U
+#define D1L_MESHCORE_ADMIN_REPLAY_NAMESPACE "d1l_admin"
+#define D1L_MESHCORE_ADMIN_REPLAY_MAGIC UINT32_C(0x41444D52)
+#define D1L_MESHCORE_ADMIN_REPLAY_VERSION UINT32_C(1)
 
 typedef struct {
     uint32_t login_tx_queued;
@@ -30,6 +34,14 @@ typedef struct {
     uint32_t response_replayed;
     esp_err_t last_error;
 } d1l_meshcore_admin_metrics_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES];
+    uint32_t highest_server_timestamp;
+    uint8_t last_response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES];
+} d1l_meshcore_admin_durable_replay_record_t;
 
 static d1l_meshcore_admin_session_t s_session;
 static d1l_meshcore_admin_replay_cache_t s_replay_cache;
@@ -92,6 +104,77 @@ static bool same_bytes(const uint8_t *left, const uint8_t *right, size_t size)
         difference |= (uint8_t)(left[i] ^ right[i]);
     }
     return difference == 0U;
+}
+
+static bool durable_replay_key(
+    const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
+    char out_key[16])
+{
+    if (!peer_public_key || !out_key) {
+        return false;
+    }
+    const int written = snprintf(
+        out_key, 16U, "p%02x%02x%02x%02x%02x%02x%02x",
+        peer_public_key[0], peer_public_key[1], peer_public_key[2],
+        peer_public_key[3], peer_public_key[4], peer_public_key[5],
+        peer_public_key[6]);
+    return written == 15;
+}
+
+static esp_err_t durable_replay_commit(
+    const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
+    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES],
+    uint32_t server_timestamp)
+{
+    if (!peer_public_key || !response || server_timestamp == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char key[16] = {0};
+    if (!durable_replay_key(peer_public_key, key)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    nvs_handle_t handle = 0U;
+    esp_err_t ret = nvs_open(
+        D1L_MESHCORE_ADMIN_REPLAY_NAMESPACE, NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    d1l_meshcore_admin_durable_replay_record_t record = {0};
+    size_t record_size = sizeof(record);
+    ret = nvs_get_blob(handle, key, &record, &record_size);
+    if (ret == ESP_OK) {
+        if (record_size != sizeof(record) ||
+            record.magic != D1L_MESHCORE_ADMIN_REPLAY_MAGIC ||
+            record.version != D1L_MESHCORE_ADMIN_REPLAY_VERSION ||
+            !same_bytes(
+                record.peer_public_key, peer_public_key,
+                D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES)) {
+            ret = ESP_ERR_INVALID_STATE;
+        } else if (server_timestamp <= record.highest_server_timestamp) {
+            ret = ESP_ERR_INVALID_RESPONSE;
+        }
+    } else if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ret = ESP_OK;
+    }
+
+    if (ret == ESP_OK) {
+        memset(&record, 0, sizeof(record));
+        record.magic = D1L_MESHCORE_ADMIN_REPLAY_MAGIC;
+        record.version = D1L_MESHCORE_ADMIN_REPLAY_VERSION;
+        memcpy(record.peer_public_key, peer_public_key,
+               sizeof(record.peer_public_key));
+        record.highest_server_timestamp = server_timestamp;
+        memcpy(record.last_response, response, sizeof(record.last_response));
+        ret = nvs_set_blob(handle, key, &record, sizeof(record));
+        if (ret == ESP_OK) {
+            ret = nvs_commit(handle);
+        }
+    }
+    d1l_meshcore_admin_secure_zero(&record, sizeof(record));
+    nvs_close(handle);
+    return ret;
 }
 
 d1l_meshcore_admin_role_t d1l_meshcore_admin_role_for_contact(
@@ -434,6 +517,27 @@ static void clear_session_locked(void)
     s_fingerprint[0] = '\0';
 }
 
+static d1l_meshcore_admin_state_t failure_state_for_error(esp_err_t reason)
+{
+    if (reason == ESP_ERR_TIMEOUT) {
+        return D1L_MESHCORE_ADMIN_RADIO_BUSY;
+    }
+    if (reason == ESP_ERR_NOT_SUPPORTED) {
+        return D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL;
+    }
+    if (reason == ESP_ERR_NOT_ALLOWED) {
+        return D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS;
+    }
+    return D1L_MESHCORE_ADMIN_DISCONNECTED;
+}
+
+static void fail_session_locked(
+    d1l_meshcore_admin_state_t failure_state, esp_err_t reason)
+{
+    (void)d1l_meshcore_admin_fail(&s_session, failure_state);
+    s_metrics.last_error = reason;
+}
+
 static bool copy_session_context_locked(
     d1l_meshcore_admin_context_t *out_context)
 {
@@ -458,6 +562,9 @@ static bool copy_session_context_locked(
     out_context->pending_query = s_session.pending_query;
     out_context->pending_query_offset = s_session.pending_query_offset;
     out_context->pending_cli_sensitive = s_session.pending_cli_sensitive;
+    out_context->pending_cli_read_only = s_session.pending_cli_read_only;
+    out_context->pending_cli_reply_profile =
+        s_session.pending_cli_reply_profile;
     return true;
 }
 
@@ -537,7 +644,7 @@ void d1l_meshcore_admin_runtime_note_login_tx(uint32_t generation,
     } else {
         if (s_session.generation == generation &&
             s_session.state == D1L_MESHCORE_ADMIN_LOGIN_PENDING) {
-            clear_session_locked();
+            fail_session_locked(failure_state_for_error(result), result);
         }
         s_metrics.last_error = result;
     }
@@ -613,8 +720,8 @@ bool d1l_meshcore_admin_runtime_validate_binding(
     const bool valid = s_session.generation == generation &&
                        binding_matches_locked(binding);
     if (!valid && s_session.generation == generation) {
-        clear_session_locked();
-        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_DISCONNECTED, ESP_ERR_INVALID_STATE);
     }
     d1l_store_lock_give(&s_lock);
     return valid;
@@ -632,7 +739,6 @@ bool d1l_meshcore_admin_runtime_note_room_activity(
     if (valid &&
         !d1l_meshcore_admin_note_authenticated_activity(
             &s_session, now_us)) {
-        s_fingerprint[0] = '\0';
         s_metrics.response_expired++;
         s_metrics.last_error = ESP_ERR_TIMEOUT;
         valid = false;
@@ -657,14 +763,13 @@ bool d1l_meshcore_admin_runtime_begin_status(
             &s_session, tag, now_us,
             deadline_after(now_us, D1L_MESHCORE_ADMIN_REQUEST_TIMEOUT_US));
     } else if (s_session.generation == generation) {
-        clear_session_locked();
-        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_DISCONNECTED, ESP_ERR_INVALID_STATE);
     }
     if (began) {
         *out_request_generation = s_session.generation;
         s_metrics.last_error = ESP_OK;
     } else if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
-        s_fingerprint[0] = '\0';
         s_metrics.response_expired++;
         s_metrics.last_error = ESP_ERR_TIMEOUT;
     }
@@ -676,12 +781,13 @@ void d1l_meshcore_admin_runtime_note_status_tx(uint32_t request_generation,
                                                uint32_t tag,
                                                esp_err_t result)
 {
+    (void)tag;
     d1l_store_lock_take(&s_lock);
     if (result == ESP_OK) {
         s_metrics.status_tx_queued++;
     } else {
         if (s_session.generation == request_generation) {
-            (void)d1l_meshcore_admin_cancel_status_request(&s_session, tag);
+            fail_session_locked(failure_state_for_error(result), result);
         }
         s_metrics.last_error = result;
     }
@@ -705,14 +811,13 @@ bool d1l_meshcore_admin_runtime_begin_query(
             &s_session, query, offset, tag, now_us,
             deadline_after(now_us, D1L_MESHCORE_ADMIN_REQUEST_TIMEOUT_US));
     } else if (s_session.generation == generation) {
-        clear_session_locked();
-        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_DISCONNECTED, ESP_ERR_INVALID_STATE);
     }
     if (began) {
         *out_request_generation = s_session.generation;
         s_metrics.last_error = ESP_OK;
     } else if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
-        s_fingerprint[0] = '\0';
         s_metrics.response_expired++;
         s_metrics.last_error = ESP_ERR_TIMEOUT;
     }
@@ -724,13 +829,14 @@ void d1l_meshcore_admin_runtime_note_query_tx(
     uint32_t request_generation, d1l_meshcore_admin_query_t query,
     uint32_t tag, esp_err_t result)
 {
+    (void)query;
+    (void)tag;
     d1l_store_lock_take(&s_lock);
     if (result == ESP_OK) {
         s_metrics.query_tx_queued++;
     } else {
         if (s_session.generation == request_generation) {
-            (void)d1l_meshcore_admin_cancel_query_request(
-                &s_session, query, tag);
+            fail_session_locked(failure_state_for_error(result), result);
         }
         s_metrics.last_error = result;
     }
@@ -754,14 +860,13 @@ bool d1l_meshcore_admin_runtime_begin_mutation(
             &s_session, mutation, tag, now_us,
             deadline_after(now_us, D1L_MESHCORE_ADMIN_REQUEST_TIMEOUT_US));
     } else if (s_session.generation == generation) {
-        clear_session_locked();
-        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_DISCONNECTED, ESP_ERR_INVALID_STATE);
     }
     if (began) {
         *out_request_generation = s_session.generation;
         s_metrics.last_error = ESP_OK;
     } else if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
-        s_fingerprint[0] = '\0';
         s_metrics.response_expired++;
         s_metrics.last_error = ESP_ERR_TIMEOUT;
     }
@@ -773,13 +878,14 @@ void d1l_meshcore_admin_runtime_note_mutation_tx(
     uint32_t request_generation, d1l_meshcore_admin_mutation_t mutation,
     uint32_t tag, esp_err_t result)
 {
+    (void)mutation;
+    (void)tag;
     d1l_store_lock_take(&s_lock);
     if (result == ESP_OK) {
         s_metrics.mutation_tx_queued++;
     } else {
         if (s_session.generation == request_generation) {
-            (void)d1l_meshcore_admin_cancel_mutation(
-                &s_session, mutation, tag);
+            fail_session_locked(failure_state_for_error(result), result);
         }
         s_metrics.last_error = result;
     }
@@ -788,7 +894,8 @@ void d1l_meshcore_admin_runtime_note_mutation_tx(
 
 bool d1l_meshcore_admin_runtime_begin_cli(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
-    uint32_t tag, bool sensitive, uint64_t now_us,
+    uint32_t tag, bool sensitive, bool read_only,
+    d1l_meshcore_admin_cli_reply_profile_t reply_profile, uint64_t now_us,
     uint32_t *out_request_generation)
 {
     if (!out_request_generation) {
@@ -800,17 +907,16 @@ bool d1l_meshcore_admin_runtime_begin_cli(
     bool began = false;
     if (valid) {
         began = d1l_meshcore_admin_begin_cli_command(
-            &s_session, tag, sensitive, now_us,
+            &s_session, tag, sensitive, read_only, reply_profile, now_us,
             deadline_after(now_us, D1L_MESHCORE_ADMIN_REQUEST_TIMEOUT_US));
     } else if (s_session.generation == generation) {
-        clear_session_locked();
-        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_DISCONNECTED, ESP_ERR_INVALID_STATE);
     }
     if (began) {
         *out_request_generation = s_session.generation;
         s_metrics.last_error = ESP_OK;
     } else if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
-        s_fingerprint[0] = '\0';
         s_metrics.response_expired++;
         s_metrics.last_error = ESP_ERR_TIMEOUT;
     }
@@ -821,13 +927,13 @@ bool d1l_meshcore_admin_runtime_begin_cli(
 void d1l_meshcore_admin_runtime_note_cli_tx(
     uint32_t request_generation, uint32_t tag, esp_err_t result)
 {
+    (void)tag;
     d1l_store_lock_take(&s_lock);
     if (result == ESP_OK) {
         s_metrics.cli_tx_queued++;
     } else {
         if (s_session.generation == request_generation) {
-            (void)d1l_meshcore_admin_cancel_cli_command(
-                &s_session, tag);
+            fail_session_locked(failure_state_for_error(result), result);
         }
         s_metrics.last_error = result;
     }
@@ -891,8 +997,8 @@ d1l_meshcore_admin_runtime_dispatch_mutation_response(
         *out_considered = true;
     }
     if (!binding_matches_locked(binding)) {
-        clear_session_locked();
-        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_DISCONNECTED, ESP_ERR_INVALID_STATE);
         d1l_store_lock_give(&s_lock);
         return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
     }
@@ -900,8 +1006,11 @@ d1l_meshcore_admin_runtime_dispatch_mutation_response(
         d1l_meshcore_admin_accept_mutation_response(
             &s_session, binding->peer_public_key, response_timestamp,
             text, text_len, now_us);
-    if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
-        s_fingerprint[0] = '\0';
+    if (result == D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED &&
+        s_session.state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL) {
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL,
+            ESP_ERR_INVALID_RESPONSE);
     }
     if (result == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
         s_metrics.mutation_accepted++;
@@ -939,8 +1048,8 @@ d1l_meshcore_admin_runtime_dispatch_cli_response(
         *out_considered = true;
     }
     if (!binding_matches_locked(binding)) {
-        clear_session_locked();
-        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_DISCONNECTED, ESP_ERR_INVALID_STATE);
         d1l_store_lock_give(&s_lock);
         return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
     }
@@ -948,8 +1057,11 @@ d1l_meshcore_admin_runtime_dispatch_cli_response(
         d1l_meshcore_admin_accept_cli_response(
             &s_session, binding->peer_public_key, response_timestamp,
             text, text_len, now_us);
-    if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
-        s_fingerprint[0] = '\0';
+    if (result == D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED &&
+        s_session.state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL) {
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL,
+            ESP_ERR_INVALID_RESPONSE);
     }
     if (result == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
         s_metrics.cli_accepted++;
@@ -991,17 +1103,46 @@ d1l_meshcore_admin_runtime_dispatch_response(
         *out_considered = true;
     }
     if (!binding_matches_locked(binding)) {
-        clear_session_locked();
-        s_metrics.last_error = ESP_ERR_INVALID_STATE;
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_DISCONNECTED, ESP_ERR_INVALID_STATE);
         d1l_store_lock_give(&s_lock);
         return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
     }
 
     d1l_meshcore_admin_response_result_t result;
+    esp_err_t durable_failure = ESP_OK;
     if (s_session.state == D1L_MESHCORE_ADMIN_LOGIN_PENDING) {
+        d1l_meshcore_admin_session_t candidate_session = s_session;
+        d1l_meshcore_admin_replay_cache_t candidate_replay = s_replay_cache;
         result = d1l_meshcore_admin_accept_login_response(
-            &s_session, &s_replay_cache, binding->peer_public_key, plaintext,
-            plaintext_len, now_us);
+            &candidate_session, &candidate_replay,
+            binding->peer_public_key, plaintext, plaintext_len, now_us);
+        if (result == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
+            const esp_err_t durable_ret = durable_replay_commit(
+                binding->peer_public_key, plaintext,
+                candidate_session.server_timestamp);
+            if (durable_ret == ESP_OK) {
+                s_session = candidate_session;
+                s_replay_cache = candidate_replay;
+            } else if (durable_ret == ESP_ERR_INVALID_RESPONSE) {
+                fail_session_locked(
+                    D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED,
+                    ESP_ERR_INVALID_RESPONSE);
+                result = D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED;
+            } else {
+                fail_session_locked(
+                    D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED, durable_ret);
+                durable_failure = durable_ret;
+                result = D1L_MESHCORE_ADMIN_RESPONSE_REJECTED;
+            }
+        } else {
+            s_session = candidate_session;
+            s_replay_cache = candidate_replay;
+        }
+        d1l_meshcore_admin_secure_zero(
+            &candidate_session, sizeof(candidate_session));
+        d1l_meshcore_admin_secure_zero(
+            &candidate_replay, sizeof(candidate_replay));
     } else if (s_session.state == D1L_MESHCORE_ADMIN_STATUS_PENDING) {
         result = d1l_meshcore_admin_accept_status_response(
             &s_session, binding->peer_public_key, plaintext, plaintext_len,
@@ -1011,8 +1152,11 @@ d1l_meshcore_admin_runtime_dispatch_response(
             &s_session, binding->peer_public_key, plaintext, plaintext_len,
             now_us);
     }
-    if (s_session.state == D1L_MESHCORE_ADMIN_TIMED_OUT) {
-        s_fingerprint[0] = '\0';
+    if (result == D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED &&
+        s_session.state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL) {
+        fail_session_locked(
+            D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL,
+            ESP_ERR_INVALID_RESPONSE);
     }
     if (query_attempt) {
         if (result == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
@@ -1022,6 +1166,9 @@ d1l_meshcore_admin_runtime_dispatch_response(
         }
     }
     note_response_locked(result);
+    if (durable_failure != ESP_OK) {
+        s_metrics.last_error = durable_failure;
+    }
     d1l_store_lock_give(&s_lock);
     return result;
 }
@@ -1031,7 +1178,6 @@ bool d1l_meshcore_admin_runtime_expire(uint64_t now_us)
     d1l_store_lock_take(&s_lock);
     const bool expired = d1l_meshcore_admin_expire_if_due(&s_session, now_us);
     if (expired) {
-        s_fingerprint[0] = '\0';
         s_metrics.response_expired++;
         s_metrics.last_error = ESP_ERR_TIMEOUT;
     }
@@ -1090,11 +1236,27 @@ void d1l_meshcore_admin_runtime_snapshot(
     *out_snapshot = snapshot;
 }
 
-void d1l_meshcore_admin_runtime_invalidate(esp_err_t reason)
+void d1l_meshcore_admin_runtime_report_failure(esp_err_t reason)
 {
     d1l_store_lock_take(&s_lock);
+    const d1l_meshcore_admin_state_t failure_state =
+        failure_state_for_error(reason);
+    if (s_session.state != failure_state ||
+        s_metrics.last_error != reason) {
+        fail_session_locked(failure_state, reason);
+    }
+    d1l_store_lock_give(&s_lock);
+}
+
+void d1l_meshcore_admin_runtime_invalidate(esp_err_t reason)
+{
+    if (reason != ESP_OK) {
+        d1l_meshcore_admin_runtime_report_failure(reason);
+        return;
+    }
+    d1l_store_lock_take(&s_lock);
     clear_session_locked();
-    s_metrics.last_error = reason;
+    s_metrics.last_error = ESP_OK;
     d1l_store_lock_give(&s_lock);
 }
 

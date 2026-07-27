@@ -139,6 +139,45 @@ def test_admin_mutations_are_exactly_allowlisted_and_locally_confirmed() -> None
         "".join(ui.split())
 
 
+def test_remote_cli_is_documented_role_aware_and_fails_closed() -> None:
+    dispatch_h = read("main/mesh/meshcore_admin_dispatch.h")
+    dispatch = read("main/mesh/meshcore_admin_dispatch.c")
+    service = read("main/mesh/meshcore_service.c")
+
+    for policy in (
+        "D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED",
+        "D1L_MESHCORE_ADMIN_CLI_READ_ONLY",
+        "D1L_MESHCORE_ADMIN_CLI_MUTATION",
+        "D1L_MESHCORE_ADMIN_CLI_SENSITIVE",
+    ):
+        assert policy in dispatch_h
+    assert "d1l_meshcore_admin_cli_command_allowed" in dispatch_h
+    assert "d1l_meshcore_admin_format_acl_command" in dispatch_h
+    assert '{"allow.read.only", CLI_ROLE_ROOM' in dispatch
+    assert '{"neighbors", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_REPEATER}' \
+        in dispatch
+    assert '{"prv.key", CLI_ROLE_BOTH, false, true, true}' in dispatch
+    assert '{"freq", CLI_ROLE_BOTH, true, false, false}' in dispatch
+    assert '"reboot"' not in body(
+        dispatch,
+        "static const cli_exact_rule_t CLI_EXACT_RULES[]",
+        "static bool cli_command_shape_valid",
+    )
+    assert '"start ota"' not in dispatch
+
+    handler = body(
+        service,
+        "static esp_err_t meshcore_service_handle_admin_cli",
+        "static esp_err_t meshcore_service_handle_admin_logout",
+    )
+    allowed = handler.index("d1l_meshcore_admin_cli_command_allowed(")
+    packet = handler.index("d1l_meshcore_admin_build_cli_packet(")
+    assert allowed < packet
+    assert "context.binding.role, context.permissions" in handler
+    assert "ESP_ERR_NOT_SUPPORTED" in handler
+    assert "ESP_ERR_NOT_ALLOWED" in handler
+
+
 def test_runtime_snapshot_redacts_all_authority_material() -> None:
     runtime_h = read("main/mesh/meshcore_admin_runtime.h")
     runtime_c = read("main/mesh/meshcore_admin_runtime.c")
@@ -678,3 +717,73 @@ def test_admin_command_guards_are_exact_production_binding_sources() -> None:
         assert manifest["production_binding_sources"][relative] == \
             canonical_sha256(relative)
         assert f'"{relative}"' in allowlist
+
+
+def test_admin_login_replay_guard_is_durable_and_fail_closed() -> None:
+    runtime = read("main/mesh/meshcore_admin_runtime.c")
+    dispatch = read("main/mesh/meshcore_admin_dispatch.c")
+    header = read("main/mesh/meshcore_admin_dispatch.h")
+    usb = read("main/comms/usb_console.c")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    for token in (
+        "D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS",
+        "D1L_MESHCORE_ADMIN_DISCONNECTED",
+        "D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL",
+        "D1L_MESHCORE_ADMIN_RADIO_BUSY",
+        "D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED",
+        "D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED",
+        "D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED",
+    ):
+        assert token in header
+
+    durable = runtime.split(
+        "static esp_err_t durable_replay_commit(", 1
+    )[1].split(
+        "d1l_meshcore_admin_role_t d1l_meshcore_admin_role_for_contact", 1
+    )[0]
+    for token in (
+        "nvs_open(",
+        "nvs_get_blob(",
+        "record.peer_public_key",
+        "record.highest_server_timestamp",
+        "nvs_set_blob(",
+        "nvs_commit(",
+    ):
+        assert token in durable
+    assert durable.index("nvs_set_blob(") < durable.index("nvs_commit(")
+
+    receive = runtime.split(
+        "d1l_meshcore_admin_runtime_dispatch_response(", 1
+    )[1].split(
+        "bool d1l_meshcore_admin_runtime_expire(", 1
+    )[0]
+    assert receive.index("durable_replay_commit(") < \
+        receive.index("s_session = candidate_session;")
+    assert "D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED" in receive
+    assert "D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED, durable_ret" in receive
+
+    accept = dispatch.split(
+        "d1l_meshcore_admin_accept_login_response(", 1
+    )[1].split(
+        "bool d1l_meshcore_admin_begin_status_request(", 1
+    )[0]
+    assert "server_timestamp <= entry->highest_server_timestamp" in dispatch
+    assert "D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS" in accept
+    assert "D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL" in accept
+    assert "D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED" in accept
+
+    for external_name in (
+        "volatile_replay_rejected",
+        "durable_replay_rejected",
+        "local_storage_failed",
+    ):
+        assert external_name in usb
+        assert external_name in sheets
+    for user_message in (
+        "recent login replay rejected",
+        "saved login replay rejected",
+        "local storage failed",
+    ):
+        assert user_message in phase1

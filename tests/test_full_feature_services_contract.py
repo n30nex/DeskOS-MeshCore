@@ -152,8 +152,9 @@ def test_server_admin_login_is_available_on_device_and_scrubs_credentials():
     assert "ESP_LOG" not in login
 
 
-def test_server_admin_session_is_cleared_when_closed_or_target_changes():
+def test_server_admin_close_preserves_session_and_target_change_logs_out():
     phase1 = read("main/ui/ui_phase1.c")
+    sheets = read("main/ui/ui_service_sheets.c")
     close = phase1.split(
         "case D1L_UI_SERVICE_ACTION_CLOSE_ADMIN:", 1
     )[1].split(
@@ -164,9 +165,26 @@ def test_server_admin_session_is_cleared_when_closed_or_target_changes():
     )[1].split(
         "case D1L_UI_NODE_DETAIL_ACTION_NONE:", 1
     )[0]
-    assert "d1l_meshcore_service_admin_logout();" in close
+    assert "d1l_meshcore_service_admin_logout();" not in close
+    assert "hide_service_sheets();" in close
     assert "strcmp(admin_status.fingerprint," in switch
     assert "d1l_meshcore_service_admin_logout();" in switch
+
+    begin_render = sheets.split(
+        "static bool begin_render(", 1
+    )[1].split(
+        "static void finish_admin_render(", 1
+    )[0]
+    finish_render = sheets.split(
+        "static void finish_admin_render(", 1
+    )[1].split(
+        "static bool render_header(", 1
+    )[0]
+    assert begin_render.index("lv_obj_get_scroll_y(sheet)") < \
+        begin_render.index("lv_obj_clean(sheet)")
+    assert "lv_obj_update_layout(sheet);" in finish_render
+    assert "lv_obj_scroll_to_y(" in finish_render
+    assert "finish_admin_render(controller, sheet);" in sheets
 
 
 def test_authenticated_server_management_is_available_on_device_and_bounded():
@@ -201,6 +219,53 @@ def test_authenticated_server_management_is_available_on_device_and_bounded():
         "d1l_meshcore_admin_secure_zero(command, sizeof(command));"
     ) >= 4
     assert "show_toast_text(command" not in cli
+
+
+def test_acl_room_controls_and_usb_admin_surface_are_complete():
+    header = read("main/ui/ui_service_sheets.h")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+    usb = read("main/comms/usb_console.c")
+
+    for required in (
+        "D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY",
+        "D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_ON",
+        "D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_OFF",
+        "admin_acl_textarea",
+        "d1l_ui_service_sheets_take_admin_acl",
+    ):
+        assert required in header
+    assert "Access-list editor" in sheets
+    assert "0 remove, 1 read, 2 write, 3 admin" in sheets
+    assert "Room guest access" in sheets
+    assert "Controls allow.read.only." in sheets
+    assert "unsupported, serial-only, OTA, reboot and power commands fail closed" \
+        in sheets
+
+    assert "D1L_UI_ADMIN_CLI_ORIGIN_ACL" in phase1
+    assert "D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_ON" in phase1
+    assert "D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_OFF" in phase1
+    assert "case D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY:" in phase1
+    assert "d1l_meshcore_admin_format_acl_command(" in phase1
+    assert '"set allow.read.only on"' in phase1
+    assert '"set allow.read.only off"' in phase1
+    assert "admin_cli_allowed_for_current_session(command)" in phase1
+
+    assert "static void cmd_admin_cli(const char *line)" in usb
+    assert "static void cmd_admin_room_post(const char *line)" in usb
+    assert '"admin cli <documented-command> ' in usb
+    assert '[CONFIRM-REMOTE-MUTATION]' in usb
+    assert "admin room-post <text>" in usb
+    admin_cli = usb.split(
+        "static void cmd_admin_cli(const char *line)", 1
+    )[1].split(
+        "static void cmd_admin_room_post(const char *line)", 1
+    )[0]
+    assert "D1L_MESHCORE_ADMIN_CLI_SENSITIVE" in admin_cli
+    assert "sensitive remote commands require on-device Secure Input" in \
+        admin_cli
+    assert "d1l_meshcore_service_admin_request_cli(" in admin_cli
+    assert "print_json_string(remote_command)" not in admin_cli
 
 
 def test_authenticated_room_console_receives_acks_and_posts_on_device():

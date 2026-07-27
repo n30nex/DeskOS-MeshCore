@@ -37,6 +37,8 @@ typedef struct {
     d1l_meshcore_admin_query_t pending_query;
     uint16_t pending_query_offset;
     bool pending_cli_sensitive;
+    bool pending_cli_read_only;
+    d1l_meshcore_admin_cli_reply_profile_t pending_cli_reply_profile;
 } d1l_meshcore_admin_context_t;
 
 typedef struct {
@@ -177,7 +179,8 @@ void d1l_meshcore_admin_runtime_note_mutation_tx(
     uint32_t tag, esp_err_t result);
 bool d1l_meshcore_admin_runtime_begin_cli(
     const d1l_meshcore_admin_binding_t *binding, uint32_t generation,
-    uint32_t tag, bool sensitive, uint64_t now_us,
+    uint32_t tag, bool sensitive, bool read_only,
+    d1l_meshcore_admin_cli_reply_profile_t reply_profile, uint64_t now_us,
     uint32_t *out_request_generation);
 void d1l_meshcore_admin_runtime_note_cli_tx(
     uint32_t request_generation, uint32_t tag, esp_err_t result);
@@ -199,6 +202,7 @@ d1l_meshcore_admin_runtime_dispatch_response(
 bool d1l_meshcore_admin_runtime_expire(uint64_t now_us);
 void d1l_meshcore_admin_runtime_snapshot(
     d1l_meshcore_admin_runtime_snapshot_t *out_snapshot);
+void d1l_meshcore_admin_runtime_report_failure(esp_err_t reason);
 void d1l_meshcore_admin_runtime_invalidate(esp_err_t reason);
 void d1l_meshcore_admin_runtime_logout(void);
 

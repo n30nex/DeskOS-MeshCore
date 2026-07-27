@@ -7472,6 +7472,20 @@ static const char *admin_state_name(d1l_meshcore_admin_state_t state)
         return "query_pending";
     case D1L_MESHCORE_ADMIN_TIMED_OUT:
         return "timed_out";
+    case D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS:
+        return "rejected_credentials";
+    case D1L_MESHCORE_ADMIN_DISCONNECTED:
+        return "disconnected";
+    case D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL:
+        return "unsupported_protocol";
+    case D1L_MESHCORE_ADMIN_RADIO_BUSY:
+        return "radio_busy";
+    case D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED:
+        return "volatile_replay_rejected";
+    case D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED:
+        return "durable_replay_rejected";
+    case D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED:
+        return "local_storage_failed";
     default:
         return "invalid";
     }
@@ -7723,6 +7737,90 @@ static void cmd_admin_mutation(const char *line)
         return;
     }
     cmd_admin_status(command);
+}
+
+static void cmd_admin_cli(const char *line)
+{
+    static const char PREFIX[] = "admin cli ";
+    static const char CONFIRMATION[] = " CONFIRM-REMOTE-MUTATION";
+    char remote_command[D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
+    const char *input =
+        line && strncmp(line, PREFIX, sizeof(PREFIX) - 1U) == 0 ?
+            line + sizeof(PREFIX) - 1U : NULL;
+    size_t input_len = input ? strlen(input) : 0U;
+    bool confirmed = false;
+    const size_t confirmation_len = sizeof(CONFIRMATION) - 1U;
+    if (input_len > confirmation_len &&
+        strcmp(input + input_len - confirmation_len, CONFIRMATION) == 0) {
+        confirmed = true;
+        input_len -= confirmation_len;
+    }
+    if (!input || input_len == 0U ||
+        input_len > D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES) {
+        err_result(
+            "admin cli", "INVALID_ARGUMENT",
+            "usage: admin cli <documented-command> "
+            "[CONFIRM-REMOTE-MUTATION]");
+        return;
+    }
+    memcpy(remote_command, input, input_len);
+    remote_command[input_len] = '\0';
+    const d1l_meshcore_admin_cli_policy_t policy =
+        d1l_meshcore_admin_cli_command_policy(remote_command);
+    if (policy == D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED) {
+        wipe_console_bytes(remote_command, sizeof(remote_command));
+        err_result(
+            "admin cli", "NOT_SUPPORTED",
+            "command is not in the pinned role-compatible remote allowlist");
+        return;
+    }
+    if (policy == D1L_MESHCORE_ADMIN_CLI_SENSITIVE) {
+        wipe_console_bytes(remote_command, sizeof(remote_command));
+        err_result(
+            "admin cli", "NOT_ALLOWED",
+            "sensitive remote commands require on-device Secure Input");
+        return;
+    }
+    if (policy != D1L_MESHCORE_ADMIN_CLI_READ_ONLY && !confirmed) {
+        wipe_console_bytes(remote_command, sizeof(remote_command));
+        err_result(
+            "admin cli", "CONFIRMATION_REQUIRED",
+            "append CONFIRM-REMOTE-MUTATION for a documented remote change");
+        return;
+    }
+    const esp_err_t ret = d1l_meshcore_service_admin_request_cli(
+        remote_command, confirmed);
+    wipe_console_bytes(remote_command, sizeof(remote_command));
+    if (ret != ESP_OK) {
+        err_result(
+            "admin cli", esp_err_to_name(ret),
+            "requires an authenticated admin session, compatible server role, current route, and no pending request");
+        return;
+    }
+    cmd_admin_status("admin cli");
+}
+
+static void cmd_admin_room_post(const char *line)
+{
+    static const char PREFIX[] = "admin room-post ";
+    const char *text =
+        line && strncmp(line, PREFIX, sizeof(PREFIX) - 1U) == 0 ?
+            line + sizeof(PREFIX) - 1U : NULL;
+    if (!text || text[0] == '\0') {
+        err_result(
+            "admin room-post", "INVALID_ARGUMENT",
+            "usage: admin room-post <text>");
+        return;
+    }
+    const esp_err_t ret =
+        d1l_meshcore_service_admin_send_room_post(text);
+    if (ret != ESP_OK) {
+        err_result(
+            "admin room-post", esp_err_to_name(ret),
+            "requires an authenticated room session with write permission");
+        return;
+    }
+    cmd_admin_status("admin room-post");
 }
 
 static void print_crash_log_entry_json(const d1l_crash_log_entry_t *e)
@@ -8620,6 +8718,8 @@ static void cmd_help(void)
            "\"admin access-list\","
            "\"admin clear-stats CONFIRM-REMOTE-MUTATION\","
            "\"admin advertise-zero-hop CONFIRM-REMOTE-MUTATION\","
+           "\"admin cli <documented-command> [CONFIRM-REMOTE-MUTATION]\","
+           "\"admin room-post <text>\","
            "\"admin logout\",\"health\",\"crashlog\",\"crashlog clear\","
            "\"wifi status\",\"wifi profiles\",\"wifi scan\","
            "\"wifi save <ssid> [password]\",\"wifi select <1-based-index>\","
@@ -9162,6 +9262,14 @@ static void handle_line(const d1l_usb_command_view_t *command)
                strncmp(line, "admin advertise-zero-hop",
                        strlen("admin advertise-zero-hop")) == 0) {
         cmd_admin_mutation(line);
+    } else if (strcmp(line, "admin cli") == 0 ||
+               strncmp(line, "admin cli ",
+                       strlen("admin cli ")) == 0) {
+        cmd_admin_cli(line);
+    } else if (strcmp(line, "admin room-post") == 0 ||
+               strncmp(line, "admin room-post ",
+                       strlen("admin room-post ")) == 0) {
+        cmd_admin_room_post(line);
     } else if (strcmp(line, "admin logout") == 0) {
         cmd_admin_logout();
     } else if (strcmp(line, "health") == 0) {

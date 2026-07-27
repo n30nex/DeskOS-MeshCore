@@ -246,13 +246,32 @@ void d1l_meshcore_admin_reset(d1l_meshcore_admin_session_t *session)
 
 void d1l_meshcore_admin_timeout(d1l_meshcore_admin_session_t *session)
 {
-    if (!session) {
-        return;
+    (void)d1l_meshcore_admin_fail(
+        session, D1L_MESHCORE_ADMIN_TIMED_OUT);
+}
+
+bool d1l_meshcore_admin_fail(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_state_t failure_state)
+{
+    if (!session ||
+        (failure_state != D1L_MESHCORE_ADMIN_TIMED_OUT &&
+         failure_state != D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS &&
+         failure_state != D1L_MESHCORE_ADMIN_DISCONNECTED &&
+         failure_state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL &&
+         failure_state != D1L_MESHCORE_ADMIN_RADIO_BUSY &&
+         failure_state != D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED &&
+         failure_state != D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED &&
+         failure_state != D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED)) {
+        return false;
     }
     const uint32_t generation = next_generation(session->generation);
+    const d1l_meshcore_admin_role_t role = session->role;
     d1l_meshcore_admin_secure_zero(session, sizeof(*session));
-    session->state = D1L_MESHCORE_ADMIN_TIMED_OUT;
+    session->state = failure_state;
+    session->role = role;
     session->generation = generation;
+    return true;
 }
 
 void d1l_meshcore_admin_replay_cache_clear(
@@ -276,7 +295,14 @@ bool d1l_meshcore_admin_begin_login(
         (role != D1L_MESHCORE_ADMIN_ROLE_REPEATER &&
          role != D1L_MESHCORE_ADMIN_ROLE_ROOM) ||
         (session->state != D1L_MESHCORE_ADMIN_IDLE &&
-         session->state != D1L_MESHCORE_ADMIN_TIMED_OUT)) {
+         session->state != D1L_MESHCORE_ADMIN_TIMED_OUT &&
+         session->state != D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS &&
+         session->state != D1L_MESHCORE_ADMIN_DISCONNECTED &&
+         session->state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL &&
+         session->state != D1L_MESHCORE_ADMIN_RADIO_BUSY &&
+         session->state != D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED &&
+         session->state != D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED &&
+         session->state != D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED)) {
         return false;
     }
     const uint32_t generation = next_generation(session->generation);
@@ -326,7 +352,8 @@ bool d1l_meshcore_admin_binding_matches(
 static bool replay_cache_contains(
     const d1l_meshcore_admin_replay_cache_t *cache,
     const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
-    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES])
+    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES],
+    uint32_t server_timestamp)
 {
     if (!cache) {
         return false;
@@ -337,6 +364,9 @@ static bool replay_cache_contains(
             !bytes_equal(entry->peer_public_key, peer_public_key,
                          D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES)) {
             continue;
+        }
+        if (server_timestamp <= entry->highest_server_timestamp) {
+            return true;
         }
         for (size_t response_index = 0U;
              response_index < entry->response_count; ++response_index) {
@@ -353,7 +383,8 @@ static bool replay_cache_contains(
 static void replay_cache_remember(
     d1l_meshcore_admin_replay_cache_t *cache,
     const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
-    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES])
+    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES],
+    uint32_t server_timestamp)
 {
     size_t slot = D1L_MESHCORE_ADMIN_REPLAY_PEER_CAPACITY;
     for (size_t i = 0U; i < D1L_MESHCORE_ADMIN_REPLAY_PEER_CAPACITY; ++i) {
@@ -399,6 +430,7 @@ static void replay_cache_remember(
     }
     memcpy(entry->responses[response_slot], response,
            D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES);
+    entry->highest_server_timestamp = server_timestamp;
 }
 
 static bool authenticated_deadline_due(
@@ -471,9 +503,16 @@ d1l_meshcore_admin_accept_login_response(
     if (!d1l_meshcore_admin_canonical_span(
             plaintext, plaintext_len,
             D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES)) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
 
+    if (plaintext[4] != 0U) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS);
+        return D1L_MESHCORE_ADMIN_RESPONSE_REJECTED;
+    }
     const uint8_t permissions = plaintext[7];
     const uint8_t permission_role =
         permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
@@ -483,18 +522,28 @@ d1l_meshcore_admin_accept_login_response(
         permission_role == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ? 1U :
         (session->role == D1L_MESHCORE_ADMIN_ROLE_ROOM &&
          permission_role == D1L_MESHCORE_ADMIN_PERMISSION_GUEST ? 2U : 0U);
-    if (plaintext[4] != 0U || plaintext[5] != 0U ||
-        plaintext[6] != expected_legacy_role ||
+    if (plaintext[5] != 0U || plaintext[6] != expected_legacy_role ||
         plaintext[12] != expected_firmware) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
-    if (replay_cache_contains(replay_cache, peer_public_key, plaintext)) {
-        d1l_meshcore_admin_timeout(session);
+    const uint32_t server_timestamp = read_le32(plaintext);
+    if (server_timestamp == 0U) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+    }
+    if (replay_cache_contains(
+            replay_cache, peer_public_key, plaintext, server_timestamp)) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED);
         return D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED;
     }
 
-    replay_cache_remember(replay_cache, peer_public_key, plaintext);
-    session->server_timestamp = read_le32(plaintext);
+    replay_cache_remember(
+        replay_cache, peer_public_key, plaintext, server_timestamp);
+    session->server_timestamp = server_timestamp;
     session->permissions = permissions;
     session->firmware_level = plaintext[12];
     session->request_deadline_us = 0U;
@@ -679,44 +728,111 @@ static uint8_t cli_ascii_lower(uint8_t value)
         (uint8_t)(value + ((uint8_t)'a' - (uint8_t)'A')) : value;
 }
 
-static bool cli_starts_with_case_insensitive(
-    const char *command, const char *prefix)
-{
-    if (!command || !prefix || prefix[0] == '\0') {
-        return false;
-    }
-    for (size_t i = 0U; prefix[i] != '\0'; ++i) {
-        if (command[i] == '\0' ||
-            cli_ascii_lower((uint8_t)command[i]) !=
-                cli_ascii_lower((uint8_t)prefix[i])) {
-            return false;
-        }
-    }
-    return true;
-}
+enum {
+    CLI_ROLE_REPEATER = 0x01U,
+    CLI_ROLE_ROOM = 0x02U,
+    CLI_ROLE_BOTH = CLI_ROLE_REPEATER | CLI_ROLE_ROOM,
+};
 
-static bool cli_equals_case_insensitive(
-    const char *command, const char *expected)
-{
-    return cli_starts_with_case_insensitive(command, expected) &&
-           command[strlen(expected)] == '\0';
-}
+typedef struct {
+    d1l_meshcore_admin_cli_policy_t policy;
+    uint8_t role_mask;
+} cli_classification_t;
 
-static bool cli_contains_case_insensitive(
-    const char *command, const char *needle)
-{
-    if (!command || !needle || needle[0] == '\0') {
-        return false;
-    }
-    for (size_t offset = 0U; command[offset] != '\0'; ++offset) {
-        if (cli_starts_with_case_insensitive(&command[offset], needle)) {
-            return true;
-        }
-    }
-    return false;
-}
+typedef struct {
+    const char *name;
+    uint8_t role_mask;
+    bool readable;
+    bool writable;
+    bool sensitive;
+} cli_setting_t;
 
-bool d1l_meshcore_admin_cli_command_valid(const char *command)
+typedef struct {
+    const char *command;
+    d1l_meshcore_admin_cli_policy_t policy;
+    uint8_t role_mask;
+} cli_exact_rule_t;
+
+static const cli_setting_t CLI_SETTINGS[] = {
+    {"dutycycle", CLI_ROLE_BOTH, true, true, false},
+    {"af", CLI_ROLE_BOTH, true, true, false},
+    {"int.thresh", CLI_ROLE_BOTH, true, true, false},
+    {"agc.reset.interval", CLI_ROLE_BOTH, true, true, false},
+    {"multi.acks", CLI_ROLE_BOTH, true, true, false},
+    {"allow.read.only", CLI_ROLE_ROOM, true, true, false},
+    {"flood.advert.interval", CLI_ROLE_BOTH, true, true, false},
+    {"advert.interval", CLI_ROLE_BOTH, true, true, false},
+    {"guest.password", CLI_ROLE_BOTH, true, true, true},
+    {"name", CLI_ROLE_BOTH, true, true, false},
+    {"repeat", CLI_ROLE_BOTH, true, true, false},
+    {"radio.rxgain", CLI_ROLE_BOTH, true, true, false},
+    {"radio", CLI_ROLE_BOTH, true, true, false},
+    {"lat", CLI_ROLE_BOTH, true, true, false},
+    {"lon", CLI_ROLE_BOTH, true, true, false},
+    {"rxdelay", CLI_ROLE_BOTH, true, true, false},
+    {"txdelay", CLI_ROLE_BOTH, true, true, false},
+    {"flood.max.unscoped", CLI_ROLE_BOTH, true, true, false},
+    {"flood.max.advert", CLI_ROLE_BOTH, true, true, false},
+    {"flood.max", CLI_ROLE_BOTH, true, true, false},
+    {"direct.txdelay", CLI_ROLE_BOTH, true, true, false},
+    {"owner.info", CLI_ROLE_BOTH, true, true, false},
+    {"path.hash.mode", CLI_ROLE_BOTH, true, true, false},
+    {"loop.detect", CLI_ROLE_BOTH, true, true, false},
+    {"tx", CLI_ROLE_BOTH, true, true, false},
+    {"bridge.enabled", CLI_ROLE_BOTH, true, true, false},
+    {"bridge.delay", CLI_ROLE_BOTH, true, true, false},
+    {"bridge.source", CLI_ROLE_BOTH, true, true, false},
+    {"bridge.baud", CLI_ROLE_BOTH, true, true, false},
+    {"bridge.channel", CLI_ROLE_BOTH, true, true, false},
+    {"bridge.secret", CLI_ROLE_BOTH, true, true, true},
+    {"adc.multiplier", CLI_ROLE_BOTH, true, true, false},
+    {"prv.key", CLI_ROLE_BOTH, false, true, true},
+    {"freq", CLI_ROLE_BOTH, true, false, false},
+    {"public.key", CLI_ROLE_BOTH, true, false, false},
+    {"role", CLI_ROLE_BOTH, true, false, false},
+    {"bridge.type", CLI_ROLE_BOTH, true, false, false},
+    {"bootloader.ver", CLI_ROLE_BOTH, true, false, false},
+    {"pwrmgt.support", CLI_ROLE_BOTH, true, false, false},
+    {"pwrmgt.source", CLI_ROLE_BOTH, true, false, false},
+    {"pwrmgt.bootreason", CLI_ROLE_BOTH, true, false, false},
+    {"pwrmgt.bootmv", CLI_ROLE_BOTH, true, false, false},
+};
+
+static const cli_exact_rule_t CLI_EXACT_RULES[] = {
+    {"ver", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"board", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"clock", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"neighbors", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_REPEATER},
+    {"powersaving", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_REPEATER},
+    {"gps", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"gps advert", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"region", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"region home", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"region default", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"region list allowed", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"region list denied", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"sensor list", D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH},
+    {"clock sync", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"advert", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"advert.zerohop", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"clear stats", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"log start", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"log stop", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"log erase", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"gps on", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"gps off", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"gps sync", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"gps advert none", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"gps advert share", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"gps advert prefs", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"region save", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH},
+    {"discover.neighbors", D1L_MESHCORE_ADMIN_CLI_MUTATION,
+     CLI_ROLE_REPEATER},
+    {"powersaving on", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_REPEATER},
+    {"powersaving off", D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_REPEATER},
+};
+
+static bool cli_command_shape_valid(const char *command)
 {
     if (!command) {
         return false;
@@ -740,43 +856,315 @@ bool d1l_meshcore_admin_cli_command_valid(const char *command)
     return true;
 }
 
-bool d1l_meshcore_admin_cli_command_sensitive(const char *command)
+static bool cli_starts_with(const char *command, const char *prefix)
 {
-    if (!d1l_meshcore_admin_cli_command_valid(command)) {
+    return command && prefix &&
+           strncmp(command, prefix, strlen(prefix)) == 0;
+}
+
+static bool cli_single_token(const char *value)
+{
+    return value && value[0] != '\0' && strchr(value, ' ') == NULL;
+}
+
+static bool cli_unsigned_decimal(const char *value)
+{
+    if (!cli_single_token(value)) {
         return false;
     }
-    return cli_contains_case_insensitive(command, "password") ||
-           cli_contains_case_insensitive(command, "secret") ||
-           cli_contains_case_insensitive(command, "prv.key") ||
-           cli_contains_case_insensitive(command, "private.key");
+    for (size_t i = 0U; value[i] != '\0'; ++i) {
+        if (value[i] < '0' || value[i] > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool cli_hex_span(const char *value, size_t len)
+{
+    if (!value || len == 0U) {
+        return false;
+    }
+    for (size_t i = 0U; i < len; ++i) {
+        const char ch = value[i];
+        if (!((ch >= '0' && ch <= '9') ||
+              (ch >= 'a' && ch <= 'f') ||
+              (ch >= 'A' && ch <= 'F'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool cli_hex_token(const char *value, size_t min_len, size_t max_len)
+{
+    if (!cli_single_token(value)) {
+        return false;
+    }
+    const size_t len = strlen(value);
+    return len >= min_len && len <= max_len && (len & 1U) == 0U &&
+           cli_hex_span(value, len);
+}
+
+static const cli_setting_t *cli_find_setting(
+    const char *name, size_t name_len)
+{
+    for (size_t i = 0U;
+         i < sizeof(CLI_SETTINGS) / sizeof(CLI_SETTINGS[0]); ++i) {
+        if (strlen(CLI_SETTINGS[i].name) == name_len &&
+            strncmp(name, CLI_SETTINGS[i].name, name_len) == 0) {
+            return &CLI_SETTINGS[i];
+        }
+    }
+    return NULL;
+}
+
+static cli_classification_t cli_classification(
+    d1l_meshcore_admin_cli_policy_t policy, uint8_t role_mask)
+{
+    return (cli_classification_t) {
+        .policy = policy,
+        .role_mask = role_mask,
+    };
+}
+
+static cli_classification_t cli_classify_setting(const char *command)
+{
+    const bool is_get = cli_starts_with(command, "get ");
+    const bool is_set = cli_starts_with(command, "set ");
+    if (!is_get && !is_set) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED, 0U);
+    }
+    const char *name = command + 4U;
+    const char *value = strchr(name, ' ');
+    const size_t name_len = value ? (size_t)(value - name) : strlen(name);
+    const cli_setting_t *setting = cli_find_setting(name, name_len);
+    if (!setting || name_len == 0U) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED, 0U);
+    }
+    if (is_get) {
+        if (value || !setting->readable) {
+            return cli_classification(
+                D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED, 0U);
+        }
+        return cli_classification(
+            setting->sensitive ? D1L_MESHCORE_ADMIN_CLI_SENSITIVE :
+                                 D1L_MESHCORE_ADMIN_CLI_READ_ONLY,
+            setting->role_mask);
+    }
+    if (!value || value[1] == '\0' || !setting->writable) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED, 0U);
+    }
+    return cli_classification(
+        setting->sensitive ? D1L_MESHCORE_ADMIN_CLI_SENSITIVE :
+                             D1L_MESHCORE_ADMIN_CLI_MUTATION,
+        setting->role_mask);
+}
+
+static bool cli_acl_arguments_valid(const char *arguments)
+{
+    if (!arguments) {
+        return false;
+    }
+    const char *permission = strchr(arguments, ' ');
+    return permission &&
+           permission == arguments + (D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U) &&
+           cli_hex_span(
+               arguments, D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U) &&
+           permission[1] >= '0' && permission[1] <= '3' &&
+           permission[2] == '\0';
+}
+
+static cli_classification_t cli_classify(const char *command)
+{
+    if (!cli_command_shape_valid(command)) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED, 0U);
+    }
+
+    const cli_classification_t setting = cli_classify_setting(command);
+    if (setting.policy != D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED) {
+        return setting;
+    }
+    for (size_t i = 0U;
+         i < sizeof(CLI_EXACT_RULES) / sizeof(CLI_EXACT_RULES[0]); ++i) {
+        if (strcmp(command, CLI_EXACT_RULES[i].command) == 0) {
+            return cli_classification(
+                CLI_EXACT_RULES[i].policy, CLI_EXACT_RULES[i].role_mask);
+        }
+    }
+
+    if (cli_starts_with(command, "setperm ") &&
+        cli_acl_arguments_valid(command + strlen("setperm "))) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH);
+    }
+    if (cli_starts_with(command, "region get ") &&
+        cli_single_token(command + strlen("region get "))) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH);
+    }
+    if (cli_starts_with(command, "sensor list ") &&
+        cli_unsigned_decimal(command + strlen("sensor list "))) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH);
+    }
+    if (cli_starts_with(command, "sensor get ") &&
+        cli_single_token(command + strlen("sensor get "))) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_READ_ONLY, CLI_ROLE_BOTH);
+    }
+    if (cli_starts_with(command, "time ") &&
+        cli_unsigned_decimal(command + strlen("time "))) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH);
+    }
+    if (cli_starts_with(command, "neighbor.remove ") &&
+        cli_hex_token(
+            command + strlen("neighbor.remove "), 2U,
+            D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U)) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_REPEATER);
+    }
+    if (cli_starts_with(command, "password ") &&
+        command[strlen("password ")] != '\0') {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_SENSITIVE, CLI_ROLE_BOTH);
+    }
+    if (cli_starts_with(command, "tempradio ") ||
+        cli_starts_with(command, "gps setloc ")) {
+        return cli_classification(
+            D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH);
+    }
+    if (cli_starts_with(command, "sensor set ")) {
+        const char *arguments = command + strlen("sensor set ");
+        const char *value = strchr(arguments, ' ');
+        if (value && value != arguments && value[1] != '\0') {
+            return cli_classification(
+                D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH);
+        }
+    }
+    static const char *const REGION_MUTATION_PREFIXES[] = {
+        "region allowf ", "region denyf ", "region put ", "region def ",
+        "region remove ", "region home ", "region default ",
+    };
+    for (size_t i = 0U;
+         i < sizeof(REGION_MUTATION_PREFIXES) /
+                 sizeof(REGION_MUTATION_PREFIXES[0]); ++i) {
+        if (cli_starts_with(command, REGION_MUTATION_PREFIXES[i]) &&
+            command[strlen(REGION_MUTATION_PREFIXES[i])] != '\0') {
+            return cli_classification(
+                D1L_MESHCORE_ADMIN_CLI_MUTATION, CLI_ROLE_BOTH);
+        }
+    }
+    return cli_classification(
+        D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED, 0U);
+}
+
+d1l_meshcore_admin_cli_policy_t d1l_meshcore_admin_cli_command_policy(
+    const char *command)
+{
+    return cli_classify(command).policy;
+}
+
+bool d1l_meshcore_admin_cli_command_valid(const char *command)
+{
+    return d1l_meshcore_admin_cli_command_policy(command) !=
+           D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED;
+}
+
+bool d1l_meshcore_admin_cli_command_sensitive(const char *command)
+{
+    return d1l_meshcore_admin_cli_command_policy(command) ==
+           D1L_MESHCORE_ADMIN_CLI_SENSITIVE;
 }
 
 bool d1l_meshcore_admin_cli_command_read_only(const char *command)
 {
-    if (!d1l_meshcore_admin_cli_command_valid(command) ||
-        d1l_meshcore_admin_cli_command_sensitive(command)) {
+    return d1l_meshcore_admin_cli_command_policy(command) ==
+           D1L_MESHCORE_ADMIN_CLI_READ_ONLY;
+}
+
+d1l_meshcore_admin_cli_reply_profile_t
+d1l_meshcore_admin_cli_command_reply_profile(const char *command)
+{
+    if (command && strcmp(command, "get bootloader.ver") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE;
+    }
+    if (command && strcmp(command, "get pwrmgt.support") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE;
+    }
+    if (command && strcmp(command, "get adc.multiplier") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_ADC_UNSUPPORTED;
+    }
+    if (command &&
+        (strcmp(command, "get pwrmgt.source") == 0 ||
+         strcmp(command, "get pwrmgt.bootreason") == 0 ||
+         strcmp(command, "get pwrmgt.bootmv") == 0)) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_POWER_MANAGEMENT_UNSUPPORTED;
+    }
+    if (command && strcmp(command, "gps") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_NOT_FOUND;
+    }
+    if (command && strcmp(command, "gps advert") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_ADVERT_ERROR;
+    }
+    if (command && strncmp(command, "region get ", 11U) == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_REGION_NOT_FOUND;
+    }
+    if (command && strncmp(command, "get ", 4U) == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE;
+    }
+    return D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT;
+}
+
+bool d1l_meshcore_admin_cli_command_allowed(
+    const char *command, d1l_meshcore_admin_role_t role,
+    uint8_t permissions)
+{
+    const cli_classification_t classification = cli_classify(command);
+    const uint8_t role_mask =
+        role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ? CLI_ROLE_REPEATER :
+        role == D1L_MESHCORE_ADMIN_ROLE_ROOM ? CLI_ROLE_ROOM : 0U;
+    return classification.policy != D1L_MESHCORE_ADMIN_CLI_UNSUPPORTED &&
+           role_mask != 0U &&
+           (classification.role_mask & role_mask) != 0U &&
+           (permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) ==
+               D1L_MESHCORE_ADMIN_PERMISSION_ADMIN;
+}
+
+bool d1l_meshcore_admin_format_acl_command(
+    const char *full_public_key_hex, uint8_t permissions,
+    char *out_command, size_t out_command_size)
+{
+    if (!full_public_key_hex || !out_command ||
+        permissions > D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ||
+        !cli_hex_token(
+            full_public_key_hex,
+            D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U,
+            D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES * 2U)) {
         return false;
     }
-    return cli_equals_case_insensitive(command, "ver") ||
-           cli_equals_case_insensitive(command, "board") ||
-           cli_equals_case_insensitive(command, "clock") ||
-           cli_equals_case_insensitive(command, "neighbors") ||
-           cli_equals_case_insensitive(command, "help") ||
-           cli_equals_case_insensitive(command, "gps") ||
-           cli_equals_case_insensitive(command, "region") ||
-           cli_equals_case_insensitive(command, "region home") ||
-           cli_equals_case_insensitive(command, "region default") ||
-           cli_starts_with_case_insensitive(command, "region get ") ||
-           cli_starts_with_case_insensitive(command, "region list ") ||
-           cli_equals_case_insensitive(command, "sensor list") ||
-           cli_starts_with_case_insensitive(command, "sensor list ") ||
-           cli_starts_with_case_insensitive(command, "sensor get ") ||
-           cli_starts_with_case_insensitive(command, "get ");
+    const int written = snprintf(
+        out_command, out_command_size, "setperm %s %u",
+        full_public_key_hex, (unsigned)permissions);
+    if (written < 0 || (size_t)written >= out_command_size) {
+        if (out_command_size > 0U) {
+            out_command[0] = '\0';
+        }
+        return false;
+    }
+    return true;
 }
 
 bool d1l_meshcore_admin_begin_cli_command(
     d1l_meshcore_admin_session_t *session, uint32_t tag,
-    bool sensitive, uint64_t now_us, uint64_t request_deadline_us)
+    bool sensitive, bool read_only,
+    d1l_meshcore_admin_cli_reply_profile_t reply_profile, uint64_t now_us,
+    uint64_t request_deadline_us)
 {
     const uint8_t expected_firmware =
         session && session->role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ? 2U :
@@ -787,7 +1175,8 @@ bool d1l_meshcore_admin_begin_cli_command(
         (session->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ADMIN) !=
             D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ||
         expected_firmware == 0U ||
-        session->firmware_level != expected_firmware) {
+        session->firmware_level != expected_firmware ||
+        reply_profile > D1L_MESHCORE_ADMIN_CLI_REPLY_REGION_NOT_FOUND) {
         return false;
     }
     if (authenticated_deadline_due(session, now_us)) {
@@ -796,6 +1185,8 @@ bool d1l_meshcore_admin_begin_cli_command(
     }
     session->pending_tag = tag;
     session->pending_cli_sensitive = sensitive;
+    session->pending_cli_read_only = read_only;
+    session->pending_cli_reply_profile = reply_profile;
     session->request_deadline_us = request_deadline_us;
     session->cli_reply_valid = false;
     session->cli_reply_redacted = false;
@@ -816,6 +1207,9 @@ bool d1l_meshcore_admin_cancel_cli_command(
     }
     session->pending_tag = 0U;
     session->pending_cli_sensitive = false;
+    session->pending_cli_read_only = false;
+    session->pending_cli_reply_profile =
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT;
     session->request_deadline_us = 0U;
     session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
     session->generation = next_generation(session->generation);
@@ -828,27 +1222,151 @@ static bool cli_reply_byte_valid(uint8_t value)
            (value >= 0x20U && value <= 0x7EU);
 }
 
-static bool cli_reply_is_error(const uint8_t *text, size_t text_len)
+static bool cli_reply_prefix(
+    const uint8_t *text, size_t text_len, size_t offset,
+    const char *prefix)
 {
-    if (!text || text_len == 0U) {
+    if (!text || !prefix || offset > text_len) {
         return false;
     }
-    if (text_len >= 3U &&
-        cli_ascii_lower(text[0]) == (uint8_t)'e' &&
-        cli_ascii_lower(text[1]) == (uint8_t)'r' &&
-        cli_ascii_lower(text[2]) == (uint8_t)'r') {
-        return true;
-    }
-    static const char unknown[] = "unknown";
-    if (text_len < sizeof(unknown) - 1U) {
+    const size_t prefix_len = strlen(prefix);
+    if (prefix_len > text_len - offset) {
         return false;
     }
-    for (size_t i = 0U; i < sizeof(unknown) - 1U; ++i) {
-        if (cli_ascii_lower(text[i]) != (uint8_t)unknown[i]) {
+    for (size_t i = 0U; i < prefix_len; ++i) {
+        if (cli_ascii_lower(text[offset + i]) !=
+            (uint8_t)prefix[i]) {
             return false;
         }
     }
     return true;
+}
+
+static bool cli_reply_contains(
+    const uint8_t *text, size_t text_len, const char *needle)
+{
+    const size_t needle_len = needle ? strlen(needle) : 0U;
+    if (!text || needle_len == 0U || needle_len > text_len) {
+        return false;
+    }
+    for (size_t offset = 0U; offset + needle_len <= text_len; ++offset) {
+        if (cli_reply_prefix(text, text_len, offset, needle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool cli_reply_exact(
+    const uint8_t *text, size_t text_len, size_t offset,
+    const char *expected)
+{
+    if (!text || !expected || offset > text_len) {
+        return false;
+    }
+    while (text_len > offset &&
+           (text[text_len - 1U] == ' ' || text[text_len - 1U] == '\t' ||
+            text[text_len - 1U] == '\r' || text[text_len - 1U] == '\n')) {
+        text_len--;
+    }
+    return strlen(expected) == text_len - offset &&
+           cli_reply_prefix(text, text_len, offset, expected);
+}
+
+static bool cli_reply_is_error(
+    const uint8_t *text, size_t text_len, bool sensitive, bool read_only,
+    d1l_meshcore_admin_cli_reply_profile_t reply_profile)
+{
+    if (!text || text_len == 0U) {
+        return false;
+    }
+    size_t offset = 0U;
+    while (offset < text_len &&
+           (text[offset] == ' ' || text[offset] == '\t' ||
+            text[offset] == '\r' || text[offset] == '\n')) {
+        offset++;
+    }
+    if (offset < text_len && text[offset] == '(') {
+        offset++;
+    }
+
+    /* A prompted read-only reply is a value, and several such values are
+     * user-controlled. Never infer failure from words inside that payload. */
+    bool read_only_value = false;
+    if (read_only && offset < text_len && text[offset] == '>') {
+        read_only_value = true;
+        offset++;
+        while (offset < text_len &&
+               (text[offset] == ' ' || text[offset] == '\t')) {
+            offset++;
+        }
+    }
+    if ((reply_profile ==
+             D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE &&
+         cli_reply_exact(text, text_len, offset, "unknown")) ||
+        (reply_profile ==
+             D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE &&
+         cli_reply_exact(text, text_len, offset, "unsupported")) ||
+        (sensitive &&
+         cli_reply_prefix(text, text_len, offset, "password now:"))) {
+        return false;
+    }
+    if (read_only_value) {
+        return false;
+    }
+    if (read_only) {
+        switch (reply_profile) {
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE:
+            return cli_reply_exact(
+                text, text_len, offset, "error: unsupported");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE:
+            return cli_reply_prefix(text, text_len, offset, "??:");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_ADC_UNSUPPORTED:
+            return cli_reply_exact(
+                text, text_len, offset,
+                "error: unsupported by this board");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_POWER_MANAGEMENT_UNSUPPORTED:
+            return cli_reply_exact(
+                text, text_len, offset,
+                "error: power management not supported");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_NOT_FOUND:
+            return cli_reply_exact(
+                text, text_len, offset, "can't find gps");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_GPS_ADVERT_ERROR:
+            return cli_reply_exact(text, text_len, offset, "error");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_REGION_NOT_FOUND:
+            return cli_reply_exact(
+                text, text_len, offset, "err - unknown region");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT:
+            return cli_reply_exact(
+                text, text_len, offset, "unknown command");
+        case D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE:
+        default:
+            return false;
+        }
+    }
+    static const char *const ERROR_PREFIXES[] = {
+        "err", "error", "unknown", "??", "can't", "cannot",
+    };
+    for (size_t i = 0U;
+         i < sizeof(ERROR_PREFIXES) / sizeof(ERROR_PREFIXES[0]); ++i) {
+        if (cli_reply_prefix(
+                text, text_len, offset, ERROR_PREFIXES[i])) {
+            return true;
+        }
+    }
+    static const char *const FAILURE_PHRASES[] = {
+        " not found", " not supported", " unsupported",
+        " failed", " invalid", " unable", " denied", " bad ",
+        ": err",
+    };
+    for (size_t i = 0U;
+         i < sizeof(FAILURE_PHRASES) / sizeof(FAILURE_PHRASES[0]); ++i) {
+        if (cli_reply_contains(text, text_len, FAILURE_PHRASES[i])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 d1l_meshcore_admin_response_result_t
@@ -879,7 +1397,10 @@ d1l_meshcore_admin_accept_cli_response(
         }
     }
 
-    const bool rejected = cli_reply_is_error(text, text_len);
+    const bool rejected = cli_reply_is_error(
+        text, text_len, session->pending_cli_sensitive,
+        session->pending_cli_read_only,
+        session->pending_cli_reply_profile);
     d1l_meshcore_admin_secure_zero(
         session->cli_reply, sizeof(session->cli_reply));
     if (session->pending_cli_sensitive) {
@@ -897,6 +1418,9 @@ d1l_meshcore_admin_accept_cli_response(
     session->last_completed_tag = session->pending_tag;
     session->pending_tag = 0U;
     session->pending_cli_sensitive = false;
+    session->pending_cli_read_only = false;
+    session->pending_cli_reply_profile =
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT;
     session->request_deadline_us = 0U;
     refresh_idle_deadline(session, now_us);
     session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
