@@ -339,6 +339,10 @@ def test_storage_edge_scenarios_and_constants_match_c_contract():
     assert STATUS_REQUEST in rp2040_sketch
     assert MOUNT_REQUEST in rp2040_sketch
     assert PING_REQUEST in rp2040_sketch
+    assert "d1l_rp2040_bridge_file_create" in c_header
+    assert "d1l_rp2040_bridge_file_create" in c_source
+    assert "op=create" in c_source
+    assert "O_WRONLY | O_CREAT | O_EXCL" in rp2040_sketch
     old_request = "DESKOS_SD_" + "FORMAT"
     old_confirmation = "FORMAT-" + "DESKOS-SD"
     assert old_request not in c_source
@@ -361,6 +365,52 @@ def file_tokens(line: str) -> dict[str, str]:
 def file_request(request_id: int, op: str, **tokens: object) -> str:
     merged = {"v": 1, "id": request_id, "op": op, **tokens}
     return " ".join([FILE_REQUEST, *(f"{key}={value}" for key, value in merged.items())])
+
+
+def test_file_protocol_create_is_atomic_and_never_clobbers():
+    fs = SdFileSystem()
+    relative = "map/offline-provider.stage-rc1-001.json"
+    path = encode_path(relative)
+    original = b"first-stage"
+    replacement = b"must-not-replace"
+
+    created = file_tokens(
+        reply_for_request(
+            file_request(
+                60,
+                "create",
+                path=path,
+                len=len(original),
+                data=b64url(original),
+                crc=crc32_hex(original),
+            ),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    collision = file_tokens(
+        reply_for_request(
+            file_request(
+                61,
+                "create",
+                path=path,
+                len=len(replacement),
+                data=b64url(replacement),
+                crc=crc32_hex(replacement),
+            ),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+
+    assert created["ok"] == "1"
+    assert created["op"] == "create"
+    assert created["off"] == "0"
+    assert created["size"] == str(len(original))
+    assert collision["ok"] == "0"
+    assert collision["op"] == "create"
+    assert collision["err"] == "exists"
+    assert fs.files[relative] == original
 
 
 def test_file_protocol_supports_bounded_write_read_rename_delete_cycle():

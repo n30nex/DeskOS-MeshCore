@@ -1282,6 +1282,45 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path,
                               out_result, offset, max_len) : ret;
 }
 
+esp_err_t d1l_rp2040_bridge_file_create(const char *path,
+                                        const uint8_t *data,
+                                        size_t len,
+                                        d1l_rp2040_file_result_t *out_result,
+                                        uint32_t timeout_ms)
+{
+    if (!path || !data || len == 0U ||
+        len > D1L_RP2040_FILE_CHUNK_MAX || !out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path64[D1L_RP2040_PATH64_MAX + 1U];
+    char data64[D1L_RP2040_DATA64_MAX + 1U];
+    char crc[9];
+    if (!encode_path(path, path64, sizeof(path64)) ||
+        !base64url_encode(data, len, data64, sizeof(data64))) {
+        init_file_result(out_result, ESP_ERR_INVALID_ARG);
+        snprintf(out_result->err, sizeof(out_result->err), "bad_path");
+        snprintf(out_result->note, sizeof(out_result->note), "bad_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    crc32_hex(crc32_bytes(data, len), crc);
+    const uint16_t request_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    const int command_len = snprintf(
+        command, sizeof(command),
+        "%s v=1 id=%u op=create path=%s len=%lu data=%s crc=%s\n",
+        D1L_RP2040_FILE_PREFIX, (unsigned)request_id, path64,
+        (unsigned long)len, data64, crc);
+    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
+        init_file_result(out_result, ESP_ERR_INVALID_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    const esp_err_t ret = send_file_command(
+        command, (size_t)command_len, request_id, "create",
+        NULL, 0, out_result, timeout_ms);
+    return ret == ESP_OK ? d1l_rp2040_file_reply_bind_write(
+                              out_result, 0U, len) : ret;
+}
+
 esp_err_t d1l_rp2040_bridge_file_write(const char *path,
                                        uint32_t offset,
                                        const uint8_t *data,

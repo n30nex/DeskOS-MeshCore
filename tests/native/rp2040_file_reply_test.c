@@ -58,6 +58,14 @@ static void test_write_and_remote_error_semantics_are_preserved(void)
 {
     d1l_rp2040_file_result_t result = {0};
     assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=9 ok=1 op=create off=0 len=4 "
+               "size=4 note=ok",
+               9U, "create", NULL, 0U, &result) == ESP_OK);
+    assert(result.offset == 0U && result.length == 4U && result.size == 4U);
+    assert(d1l_rp2040_file_reply_bind_write(&result, 0U, 4U) == ESP_OK);
+
+    memset(&result, 0, sizeof(result));
+    assert(d1l_rp2040_file_reply_parse(
                "DESKOS_SD_FILE v=1 id=10 ok=1 op=write off=12 len=4 "
                "size=16 note=ok",
                10U, "write", NULL, 0U, &result) == ESP_OK);

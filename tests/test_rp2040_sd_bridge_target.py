@@ -498,6 +498,7 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "token_len >= key_len + 1U" in sketch
     assert "handle_file_stat" in sketch
     assert "handle_file_read" in sketch
+    assert "handle_file_create" in sketch
     assert "handle_file_write" in sketch
     assert "handle_file_delete" in sketch
     assert "handle_file_rename" in sketch
@@ -515,6 +516,14 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "rename replace backup path must fit the .bak suffix" in sketch
     assert "max file path buffer must include the replace backup suffix" in sketch
     assert "SD.open(full_path, FILE_READ)" in sketch
+    create_body = sketch.split("void handle_file_create", 1)[1].split(
+        "bool prepare_file_write_target", 1
+    )[0]
+    assert "FsFile file;" in create_body
+    assert "O_WRONLY | O_CREAT | O_EXCL" in create_body
+    assert "file.open(full_path, create_flags)" in create_body
+    assert "SD.remove" not in create_body
+    assert 'send_file_error(request_id, "create", "exists")' in create_body
     assert 'const char *write_mode = truncate ? "w" : "a";' in sketch
     assert "SD.open(full_path, write_mode)" in sketch
     write_body = sketch.split("void handle_file_write", 1)[1].split(

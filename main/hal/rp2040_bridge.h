@@ -178,6 +178,11 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path,
                                       size_t max_len,
                                       d1l_rp2040_file_result_t *out_result,
                                       uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_file_create(const char *path,
+                                        const uint8_t *data,
+                                        size_t len,
+                                        d1l_rp2040_file_result_t *out_result,
+                                        uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_file_write(const char *path,
                                        uint32_t offset,
                                        const uint8_t *data,

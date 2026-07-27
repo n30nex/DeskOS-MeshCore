@@ -15,6 +15,10 @@
 #define D1L_MAP_PROVIDER_CONFIG_PATH "map/offline-provider.json"
 #define D1L_MAP_PROVIDER_CONFIG_MAX_BYTES 1024U
 #define D1L_MAP_PROVIDER_BACKUP_PATH_MAX 64U
+#define D1L_MAP_PROVIDER_ACTION_MAX 31U
+#define D1L_MAP_PROVIDER_DEFAULT_MANIFEST_BYTES 530U
+#define D1L_MAP_PROVIDER_DEFAULT_MANIFEST_SHA256 \
+    "e7da7a256954617f808b16f1306b8684c91025a67cd49841a26efbc2ca253984"
 #define D1L_MAP_PROVIDER_REQUEST_INTERVAL_DEFAULT_MS 250U
 #define D1L_MAP_PROVIDER_REQUEST_INTERVAL_MIN_MS 100U
 #define D1L_MAP_PROVIDER_REQUEST_INTERVAL_MAX_MS 5000U
@@ -36,13 +40,31 @@ typedef struct {
 typedef struct {
     bool mutation_performed;
     bool before_valid;
+    bool canonical_missing_before;
+    bool recovery_resumed;
+    bool provider_lock_busy;
+    bool stage_path_fresh;
+    bool stage_create_new;
+    bool stage_mutation_attempted;
+    bool stage_mutation_performed;
+    bool stage_mutation_uncertain;
+    bool backup_path_fresh;
+    bool stage_default_exact;
+    bool stage_hash_verified;
+    bool stage_parsed;
+    bool backup_preexisting;
     bool backup_preserved;
+    bool fixed_backup_present;
+    bool fixed_backup_untouched;
     bool final_valid;
     bool final_builtin_exact;
     size_t before_bytes;
     size_t final_bytes;
+    char action[D1L_MAP_PROVIDER_ACTION_MAX + 1U];
     char source_id[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
+    char stage_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
     char backup_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
+    char preserved_backup_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
 } d1l_map_provider_repair_result_t;
 
 void d1l_map_tile_provider_builtin(d1l_map_tile_provider_t *out_provider);

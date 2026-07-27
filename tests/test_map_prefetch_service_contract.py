@@ -29,7 +29,7 @@ def test_offline_provider_is_explicit_fail_closed_and_secret_safe():
     assert "result.url" not in read("main/map/map_prefetch_service.c")
 
 
-def test_authorized_default_provider_is_seeded_without_overwrite():
+def test_authorized_default_provider_is_seeded_create_new_and_recovery_aware():
     provider = read("main/map/map_tile_provider.c")
     manifest = json.loads(read("sdcard/offline-tile-provider.json"))
 
@@ -51,10 +51,22 @@ def test_authorized_default_provider_is_seeded_without_overwrite():
         "average_tile_bytes": 65536,
         "minimum_request_interval_ms": 1000,
     }
-    assert (
-        "if (read_ret == ESP_ERR_NOT_FOUND) {\n"
-        "        (void)seed_default_provider_config();"
-    ) in provider
+    missing_block = provider.split(
+        "if (read_ret == ESP_ERR_NOT_FOUND) {", 1
+    )[1].split("d1l_map_tile_provider_t provider", 1)[0]
+    assert "find_preserved_invalid_backup(" in missing_block
+    assert missing_block.index("find_preserved_invalid_backup(") < (
+        missing_block.index("seed_default_provider_config()")
+    )
+    assert "recovery_ret == ESP_OK" in missing_block
+    assert "read_ret = ESP_ERR_INVALID_STATE;" in missing_block
+    assert "d1l_rp2040_bridge_file_create(" in provider
+    stage_writer = provider.split(
+        "static esp_err_t write_default_provider_stage", 1
+    )[1].split("static bool default_provider_hash_matches", 1)[0]
+    assert "d1l_rp2040_bridge_file_create(" in stage_writer
+    assert "offset == 0U" in stage_writer
+    assert "offset == 0U, &file" not in stage_writer
     assert "D1L_MAP_PROVIDER_CONFIG_PATH, false," in provider
 
 

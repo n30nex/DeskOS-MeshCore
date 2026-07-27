@@ -326,7 +326,8 @@ esp_err_t d1l_rp2040_file_reply_parse(
             result->last_error = ESP_FAIL;
             return result->last_error;
         }
-    } else if (strcmp(expected_op, "write") == 0 ||
+    } else if (strcmp(expected_op, "create") == 0 ||
+               strcmp(expected_op, "write") == 0 ||
                strcmp(expected_op, "append") == 0) {
         if (!parse_u32_token(line, "off", &result->offset) ||
             !parse_u32_token(line, "len", &result->length) ||

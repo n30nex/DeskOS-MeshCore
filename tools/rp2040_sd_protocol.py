@@ -647,6 +647,27 @@ def read_file(request_id: int, tokens: dict[str, str], fs: SdFileSystem) -> str:
     )
 
 
+def create_file(request_id: int, tokens: dict[str, str], fs: SdFileSystem) -> str:
+    path = decode_request_path(tokens)
+    expected_len = parse_uint_token(tokens, "len")
+    if expected_len == 0:
+        raise ValueError("bad_value")
+    data = decode_request_data(tokens, expected_len)
+    if path in fs.files or path in fs.dirs:
+        raise ValueError("exists")
+    ensure_parent_dirs(path, fs)
+    fs.files[path] = data
+    return file_line(
+        id=request_id,
+        ok=1,
+        op="create",
+        off=0,
+        len=len(data),
+        size=len(data),
+        note="ok",
+    )
+
+
 def write_file(request_id: int, tokens: dict[str, str], fs: SdFileSystem) -> str:
     path = decode_request_path(tokens)
     offset = parse_uint_token(tokens, "off")
@@ -722,7 +743,15 @@ def file_reply_for_request(request: str, scenario: SdScenario, fs: SdFileSystem)
         if parse_uint_token(tokens, "v") != FILE_PROTOCOL_VERSION:
             raise ValueError("bad_value")
         request_id, op = command_identity(tokens)
-        if op not in {"stat", "read", "write", "append", "delete", "rename"}:
+        if op not in {
+            "stat",
+            "read",
+            "create",
+            "write",
+            "append",
+            "delete",
+            "rename",
+        }:
             raise ValueError("unsupported_op")
         not_ready = require_file_ready(scenario)
         if not_ready:
@@ -731,6 +760,8 @@ def file_reply_for_request(request: str, scenario: SdScenario, fs: SdFileSystem)
             return stat_file(request_id, decode_request_path(tokens), fs)
         if op == "read":
             return read_file(request_id, tokens, fs)
+        if op == "create":
+            return create_file(request_id, tokens, fs)
         if op == "write":
             return write_file(request_id, tokens, fs)
         if op == "append":

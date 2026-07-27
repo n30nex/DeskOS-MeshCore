@@ -2726,6 +2726,83 @@ void handle_file_read(uint32_t request_id, const char *line) {
     reply_stream->flush();
 }
 
+bool fs_path_exists(const char *full_path) {
+    FsFile existing;
+    if (!existing.open(full_path, O_RDONLY)) {
+        return false;
+    }
+    existing.close();
+    return true;
+}
+
+void handle_file_create(uint32_t request_id, const char *line) {
+    char relative[FILE_PATH_MAX + 1U];
+    char full_path[FILE_FULL_PATH_MAX];
+    uint8_t data[FILE_CHUNK_MAX];
+    size_t data_len = 0;
+    const char *err = "bad_request";
+    if (!decode_path_token(line, "path", relative, sizeof(relative)) ||
+        !make_full_path(relative, full_path, sizeof(full_path))) {
+        send_file_error(request_id, "create", "bad_path");
+        return;
+    }
+    if (!decode_file_data(line, data, sizeof(data), &data_len, &err)) {
+        send_file_error(request_id, "create", err);
+        return;
+    }
+    if (data_len == 0U) {
+        send_file_error(request_id, "create", "bad_value");
+        return;
+    }
+    if (!ensure_parent_dirs(full_path) &&
+        (!recover_file_ops_mount() || !ensure_parent_dirs(full_path))) {
+        send_file_error(request_id, "create", "open_failed");
+        return;
+    }
+
+    /*
+     * FsFile O_CREAT|O_EXCL is the only create path used here. The file
+     * worker is idle and s_file_command_active excludes every other bridge
+     * filesystem mutation while this atomic no-clobber open is in flight.
+     */
+    FsFile file;
+    const oflag_t create_flags = O_WRONLY | O_CREAT | O_EXCL;
+    if (!file.open(full_path, create_flags)) {
+        if (fs_path_exists(full_path)) {
+            send_file_error(request_id, "create", "exists");
+            return;
+        }
+        if (!recover_file_ops_mount() ||
+            !ensure_parent_dirs(full_path) ||
+            !file.open(full_path, create_flags)) {
+            send_file_error(
+                request_id, "create",
+                fs_path_exists(full_path) ? "exists" : "open_failed");
+            return;
+        }
+    }
+
+    const size_t written = file.write(data, data_len);
+    const bool synced = file.sync();
+    const uint32_t new_size = static_cast<uint32_t>(file.fileSize());
+    const bool closed = file.close();
+    if (written != data_len || !synced || !closed || new_size != data_len) {
+        send_file_error(request_id, "create", "write_failed");
+        return;
+    }
+
+    String out(FILE_REPLY);
+    out += " v=1 id=";
+    out += String(static_cast<unsigned long>(request_id));
+    out += " ok=1 op=create off=0 len=";
+    out += String(static_cast<unsigned long>(data_len));
+    out += " size=";
+    out += String(static_cast<unsigned long>(new_size));
+    out += " note=ok";
+    reply_stream->println(out);
+    reply_stream->flush();
+}
+
 bool prepare_file_write_target(const char *full_path, bool append_mode, bool truncate,
                                uint32_t *offset, const char **err) {
     if (!ensure_parent_dirs(full_path) &&
@@ -2942,6 +3019,8 @@ void handle_file_line(const char *line) {
         handle_file_stat(request_id, line);
     } else if (strcmp(op, "read") == 0) {
         handle_file_read(request_id, line);
+    } else if (strcmp(op, "create") == 0) {
+        handle_file_create(request_id, line);
     } else if (strcmp(op, "write") == 0) {
         handle_file_write(request_id, line, false);
     } else if (strcmp(op, "append") == 0) {

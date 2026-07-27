@@ -3521,6 +3521,70 @@ static void cmd_map_acceptance_open(void)
            "\"public_rf_tx\":false,\"formats_sd\":false}\n");
 }
 
+static void print_map_provider_repair_fields(
+    const d1l_map_provider_repair_result_t *repair)
+{
+    printf(",\"action\":");
+    print_json_string(
+        repair && repair->action[0] != '\0' ?
+            repair->action : "failed_closed");
+    printf(",\"mutation_performed\":%s,\"before_valid\":%s,"
+           "\"canonical_missing_before\":%s,\"recovery_resumed\":%s,"
+           "\"provider_lock_busy\":%s,\"stage_path_fresh\":%s,"
+           "\"stage_create_new\":%s,\"stage_mutation_attempted\":%s,"
+           "\"stage_mutation_performed\":%s,"
+           "\"stage_mutation_uncertain\":%s,"
+           "\"backup_path_fresh\":%s,\"stage_default_exact\":%s,"
+           "\"stage_hash_verified\":%s,\"stage_parsed\":%s,"
+           "\"backup_preexisting\":%s,\"backup_preserved\":%s,"
+           "\"fixed_backup_present\":%s,\"fixed_backup_untouched\":%s,"
+           "\"final_valid\":%s,\"final_builtin_exact\":%s,"
+           "\"before_bytes\":%u,\"final_bytes\":%u,"
+           "\"manifest_bytes\":%u,\"manifest_sha256\":",
+           bool_json(repair && repair->mutation_performed),
+           bool_json(repair && repair->before_valid),
+           bool_json(repair && repair->canonical_missing_before),
+           bool_json(repair && repair->recovery_resumed),
+           bool_json(repair && repair->provider_lock_busy),
+           bool_json(repair && repair->stage_path_fresh),
+           bool_json(repair && repair->stage_create_new),
+           bool_json(repair && repair->stage_mutation_attempted),
+           bool_json(repair && repair->stage_mutation_performed),
+           bool_json(repair && repair->stage_mutation_uncertain),
+           bool_json(repair && repair->backup_path_fresh),
+           bool_json(repair && repair->stage_default_exact),
+           bool_json(repair && repair->stage_hash_verified),
+           bool_json(repair && repair->stage_parsed),
+           bool_json(repair && repair->backup_preexisting),
+           bool_json(repair && repair->backup_preserved),
+           bool_json(repair && repair->fixed_backup_present),
+           bool_json(repair && repair->fixed_backup_untouched),
+           bool_json(repair && repair->final_valid),
+           bool_json(repair && repair->final_builtin_exact),
+           repair ? (unsigned)repair->before_bytes : 0U,
+           repair ? (unsigned)repair->final_bytes : 0U,
+           (unsigned)D1L_MAP_PROVIDER_DEFAULT_MANIFEST_BYTES);
+    print_json_string(D1L_MAP_PROVIDER_DEFAULT_MANIFEST_SHA256);
+    printf(",\"source_id\":");
+    print_json_string(repair ? repair->source_id : "");
+    printf(",\"stage_path\":");
+    print_json_string(repair ? repair->stage_path : "");
+    printf(",\"backup_path\":");
+    print_json_string(repair ? repair->backup_path : "");
+    printf(",\"preserved_backup_path\":");
+    print_json_string(repair ? repair->preserved_backup_path : "");
+    printf(",\"valid_provider_preserved\":%s,"
+           "\"forward_only\":true,\"non_replacing_renames_only\":true,"
+           "\"delete_performed\":false,\"replace_performed\":false,"
+           "\"rollback_attempted\":false,"
+           "\"public_rf_tx\":false,\"formats_sd\":false,"
+           "\"nvs_mutated\":false,\"tile_cache_mutated\":false,"
+           "\"arbitrary_url_accepted\":false",
+           bool_json(
+               repair && repair->before_valid &&
+               !repair->mutation_performed));
+}
+
 static void cmd_map_provider_repair_invalid(void)
 {
     d1l_storage_status_t storage = {0};
@@ -3529,35 +3593,28 @@ static void cmd_map_provider_repair_invalid(void)
     const esp_err_t ret =
         d1l_map_tile_provider_repair_invalid_default(&storage, &repair);
     if (ret != ESP_OK) {
-        err_result(
-            "map provider repair-invalid", esp_err_to_name(ret),
-            "only a fully readable invalid provider is backed up and replaced");
+        printf(
+            "{\"schema\":%d,\"ok\":false,"
+            "\"cmd\":\"map provider repair-invalid\",\"code\":",
+            D1L_CONSOLE_SCHEMA);
+        print_json_string(esp_err_to_name(ret));
+        print_map_provider_repair_fields(&repair);
+        printf(",\"hint\":");
+        print_json_string(
+            repair.provider_lock_busy ?
+                "provider refresh owns the lock; retry this command" :
+            repair.stage_mutation_uncertain ?
+                "stage create/write completion is uncertain; inspect the "
+                "reported path before retrying" :
+                "repair stopped forward-only; preserved files were not "
+                "deleted, replaced, or rolled back");
+        printf("}\n");
         return;
     }
 
     ok_begin("map provider repair-invalid");
-    printf(",\"action\":");
-    print_json_string(
-        repair.mutation_performed ? "repaired_invalid" : "preserved_valid");
-    printf(",\"mutation_performed\":%s,\"before_valid\":%s,"
-           "\"backup_preserved\":%s,\"final_valid\":%s,"
-           "\"final_builtin_exact\":%s,\"before_bytes\":%u,"
-           "\"final_bytes\":%u,\"source_id\":",
-           bool_json(repair.mutation_performed),
-           bool_json(repair.before_valid),
-           bool_json(repair.backup_preserved),
-           bool_json(repair.final_valid),
-           bool_json(repair.final_builtin_exact),
-           (unsigned)repair.before_bytes,
-           (unsigned)repair.final_bytes);
-    print_json_string(repair.source_id);
-    printf(",\"backup_path\":");
-    print_json_string(repair.backup_path);
-    printf(",\"valid_provider_preserved\":%s,"
-           "\"public_rf_tx\":false,\"formats_sd\":false,"
-           "\"nvs_mutated\":false,\"tile_cache_mutated\":false,"
-           "\"arbitrary_url_accepted\":false}\n",
-           bool_json(repair.before_valid && !repair.mutation_performed));
+    print_map_provider_repair_fields(&repair);
+    printf("}\n");
 }
 
 static void print_storage_setup_payload(const d1l_storage_status_t *status)
