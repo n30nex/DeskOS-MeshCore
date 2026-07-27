@@ -242,7 +242,7 @@ def test_authenticated_room_console_receives_acks_and_posts_on_device():
         "settings->identity_public_key",
         "ack_wire_len",
         'room_post ? "room_post" : "dm_text"',
-        "d1l_dm_store_append_rx_identity(",
+        "d1l_dm_store_append_rx_identity_deferred(",
     ):
         assert required in dm_rx
     assert "room_post ? 4U : D1L_MESHCORE_DM_ACK_WIRE_BYTES" in dm_rx
