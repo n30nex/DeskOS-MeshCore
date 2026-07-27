@@ -138,8 +138,8 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
 
     fetch = body(
         store,
-        "esp_err_t d1l_map_tile_store_fetch",
-        "esp_err_t d1l_map_tile_store_write_canary",
+        "static esp_err_t map_tile_store_fetch_network",
+        "\nesp_err_t d1l_map_tile_store_fetch",
     )
     assert fetch.index("if (!wifi_connected)") < fetch.index("esp_http_client_init")
     assert fetch.index("if (!result.sd_ready)") < fetch.index("esp_http_client_init")
@@ -221,8 +221,8 @@ def test_http_header_length_contract_handles_errors_chunking_and_hard_bounds():
     store = read("main/storage/map_tile_store.c")
     fetch = body(
         store,
-        "esp_err_t d1l_map_tile_store_fetch",
-        "esp_err_t d1l_map_tile_store_write_canary",
+        "static esp_err_t map_tile_store_fetch_network",
+        "\nesp_err_t d1l_map_tile_store_fetch",
     )
 
     header_fetch = fetch.split("esp_http_client_fetch_headers(client)", 1)[1].split(
@@ -249,8 +249,8 @@ def test_https_download_waits_for_valid_sntp_time_and_remains_cancelable():
     defaults = read("sdkconfig.defaults")
     fetch = body(
         store,
-        "esp_err_t d1l_map_tile_store_fetch",
-        "esp_err_t d1l_map_tile_store_write_canary",
+        "static esp_err_t map_tile_store_fetch_network",
+        "\nesp_err_t d1l_map_tile_store_fetch",
     )
     clock = body(
         time_service,
@@ -282,13 +282,18 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
     source = read("main/storage/map_tile_store.c")
     read_cache = body(
         source,
-        "esp_err_t d1l_map_tile_store_read",
-        "typedef struct {\n    char content_type",
+        "static esp_err_t map_tile_store_read_locked",
+        "\nesp_err_t d1l_map_tile_store_read",
     )
     fetch = body(
         source,
-        "esp_err_t d1l_map_tile_store_fetch",
-        "esp_err_t d1l_map_tile_store_write_canary",
+        "static esp_err_t map_tile_store_fetch_network",
+        "\nesp_err_t d1l_map_tile_store_fetch",
+    )
+    persist = body(
+        source,
+        "static esp_err_t persist_validated_tile",
+        "static esp_err_t map_tile_store_fetch_network",
     )
 
     assert "attribution_metadata_present(&result)" in read_cache
@@ -300,12 +305,12 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
     assert "read_result.eof !=" in read_cache
     assert "result.bytes != (size_t)expected_size || !saw_eof" in read_cache
     assert "result.content_crc32 == metadata.content_crc32" in read_cache
-    assert fetch.index("d1l_map_tile_png_valid(buffer, result.bytes)") < fetch.index(
-        "verify_tile_file(result.tmp_path, &verify_record)"
-    )
-    assert fetch.index("verify_tile_file(result.tmp_path, &verify_record)") < fetch.index(
-        "write_attribution_metadata(&provider, &result)"
-    ) < fetch.index("commit_cache_tile(&provider, status, &result)")
+    assert "d1l_map_tile_png_valid(buffer, result.bytes)" in fetch
+    assert persist.index(
+        "verify_tile_file(result->tmp_path, &verify_record)"
+    ) < persist.index(
+        "write_attribution_metadata(provider, result)"
+    ) < persist.index("commit_cache_tile(provider, storage, result)")
     commit = body(
         source,
         "static esp_err_t commit_cache_tile",
@@ -317,7 +322,7 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
         "d1l_rp2040_bridge_file_rename("
     ) < commit.index("rename_cache_metadata(result)")
     assert "write_cache_state(&paths, state)" in commit
-    assert "!result.cache_intent_recorded" in fetch
+    assert "!result->cache_intent_recorded" in persist
 
 
 def test_worker_publishes_immutable_psram_frames_without_lvgl_calls_or_replay():

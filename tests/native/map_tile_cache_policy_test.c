@@ -37,7 +37,12 @@ static void test_record_and_state_checksums_reject_damage(void)
     d1l_map_tile_cache_record_t decoded_record = {0};
     assert(d1l_map_tile_cache_record_decode(
         encoded_record, &decoded_record));
-    assert(memcmp(&original, &decoded_record, sizeof(original)) == 0);
+    assert(original.sequence == decoded_record.sequence);
+    assert(original.size == decoded_record.size);
+    assert(original.content_crc32 == decoded_record.content_crc32);
+    assert(original.zoom == decoded_record.zoom);
+    assert(original.x == decoded_record.x);
+    assert(original.y == decoded_record.y);
     encoded_record[20] ^= 1U;
     assert(!d1l_map_tile_cache_record_decode(
         encoded_record, &decoded_record));
