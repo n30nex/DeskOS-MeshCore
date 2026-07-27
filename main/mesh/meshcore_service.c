@@ -87,7 +87,6 @@
 #define D1L_MESHCORE_OWNER_POLL_MS 250U
 #define D1L_MESHCORE_TX_WATCHDOG_GRACE_MS 250U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
-#define D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS 5000U
 #define D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS 5000U
 #define D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS 20U
 #define D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS 2000U
@@ -1788,7 +1787,7 @@ static esp_err_t record_detached_dm_queue_failure(
     return ret;
 }
 
-static void clear_pending_channel_tx(void)
+static void reset_pending_channel_tx_state(void)
 {
     s_pending_channel_tx = false;
     s_pending_channel_id = 0U;
@@ -1797,6 +1796,12 @@ static void clear_pending_channel_tx(void)
     secure_zero_bytes(s_pending_channel_packet_hash,
                       sizeof(s_pending_channel_packet_hash));
     s_pending_channel_packet_hash_ready = false;
+}
+
+static void clear_pending_channel_tx(void)
+{
+    reset_pending_channel_tx_state();
+    __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
 }
 
 static esp_err_t remember_pending_channel_tx(uint64_t channel_id,
@@ -1810,7 +1815,7 @@ static esp_err_t remember_pending_channel_tx(uint64_t channel_id,
     const d1l_user_text_result_t result = d1l_user_text_copy(
         s_pending_channel_text, sizeof(s_pending_channel_text), message);
     if (result != D1L_USER_TEXT_OK) {
-        clear_pending_channel_tx();
+        reset_pending_channel_tx_state();
         return result == D1L_USER_TEXT_TOO_LONG ?
             ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
     }
@@ -7078,6 +7083,12 @@ static void meshcore_service_task(void *arg)
             complete_pending_ack_tx(false, ret);
             d1l_meshcore_start_rx();
         }
+        if (cmd.type == D1L_MESHCORE_SERVICE_CMD_SEND_RAW &&
+            cmd.requested_tx_kind == D1L_MESH_TX_OPERATION_PUBLIC &&
+            ret != ESP_OK) {
+            clear_pending_channel_tx();
+            s_status.rejected_commands++;
+        }
         meshcore_service_reply(&cmd, ret);
         if (cmd.type == D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT &&
             ret == ESP_OK) {
@@ -7326,6 +7337,34 @@ static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
 {
     return meshcore_service_send_raw_kind(
         raw, raw_len, timeout_ms, D1L_MESH_TX_OPERATION_GENERIC);
+}
+
+static esp_err_t meshcore_service_queue_public_raw(const uint8_t *raw,
+                                                   uint8_t raw_len)
+{
+    if (!raw || raw_len == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = meshcore_service_start_task();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+        .requested_tx_kind = D1L_MESH_TX_OPERATION_PUBLIC,
+        .raw_len = raw_len,
+    };
+    memcpy(cmd.raw, raw, raw_len);
+    if (xQueueSend(s_service_queue, &cmd, 0) != pdTRUE) {
+        runtime_note_command_saturation(false);
+        meshcore_service_command_wipe(&cmd);
+        return ESP_ERR_TIMEOUT;
+    }
+    runtime_note_queue_depth(s_service_queue,
+                             &s_runtime_command_queue_high_water);
+    meshcore_service_wake();
+    meshcore_service_command_wipe(&cmd);
+    return ESP_OK;
 }
 
 static esp_err_t meshcore_service_queue_raw_response(
@@ -8029,11 +8068,8 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         s_status.rejected_commands++;
         return ret;
     }
-    ret = meshcore_service_send_raw_kind(
-        raw, raw_len, D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS,
-        D1L_MESH_TX_OPERATION_PUBLIC);
+    ret = meshcore_service_queue_public_raw(raw, raw_len);
     if (ret != ESP_OK) {
-        clear_pending_channel_tx();
         secure_zero_bytes(raw, sizeof(raw));
         s_status.rejected_commands++;
         return ret;
@@ -8067,7 +8103,10 @@ esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
     }
     const esp_err_t ret =
         meshcore_service_send_channel_owned(channel_id, text);
-    __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
+    if (ret != ESP_OK) {
+        reset_pending_channel_tx_state();
+        __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
+    }
     return ret;
 }
 
