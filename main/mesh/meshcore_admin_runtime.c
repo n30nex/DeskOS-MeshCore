@@ -244,7 +244,6 @@ esp_err_t d1l_meshcore_admin_build_login_packet(
     const d1l_meshcore_admin_role_t role =
         d1l_meshcore_admin_role_for_contact(contact);
     if (password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES ||
-        (role == D1L_MESHCORE_ADMIN_ROLE_ROOM && password_len == 0U) ||
         (role != D1L_MESHCORE_ADMIN_ROLE_REPEATER &&
          role != D1L_MESHCORE_ADMIN_ROLE_ROOM) ||
         !hex_to_key(out_binding->peer_public_key,

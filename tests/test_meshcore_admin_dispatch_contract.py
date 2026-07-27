@@ -49,7 +49,8 @@ def test_admin_protocol_and_runtime_are_separate_production_modules() -> None:
         "role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?\n"
         "                timestamp : 0U"
     ) in runtime
-    assert "role == D1L_MESHCORE_ADMIN_ROLE_ROOM && password_len == 0U" in \
+    assert "password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES" in runtime
+    assert "role == D1L_MESHCORE_ADMIN_ROLE_ROOM && password_len == 0U" not in \
         runtime
     assert "D1L_MESHCORE_ADMIN_PERMISSION_GUEST" in dispatch_c
 
