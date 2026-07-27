@@ -67,7 +67,7 @@ static void login_response_for_role(uint8_t response[16], uint8_t uniqueness,
                                     uint8_t firmware_level)
 {
     memset(response, 0, 16U);
-    write_le32(response, 0x55667788U);
+    write_le32(response, 0x55660000U | uniqueness);
     response[6] = 1U;
     response[7] = D1L_MESHCORE_ADMIN_PERMISSION_ADMIN;
     response[8] = uniqueness;
@@ -365,7 +365,8 @@ static int test_guest_sessions_are_read_only(void)
         &repeater, D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS,
         0x01020312U, 420U, 480U));
     CHECK(!d1l_meshcore_admin_begin_cli_command(
-        &repeater, 0x01020313U, false, 420U, 480U));
+        &repeater, 0x01020313U, false, false,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 420U, 480U));
 
     d1l_meshcore_admin_session_t room = {0};
     CHECK(d1l_meshcore_admin_begin_login(
@@ -379,7 +380,8 @@ static int test_guest_sessions_are_read_only(void)
           D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
     CHECK(room.permissions == D1L_MESHCORE_ADMIN_PERMISSION_WRITE);
     CHECK(!d1l_meshcore_admin_begin_cli_command(
-        &room, 0x01020314U, false, 610U, 680U));
+        &room, 0x01020314U, false, false,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 610U, 680U));
     CHECK(d1l_meshcore_admin_note_authenticated_activity(&room, 620U));
     CHECK(room.idle_deadline_us == 720U);
     return 0;
@@ -602,13 +604,22 @@ static int test_bounded_cli_session_and_redaction(void)
         acl_key, 4U, acl_command, sizeof(acl_command)));
     CHECK(!d1l_meshcore_admin_cli_command_valid(" neighbors"));
     CHECK(!d1l_meshcore_admin_cli_command_valid("neighbors\n"));
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile(
+              "get bootloader.ver") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE);
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile(
+              "get pwrmgt.support") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE);
+    CHECK(d1l_meshcore_admin_cli_command_reply_profile("neighbors") ==
+          D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT);
 
     d1l_meshcore_admin_session_t session = {0};
     d1l_meshcore_admin_replay_cache_t replay = {0};
     CHECK(authenticate_repeater(&session, &replay, 0x51U, 100U));
     const uint32_t tag = 0x10203050U;
     CHECK(d1l_meshcore_admin_begin_cli_command(
-        &session, tag, false, 120U, 200U));
+        &session, tag, false, true,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 120U, 200U));
     static const uint8_t reply[] = "2 neighbors\nA1B2";
     CHECK(d1l_meshcore_admin_accept_cli_response(
               &session, PEER, 0x55667789U, reply, sizeof(reply) - 1U,
@@ -620,7 +631,8 @@ static int test_bounded_cli_session_and_redaction(void)
     CHECK(strcmp(session.cli_reply, (const char *)reply) == 0);
 
     CHECK(d1l_meshcore_admin_begin_cli_command(
-        &session, tag + 1U, true, 140U, 210U));
+        &session, tag + 1U, true, false,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 140U, 210U));
     static const uint8_t sensitive_reply[] = "password now: secret";
     CHECK(d1l_meshcore_admin_accept_cli_response(
               &session, PEER, 0x5566778AU, sensitive_reply,
@@ -632,7 +644,8 @@ static int test_bounded_cli_session_and_redaction(void)
     CHECK(strcmp(session.cli_reply, "[sensitive response hidden]") == 0);
 
     CHECK(d1l_meshcore_admin_begin_cli_command(
-        &session, tag + 2U, false, 160U, 220U));
+        &session, tag + 2U, false, false,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 160U, 220U));
     static const uint8_t error_reply[] = "Unknown command";
     CHECK(d1l_meshcore_admin_accept_cli_response(
               &session, PEER, 0x5566778BU, error_reply,
@@ -640,7 +653,8 @@ static int test_bounded_cli_session_and_redaction(void)
           D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
     CHECK(!session.cli_reply_success);
     CHECK(d1l_meshcore_admin_begin_cli_command(
-        &session, tag + 3U, false, 175U, 225U));
+        &session, tag + 3U, false, false,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 175U, 225U));
     static const uint8_t config_error_reply[] = "unknown config: bogus";
     CHECK(d1l_meshcore_admin_accept_cli_response(
               &session, PEER, 0x5566778CU, config_error_reply,
@@ -648,9 +662,68 @@ static int test_bounded_cli_session_and_redaction(void)
           D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
     CHECK(!session.cli_reply_success);
     CHECK(d1l_meshcore_admin_begin_cli_command(
-        &session, tag + 4U, false, 180U, 230U));
+        &session, tag + 4U, false, true,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 180U, 230U));
+    static const uint8_t unsupported_value[] = "> unsupported";
+    CHECK(d1l_meshcore_admin_accept_cli_response(
+              &session, PEER, 0x5566778DU, unsupported_value,
+              sizeof(unsupported_value) - 1U, 181U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
+    CHECK(!session.cli_reply_success);
+
+    CHECK(d1l_meshcore_admin_begin_cli_command(
+        &session, tag + 5U, false, true,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE,
+        182U, 240U));
+    CHECK(d1l_meshcore_admin_accept_cli_response(
+              &session, PEER, 0x5566778EU, unsupported_value,
+              sizeof(unsupported_value) - 1U, 183U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.cli_reply_success);
+
+    static const uint8_t unknown_value[] = "> unknown";
+    CHECK(d1l_meshcore_admin_begin_cli_command(
+        &session, tag + 6U, false, true,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE,
+        184U, 250U));
+    CHECK(d1l_meshcore_admin_accept_cli_response(
+              &session, PEER, 0x5566778FU, unknown_value,
+              sizeof(unknown_value) - 1U, 185U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+
+    static const char *const pinned_failures[] = {
+        "  (ERR: clock cannot go backwards)",
+        "> ERR: unsupported",
+        "gps toggle not found",
+        "gps provider not found",
+        "Bridge not supported",
+        "Board not supported",
+        "Can't find GPS",
+        "??: bogus",
+        "Error, invalid params",
+        "Err - unable to put",
+    };
+    uint32_t failure_tag = tag + 7U;
+    uint32_t failure_timestamp = 0x55667790U;
+    for (size_t i = 0U;
+         i < sizeof(pinned_failures) / sizeof(pinned_failures[0]); ++i) {
+        CHECK(d1l_meshcore_admin_begin_cli_command(
+            &session, failure_tag++, false,
+            pinned_failures[i][0] == '>', D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT,
+            184U + i, 270U + i));
+        CHECK(d1l_meshcore_admin_accept_cli_response(
+                  &session, PEER, failure_timestamp++,
+                  (const uint8_t *)pinned_failures[i],
+                  strlen(pinned_failures[i]), 185U + i) ==
+              D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
+        CHECK(!session.cli_reply_success);
+    }
+
+    CHECK(d1l_meshcore_admin_begin_cli_command(
+        &session, failure_tag, false, false,
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 210U, 310U));
     CHECK(d1l_meshcore_admin_cancel_cli_command(
-        &session, tag + 4U));
+        &session, failure_tag));
     CHECK(session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED);
     return 0;
 }
@@ -675,21 +748,58 @@ static int test_replay_capacity_and_deterministic_eviction(void)
           D1L_MESHCORE_ADMIN_REPLAY_RESPONSES_PER_PEER);
     CHECK(replay.peers[0].next_response == 1U);
 
-    /* The fifth identity deterministically evicts the first. Accepting that
-     * first identity again then evicts the second, while the third remains
-     * protected inside the documented four-response window. */
+    /* The fifth response evicts the first response bytes, but the per-peer
+     * server timestamp high-water must still reject that captured success. */
     CHECK(begin(&session, 700U, 100U, 300U));
     login_response(login, 0x30U);
     CHECK(d1l_meshcore_admin_accept_login_response(
               &session, &replay, PEER, login, sizeof(login), 650U) ==
-          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
-    CHECK(replay.peers[0].next_response == 2U);
+          D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED);
+    CHECK(replay.peers[0].next_response == 1U);
     d1l_meshcore_admin_reset(&session);
     CHECK(begin(&session, 800U, 100U, 300U));
     login_response(login, 0x32U);
     CHECK(d1l_meshcore_admin_accept_login_response(
               &session, &replay, PEER, login, sizeof(login), 750U) ==
           D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED);
+    return 0;
+}
+
+static int test_truthful_login_failure_states(void)
+{
+    d1l_meshcore_admin_session_t session = {0};
+    d1l_meshcore_admin_replay_cache_t replay = {0};
+    uint8_t login[16];
+
+    CHECK(begin(&session, 200U, 100U, 300U));
+    login_response(login, 0x60U);
+    login[4] = 1U;
+    CHECK(d1l_meshcore_admin_accept_login_response(
+              &session, &replay, PEER, login, sizeof(login), 100U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_REJECTED);
+    CHECK(session.state == D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS);
+    CHECK(all_zero(session.session_secret, sizeof(session.session_secret)));
+
+    CHECK(begin(&session, 400U, 100U, 300U));
+    login_response(login, 0x61U);
+    login[12] = 9U;
+    CHECK(d1l_meshcore_admin_accept_login_response(
+              &session, &replay, PEER, login, sizeof(login), 300U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED);
+    CHECK(session.state == D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
+
+    CHECK(begin(&session, 600U, 100U, 300U));
+    CHECK(d1l_meshcore_admin_fail(
+        &session, D1L_MESHCORE_ADMIN_RADIO_BUSY));
+    CHECK(session.state == D1L_MESHCORE_ADMIN_RADIO_BUSY);
+    CHECK(session.role == D1L_MESHCORE_ADMIN_ROLE_REPEATER);
+    CHECK(all_zero(session.session_secret, sizeof(session.session_secret)));
+    CHECK(begin(&session, 800U, 100U, 300U));
+    CHECK(d1l_meshcore_admin_fail(
+        &session, D1L_MESHCORE_ADMIN_DISCONNECTED));
+    CHECK(session.state == D1L_MESHCORE_ADMIN_DISCONNECTED);
+    CHECK(!d1l_meshcore_admin_fail(
+        &session, D1L_MESHCORE_ADMIN_AUTHENTICATED));
     return 0;
 }
 
@@ -703,6 +813,7 @@ int main(void)
     CHECK(test_server_queries_and_protocol_permissions() == 0);
     CHECK(test_bounded_cli_session_and_redaction() == 0);
     CHECK(test_replay_capacity_and_deterministic_eviction() == 0);
+    CHECK(test_truthful_login_failure_states() == 0);
     puts("meshcore_admin_dispatch_test: ok");
     return 0;
 }

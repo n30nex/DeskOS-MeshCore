@@ -90,6 +90,8 @@ typedef struct d1l_ui_service_sheets_controller {
     d1l_ui_service_binding_t
         bindings[D1L_UI_SERVICE_SHEETS_BINDING_COUNT];
     uint32_t generation;
+    int32_t admin_scroll_y;
+    bool admin_scroll_valid;
 } d1l_ui_service_sheets_controller_t;
 
 bool d1l_ui_service_sheets_create(

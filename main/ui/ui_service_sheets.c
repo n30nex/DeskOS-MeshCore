@@ -382,6 +382,11 @@ static bool begin_render(
     if (!controller || !sheet || !lv_obj_is_valid(sheet) || !handler) {
         return false;
     }
+    if (sheet == controller->admin_sheet) {
+        lv_obj_update_layout(sheet);
+        controller->admin_scroll_y = (int32_t)lv_obj_get_scroll_y(sheet);
+        controller->admin_scroll_valid = true;
+    }
     clear_admin_sensitive_input(controller);
     deactivate_actions(controller);
     controller->action_handler = handler;
@@ -395,6 +400,18 @@ static bool begin_render(
         controller->admin_keyboard = NULL;
     }
     return true;
+}
+
+static void finish_admin_render(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet)
+{
+    if (!controller || sheet != controller->admin_sheet ||
+        !controller->admin_scroll_valid || !lv_obj_is_valid(sheet)) {
+        return;
+    }
+    lv_obj_update_layout(sheet);
+    lv_obj_scroll_to_y(
+        sheet, (lv_coord_t)controller->admin_scroll_y, LV_ANIM_OFF);
 }
 
 static bool render_header(
@@ -673,6 +690,14 @@ static const char *admin_state_name(d1l_meshcore_admin_state_t state)
         return "query_pending";
     case D1L_MESHCORE_ADMIN_TIMED_OUT:
         return "timed_out";
+    case D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS:
+        return "rejected_credentials";
+    case D1L_MESHCORE_ADMIN_DISCONNECTED:
+        return "disconnected";
+    case D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL:
+        return "unsupported_protocol";
+    case D1L_MESHCORE_ADMIN_RADIO_BUSY:
+        return "radio_busy";
     default:
         return "invalid";
     }
@@ -1373,6 +1398,7 @@ bool d1l_ui_service_sheets_render_admin(
             complete = login && complete;
         }
     }
+    finish_admin_render(controller, sheet);
     return complete;
 }
 

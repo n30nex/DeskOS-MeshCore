@@ -152,8 +152,9 @@ def test_server_admin_login_is_available_on_device_and_scrubs_credentials():
     assert "ESP_LOG" not in login
 
 
-def test_server_admin_session_is_cleared_when_closed_or_target_changes():
+def test_server_admin_close_preserves_session_and_target_change_logs_out():
     phase1 = read("main/ui/ui_phase1.c")
+    sheets = read("main/ui/ui_service_sheets.c")
     close = phase1.split(
         "case D1L_UI_SERVICE_ACTION_CLOSE_ADMIN:", 1
     )[1].split(
@@ -164,9 +165,26 @@ def test_server_admin_session_is_cleared_when_closed_or_target_changes():
     )[1].split(
         "case D1L_UI_NODE_DETAIL_ACTION_NONE:", 1
     )[0]
-    assert "d1l_meshcore_service_admin_logout();" in close
+    assert "d1l_meshcore_service_admin_logout();" not in close
+    assert "hide_service_sheets();" in close
     assert "strcmp(admin_status.fingerprint," in switch
     assert "d1l_meshcore_service_admin_logout();" in switch
+
+    begin_render = sheets.split(
+        "static bool begin_render(", 1
+    )[1].split(
+        "static void finish_admin_render(", 1
+    )[0]
+    finish_render = sheets.split(
+        "static void finish_admin_render(", 1
+    )[1].split(
+        "static bool render_header(", 1
+    )[0]
+    assert begin_render.index("lv_obj_get_scroll_y(sheet)") < \
+        begin_render.index("lv_obj_clean(sheet)")
+    assert "lv_obj_update_layout(sheet);" in finish_render
+    assert "lv_obj_scroll_to_y(" in finish_render
+    assert "finish_admin_render(controller, sheet);" in sheets
 
 
 def test_authenticated_server_management_is_available_on_device_and_bounded():

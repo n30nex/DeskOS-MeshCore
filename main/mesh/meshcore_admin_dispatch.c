@@ -246,13 +246,29 @@ void d1l_meshcore_admin_reset(d1l_meshcore_admin_session_t *session)
 
 void d1l_meshcore_admin_timeout(d1l_meshcore_admin_session_t *session)
 {
-    if (!session) {
-        return;
+    (void)d1l_meshcore_admin_fail(
+        session, D1L_MESHCORE_ADMIN_TIMED_OUT);
+}
+
+bool d1l_meshcore_admin_fail(
+    d1l_meshcore_admin_session_t *session,
+    d1l_meshcore_admin_state_t failure_state)
+{
+    if (!session ||
+        (failure_state != D1L_MESHCORE_ADMIN_TIMED_OUT &&
+         failure_state != D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS &&
+         failure_state != D1L_MESHCORE_ADMIN_DISCONNECTED &&
+         failure_state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL &&
+         failure_state != D1L_MESHCORE_ADMIN_RADIO_BUSY)) {
+        return false;
     }
     const uint32_t generation = next_generation(session->generation);
+    const d1l_meshcore_admin_role_t role = session->role;
     d1l_meshcore_admin_secure_zero(session, sizeof(*session));
-    session->state = D1L_MESHCORE_ADMIN_TIMED_OUT;
+    session->state = failure_state;
+    session->role = role;
     session->generation = generation;
+    return true;
 }
 
 void d1l_meshcore_admin_replay_cache_clear(
@@ -276,7 +292,11 @@ bool d1l_meshcore_admin_begin_login(
         (role != D1L_MESHCORE_ADMIN_ROLE_REPEATER &&
          role != D1L_MESHCORE_ADMIN_ROLE_ROOM) ||
         (session->state != D1L_MESHCORE_ADMIN_IDLE &&
-         session->state != D1L_MESHCORE_ADMIN_TIMED_OUT)) {
+         session->state != D1L_MESHCORE_ADMIN_TIMED_OUT &&
+         session->state != D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS &&
+         session->state != D1L_MESHCORE_ADMIN_DISCONNECTED &&
+         session->state != D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL &&
+         session->state != D1L_MESHCORE_ADMIN_RADIO_BUSY)) {
         return false;
     }
     const uint32_t generation = next_generation(session->generation);
@@ -326,7 +346,8 @@ bool d1l_meshcore_admin_binding_matches(
 static bool replay_cache_contains(
     const d1l_meshcore_admin_replay_cache_t *cache,
     const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
-    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES])
+    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES],
+    uint32_t server_timestamp)
 {
     if (!cache) {
         return false;
@@ -337,6 +358,9 @@ static bool replay_cache_contains(
             !bytes_equal(entry->peer_public_key, peer_public_key,
                          D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES)) {
             continue;
+        }
+        if (server_timestamp <= entry->highest_server_timestamp) {
+            return true;
         }
         for (size_t response_index = 0U;
              response_index < entry->response_count; ++response_index) {
@@ -353,7 +377,8 @@ static bool replay_cache_contains(
 static void replay_cache_remember(
     d1l_meshcore_admin_replay_cache_t *cache,
     const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
-    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES])
+    const uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES],
+    uint32_t server_timestamp)
 {
     size_t slot = D1L_MESHCORE_ADMIN_REPLAY_PEER_CAPACITY;
     for (size_t i = 0U; i < D1L_MESHCORE_ADMIN_REPLAY_PEER_CAPACITY; ++i) {
@@ -399,6 +424,7 @@ static void replay_cache_remember(
     }
     memcpy(entry->responses[response_slot], response,
            D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES);
+    entry->highest_server_timestamp = server_timestamp;
 }
 
 static bool authenticated_deadline_due(
@@ -471,9 +497,16 @@ d1l_meshcore_admin_accept_login_response(
     if (!d1l_meshcore_admin_canonical_span(
             plaintext, plaintext_len,
             D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES)) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
 
+    if (plaintext[4] != 0U) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS);
+        return D1L_MESHCORE_ADMIN_RESPONSE_REJECTED;
+    }
     const uint8_t permissions = plaintext[7];
     const uint8_t permission_role =
         permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
@@ -483,18 +516,23 @@ d1l_meshcore_admin_accept_login_response(
         permission_role == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ? 1U :
         (session->role == D1L_MESHCORE_ADMIN_ROLE_ROOM &&
          permission_role == D1L_MESHCORE_ADMIN_PERMISSION_GUEST ? 2U : 0U);
-    if (plaintext[4] != 0U || plaintext[5] != 0U ||
-        plaintext[6] != expected_legacy_role ||
+    if (plaintext[5] != 0U || plaintext[6] != expected_legacy_role ||
         plaintext[12] != expected_firmware) {
+        (void)d1l_meshcore_admin_fail(
+            session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
-    if (replay_cache_contains(replay_cache, peer_public_key, plaintext)) {
+    const uint32_t server_timestamp = read_le32(plaintext);
+    if (server_timestamp == 0U ||
+        replay_cache_contains(
+            replay_cache, peer_public_key, plaintext, server_timestamp)) {
         d1l_meshcore_admin_timeout(session);
         return D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED;
     }
 
-    replay_cache_remember(replay_cache, peer_public_key, plaintext);
-    session->server_timestamp = read_le32(plaintext);
+    replay_cache_remember(
+        replay_cache, peer_public_key, plaintext, server_timestamp);
+    session->server_timestamp = server_timestamp;
     session->permissions = permissions;
     session->firmware_level = plaintext[12];
     session->request_deadline_us = 0U;
@@ -1039,6 +1077,18 @@ bool d1l_meshcore_admin_cli_command_read_only(const char *command)
            D1L_MESHCORE_ADMIN_CLI_READ_ONLY;
 }
 
+d1l_meshcore_admin_cli_reply_profile_t
+d1l_meshcore_admin_cli_command_reply_profile(const char *command)
+{
+    if (command && strcmp(command, "get bootloader.ver") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE;
+    }
+    if (command && strcmp(command, "get pwrmgt.support") == 0) {
+        return D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE;
+    }
+    return D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT;
+}
+
 bool d1l_meshcore_admin_cli_command_allowed(
     const char *command, d1l_meshcore_admin_role_t role,
     uint8_t permissions)
@@ -1080,7 +1130,9 @@ bool d1l_meshcore_admin_format_acl_command(
 
 bool d1l_meshcore_admin_begin_cli_command(
     d1l_meshcore_admin_session_t *session, uint32_t tag,
-    bool sensitive, uint64_t now_us, uint64_t request_deadline_us)
+    bool sensitive, bool read_only,
+    d1l_meshcore_admin_cli_reply_profile_t reply_profile, uint64_t now_us,
+    uint64_t request_deadline_us)
 {
     const uint8_t expected_firmware =
         session && session->role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ? 2U :
@@ -1091,7 +1143,8 @@ bool d1l_meshcore_admin_begin_cli_command(
         (session->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ADMIN) !=
             D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ||
         expected_firmware == 0U ||
-        session->firmware_level != expected_firmware) {
+        session->firmware_level != expected_firmware ||
+        reply_profile > D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE) {
         return false;
     }
     if (authenticated_deadline_due(session, now_us)) {
@@ -1100,6 +1153,8 @@ bool d1l_meshcore_admin_begin_cli_command(
     }
     session->pending_tag = tag;
     session->pending_cli_sensitive = sensitive;
+    session->pending_cli_read_only = read_only;
+    session->pending_cli_reply_profile = reply_profile;
     session->request_deadline_us = request_deadline_us;
     session->cli_reply_valid = false;
     session->cli_reply_redacted = false;
@@ -1120,6 +1175,9 @@ bool d1l_meshcore_admin_cancel_cli_command(
     }
     session->pending_tag = 0U;
     session->pending_cli_sensitive = false;
+    session->pending_cli_read_only = false;
+    session->pending_cli_reply_profile =
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT;
     session->request_deadline_us = 0U;
     session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;
     session->generation = next_generation(session->generation);
@@ -1132,27 +1190,116 @@ static bool cli_reply_byte_valid(uint8_t value)
            (value >= 0x20U && value <= 0x7EU);
 }
 
-static bool cli_reply_is_error(const uint8_t *text, size_t text_len)
+static bool cli_reply_prefix(
+    const uint8_t *text, size_t text_len, size_t offset,
+    const char *prefix)
 {
-    if (!text || text_len == 0U) {
+    if (!text || !prefix || offset > text_len) {
         return false;
     }
-    if (text_len >= 3U &&
-        cli_ascii_lower(text[0]) == (uint8_t)'e' &&
-        cli_ascii_lower(text[1]) == (uint8_t)'r' &&
-        cli_ascii_lower(text[2]) == (uint8_t)'r') {
-        return true;
-    }
-    static const char unknown[] = "unknown";
-    if (text_len < sizeof(unknown) - 1U) {
+    const size_t prefix_len = strlen(prefix);
+    if (prefix_len > text_len - offset) {
         return false;
     }
-    for (size_t i = 0U; i < sizeof(unknown) - 1U; ++i) {
-        if (cli_ascii_lower(text[i]) != (uint8_t)unknown[i]) {
+    for (size_t i = 0U; i < prefix_len; ++i) {
+        if (cli_ascii_lower(text[offset + i]) !=
+            (uint8_t)prefix[i]) {
             return false;
         }
     }
     return true;
+}
+
+static bool cli_reply_contains(
+    const uint8_t *text, size_t text_len, const char *needle)
+{
+    const size_t needle_len = needle ? strlen(needle) : 0U;
+    if (!text || needle_len == 0U || needle_len > text_len) {
+        return false;
+    }
+    for (size_t offset = 0U; offset + needle_len <= text_len; ++offset) {
+        if (cli_reply_prefix(text, text_len, offset, needle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool cli_reply_exact(
+    const uint8_t *text, size_t text_len, size_t offset,
+    const char *expected)
+{
+    if (!text || !expected || offset > text_len) {
+        return false;
+    }
+    while (text_len > offset &&
+           (text[text_len - 1U] == ' ' || text[text_len - 1U] == '\t' ||
+            text[text_len - 1U] == '\r' || text[text_len - 1U] == '\n')) {
+        text_len--;
+    }
+    return strlen(expected) == text_len - offset &&
+           cli_reply_prefix(text, text_len, offset, expected);
+}
+
+static bool cli_reply_is_error(
+    const uint8_t *text, size_t text_len, bool sensitive, bool read_only,
+    d1l_meshcore_admin_cli_reply_profile_t reply_profile)
+{
+    if (!text || text_len == 0U) {
+        return false;
+    }
+    size_t offset = 0U;
+    while (offset < text_len &&
+           (text[offset] == ' ' || text[offset] == '\t' ||
+            text[offset] == '\r' || text[offset] == '\n')) {
+        offset++;
+    }
+    if (offset < text_len && text[offset] == '(') {
+        offset++;
+    }
+
+    /* Strip an expected read-only prompt before classifying its payload. Only
+     * two command-specific upstream values may use words that otherwise
+     * identify a failure. */
+    if (read_only && offset < text_len && text[offset] == '>') {
+        offset++;
+        while (offset < text_len &&
+               (text[offset] == ' ' || text[offset] == '\t')) {
+            offset++;
+        }
+    }
+    if ((reply_profile ==
+             D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE &&
+         cli_reply_exact(text, text_len, offset, "unknown")) ||
+        (reply_profile ==
+             D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE &&
+         cli_reply_exact(text, text_len, offset, "unsupported")) ||
+        (sensitive &&
+         cli_reply_prefix(text, text_len, offset, "password now:"))) {
+        return false;
+    }
+    static const char *const ERROR_PREFIXES[] = {
+        "err", "error", "unknown", "??", "can't", "cannot",
+    };
+    for (size_t i = 0U;
+         i < sizeof(ERROR_PREFIXES) / sizeof(ERROR_PREFIXES[0]); ++i) {
+        if (cli_reply_prefix(
+                text, text_len, offset, ERROR_PREFIXES[i])) {
+            return true;
+        }
+    }
+    static const char *const FAILURE_PHRASES[] = {
+        " not found", " not supported", " unsupported",
+        " failed", " invalid", " unable", " denied", " bad ",
+        ": err",
+    };
+    for (size_t i = 0U;
+         i < sizeof(FAILURE_PHRASES) / sizeof(FAILURE_PHRASES[0]); ++i) {
+        if (cli_reply_contains(text, text_len, FAILURE_PHRASES[i])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 d1l_meshcore_admin_response_result_t
@@ -1183,7 +1330,10 @@ d1l_meshcore_admin_accept_cli_response(
         }
     }
 
-    const bool rejected = cli_reply_is_error(text, text_len);
+    const bool rejected = cli_reply_is_error(
+        text, text_len, session->pending_cli_sensitive,
+        session->pending_cli_read_only,
+        session->pending_cli_reply_profile);
     d1l_meshcore_admin_secure_zero(
         session->cli_reply, sizeof(session->cli_reply));
     if (session->pending_cli_sensitive) {
@@ -1201,6 +1351,9 @@ d1l_meshcore_admin_accept_cli_response(
     session->last_completed_tag = session->pending_tag;
     session->pending_tag = 0U;
     session->pending_cli_sensitive = false;
+    session->pending_cli_read_only = false;
+    session->pending_cli_reply_profile =
+        D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT;
     session->request_deadline_us = 0U;
     refresh_idle_deadline(session, now_us);
     session->state = D1L_MESHCORE_ADMIN_AUTHENTICATED;

@@ -1894,7 +1894,13 @@ static void more_view_input_from_snapshot(
         admin.state == D1L_MESHCORE_ADMIN_MUTATION_PENDING ? "applying" :
         admin.state == D1L_MESHCORE_ADMIN_CLI_PENDING ? "command pending" :
         admin.state == D1L_MESHCORE_ADMIN_QUERY_PENDING ? "query pending" :
-        admin.state == D1L_MESHCORE_ADMIN_TIMED_OUT ? "timed out" : "idle";
+        admin.state == D1L_MESHCORE_ADMIN_TIMED_OUT ? "timed out" :
+        admin.state == D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS ?
+            "credentials rejected" :
+        admin.state == D1L_MESHCORE_ADMIN_DISCONNECTED ? "disconnected" :
+        admin.state == D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL ?
+            "unsupported protocol" :
+        admin.state == D1L_MESHCORE_ADMIN_RADIO_BUSY ? "radio busy" : "idle";
     *out_input = (d1l_ui_more_view_input_t) {
         .packet_count = snapshot->packet_count,
         .wifi_build_enabled = snapshot->wifi_build_enabled,
@@ -7249,7 +7255,6 @@ static void service_sheets_action_handler(
         s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
         clear_admin_cli_confirmation();
         s_admin_cli_secure_input = false;
-        (void)d1l_meshcore_service_admin_logout();
         hide_service_sheets();
         return;
     case D1L_UI_SERVICE_ACTION_TERMINAL_LEVEL: {

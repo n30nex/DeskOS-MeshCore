@@ -6556,6 +6556,8 @@ static esp_err_t meshcore_service_handle_admin_cli(
         d1l_meshcore_admin_cli_command_sensitive(command);
     const bool read_only =
         d1l_meshcore_admin_cli_command_read_only(command);
+    const d1l_meshcore_admin_cli_reply_profile_t reply_profile =
+        d1l_meshcore_admin_cli_command_reply_profile(command);
 
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
@@ -6601,8 +6603,8 @@ static esp_err_t meshcore_service_handle_admin_cli(
 
     uint32_t request_generation = 0U;
     if (!d1l_meshcore_admin_runtime_begin_cli(
-            &current, context.generation, tag, sensitive, now_us,
-            &request_generation)) {
+            &current, context.generation, tag, sensitive, read_only,
+            reply_profile, now_us, &request_generation)) {
         ret = ESP_ERR_INVALID_STATE;
         goto admin_cli_cleanup;
     }
@@ -6729,6 +6731,9 @@ static esp_err_t meshcore_service_handle_admin_response(
             break;
         case D1L_MESHCORE_ADMIN_RESPONSE_EXPIRED:
             ret = ESP_ERR_TIMEOUT;
+            break;
+        case D1L_MESHCORE_ADMIN_RESPONSE_REJECTED:
+            ret = ESP_ERR_NOT_ALLOWED;
             break;
         case D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED:
         case D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED:
@@ -7816,6 +7821,7 @@ esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
         return ESP_ERR_INVALID_ARG;
     }
     if (!s_service_initialized) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
     const size_t fingerprint_len = strnlen(
@@ -7834,14 +7840,19 @@ esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
     };
     memcpy(cmd.admin_fingerprint, fingerprint, fingerprint_len);
     cmd.admin_fingerprint[fingerprint_len] = '\0';
-    return meshcore_service_send_admin_login_command(
+    const esp_err_t ret = meshcore_service_send_admin_login_command(
         &cmd, password, password_len,
         D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_report_failure(ret);
+    }
+    return ret;
 }
 
 esp_err_t d1l_meshcore_service_admin_request_status(void)
 {
     if (!s_service_initialized) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
     d1l_meshcore_service_cmd_t cmd = {
@@ -7850,6 +7861,9 @@ esp_err_t d1l_meshcore_service_admin_request_status(void)
     const esp_err_t ret = meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     meshcore_service_command_wipe(&cmd);
+    if (ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_report_failure(ret);
+    }
     return ret;
 }
 
@@ -7861,9 +7875,11 @@ esp_err_t d1l_meshcore_service_admin_request_query(
         return ESP_ERR_INVALID_ARG;
     }
     if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_NOT_SUPPORTED);
         return ESP_ERR_NOT_SUPPORTED;
     }
     if (!s_service_initialized) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
     d1l_meshcore_service_cmd_t cmd = {
@@ -7874,6 +7890,9 @@ esp_err_t d1l_meshcore_service_admin_request_query(
     const esp_err_t ret = meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     meshcore_service_command_wipe(&cmd);
+    if (ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_report_failure(ret);
+    }
     return ret;
 }
 
@@ -7887,9 +7906,11 @@ esp_err_t d1l_meshcore_service_admin_request_mutation(
         return ESP_ERR_INVALID_ARG;
     }
     if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_NOT_SUPPORTED);
         return ESP_ERR_NOT_SUPPORTED;
     }
     if (!s_service_initialized) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
     d1l_meshcore_service_cmd_t cmd = {
@@ -7899,6 +7920,9 @@ esp_err_t d1l_meshcore_service_admin_request_mutation(
     const esp_err_t ret = meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     meshcore_service_command_wipe(&cmd);
+    if (ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_report_failure(ret);
+    }
     return ret;
 }
 
@@ -7913,18 +7937,24 @@ esp_err_t d1l_meshcore_service_admin_request_cli(
         return ESP_ERR_NOT_ALLOWED;
     }
     if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_NOT_SUPPORTED);
         return ESP_ERR_NOT_SUPPORTED;
     }
     if (!s_service_initialized) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
     const size_t command_len = strlen(command);
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_ADMIN_CLI,
     };
-    return meshcore_service_send_admin_cli_command(
+    const esp_err_t ret = meshcore_service_send_admin_cli_command(
         &cmd, command, command_len,
         D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_report_failure(ret);
+    }
+    return ret;
 }
 
 esp_err_t d1l_meshcore_service_admin_send_room_post(const char *text)
@@ -7934,9 +7964,11 @@ esp_err_t d1l_meshcore_service_admin_send_room_post(const char *text)
         return ret;
     }
     if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_NOT_SUPPORTED);
         return ESP_ERR_NOT_SUPPORTED;
     }
     if (!s_service_initialized) {
+        d1l_meshcore_admin_runtime_report_failure(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
     d1l_meshcore_admin_context_t context = {0};
@@ -7960,6 +7992,9 @@ esp_err_t d1l_meshcore_service_admin_send_room_post(const char *text)
     }
     ret = d1l_meshcore_service_send_dm(fingerprint, text);
     secure_zero_bytes(fingerprint, sizeof(fingerprint));
+    if (ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_report_failure(ret);
+    }
     return ret;
 }
 

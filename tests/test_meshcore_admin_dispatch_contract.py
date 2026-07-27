@@ -717,3 +717,51 @@ def test_admin_command_guards_are_exact_production_binding_sources() -> None:
         assert manifest["production_binding_sources"][relative] == \
             canonical_sha256(relative)
         assert f'"{relative}"' in allowlist
+
+
+def test_admin_login_replay_guard_is_durable_and_fail_closed() -> None:
+    runtime = read("main/mesh/meshcore_admin_runtime.c")
+    dispatch = read("main/mesh/meshcore_admin_dispatch.c")
+    header = read("main/mesh/meshcore_admin_dispatch.h")
+
+    for token in (
+        "D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS",
+        "D1L_MESHCORE_ADMIN_DISCONNECTED",
+        "D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL",
+        "D1L_MESHCORE_ADMIN_RADIO_BUSY",
+    ):
+        assert token in header
+
+    durable = runtime.split(
+        "static esp_err_t durable_replay_commit(", 1
+    )[1].split(
+        "d1l_meshcore_admin_role_t d1l_meshcore_admin_role_for_contact", 1
+    )[0]
+    for token in (
+        "nvs_open(",
+        "nvs_get_blob(",
+        "record.peer_public_key",
+        "record.highest_server_timestamp",
+        "nvs_set_blob(",
+        "nvs_commit(",
+    ):
+        assert token in durable
+    assert durable.index("nvs_set_blob(") < durable.index("nvs_commit(")
+
+    receive = runtime.split(
+        "d1l_meshcore_admin_runtime_dispatch_response(", 1
+    )[1].split(
+        "bool d1l_meshcore_admin_runtime_expire(", 1
+    )[0]
+    assert receive.index("durable_replay_commit(") < \
+        receive.index("s_session = candidate_session;")
+    assert "D1L_MESHCORE_ADMIN_DISCONNECTED, durable_ret" in receive
+
+    accept = dispatch.split(
+        "d1l_meshcore_admin_accept_login_response(", 1
+    )[1].split(
+        "bool d1l_meshcore_admin_begin_status_request(", 1
+    )[0]
+    assert "server_timestamp <= entry->highest_server_timestamp" in dispatch
+    assert "D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS" in accept
+    assert "D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL" in accept

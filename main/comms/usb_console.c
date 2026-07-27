@@ -7465,6 +7465,14 @@ static const char *admin_state_name(d1l_meshcore_admin_state_t state)
         return "query_pending";
     case D1L_MESHCORE_ADMIN_TIMED_OUT:
         return "timed_out";
+    case D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS:
+        return "rejected_credentials";
+    case D1L_MESHCORE_ADMIN_DISCONNECTED:
+        return "disconnected";
+    case D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL:
+        return "unsupported_protocol";
+    case D1L_MESHCORE_ADMIN_RADIO_BUSY:
+        return "radio_busy";
     default:
         return "invalid";
     }
