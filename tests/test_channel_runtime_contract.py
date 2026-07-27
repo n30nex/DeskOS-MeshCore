@@ -124,12 +124,14 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     ready_index = send.index("channel_message_generation_ready()")
     copy_index = send.index("d1l_channel_store_copy_protocol_key")
     timestamp_index = send.index("d1l_time_service_preflight_protocol_timestamp")
-    start_index = send.index("D1L_MESHCORE_SERVICE_CMD_START_RX")
     hash_index = send.index("d1l_meshcore_packet_hash_calculate")
     pending_index = send.index("remember_pending_channel_tx(channel_id, text,")
-    radio_index = send.index("meshcore_service_send_raw")
-    assert ready_index < copy_index < timestamp_index < start_index
-    assert start_index < hash_index < pending_index < radio_index
+    radio_index = send.index("meshcore_service_queue_public_raw")
+    assert ready_index < copy_index < timestamp_index < hash_index
+    assert hash_index < pending_index < radio_index
+    assert "D1L_MESHCORE_SERVICE_CMD_START_RX" not in send
+    assert "meshcore_service_send_raw_kind(" not in send
+    assert "if (s_tx_busy)" not in send
     assert "d1l_channel_store_find_unique_hash" not in send
     assert "secure_zero_channel_key(&channel_key)" in send
 
@@ -248,6 +250,15 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
     assert "__atomic_compare_exchange_n" in admission
     assert "meshcore_service_send_channel_owned" in admission
     assert "__atomic_store_n(&s_channel_send_admission, 0U" in admission
+    assert admission.index("if (ret != ESP_OK)") < admission.index(
+        "__atomic_store_n(&s_channel_send_admission, 0U"
+    )
+    clear = c_function(service, "static void clear_pending_channel_tx(")
+    assert "reset_pending_channel_tx_state()" in clear
+    assert "__atomic_store_n(&s_channel_send_admission, 0U" in clear
+    reset = c_function(service, "static void reset_pending_channel_tx_state(")
+    assert "s_pending_channel_tx = false" in reset
+    assert "__atomic_store_n(&s_channel_send_admission" not in reset
 
     begin = c_function(
         service, "static esp_err_t meshcore_service_handle_send_raw("
@@ -261,8 +272,23 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
     channel_send = c_function(
         service, "static esp_err_t meshcore_service_send_channel_owned("
     )
-    assert "meshcore_service_send_raw_kind(" in channel_send
-    assert "D1L_MESH_TX_OPERATION_PUBLIC" in channel_send
+    assert "meshcore_service_queue_public_raw(" in channel_send
+    assert "meshcore_service_send_raw_kind(" not in channel_send
+    public_queue = c_function(
+        service, "static esp_err_t meshcore_service_queue_public_raw("
+    )
+    assert ".requested_tx_kind = D1L_MESH_TX_OPERATION_PUBLIC" in public_queue
+    assert "xQueueSend(s_service_queue, &cmd, 0)" in public_queue
+    assert "meshcore_service_send_command" not in public_queue
+    assert "meshcore_service_wake()" in public_queue
+    task = c_function(service, "static void meshcore_service_task(")
+    public_failure = task[
+        task.index(
+            "cmd.requested_tx_kind == D1L_MESH_TX_OPERATION_PUBLIC"
+        ) : task.index("meshcore_service_reply(&cmd")
+    ]
+    assert "clear_pending_channel_tx()" in public_failure
+    assert "s_status.rejected_commands++" in public_failure
     generic_send = c_function(
         service, "static esp_err_t meshcore_service_send_raw("
     )
