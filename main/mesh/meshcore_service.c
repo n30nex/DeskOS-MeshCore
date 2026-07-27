@@ -44,6 +44,7 @@
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
 #include "mesh/route_store.h"
+#include "mesh/route_store_worker.h"
 #include "mesh/store_lock.h"
 #include "platform/time_service.h"
 #include "platform/secure_random.h"
@@ -5730,6 +5731,20 @@ static esp_err_t meshcore_service_handle_send_dm(
         return ret;
     }
 
+    /*
+     * Outbound DM admission performs several durable store transitions before
+     * Radio.Send.  Preempt and hold the retained worker across that sequence
+     * so the sole MeshCore owner can never wait forever on the worker's
+     * persistence mutex.  The existing worker quiesce deadline also gives an
+     * in-flight SD operation time to observe persistence_should_yield().
+     */
+    ret = d1l_route_store_worker_quiesce_begin(
+        D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        return ret == ESP_ERR_TIMEOUT || ret == ESP_ERR_INVALID_STATE ?
+            ESP_ERR_NOT_FINISHED : ret;
+    }
+
     d1l_dm_store_append_outcome_t append_outcome = {0};
     ret = d1l_dm_store_append_tx(
         contact.fingerprint,
@@ -5747,7 +5762,7 @@ static esp_err_t meshcore_service_handle_send_dm(
         if (append_outcome.inserted) {
             (void)record_detached_dm_queue_failure(&append_outcome, ret);
         }
-        return ret;
+        goto dm_persistence_release;
     }
 
     /* The command reached the sole owner, but another radio operation may
@@ -5755,19 +5770,21 @@ static esp_err_t meshcore_service_handle_send_dm(
     if (s_tx_busy) {
         (void)record_detached_dm_queue_failure(
             &append_outcome, ESP_ERR_INVALID_STATE);
-        return ESP_ERR_INVALID_STATE;
+        ret = ESP_ERR_INVALID_STATE;
+        goto dm_persistence_release;
     }
     ret = ensure_radio_started();
     if (ret != ESP_OK) {
         (void)record_detached_dm_queue_failure(&append_outcome, ret);
-        return ret;
+        goto dm_persistence_release;
     }
     if (!begin_pending_dm_tx(&contact, cmd->dm_text, &selection, 0U,
                              ack_hash, raw, raw_len, cmd->dm_path_probe,
                              &append_outcome)) {
         (void)record_detached_dm_queue_failure(
             &append_outcome, ESP_ERR_INVALID_STATE);
-        return ESP_ERR_INVALID_STATE;
+        ret = ESP_ERR_INVALID_STATE;
+        goto dm_persistence_release;
     }
 
     ret = transition_pending_dm_tx(
@@ -5775,25 +5792,27 @@ static esp_err_t meshcore_service_handle_send_dm(
         D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK);
     if (ret != ESP_OK) {
         (void)fail_pending_dm_before_radio(ret);
-        return ret;
+        goto dm_persistence_release;
     }
     ret = transition_pending_dm_tx(
         D1L_DM_DELIVERY_TX_ACTIVE,
         D1L_DM_DELIVERY_REASON_RADIO_STARTED, ESP_OK);
     if (ret != ESP_OK) {
         (void)fail_pending_dm_before_radio(ret);
-        return ret;
+        goto dm_persistence_release;
     }
     if (!meshcore_radio_tx_operation_begin(
             D1L_MESH_TX_OPERATION_DM,
             &s_pending_dm_tx.delivery)) {
         (void)fail_pending_dm_before_radio(ESP_ERR_INVALID_STATE);
-        return ESP_ERR_INVALID_STATE;
+        ret = ESP_ERR_INVALID_STATE;
+        goto dm_persistence_release;
     }
 
     s_active_tx_ack_response = false;
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    d1l_route_store_worker_quiesce_end();
     Radio.SendWithOrigin(
         s_pending_dm_tx.raw, s_pending_dm_tx.raw_len,
         (uint32_t)s_active_radio_tx.operation_id);
@@ -5805,6 +5824,10 @@ static esp_err_t meshcore_service_handle_send_dm(
         s_last_path_probe_ms = now_ms;
     }
     return ESP_OK;
+
+dm_persistence_release:
+    d1l_route_store_worker_quiesce_end();
+    return ret;
 }
 
 static char meshcore_service_lower_hex(char value)

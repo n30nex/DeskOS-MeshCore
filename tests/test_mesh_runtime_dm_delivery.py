@@ -95,6 +95,49 @@ def test_dm_command_is_authorized_owned_and_persisted_before_radio_admission():
     assert "ret != ESP_ERR_NOT_FINISHED" in admission
 
 
+def test_outbound_dm_bounds_retained_worker_handoff_before_radio():
+    source = read("main/mesh/meshcore_service.c")
+    handler = body(
+        source,
+        "static esp_err_t meshcore_service_handle_send_dm",
+        "static void meshcore_service_reply",
+    )
+
+    assert '#include "mesh/route_store_worker.h"' in source
+    quiesce_at = handler.index("d1l_route_store_worker_quiesce_begin(")
+    append_at = handler.index("d1l_dm_store_append_tx(")
+    success_release_at = handler.index(
+        "d1l_route_store_worker_quiesce_end();", append_at
+    )
+    radio_at = handler.index("Radio.SendWithOrigin(")
+    cleanup_label_at = handler.index("dm_persistence_release:")
+    cleanup_release_at = handler.index(
+        "d1l_route_store_worker_quiesce_end();", cleanup_label_at
+    )
+
+    assert (
+        quiesce_at
+        < append_at
+        < success_release_at
+        < radio_at
+        < cleanup_label_at
+        < cleanup_release_at
+    )
+    assert (
+        "D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS"
+        in handler[quiesce_at:append_at]
+    )
+    assert "ESP_ERR_NOT_FINISHED" in handler[quiesce_at:append_at]
+    assert "return " not in handler[append_at:success_release_at]
+    assert handler[append_at:success_release_at].count(
+        "goto dm_persistence_release;"
+    ) == 7
+    assert handler.count("d1l_route_store_worker_quiesce_end();") == 2
+    assert handler[success_release_at:radio_at].strip() == (
+        "d1l_route_store_worker_quiesce_end();"
+    )
+
+
 def test_dm_console_reports_transient_storage_admission_truthfully():
     console = read("main/comms/usb_console.c")
     command = body(
