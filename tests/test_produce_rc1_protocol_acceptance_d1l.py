@@ -514,6 +514,31 @@ def test_machine_transcript_closes_the_protocol_gate(
 
 
 @pytest.mark.parametrize(
+    ("dm_count", "accepted"), [(6, True), (7, True), (8, False)]
+)
+def test_controlled_peer_dm_ingest_is_bounded(
+    dm_count: int,
+    accepted: bool,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    status = peer_capture(channel=11, dm=dm_count)
+    assert runner.peer_dm_ingest_bounded(status, 5) is accepted
+
+    transcript = protocol_transcript()
+    peer_after_dm = next(
+        row["response"]
+        for row in transcript["steps"]
+        if row["operation"] == "peer_after_dm"
+    )
+    peer_after_dm["snapshot"]["counters"]["rx_dm_total"] = dm_count
+    if accepted:
+        assert validate(transcript, monkeypatch)["path"] is True
+    else:
+        with pytest.raises(gate.EvidenceError):
+            validate(transcript, monkeypatch)
+
+
+@pytest.mark.parametrize(
     ("operation", "mutation"),
     [
         (

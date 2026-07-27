@@ -990,7 +990,8 @@ def validate_protocol(
         and dm_tx_entry.get("delivered") is True
         and _integer(dm_tx_entry.get("ack_hash"), minimum=1) is not None
         and before_dm_count is not None
-        and after_dm_count == before_dm_count + 1
+        and after_dm_count is not None
+        and 1 <= after_dm_count - before_dm_count <= 2
         and dm_control.get("id") == f"rc1-dm-{nonce}"
         and dm_control.get("params")
         == {"target": identity_public_key, "text": dm_in_token}

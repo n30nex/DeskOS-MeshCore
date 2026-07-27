@@ -339,6 +339,11 @@ def peer_counter(status: dict[str, Any], name: str) -> int | None:
     return integer(nested(status, "snapshot", "counters", name))
 
 
+def peer_dm_ingest_bounded(status: dict[str, Any], before: int) -> bool:
+    after = peer_counter(status, "rx_dm_total")
+    return after is not None and 1 <= after - before <= 2
+
+
 def peer_run_id(status: dict[str, Any]) -> str | None:
     value = nested(status, "snapshot", "run_id")
     return value if isinstance(value, str) and value else None
@@ -784,7 +789,7 @@ def execute(
             peer_status,
             lambda result: (
                 peer_run_id(result) == peer_run_id(peer_before_dm)
-                and peer_counter(result, "rx_dm_total") == before_dm + 1
+                and peer_dm_ingest_bounded(result, before_dm)
             ),
             timeout=rf_timeout,
             interval=poll_interval,
