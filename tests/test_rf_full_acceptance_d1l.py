@@ -4027,6 +4027,22 @@ def test_remote_build_report_requires_status_control_and_d1l_correlation():
     assert report["checks"]["controlled_peer_status_connected"] is True
     assert rf_accept.remote_peer_report_shape_ok(report)
 
+    duplicate_ingest_after = json.loads(json.dumps(after))
+    duplicate_ingest_after["counters"]["rx_dm_total"] += 1
+    duplicate_ingest_flow = rf_accept.remote_peer_flow_validation(
+        before=before,
+        after=duplicate_ingest_after,
+        before_validation=before_validation,
+        after_validation=after_validation,
+        d1l_public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        control=control,
+    )
+    assert duplicate_ingest_flow["ok"] is True
+    assert (
+        duplicate_ingest_flow["checks"]["d1l_dm_ingest_bounded"]
+        is True
+    )
+
     mismatched_after = json.loads(json.dumps(after))
     mismatched_after["counters"]["tx_dm_total"] += 1
     mismatched_flow = rf_accept.remote_peer_flow_validation(
