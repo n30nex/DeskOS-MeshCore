@@ -78,7 +78,11 @@ def test_touch_pan_center_uses_bounded_web_mercator_math():
 def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_cache():
     service = read("main/map/map_view_service.c")
     store = read("main/storage/map_tile_store.c")
-    run = body(service, "static void run_generation", "static void map_worker")
+    run = body(
+        service,
+        "static void run_generation",
+        "void d1l_map_view_service_run_pending",
+    )
     wait_for_sd = body(
         service, "static bool wait_for_sd_cache", "static void fill_placeholder"
     )
@@ -257,7 +261,11 @@ def test_https_download_waits_for_valid_sntp_time_and_remains_cancelable():
         "esp_err_t d1l_time_service_wait_for_certificate_time",
         "esp_err_t d1l_time_service_set_companion_time",
     )
-    run = body(service, "static void run_generation", "static void map_worker")
+    run = body(
+        service,
+        "static void run_generation",
+        "void d1l_map_view_service_run_pending",
+    )
 
     assert 'ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org")' in time_service
     assert "config.wait_for_sync = true" in time_service
@@ -327,7 +335,11 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
 
 def test_worker_publishes_immutable_psram_frames_without_lvgl_calls_or_replay():
     service = read("main/map/map_view_service.c")
-    worker = body(service, "static void map_worker", "esp_err_t d1l_map_view_service_init")
+    worker = body(
+        service,
+        "void d1l_map_view_service_run_pending",
+        "esp_err_t d1l_map_view_service_init",
+    )
     release = service.split("void d1l_map_view_service_release_frame", 1)[1]
 
     assert "uint16_t *frames[2]" in service
@@ -358,21 +370,31 @@ def test_same_visible_or_complete_hidden_plan_reuses_frame_without_worker_replay
         "void d1l_map_view_service_release_visible",
     )
     identical = acquire.split("if (!force_reload && same_plan &&", 1)[1].split(
-        "uint32_t generation", 1
+        "uint32_t generation = s_map.status.generation + 1U", 1
     )[0]
     completed = body(
         service, "static bool completed_frame_locked", "static bool generation_continue"
     )
-    worker = body(service, "static void map_worker", "esp_err_t d1l_map_view_service_init")
+    worker = body(
+        service,
+        "void d1l_map_view_service_run_pending",
+        "esp_err_t d1l_map_view_service_init",
+    )
 
     assert "s_map.status.visible || completed_frame_locked()" in identical
     assert "s_map.status.visible = true" in identical
     assert "if (completed_frame_locked())" in identical
     assert 'set_message_locked("ready", "Map ready")' in identical
-    assert "*out_generation = s_map.status.generation" in identical
-    assert "xTaskNotifyGive" not in identical
-    assert "xTaskNotifyGive(s_map.worker)" in acquire
-    assert acquire.index("uint32_t generation") < acquire.index("xTaskNotifyGive(s_map.worker)")
+    assert "const uint32_t generation = s_map.status.generation" in identical
+    assert "*out_generation = generation" in identical
+    assert "d1l_map_prefetch_service_wake()" in identical
+    assert identical.index("xSemaphoreGive(s_map.lock)") < identical.index(
+        "d1l_map_prefetch_service_wake()"
+    )
+    assert acquire.count("d1l_map_prefetch_service_wake()") == 2
+    assert acquire.index("uint32_t generation") < acquire.rindex(
+        "d1l_map_prefetch_service_wake()"
+    )
 
     for required in (
         "s_map.status.frame_ready",
@@ -400,6 +422,8 @@ def test_visible_lease_revocation_cannot_time_out_before_worker_notification():
 
     assert "xSemaphoreTake(s_map.lock, portMAX_DELAY)" in release
     assert "pdMS_TO_TICKS" not in release
-    assert release.index("s_map.status.visible = false") < release.index(
-        "xTaskNotifyGive(s_map.worker)"
+    assert (
+        release.index("s_map.status.visible = false")
+        < release.index("xSemaphoreGive(s_map.lock)")
+        < release.index("d1l_map_prefetch_service_wake()")
     )

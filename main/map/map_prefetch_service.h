@@ -49,5 +49,7 @@ typedef struct {
 } d1l_map_prefetch_status_t;
 
 esp_err_t d1l_map_prefetch_service_init(void);
+/* Wake the single shared map/TLS worker after a visible-map lease changes. */
+esp_err_t d1l_map_prefetch_service_wake(void);
 void d1l_map_prefetch_service_status(
     d1l_map_prefetch_status_t *out_status);

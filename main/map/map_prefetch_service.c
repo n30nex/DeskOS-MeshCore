@@ -17,8 +17,10 @@
 #include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
 
-#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES 20480U
-#define D1L_MAP_PREFETCH_WORKER_PRIORITY (tskIDLE_PRIORITY + 1U)
+#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES \
+    D1L_MAP_SHARED_WORKER_STACK_BYTES
+#define D1L_MAP_PREFETCH_WORKER_PRIORITY \
+    D1L_MAP_SHARED_WORKER_PRIORITY
 #define D1L_MAP_PREFETCH_POLL_MS 5000U
 #define D1L_MAP_PREFETCH_ERROR_BACKOFF_SEC 30U
 #define D1L_MAP_PREFETCH_DEFAULT_RATE_BACKOFF_SEC 300U
@@ -116,7 +118,8 @@ static bool key_equal(const d1l_map_prefetch_key_t *left,
 
 static void task_pause(void)
 {
-    vTaskDelay(pdMS_TO_TICKS(D1L_MAP_PREFETCH_POLL_MS));
+    (void)ulTaskNotifyTake(
+        pdTRUE, pdMS_TO_TICKS(D1L_MAP_PREFETCH_POLL_MS));
 }
 
 static bool visible_map_active(void)
@@ -366,19 +369,17 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
     publish_status(status);
 }
 
-static void prefetch_worker(void *context)
+static void run_prefetch_pass(void)
 {
-    (void)context;
-    for (;;) {
         d1l_settings_t settings = {0};
         if (d1l_settings_public_snapshot(&settings) != ESP_OK ||
             !settings.map_location_set) {
             publish_waiting(
                 "location_required",
-                "Set the device location to enable background maps",
-                ESP_ERR_INVALID_STATE);
+                 "Set the device location to enable background maps",
+                 ESP_ERR_INVALID_STATE);
             task_pause();
-            continue;
+            return;
         }
 
         d1l_storage_status_t storage = {0};
@@ -386,20 +387,20 @@ static void prefetch_worker(void *context)
         if (!d1l_map_tile_store_sd_ready(&storage)) {
             publish_waiting(
                 "sd_required",
-                "Insert the prepared FAT32 DeskOS card for background maps",
-                ESP_ERR_NOT_SUPPORTED);
+                 "Insert the prepared FAT32 DeskOS card for background maps",
+                 ESP_ERR_NOT_SUPPORTED);
             task_pause();
-            continue;
+            return;
         }
         const esp_err_t provider_ret =
             d1l_map_tile_provider_refresh(&storage);
         if (provider_ret != ESP_OK) {
             publish_waiting(
                 "provider_config",
-                "The offline map provider file on the SD card is invalid",
-                provider_ret);
+                 "The offline map provider file on the SD card is invalid",
+                 provider_ret);
             task_pause();
-            continue;
+            return;
         }
         d1l_map_tile_provider_t provider = {0};
         d1l_map_tile_provider_snapshot(&provider);
@@ -423,7 +424,7 @@ static void prefetch_worker(void *context)
                 "Install an offline-authorized provider to enable background maps");
             publish_status(&status);
             task_pause();
-            continue;
+            return;
         }
 
         d1l_connectivity_status_t connectivity = {0};
@@ -443,29 +444,8 @@ static void prefetch_worker(void *context)
                       "Background map download waits for Wi-Fi");
             publish_status(&status);
             task_pause();
-            continue;
+            return;
         }
-        if (visible_map_active()) {
-            d1l_map_prefetch_status_t status = {
-                .initialized = true,
-                .eligible = true,
-                .paused_for_visible_map = true,
-                .location_set = true,
-                .wifi_connected = true,
-                .sd_ready = true,
-                .provider_configured = true,
-                .background_prefetch_permitted = true,
-                .cache_budget_mb = provider.cache_budget_mb,
-            };
-            snprintf(status.source_id, sizeof(status.source_id), "%s",
-                     provider.source_id);
-            set_phase(&status, "paused_visible",
-                      "Background map download paused while Map is open");
-            publish_status(&status);
-            task_pause();
-            continue;
-        }
-
         const int64_t now_us = esp_timer_get_time();
         if (now_us < s_backoff_until_us) {
             d1l_map_prefetch_status_t status = {
@@ -487,7 +467,7 @@ static void prefetch_worker(void *context)
                       "Background map download is waiting before retry");
             publish_status(&status);
             task_pause();
-            continue;
+            return;
         }
 
         const uint32_t marker_generation =
@@ -518,10 +498,10 @@ static void prefetch_worker(void *context)
                 &plan)) {
             publish_waiting(
                 "capacity_required",
-                "The SD card cannot hold the minimum local map area",
-                ESP_ERR_INVALID_SIZE);
+                 "The SD card cannot hold the minimum local map area",
+                 ESP_ERR_INVALID_SIZE);
             task_pause();
-            continue;
+            return;
         }
         d1l_map_prefetch_key_t key = {
             .marker_generation = marker_generation,
@@ -558,7 +538,7 @@ static void prefetch_worker(void *context)
                 "Local node map is cached at the highest detail that fits");
             publish_status(&status);
             task_pause();
-            continue;
+            return;
         }
 
         d1l_map_prefetch_status_t status = {
@@ -592,9 +572,31 @@ static void prefetch_worker(void *context)
                 "Background map download is held at the 8 GB card reserve");
             publish_status(&status);
             task_pause();
-            continue;
+            return;
         }
         run_plan(&plan, &provider, &storage, &key, &status);
+        task_pause();
+}
+
+static void prefetch_worker(void *context)
+{
+    (void)context;
+    for (;;) {
+        if (!visible_map_active()) {
+            run_prefetch_pass();
+            continue;
+        }
+
+        d1l_map_prefetch_status_t status = {0};
+        d1l_map_prefetch_service_status(&status);
+        status.initialized = true;
+        status.running = false;
+        status.eligible = true;
+        status.paused_for_visible_map = true;
+        set_phase(&status, "paused_visible",
+                  "Background map download paused while Map is open");
+        publish_status(&status);
+        d1l_map_view_service_run_pending();
         task_pause();
     }
 }
@@ -669,5 +671,17 @@ esp_err_t d1l_map_prefetch_service_init(void)
     s_worker = worker;
     s_starting = false;
     portEXIT_CRITICAL(&s_status_lock);
+    return ESP_OK;
+}
+
+esp_err_t d1l_map_prefetch_service_wake(void)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    TaskHandle_t worker = s_worker;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (!worker) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xTaskNotifyGive(worker);
     return ESP_OK;
 }

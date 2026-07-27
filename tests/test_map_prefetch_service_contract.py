@@ -85,17 +85,33 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     assert "status->cache_used_bytes = result.cache_used_bytes" in service
 
 
-def test_map_https_workers_have_measured_internal_stack_headroom():
+def test_map_https_paths_share_one_measured_internal_worker_stack():
     prefetch = read("main/map/map_prefetch_service.c")
     prefetch_header = read("main/map/map_prefetch_service.h")
     view = read("main/map/map_view_service.c")
     view_header = read("main/map/map_view_service.h")
     console = read("main/comms/usb_console.c")
+    dispatcher = prefetch.split(
+        "static void prefetch_worker(void *context)", 1
+    )[1].split("esp_err_t d1l_map_prefetch_service_init", 1)[0]
 
-    assert "#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES 20480U" in prefetch
-    assert "#define D1L_MAP_WORKER_STACK_BYTES 20480U" in view
+    assert "#define D1L_MAP_SHARED_WORKER_STACK_BYTES 20480U" in view_header
+    assert "#define D1L_MAP_SHARED_WORKER_PRIORITY 2U" in view_header
+    assert (
+        "#define D1L_MAP_PREFETCH_WORKER_STACK_BYTES \\\n"
+        "    D1L_MAP_SHARED_WORKER_STACK_BYTES"
+    ) in prefetch
     assert "uxTaskGetStackHighWaterMark(NULL)" in prefetch
     assert "uxTaskGetStackHighWaterMark(NULL)" in view
+    assert prefetch.count("xTaskCreate(") == 1
+    assert "xTaskCreate(" not in view
+    assert "run_prefetch_pass()" in dispatcher
+    assert "d1l_map_view_service_run_pending()" in prefetch
+    assert "d1l_settings_t" not in dispatcher
+    assert "d1l_map_prefetch_plan_t" not in dispatcher
+    assert "ulTaskNotifyTake(" in prefetch
+    assert "xTaskNotifyGive(worker)" in prefetch
+    assert view.count("d1l_map_prefetch_service_wake()") == 3
     assert "worker_stack_bytes" in prefetch_header
     assert "worker_stack_free_bytes" in prefetch_header
     assert "worker_stack_bytes" in view_header
