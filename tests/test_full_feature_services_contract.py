@@ -128,7 +128,7 @@ def test_server_admin_login_is_available_on_device_and_scrubs_credentials():
 
     assert "lv_textarea_set_password_mode(" in sheets
     assert "D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES" in sheets
-    assert "Password (empty allowed for repeaters)" in sheets
+    assert "Password (empty allowed by peer)" in sheets
     assert "d1l_ui_keyboard_configure_input(" in sheets
     assert "d1l_ui_keyboard_clear_textarea(controller->admin_keyboard)" in sheets
     assert 'lv_textarea_set_text(controller->admin_password_textarea, "")' in \
