@@ -20,6 +20,7 @@
 #define D1L_MAP_PROVIDER_CONFIG_MAX_BYTES 1024U
 #define D1L_MAP_PROVIDER_BACKUP_PATH_MAX 64U
 #define D1L_MAP_PROVIDER_ACTION_MAX 31U
+#define D1L_MAP_PROVIDER_RECOVERY_STAGE_MAX 31U
 #define D1L_MAP_PROVIDER_SHA256_HEX_LENGTH 64U
 #define D1L_MAP_PROVIDER_DEFAULT_MANIFEST_BYTES 530U
 #define D1L_MAP_PROVIDER_DEFAULT_MANIFEST_SHA256 \
@@ -59,6 +60,23 @@ typedef struct {
     bool stage_parsed;
     bool backup_preexisting;
     bool backup_preserved;
+    bool storage_manager_paused;
+    bool storage_manager_resumed;
+    bool stage_reused;
+    bool backup_copy_attempted;
+    bool backup_copy_performed;
+    bool backup_copy_uncertain;
+    bool backup_bytes_verified;
+    bool backup_hash_verified;
+    bool canonical_delete_attempted;
+    bool canonical_delete_performed;
+    bool canonical_delete_uncertain;
+    bool canonical_absent_before_final_rename;
+    bool final_rename_attempted;
+    bool final_rename_performed;
+    bool final_rename_uncertain;
+    bool stage_present_after_failure;
+    bool canonical_missing_recoverable;
     bool fixed_backup_present;
     bool fixed_backup_untouched;
     bool final_valid;
@@ -66,6 +84,7 @@ typedef struct {
     size_t before_bytes;
     size_t final_bytes;
     char action[D1L_MAP_PROVIDER_ACTION_MAX + 1U];
+    char recovery_stage[D1L_MAP_PROVIDER_RECOVERY_STAGE_MAX + 1U];
     char source_id[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
     char stage_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];
     char backup_path[D1L_MAP_PROVIDER_BACKUP_PATH_MAX + 1U];

@@ -61,12 +61,17 @@ def test_authorized_default_provider_is_seeded_create_new_and_recovery_aware():
     assert "recovery_ret == ESP_OK" in missing_block
     assert "read_ret = ESP_ERR_INVALID_STATE;" in missing_block
     assert "d1l_rp2040_bridge_file_create(" in provider
+    create_new_writer = provider.split(
+        "static esp_err_t write_provider_create_new", 1
+    )[1].split("static esp_err_t write_default_provider_stage", 1)[0]
+    assert "d1l_rp2040_bridge_file_create(" in create_new_writer
+    assert "d1l_rp2040_bridge_file_write(" in create_new_writer
+    assert "offset == 0U" in create_new_writer
+    assert "offset == 0U, &file" not in create_new_writer
     stage_writer = provider.split(
         "static esp_err_t write_default_provider_stage", 1
-    )[1].split("static bool default_provider_hash_matches", 1)[0]
-    assert "d1l_rp2040_bridge_file_create(" in stage_writer
-    assert "offset == 0U" in stage_writer
-    assert "offset == 0U, &file" not in stage_writer
+    )[1].split("static bool provider_sha256", 1)[0]
+    assert "write_provider_create_new(" in stage_writer
     assert "D1L_MAP_PROVIDER_CONFIG_PATH, false," in provider
 
 
@@ -162,3 +167,45 @@ def test_provider_recovery_inspection_is_exact_and_read_only():
     assert '"read_only\\":true' in output_body
     assert '"mutation_performed\\":false' in output_body
     assert "d1l_map_tile_provider_refresh(" not in command_body
+
+
+def test_invalid_provider_repair_copies_then_commits_forward_only():
+    provider = read("main/map/map_tile_provider.c")
+    console = read("main/comms/usb_console.c")
+    repair = provider.split(
+        "esp_err_t d1l_map_tile_provider_repair_invalid_default", 1
+    )[1].split("bool d1l_map_tile_provider_path", 1)[0]
+    pause_helper = provider.split(
+        "static void provider_repair_pause_storage", 1
+    )[1].split("static esp_err_t verify_invalid_provider_copy", 1)[0]
+
+    assert "d1l_storage_manager_pause(" in pause_helper
+    assert "d1l_storage_manager_resume();" in repair
+    assert "D1L_MAP_PROVIDER_RECOVERY_STAGE_001_PATH" in repair
+    assert "out_result->stage_reused = true;" in repair
+    assert "write_provider_create_new(" in repair
+    assert "verify_invalid_provider_copy(" in repair
+    assert "d1l_rp2040_bridge_file_delete(" in repair
+    assert "d1l_rp2040_bridge_file_rename(" in repair
+    assert (
+        "D1L_MAP_PROVIDER_CONFIG_PATH, out_result->backup_path"
+        not in repair
+    )
+
+    backup_copy = repair.index("write_provider_create_new(")
+    backup_verify = repair.index("verify_invalid_provider_copy(")
+    canonical_delete = repair.index("d1l_rp2040_bridge_file_delete(")
+    final_rename = repair.index("d1l_rp2040_bridge_file_rename(")
+    final_validate = repair.index(
+        "validate_default_provider_path(", final_rename
+    )
+    assert backup_copy < backup_verify < canonical_delete < final_rename
+    assert final_rename < final_validate
+    assert (
+        "out_result->stage_path, D1L_MAP_PROVIDER_CONFIG_PATH, false"
+        in repair
+    )
+    assert "canonical_missing_recoverable" in repair
+    assert '"delete_performed\\":%s' in console
+    assert '"backup_copy_create_new_only\\":true' in console
+    assert '"rollback_attempted\\":false' in console

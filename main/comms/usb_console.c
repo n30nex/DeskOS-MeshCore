@@ -3642,15 +3642,36 @@ static void print_map_provider_repair_fields(
     print_json_string(
         repair && repair->action[0] != '\0' ?
             repair->action : "failed_closed");
+    printf(",\"recovery_stage\":");
+    print_json_string(
+        repair && repair->recovery_stage[0] != '\0' ?
+            repair->recovery_stage : "unknown");
     printf(",\"mutation_performed\":%s,\"before_valid\":%s,"
            "\"canonical_missing_before\":%s,\"recovery_resumed\":%s,"
            "\"provider_lock_busy\":%s,\"stage_path_fresh\":%s,"
            "\"stage_create_new\":%s,\"stage_mutation_attempted\":%s,"
            "\"stage_mutation_performed\":%s,"
            "\"stage_mutation_uncertain\":%s,"
-           "\"backup_path_fresh\":%s,\"stage_default_exact\":%s,"
+           "\"stage_reused\":%s,\"backup_path_fresh\":%s,"
+           "\"stage_default_exact\":%s,"
            "\"stage_hash_verified\":%s,\"stage_parsed\":%s,"
            "\"backup_preexisting\":%s,\"backup_preserved\":%s,"
+           "\"backup_copy_attempted\":%s,"
+           "\"backup_copy_performed\":%s,"
+           "\"backup_copy_uncertain\":%s,"
+           "\"backup_bytes_verified\":%s,"
+           "\"backup_hash_verified\":%s,"
+           "\"storage_manager_paused\":%s,"
+           "\"storage_manager_resumed\":%s,"
+           "\"canonical_delete_attempted\":%s,"
+           "\"canonical_delete_performed\":%s,"
+           "\"canonical_delete_uncertain\":%s,"
+           "\"canonical_absent_before_final_rename\":%s,"
+           "\"final_rename_attempted\":%s,"
+           "\"final_rename_performed\":%s,"
+           "\"final_rename_uncertain\":%s,"
+           "\"stage_present_after_failure\":%s,"
+           "\"canonical_missing_recoverable\":%s,"
            "\"fixed_backup_present\":%s,\"fixed_backup_untouched\":%s,"
            "\"final_valid\":%s,\"final_builtin_exact\":%s,"
            "\"before_bytes\":%u,\"final_bytes\":%u,"
@@ -3665,12 +3686,31 @@ static void print_map_provider_repair_fields(
            bool_json(repair && repair->stage_mutation_attempted),
            bool_json(repair && repair->stage_mutation_performed),
            bool_json(repair && repair->stage_mutation_uncertain),
+           bool_json(repair && repair->stage_reused),
            bool_json(repair && repair->backup_path_fresh),
            bool_json(repair && repair->stage_default_exact),
            bool_json(repair && repair->stage_hash_verified),
            bool_json(repair && repair->stage_parsed),
            bool_json(repair && repair->backup_preexisting),
            bool_json(repair && repair->backup_preserved),
+           bool_json(repair && repair->backup_copy_attempted),
+           bool_json(repair && repair->backup_copy_performed),
+           bool_json(repair && repair->backup_copy_uncertain),
+           bool_json(repair && repair->backup_bytes_verified),
+           bool_json(repair && repair->backup_hash_verified),
+           bool_json(repair && repair->storage_manager_paused),
+           bool_json(repair && repair->storage_manager_resumed),
+           bool_json(repair && repair->canonical_delete_attempted),
+           bool_json(repair && repair->canonical_delete_performed),
+           bool_json(repair && repair->canonical_delete_uncertain),
+           bool_json(
+               repair &&
+               repair->canonical_absent_before_final_rename),
+           bool_json(repair && repair->final_rename_attempted),
+           bool_json(repair && repair->final_rename_performed),
+           bool_json(repair && repair->final_rename_uncertain),
+           bool_json(repair && repair->stage_present_after_failure),
+           bool_json(repair && repair->canonical_missing_recoverable),
            bool_json(repair && repair->fixed_backup_present),
            bool_json(repair && repair->fixed_backup_untouched),
            bool_json(repair && repair->final_valid),
@@ -3688,15 +3728,17 @@ static void print_map_provider_repair_fields(
     printf(",\"preserved_backup_path\":");
     print_json_string(repair ? repair->preserved_backup_path : "");
     printf(",\"valid_provider_preserved\":%s,"
+           "\"backup_copy_create_new_only\":true,"
            "\"forward_only\":true,\"non_replacing_renames_only\":true,"
-           "\"delete_performed\":false,\"replace_performed\":false,"
+           "\"delete_performed\":%s,\"replace_performed\":false,"
            "\"rollback_attempted\":false,"
            "\"public_rf_tx\":false,\"formats_sd\":false,"
            "\"nvs_mutated\":false,\"tile_cache_mutated\":false,"
            "\"arbitrary_url_accepted\":false",
            bool_json(
                repair && repair->before_valid &&
-               !repair->mutation_performed));
+               !repair->mutation_performed),
+           bool_json(repair && repair->canonical_delete_performed));
 }
 
 static void cmd_map_provider_repair_invalid(void)
@@ -3717,11 +3759,20 @@ static void cmd_map_provider_repair_invalid(void)
         print_json_string(
             repair.provider_lock_busy ?
                 "provider refresh owns the lock; retry this command" :
+            repair.canonical_missing_recoverable ?
+                "canonical is absent; the verified backup and exact stage "
+                "remain available for a forward-only retry" :
+            repair.final_rename_uncertain ?
+                "final rename outcome is uncertain; inspect the exact "
+                "recovery paths before retrying" :
+            repair.backup_copy_uncertain ?
+                "backup create/write completion is uncertain; inspect the "
+                "reported path before retrying" :
             repair.stage_mutation_uncertain ?
                 "stage create/write completion is uncertain; inspect the "
                 "reported path before retrying" :
-                "repair stopped forward-only; preserved files were not "
-                "deleted, replaced, or rolled back");
+                "repair stopped forward-only; no rollback, replacement, "
+                "format, RF, or NVS mutation was attempted");
         printf("}\n");
         return;
     }
