@@ -521,6 +521,39 @@ def test_exact_package_and_single_bounded_receipt_are_release_ready(
     }
 
 
+def test_rf_source_revalidation_receives_repository_evidence_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    package, actions_receipt, receipt, evidence = release_fixture(
+        tmp_path, monkeypatch
+    )
+    validators = dict(aggregate.VALIDATORS)
+    observed: dict[str, Path] = {}
+
+    def validate_rf_with_root(
+        _data, _candidate, *, evidence_root: Path
+    ) -> dict[str, bool]:
+        observed["evidence_root"] = evidence_root
+        return dict(ROLE_OUTCOMES["rf"])
+
+    monkeypatch.setattr(
+        aggregate, "validate_rf", validate_rf_with_root
+    )
+    validators["rf"] = validate_rf_with_root
+    monkeypatch.setattr(aggregate, "VALIDATORS", validators)
+
+    result = audit.audit(
+        package,
+        actions_receipt,
+        receipt,
+        evidence,
+        repository_root=tmp_path,
+    )
+
+    assert result["ready_for_public_release"] is True
+    assert observed["evidence_root"] == tmp_path
+
+
 def test_physical_sources_are_semantically_revalidated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

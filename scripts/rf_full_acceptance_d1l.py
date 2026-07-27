@@ -2737,6 +2737,7 @@ def remote_peer_flow_validation(
     }
     tx_delta = deltas["tx_dm_total"]
     fast_reply_delta = deltas["local_fast_reply_total"]
+    ack_miss_delta = deltas["tx_dm_ack_miss_total"]
     control_validation = (
         control.get("validation")
         if isinstance(control, dict)
@@ -2777,7 +2778,15 @@ def remote_peer_flow_validation(
         and isinstance(fast_reply_delta, int)
         and not isinstance(fast_reply_delta, bool)
         and tx_delta == 1 + fast_reply_delta,
-        "no_ack_miss_delta": deltas["tx_dm_ack_miss_total"] == 0,
+        # The controlled send has its own delivery acknowledgement below. A
+        # listener-generated fast reply can independently miss its ACK without
+        # invalidating that controlled transaction, but no unrelated ACK miss
+        # is accepted.
+        "ack_miss_bounded_to_fast_reply": isinstance(ack_miss_delta, int)
+        and not isinstance(ack_miss_delta, bool)
+        and isinstance(fast_reply_delta, int)
+        and not isinstance(fast_reply_delta, bool)
+        and 0 <= ack_miss_delta <= fast_reply_delta,
         "d1l_sender_exact": listener_sender_matches(
             after, d1l_public_key
         ),
