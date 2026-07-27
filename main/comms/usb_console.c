@@ -3428,11 +3428,13 @@ static void cmd_map_acceptance_status(void)
     print_json_string(provider.license_url);
     printf(",\"provider_max_zoom\":%u,"
            "\"minimum_request_interval_ms\":%lu,"
-           "\"average_tile_bytes\":%lu,\"device_location\":{"
+           "\"average_tile_bytes\":%lu,"
+           "\"cache_budget_mb\":%lu,\"device_location\":{"
            "\"set\":%s,\"lat_e7\":%ld,\"lon_e7\":%ld,\"source\":",
            (unsigned)provider.max_zoom,
            (unsigned long)provider.minimum_request_interval_ms,
            (unsigned long)provider.average_tile_bytes,
+           (unsigned long)provider.cache_budget_mb,
            bool_json(settings.map_location_set),
            (long)settings.map_lat_e7, (long)settings.map_lon_e7);
     print_json_string(map_location_source_name(&settings));
@@ -3463,9 +3465,12 @@ static void cmd_map_acceptance_status(void)
            "\"visited_tiles\":%" PRIu64 ",\"cached_tiles\":%" PRIu64 ","
            "\"network_requests\":%" PRIu64 ","
            "\"downloaded_tiles\":%" PRIu64 ",\"failed_tiles\":%" PRIu64 ","
+           "\"evicted_tiles\":%" PRIu64 ","
            "\"downloaded_bytes\":%" PRIu64 ","
+           "\"cache_used_bytes\":%" PRIu64 ","
            "\"estimated_bytes\":%" PRIu64 ","
-           "\"allocation_bytes\":%" PRIu64 ",\"source_id\":",
+           "\"allocation_bytes\":%" PRIu64 ","
+           "\"cache_budget_mb\":%lu,\"source_id\":",
            D1L_MAP_PREFETCH_NODE_RADIUS_KM,
            bool_json(nodes_accounted),
            (unsigned long)prefetch.marker_generation,
@@ -3485,8 +3490,10 @@ static void cmd_map_acceptance_status(void)
            prefetch.total_tiles, prefetch.visited_tiles,
            prefetch.cached_tiles, prefetch.network_requests,
            prefetch.downloaded_tiles, prefetch.failed_tiles,
-           prefetch.downloaded_bytes, prefetch.estimated_bytes,
-           prefetch.allocation_bytes);
+           prefetch.evicted_tiles, prefetch.downloaded_bytes,
+           prefetch.cache_used_bytes, prefetch.estimated_bytes,
+           prefetch.allocation_bytes,
+           (unsigned long)prefetch.cache_budget_mb);
     print_json_string(prefetch.source_id);
     printf(",\"phase\":");
     print_json_string(prefetch.phase);

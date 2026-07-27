@@ -740,6 +740,7 @@ static int test_bounded_cli_session_and_redaction(void)
         const char *text;
         d1l_meshcore_admin_cli_reply_profile_t profile;
     } exact_read_only_failures[] = {
+        {"Unknown command", D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT},
         {"ERROR: unsupported",
          D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNKNOWN_VALUE},
         {"??: name", D1L_MESHCORE_ADMIN_CLI_REPLY_GET_VALUE},

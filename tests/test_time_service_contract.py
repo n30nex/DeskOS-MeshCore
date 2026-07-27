@@ -240,8 +240,8 @@ def test_map_delegates_certificate_time_without_owning_sntp_or_wall_clock():
     store = read("main/storage/map_tile_store.c")
     fetch = body(
         store,
-        "esp_err_t d1l_map_tile_store_fetch",
-        "esp_err_t d1l_map_tile_store_write_canary",
+        "static esp_err_t map_tile_store_fetch_network",
+        "\nesp_err_t d1l_map_tile_store_fetch",
     )
     assert '#include "platform/time_service.h"' in store
     assert "esp_netif_sntp" not in store

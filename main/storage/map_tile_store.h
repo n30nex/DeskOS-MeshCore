@@ -20,11 +20,11 @@
 #define D1L_MAP_TILE_ATTRIBUTION "\xC2\xA9 OpenStreetMap contributors"
 #define D1L_MAP_TILE_LICENSE_URL "https://www.openstreetmap.org/copyright"
 #define D1L_MAP_TILE_MIN_CACHE_DAYS 7U
-#define D1L_MAP_TILE_CACHE_POLICY "persistent_current_view_cache_min_7_days"
+#define D1L_MAP_TILE_CACHE_POLICY "persistent_budgeted_fifo_tile_cache_crc32_v1"
 #define D1L_MAP_TILE_CACHE_PATH_TEMPLATE "map/tiles/openstreetmap/z{z}/x{x}/y{y}.png"
-#define D1L_MAP_TILE_DOWNLOAD_STATE "current_view_only"
+#define D1L_MAP_TILE_DOWNLOAD_STATE "visible_current_view_or_authorized_background_prefetch"
 #define D1L_MAP_TILE_DOWNLOAD_REQUIRES "Saved location, connected Wi-Fi, and ready persistent SD cache"
-#define D1L_MAP_TILE_PROVIDER_POLICY "built_in_openstreetmap_current_view_only_no_prefetch"
+#define D1L_MAP_TILE_PROVIDER_POLICY "built_in_osm_current_view_and_sd_authorized_background"
 #define D1L_MAP_TILE_PROVIDER_ATTRIBUTION D1L_MAP_TILE_ATTRIBUTION
 
 typedef struct {
@@ -54,6 +54,8 @@ typedef struct {
     char license_url[129];
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char tmp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char metadata_path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char metadata_tmp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char attribution_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char attribution_tmp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char step[24];
@@ -61,6 +63,10 @@ typedef struct {
     uint32_t x;
     uint32_t y;
     size_t bytes;
+    uint32_t content_crc32;
+    uint32_t evicted_tiles;
+    uint64_t cache_budget_bytes;
+    uint64_t cache_used_bytes;
     int status_code;
     uint32_t retry_after_sec;
     bool provider_allowed;
@@ -70,6 +76,8 @@ typedef struct {
     bool cache_hit;
     bool content_type_valid;
     bool png_valid;
+    bool checksum_verified;
+    bool cache_intent_recorded;
     bool cancelled;
     bool wifi_connected;
     bool sd_ready;

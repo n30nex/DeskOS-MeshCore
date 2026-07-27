@@ -1338,6 +1338,8 @@ static bool cli_reply_is_error(
             return cli_reply_exact(
                 text, text_len, offset, "err - unknown region");
         case D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT:
+            return cli_reply_exact(
+                text, text_len, offset, "unknown command");
         case D1L_MESHCORE_ADMIN_CLI_REPLY_PROMPT_UNSUPPORTED_VALUE:
         default:
             return false;

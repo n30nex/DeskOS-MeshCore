@@ -49,6 +49,7 @@ def test_authorized_default_provider_is_seeded_without_overwrite():
         "tile_template": "z{z}/x{x}/y{y}.png",
         "max_zoom": 15,
         "average_tile_bytes": 65536,
+        "cache_budget_mb": 18432,
         "minimum_request_interval_ms": 1000,
     }
     assert (
@@ -79,6 +80,9 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     assert "d1l_map_tile_store_fetch(" in service
     assert "plan->reserve_bytes + D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in service
     assert "provider->minimum_request_interval_ms" in service
+    assert "cache_budget_mb = provider.cache_budget_mb" in service
+    assert "status->evicted_tiles += result.evicted_tiles" in service
+    assert "status->cache_used_bytes = result.cache_used_bytes" in service
 
 
 def test_map_ui_exposes_provider_and_background_state():

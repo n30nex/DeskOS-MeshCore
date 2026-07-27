@@ -12,6 +12,7 @@
 #define D1L_MAP_PREFETCH_PADDING_KM 5.0
 #define D1L_MAP_PREFETCH_CARD_RESERVE_KB (8ULL * 1024ULL * 1024ULL)
 #define D1L_MAP_PREFETCH_CARD_ALLOCATION_PERCENT 60U
+#define D1L_MAP_PREFETCH_PRIORITY_FOCUS_MAX 64U
 
 typedef struct {
     int32_t lat_e6;
@@ -37,19 +38,31 @@ typedef struct {
     uint8_t min_zoom;
     uint8_t max_zoom;
     uint8_t range_count;
+    uint8_t priority_min_zoom;
+    uint8_t priority_max_zoom;
+    uint8_t priority_focus_zoom;
+    uint8_t priority_focus_count;
+    bool priority_includes_viewport;
     uint32_t average_tile_bytes;
     uint64_t total_tiles;
+    uint64_t base_tiles;
+    uint64_t priority_tiles;
     uint64_t estimated_bytes;
     uint64_t allocation_bytes;
     uint64_t reserve_bytes;
+    uint64_t
+        priority_zoom_tile_counts[D1L_MAP_PREFETCH_ZOOM_COUNT];
     d1l_map_prefetch_range_t ranges[D1L_MAP_PREFETCH_ZOOM_COUNT];
+    d1l_map_prefetch_point_t
+        priority_focuses[D1L_MAP_PREFETCH_PRIORITY_FOCUS_MAX];
 } d1l_map_prefetch_plan_t;
 
 /*
  * Builds a deterministic tile pyramid around the configured device location
  * and every valid node no farther than 200 km from it. The highest provider
- * zoom that fits the fixed card allocation is selected; eight GiB always
- * remains outside the map allocation on a 32 GB-class or larger card.
+ * zoom that fits both the configured tile budget and the safe card allocation
+ * is selected; eight GiB always remains outside the map allocation on a
+ * 32 GB-class or larger card.
  */
 bool d1l_map_prefetch_plan_build(
     int32_t center_lat_e7,
@@ -57,6 +70,25 @@ bool d1l_map_prefetch_plan_build(
     const d1l_map_prefetch_point_t *nodes,
     size_t node_count,
     uint32_t card_capacity_kb,
+    uint64_t cache_budget_bytes,
+    uint32_t average_tile_bytes,
+    uint8_t provider_max_zoom,
+    d1l_map_prefetch_plan_t *out_plan);
+
+/*
+ * Extends the background plan with the most recently rendered viewport.
+ * Lower/mid zooms remain complete across the bounded device/node area, then
+ * remaining budget is spent center-first at provider detail around the
+ * device, the viewport, and a geographically spread set of retained nodes.
+ */
+bool d1l_map_prefetch_plan_build_with_viewport(
+    int32_t center_lat_e7,
+    int32_t center_lon_e7,
+    const d1l_map_prefetch_point_t *nodes,
+    size_t node_count,
+    const d1l_map_prefetch_point_t *viewport,
+    uint32_t card_capacity_kb,
+    uint64_t cache_budget_bytes,
     uint32_t average_tile_bytes,
     uint8_t provider_max_zoom,
     d1l_map_prefetch_plan_t *out_plan);

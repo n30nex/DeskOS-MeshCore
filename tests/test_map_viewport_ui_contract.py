@@ -614,6 +614,7 @@ def test_map_cache_status_is_read_only_and_reports_saved_work_honestly():
     assert '"Built-in OpenStreetMap - interactive cache only"' in cache_page
     assert "view_status.provider_configured" in cache_page
     assert "prefetch.selected_max_zoom" in cache_page
+    assert "prefetch.cache_budget_mb" in cache_page
     assert '"(c) OpenStreetMap contributors"' in cache_page
     assert 'map_render_header(parent, "Cache status", "Read-only readiness", "Back"' in cache_page
 
