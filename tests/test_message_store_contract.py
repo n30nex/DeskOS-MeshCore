@@ -97,9 +97,9 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
 
 def test_public_rf_appends_to_message_store():
     source = read("main/mesh/meshcore_service.c")
-    assert "d1l_message_store_append_channel(" in source
-    assert "remember_pending_channel_tx(channel_id, text, packet_hash)" in source
-    assert "flush_pending_channel_tx(" in source
+    assert "d1l_message_store_append_channel_deferred(" in source
+    assert "remember_pending_channel_tx(" in source
+    assert "maintain_pending_channel_history(" in source
     assert "append_channel_message_store_rx(" in source
     assert "reconcile_channel_messages(message_seq)" in source
 

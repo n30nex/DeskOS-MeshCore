@@ -39,6 +39,9 @@ typedef struct {
     uint32_t channel_rx_hash_collision;
     uint32_t channel_rx_decrypt_failed;
     uint32_t channel_rx_reconcile_blocked;
+    bool public_tx_history_pending;
+    uint32_t public_tx_history_retries;
+    uint32_t public_tx_history_failures;
     uint32_t rejected_commands;
     uint32_t ack_tx_queued;
     uint32_t ack_tx_done;
