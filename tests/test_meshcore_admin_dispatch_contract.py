@@ -132,7 +132,7 @@ def test_admin_mutations_are_exactly_allowlisted_and_locally_confirmed() -> None
     assert "if (!local_confirmed)" in public_request
     assert "d1l_meshcore_admin_mutation_command(mutation)" in public_request
     assert "meshcore_service_send_command(" in public_request
-    assert "&cmd, D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS" in public_request
+    assert "&cmd, D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS" in public_request
 
     assert "D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS = 5000U" in ui
     assert "s_admin_mutation_armed" in ui
@@ -527,8 +527,19 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
         "static void meshcore_service_task",
     )
 
-    assert "#define D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS 5000U" in service
-    assert service.count("D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS") == 6
+    assert "#define D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS \\" in service
+    for component in (
+        "D1L_MESHCORE_TX_TIMEOUT_MS",
+        "D1L_MESHCORE_TX_WATCHDOG_GRACE_MS",
+        "D1L_MESHCORE_OWNER_POLL_MS",
+        "D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS",
+    ):
+        assert component in service
+    assert (
+        "_Static_assert(D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS == 7000U"
+        in service
+    )
+    assert service.count("D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS") == 7
     for command_name in (
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN",
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS",
@@ -537,6 +548,13 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_CLI",
     ):
         assert command_name in idle_tx_commands
+    logout = body(
+        service,
+        "esp_err_t d1l_meshcore_service_admin_logout",
+        "static esp_err_t meshcore_service_request_advert",
+    )
+    assert "&cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS" in logout
+    assert "D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS" not in logout
     assert "password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES" in secret_store
     assert "d1l_mesh_command_request_store_admin_password" in secret_store
     assert "d1l_mesh_command_request_take_admin_password" in secret_take

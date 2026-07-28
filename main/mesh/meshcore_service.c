@@ -88,13 +88,20 @@
 #define D1L_MESHCORE_TX_WATCHDOG_GRACE_MS 250U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
 #define D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS 5000U
-#define D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS 5000U
+#define D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS \
+    (D1L_MESHCORE_TX_TIMEOUT_MS + \
+     D1L_MESHCORE_TX_WATCHDOG_GRACE_MS + \
+     D1L_MESHCORE_OWNER_POLL_MS + \
+     D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS)
 #define D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS 20U
 #define D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS 2000U
 #define D1L_MESHCORE_PUBLIC_HISTORY_RETRY_INTERVAL_MS 250U
 #define D1L_MESHCORE_PUBLIC_HISTORY_RETRY_TIMEOUT_MS 2000U
 #define D1L_MESHCORE_PATH_RESPONSE_TIMEOUT_MS 60000U
 #define D1L_MESHCORE_RECIPROCAL_PATH_DELAY_MS 500U
+_Static_assert(D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS == 7000U,
+               "Admin radio admission must cover a TX watchdog terminal plus "
+               "normal command work");
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ bytes");
 _Static_assert(
@@ -8004,7 +8011,7 @@ esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
     cmd.admin_fingerprint[fingerprint_len] = '\0';
     const esp_err_t ret = meshcore_service_send_admin_login_command(
         &cmd, password, password_len,
-        D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS);
+        D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS);
     if (ret != ESP_OK) {
         d1l_meshcore_admin_runtime_report_failure(ret);
     }
@@ -8021,7 +8028,7 @@ esp_err_t d1l_meshcore_service_admin_request_status(void)
         .type = D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS,
     };
     const esp_err_t ret = meshcore_service_send_command(
-        &cmd, D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS);
+        &cmd, D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS);
     meshcore_service_command_wipe(&cmd);
     if (ret != ESP_OK) {
         d1l_meshcore_admin_runtime_report_failure(ret);
@@ -8050,7 +8057,7 @@ esp_err_t d1l_meshcore_service_admin_request_query(
         .admin_query_offset = offset,
     };
     const esp_err_t ret = meshcore_service_send_command(
-        &cmd, D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS);
+        &cmd, D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS);
     meshcore_service_command_wipe(&cmd);
     if (ret != ESP_OK) {
         d1l_meshcore_admin_runtime_report_failure(ret);
@@ -8080,7 +8087,7 @@ esp_err_t d1l_meshcore_service_admin_request_mutation(
         .admin_mutation = mutation,
     };
     const esp_err_t ret = meshcore_service_send_command(
-        &cmd, D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS);
+        &cmd, D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS);
     meshcore_service_command_wipe(&cmd);
     if (ret != ESP_OK) {
         d1l_meshcore_admin_runtime_report_failure(ret);
@@ -8112,7 +8119,7 @@ esp_err_t d1l_meshcore_service_admin_request_cli(
     };
     const esp_err_t ret = meshcore_service_send_admin_cli_command(
         &cmd, command, command_len,
-        D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS);
+        D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS);
     if (ret != ESP_OK) {
         d1l_meshcore_admin_runtime_report_failure(ret);
     }
