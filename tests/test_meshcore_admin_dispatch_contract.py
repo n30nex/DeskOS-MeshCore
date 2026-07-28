@@ -132,7 +132,7 @@ def test_admin_mutations_are_exactly_allowlisted_and_locally_confirmed() -> None
     assert "if (!local_confirmed)" in public_request
     assert "d1l_meshcore_admin_mutation_command(mutation)" in public_request
     assert "meshcore_service_send_command(" in public_request
-    assert "&cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS" in public_request
+    assert "&cmd, D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS" in public_request
 
     assert "D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS = 5000U" in ui
     assert "s_admin_mutation_armed" in ui
@@ -521,7 +521,22 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
         "static esp_err_t meshcore_service_handle_admin_cli",
         "static esp_err_t meshcore_service_handle_admin_logout",
     )
+    idle_tx_commands = body(
+        service,
+        "static bool meshcore_service_command_requires_idle_tx",
+        "static void meshcore_service_task",
+    )
 
+    assert "#define D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS 5000U" in service
+    assert service.count("D1L_MESHCORE_ADMIN_COMMAND_TIMEOUT_MS") == 6
+    for command_name in (
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_QUERY",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_MUTATION",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_CLI",
+    ):
+        assert command_name in idle_tx_commands
     assert "password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES" in secret_store
     assert "d1l_mesh_command_request_store_admin_password" in secret_store
     assert "d1l_mesh_command_request_take_admin_password" in secret_take
