@@ -3957,7 +3957,6 @@ def build_report(
         step for step in steps if step.get("command") == outbound_command
     ]
     outbound_step = outbound_steps[0] if len(outbound_steps) == 1 else None
-    outbound_packets = command_step(steps, f"packets search {outbound_token}")
     direct_steps = [
         step for step in steps if step.get("command") == direct_command
     ]
@@ -4140,12 +4139,17 @@ def build_report(
         )
     else:
         contact_ready = True
+    outbound_terminal = exact_outbound_terminal_row(
+        baseline_messages=baseline_messages_result,
+        current_messages=messages_result,
+        outbound_text=outbound_text,
+        fingerprint=fingerprint,
+    )
     outbound_ok = bool(
         send_outbound
         and outbound_step
         and outbound_step.get("result", {}).get("ok") is True
-        and outbound_packets
-        and contains_token(outbound_packets.get("result"), outbound_token)
+        and outbound_terminal is not None
     )
     inbound_ok = bool(
         latest_messages
