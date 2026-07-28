@@ -114,7 +114,8 @@ def test_meshcore_public_and_advert_paths_feed_routes():
     assert "route_target, channel.name, packet_kind" in source
     assert "advert.name[0] ? advert.name : pub_prefix" in source
     assert '"advert"' in source
-    assert 'route store channel tx failed' in source
+    assert "d1l_route_store_upsert_observation_deferred(" in source
+    assert "s_pending_channel_route_history_admitted" in source
     assert 'route store advert tx failed' in source
     assert "D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT" in source
     assert "d1l_meshcore_service_request_path_discovery_probe" in read("main/mesh/meshcore_service.h")

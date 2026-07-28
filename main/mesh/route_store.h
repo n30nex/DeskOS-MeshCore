@@ -71,6 +71,12 @@ esp_err_t d1l_route_store_upsert_observation(const char *target, const char *lab
                                              const char *direction, int rssi_dbm,
                                              int snr_tenths, uint8_t path_hash_bytes,
                                              uint8_t path_hops, uint16_t payload_len);
+/* Zero-wait retained-ring admission for radio terminal paths. */
+esp_err_t d1l_route_store_upsert_observation_deferred(
+    const char *target, const char *label, const char *kind,
+    const char *route, const char *direction, int rssi_dbm,
+    int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
+    uint16_t payload_len);
 esp_err_t d1l_route_store_upsert_observation_volatile(const char *target, const char *label,
                                                       const char *kind, const char *route,
                                                       const char *direction, int rssi_dbm,

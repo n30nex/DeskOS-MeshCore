@@ -82,7 +82,7 @@ def test_meshcore_service_rejects_139_byte_or_invalid_utf8_text_without_truncati
     assert "D1L_MESHCORE_SERVICE_CMD_START_RX" not in public_sender
     assert "meshcore_service_queue_public_raw(" in public_sender
     assert "meshcore_service_send_raw_kind(" not in public_sender
-    assert "append_packet_log_deferred(" in public_sender
+    assert "append_packet_log_deferred(" not in public_sender
     assert "append_packet_log(\"tx\"" not in public_sender
     assert "if (s_tx_busy)" not in public_sender
     assert "validate_user_text(cmd->dm_text)" in dm_sender
@@ -98,6 +98,73 @@ def test_meshcore_service_rejects_139_byte_or_invalid_utf8_text_without_truncati
     assert "s_pending_channel_text, sizeof(s_pending_channel_text), message" in source
     assert "s_pending_dm_tx.text," in source
     assert "lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS)" in ui
+
+
+def test_public_tx_history_retries_nonblocking_exact_terminal_stages_before_release():
+    source = read("main/mesh/meshcore_service.c")
+    remember = c_function(source, "static esp_err_t remember_pending_channel_tx(")
+    terminal = c_function(source, "static void mark_pending_channel_tx_done(")
+    history = c_function(
+        source, "static bool maintain_pending_channel_history("
+    )
+    sender = c_function(
+        source, "static esp_err_t meshcore_service_send_channel_owned("
+    )
+    message = c_function(
+        source, "static bool append_channel_message_store_tx("
+    )
+    degraded_handler = c_function(
+        source, "static void fail_pending_channel_history_degraded("
+    )
+    maintenance = c_function(
+        source, "static void meshcore_service_run_owner_maintenance("
+    )
+    timeout = c_function(
+        source, "static void meshcore_service_handle_radio_tx_timeout("
+    )
+
+    assert "memcpy(s_pending_channel_raw, raw, raw_len);" in remember
+    assert "s_pending_channel_raw_len = raw_len;" in remember
+    assert "s_pending_channel_path_hash_bytes = path_hash_bytes;" in remember
+    assert "s_pending_channel_name" in remember
+    assert "s_pending_channel_author" in remember
+    assert "s_pending_channel_tx_completed = false;" in remember
+
+    completion = terminal.index("s_pending_channel_tx_completed = true;")
+    packet_hash = terminal.index(
+        "d1l_meshcore_packet_hash_cache_remember(", completion
+    )
+    packet = history.index("append_packet_log_deferred(")
+    visible = history.index("append_channel_message_store_tx(", packet)
+    route = history.index(
+        "d1l_route_store_upsert_observation_deferred(", visible
+    )
+    all_stages = history.index(
+        "s_pending_channel_packet_history_admitted &&", route
+    )
+    release = history.index("clear_pending_channel_tx();", all_stages)
+    assert completion < packet_hash
+    assert "s_pending_channel_history_attempted = false;" in terminal
+    assert packet < visible < route < all_stages < release
+    assert "append_packet_log_deferred(" not in terminal
+    assert "append_channel_message_store_tx(" not in terminal
+    assert "s_pending_channel_raw" in history
+    assert "s_pending_channel_text" in history
+    assert "s_pending_channel_packet_history_admitted =" in history
+    assert "s_pending_channel_message_history_admitted =" in history
+    assert "s_pending_channel_route_history_admitted =" in history
+    assert "D1L_MESHCORE_PUBLIC_HISTORY_RETRY_INTERVAL_MS" in history
+    assert "D1L_MESHCORE_PUBLIC_HISTORY_RETRY_TIMEOUT_MS" in source
+    assert "d1l_message_store_append_channel_deferred(" in message
+    assert "d1l_message_store_append_channel(" not in message
+    assert "reconcile_channel_messages(" not in message
+    assert "public_tx_history_failures" in degraded_handler
+    assert "clear_pending_channel_tx();" in degraded_handler
+    assert "d1l_route_store_upsert_observation(" not in sender
+    assert "if (s_tx_busy)" in maintenance
+    assert "pending_channel_history_deadline_expired(now_ms)" in maintenance
+    assert "maintain_pending_channel_history(now_ms)" in maintenance
+    assert "clear_pending_channel_tx();" in timeout
 
 
 def test_authenticated_inbound_text_is_validated_before_visible_or_ack_side_effects():

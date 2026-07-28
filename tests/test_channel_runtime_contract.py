@@ -125,7 +125,7 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     copy_index = send.index("d1l_channel_store_copy_protocol_key")
     timestamp_index = send.index("d1l_time_service_preflight_protocol_timestamp")
     hash_index = send.index("d1l_meshcore_packet_hash_calculate")
-    pending_index = send.index("remember_pending_channel_tx(channel_id, text,")
+    pending_index = send.index("remember_pending_channel_tx(")
     radio_index = send.index("meshcore_service_queue_public_raw")
     assert ready_index < copy_index < timestamp_index < hash_index
     assert hash_index < pending_index < radio_index
@@ -299,14 +299,16 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
     assert ".requested_tx_kind = D1L_MESH_TX_OPERATION_GENERIC" in reciprocal_send
     assert "s_pending_channel_tx" not in reciprocal_send
 
-    flush = c_function(service, "static void flush_pending_channel_tx(")
-    assert "operation->kind != D1L_MESH_TX_OPERATION_PUBLIC" in flush
-    assert "operation->operation_id != s_pending_channel_operation_id" in flush
-    assert "append_channel_message_store_tx" in flush
-    assert flush.index("d1l_meshcore_packet_hash_cache_remember") < flush.index(
-        "append_channel_message_store_tx"
+    mark = c_function(service, "static void mark_pending_channel_tx_done(")
+    history = c_function(
+        service, "static bool maintain_pending_channel_history("
     )
-    assert "s_pending_channel_packet_hash_ready" in flush
+    assert "operation->kind != D1L_MESH_TX_OPERATION_PUBLIC" in mark
+    assert "operation->operation_id != s_pending_channel_operation_id" in mark
+    assert "d1l_meshcore_packet_hash_cache_remember" in mark
+    assert "append_channel_message_store_tx" not in mark
+    assert "append_channel_message_store_tx" in history
+    assert "s_pending_channel_packet_hash_ready" in history
 
     done = c_function(
         service, "static void meshcore_service_handle_radio_tx_done("
@@ -315,10 +317,10 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
         service, "static void meshcore_service_handle_radio_tx_timeout("
     )
     assert done.index("meshcore_radio_terminal_matches") < done.index(
-        "flush_pending_channel_tx"
+        "mark_pending_channel_tx_done"
     )
     assert "event->tx_operation.kind == D1L_MESH_TX_OPERATION_PUBLIC" in done
-    assert "flush_pending_channel_tx" not in done.split(
+    assert "mark_pending_channel_tx_done" not in done.split(
         "D1L_MESH_TX_OPERATION_PUBLIC", 1
     )[0]
     assert "s_pending_channel_operation_id ==" in timeout

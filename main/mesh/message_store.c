@@ -1575,7 +1575,7 @@ static esp_err_t append_channel_internal(
     uint64_t channel_id, const char *direction, const char *author,
     const char *text, int rssi_dbm, int snr_tenths,
     uint8_t path_hash_bytes, uint8_t path_hops, bool delivered, bool persist,
-    uint32_t *out_seq)
+    bool defer_flush, uint32_t *out_seq)
 {
     if (out_seq) {
         *out_seq = 0U;
@@ -1588,12 +1588,24 @@ static esp_err_t append_channel_internal(
         return text_info.result == D1L_USER_TEXT_TOO_LONG ?
             ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
     }
-    const esp_err_t init_ret = ensure_store_initialized();
-    if (init_ret != ESP_OK) {
-        return init_ret;
+    if (!defer_flush) {
+        const esp_err_t init_ret = ensure_store_initialized();
+        if (init_ret != ESP_OK) {
+            return init_ret;
+        }
     }
 
-    d1l_store_lock_take(&s_store_lock);
+    if (defer_flush) {
+        if (!d1l_store_lock_try_take(&s_store_lock)) {
+            return ESP_ERR_TIMEOUT;
+        }
+        if (!s_loaded) {
+            d1l_store_lock_give(&s_store_lock);
+            return ESP_ERR_INVALID_STATE;
+        }
+    } else {
+        d1l_store_lock_take(&s_store_lock);
+    }
     d1l_message_entry_t entry = {
         .seq = s_next_seq,
         .uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL),
@@ -1661,7 +1673,7 @@ static esp_err_t append_channel_internal(
         *out_seq = entry.seq;
     }
     d1l_store_lock_give(&s_store_lock);
-    return d1l_message_store_flush();
+    return defer_flush ? ESP_OK : d1l_message_store_flush();
 }
 
 esp_err_t d1l_message_store_append_public(const char *direction, const char *author,
@@ -1692,7 +1704,21 @@ esp_err_t d1l_message_store_append_channel(
 {
     return append_channel_internal(
         channel_id, direction, author, text, rssi_dbm, snr_tenths,
-        path_hash_bytes, path_hops, delivered, true, out_seq);
+        path_hash_bytes, path_hops, delivered, true, false, out_seq);
+}
+
+esp_err_t d1l_message_store_append_channel_deferred(
+    uint64_t channel_id, const char *direction, const char *author,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
+    uint32_t *out_seq)
+{
+    if (!out_seq) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return append_channel_internal(
+        channel_id, direction, author, text, rssi_dbm, snr_tenths,
+        path_hash_bytes, path_hops, delivered, true, true, out_seq);
 }
 
 esp_err_t d1l_message_store_append_channel_volatile(
@@ -1702,7 +1728,7 @@ esp_err_t d1l_message_store_append_channel_volatile(
 {
     return append_channel_internal(
         channel_id, direction, author, text, rssi_dbm, snr_tenths,
-        path_hash_bytes, path_hops, delivered, false, NULL);
+        path_hash_bytes, path_hops, delivered, false, false, NULL);
 }
 
 static d1l_message_store_stats_t message_store_stats_locked(

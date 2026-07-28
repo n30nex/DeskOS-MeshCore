@@ -90,6 +90,8 @@
 #define D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS 5000U
 #define D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS 20U
 #define D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS 2000U
+#define D1L_MESHCORE_PUBLIC_HISTORY_RETRY_INTERVAL_MS 250U
+#define D1L_MESHCORE_PUBLIC_HISTORY_RETRY_TIMEOUT_MS 2000U
 #define D1L_MESHCORE_PATH_RESPONSE_TIMEOUT_MS 60000U
 #define D1L_MESHCORE_RECIPROCAL_PATH_DELAY_MS 500U
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
@@ -151,6 +153,18 @@ static char s_pending_channel_text[D1L_MESSAGE_TEXT_LEN];
 static uint8_t
     s_pending_channel_packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES];
 static bool s_pending_channel_packet_hash_ready;
+static uint8_t s_pending_channel_raw[D1L_MESHCORE_MAX_RAW_PACKET];
+static uint8_t s_pending_channel_raw_len;
+static uint8_t s_pending_channel_path_hash_bytes;
+static char s_pending_channel_name[D1L_CHANNEL_NAME_LEN];
+static char s_pending_channel_author[D1L_NODE_NAME_LEN];
+static bool s_pending_channel_tx_completed;
+static bool s_pending_channel_packet_history_admitted;
+static bool s_pending_channel_message_history_admitted;
+static bool s_pending_channel_route_history_admitted;
+static bool s_pending_channel_history_attempted;
+static uint32_t s_pending_channel_tx_completed_ms;
+static uint32_t s_pending_channel_history_last_attempt_ms;
 static uint32_t s_channel_send_admission;
 static uint32_t s_last_path_probe_ms;
 static char s_last_path_probe_fingerprint[D1L_NODE_FINGERPRINT_LEN];
@@ -1399,22 +1413,18 @@ static d1l_channel_rx_store_result_t append_channel_message_store_rx(
     };
 }
 
-static void append_channel_message_store_tx(uint64_t channel_id,
+static bool append_channel_message_store_tx(uint64_t channel_id,
+                                            const char *author,
                                             const char *message)
 {
-    d1l_settings_t settings_snapshot = {0};
-    (void)d1l_settings_public_snapshot(&settings_snapshot);
-    const d1l_settings_t *settings = &settings_snapshot;
     uint32_t message_seq = 0U;
-    esp_err_t ret = d1l_message_store_append_channel(
-        channel_id, "tx", settings->node_name, message, 0, 0,
-        settings->path_hash_bytes, 0, false, &message_seq);
-    reconcile_channel_messages(message_seq);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "channel message append tx failed: %s",
-                 esp_err_to_name(ret));
-    }
+    const esp_err_t ret = d1l_message_store_append_channel_deferred(
+        channel_id, "tx", author, message, 0, 0,
+        s_pending_channel_path_hash_bytes, 0, false, &message_seq);
+    return ret == ESP_OK && message_seq != 0U;
 }
+
+static const char *route_name(uint8_t route);
 
 static void bank_pending_dm_ack_packet_hash(
     const uint8_t hash[D1L_MESHCORE_PACKET_HASH_BYTES])
@@ -1796,6 +1806,22 @@ static void reset_pending_channel_tx_state(void)
     secure_zero_bytes(s_pending_channel_packet_hash,
                       sizeof(s_pending_channel_packet_hash));
     s_pending_channel_packet_hash_ready = false;
+    secure_zero_bytes(s_pending_channel_raw,
+                      sizeof(s_pending_channel_raw));
+    s_pending_channel_raw_len = 0U;
+    s_pending_channel_path_hash_bytes = 0U;
+    secure_zero_bytes(s_pending_channel_name,
+                      sizeof(s_pending_channel_name));
+    secure_zero_bytes(s_pending_channel_author,
+                      sizeof(s_pending_channel_author));
+    s_pending_channel_tx_completed = false;
+    s_pending_channel_packet_history_admitted = false;
+    s_pending_channel_message_history_admitted = false;
+    s_pending_channel_route_history_admitted = false;
+    s_pending_channel_history_attempted = false;
+    s_pending_channel_tx_completed_ms = 0U;
+    s_pending_channel_history_last_attempt_ms = 0U;
+    s_status.public_tx_history_pending = false;
 }
 
 static void clear_pending_channel_tx(void)
@@ -1807,9 +1833,15 @@ static void clear_pending_channel_tx(void)
 static esp_err_t remember_pending_channel_tx(uint64_t channel_id,
                                              const char *message,
                                              const uint8_t packet_hash[
-                                                 D1L_MESHCORE_PACKET_HASH_BYTES])
+                                                 D1L_MESHCORE_PACKET_HASH_BYTES],
+                                             const uint8_t *raw,
+                                             uint8_t raw_len,
+                                             uint8_t path_hash_bytes,
+                                             const char *channel_name,
+                                             const char *author)
 {
-    if (channel_id == 0U || !packet_hash) {
+    if (channel_id == 0U || !packet_hash || !raw || raw_len == 0U ||
+        !channel_name || !author) {
         return ESP_ERR_INVALID_ARG;
     }
     const d1l_user_text_result_t result = d1l_user_text_copy(
@@ -1822,28 +1854,123 @@ static esp_err_t remember_pending_channel_tx(uint64_t channel_id,
     memcpy(s_pending_channel_packet_hash, packet_hash,
            sizeof(s_pending_channel_packet_hash));
     s_pending_channel_packet_hash_ready = true;
+    memcpy(s_pending_channel_raw, raw, raw_len);
+    s_pending_channel_raw_len = raw_len;
+    s_pending_channel_path_hash_bytes = path_hash_bytes;
+    sanitize_note(s_pending_channel_name, sizeof(s_pending_channel_name),
+                  channel_name);
+    sanitize_note(s_pending_channel_author, sizeof(s_pending_channel_author),
+                  author);
+    s_pending_channel_tx_completed = false;
     s_pending_channel_id = channel_id;
     s_pending_channel_tx = true;
+    s_status.public_tx_history_pending = true;
     return ESP_OK;
 }
 
-static void flush_pending_channel_tx(
+static void fail_pending_channel_history_degraded(void)
+{
+    const uint8_t missing_mask =
+        (s_pending_channel_packet_history_admitted ? 0U : 0x01U) |
+        (s_pending_channel_message_history_admitted ? 0U : 0x02U) |
+        (s_pending_channel_route_history_admitted ? 0U : 0x04U);
+    (void)d1l_mesh_runtime_counter_increment_saturating(
+        &s_status.public_tx_history_failures);
+    ESP_LOGW(
+        TAG,
+        "Public TX retained history degraded (missing=0x%02x)",
+        (unsigned)missing_mask);
+    clear_pending_channel_tx();
+}
+
+static void mark_pending_channel_tx_done(
     const d1l_mesh_tx_operation_identity_t *operation)
 {
-    if (!operation || operation->kind != D1L_MESH_TX_OPERATION_PUBLIC ||
-        !s_pending_channel_tx || s_pending_channel_id == 0U ||
+    if (!operation || !s_pending_channel_tx ||
+        s_pending_channel_id == 0U ||
         !s_pending_channel_packet_hash_ready ||
+        s_pending_channel_raw_len == 0U ||
         s_pending_channel_operation_id == 0U ||
-        operation->operation_id != s_pending_channel_operation_id) {
+        operation->kind != D1L_MESH_TX_OPERATION_PUBLIC ||
+        operation->operation_id != s_pending_channel_operation_id ||
+        s_pending_channel_tx_completed) {
         return;
     }
+    const uint32_t now_ms =
+        (uint32_t)(esp_timer_get_time() / 1000ULL);
+    s_pending_channel_tx_completed = true;
+    s_pending_channel_tx_completed_ms = now_ms;
+    s_pending_channel_history_attempted = false;
+    s_pending_channel_history_last_attempt_ms = now_ms;
     /* Match pinned MeshCore's seen-table behavior: an outgoing group packet
-     * becomes self-suppressing only at successful terminal TX. */
+     * becomes self-suppressing at successful terminal TX. */
     (void)d1l_meshcore_packet_hash_cache_remember(
         &s_rx_packet_hash_cache, s_pending_channel_packet_hash);
-    append_channel_message_store_tx(s_pending_channel_id,
-                                    s_pending_channel_text);
-    clear_pending_channel_tx();
+}
+
+static bool pending_channel_history_deadline_expired(uint32_t now_ms)
+{
+    return s_pending_channel_tx && s_pending_channel_tx_completed &&
+        (uint32_t)(now_ms - s_pending_channel_tx_completed_ms) >=
+            D1L_MESHCORE_PUBLIC_HISTORY_RETRY_TIMEOUT_MS;
+}
+
+static bool maintain_pending_channel_history(uint32_t now_ms)
+{
+    if (!s_pending_channel_tx || !s_pending_channel_tx_completed ||
+        s_pending_channel_id == 0U ||
+        !s_pending_channel_packet_hash_ready ||
+        s_pending_channel_raw_len == 0U ||
+        s_pending_channel_operation_id == 0U) {
+        return false;
+    }
+    if (pending_channel_history_deadline_expired(now_ms)) {
+        fail_pending_channel_history_degraded();
+        return true;
+    }
+    if (s_pending_channel_history_attempted &&
+        (uint32_t)(now_ms - s_pending_channel_history_last_attempt_ms) <
+            D1L_MESHCORE_PUBLIC_HISTORY_RETRY_INTERVAL_MS) {
+        return true;
+    }
+    s_pending_channel_history_attempted = true;
+    s_pending_channel_history_last_attempt_ms = now_ms;
+
+    if (!s_pending_channel_packet_history_admitted) {
+        s_pending_channel_packet_history_admitted =
+            append_packet_log_deferred(
+                "tx", channel_packet_kind(s_pending_channel_id), 0, 0,
+                s_pending_channel_path_hash_bytes, 0,
+                s_pending_channel_raw_len, s_pending_channel_raw,
+                s_pending_channel_raw_len, s_pending_channel_text);
+    }
+    if (!s_pending_channel_message_history_admitted) {
+        s_pending_channel_message_history_admitted =
+            append_channel_message_store_tx(
+                s_pending_channel_id, s_pending_channel_author,
+                s_pending_channel_text);
+    }
+    if (!s_pending_channel_route_history_admitted) {
+        char route_target[17] = {0};
+        channel_route_target(s_pending_channel_id, route_target);
+        s_pending_channel_route_history_admitted =
+            d1l_route_store_upsert_observation_deferred(
+                route_target, s_pending_channel_name,
+                channel_packet_kind(s_pending_channel_id),
+                route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx", 0, 0,
+                s_pending_channel_path_hash_bytes, 0,
+                s_pending_channel_raw_len) == ESP_OK;
+    }
+    if (s_pending_channel_packet_history_admitted &&
+        s_pending_channel_message_history_admitted &&
+        s_pending_channel_route_history_admitted) {
+        clear_pending_channel_tx();
+        return true;
+    }
+
+    (void)d1l_mesh_runtime_counter_increment_saturating(
+        &s_status.public_tx_history_retries);
+    return true;
 }
 
 static void write_le32(uint8_t *dest, uint32_t value)
@@ -4812,7 +4939,7 @@ static void meshcore_service_handle_radio_tx_done(
         }
         finalize_pending_dm_radio_result(true, ESP_OK);
     } else if (event->tx_operation.kind == D1L_MESH_TX_OPERATION_PUBLIC) {
-        flush_pending_channel_tx(&event->tx_operation);
+        mark_pending_channel_tx_done(&event->tx_operation);
     }
 }
 
@@ -4913,6 +5040,18 @@ static void meshcore_service_run_owner_maintenance(void)
          * expiry, or an outbound DM retry can block or claim the radio. The
          * watchdog still runs above, and normal maintenance resumes after the
          * ACK has started. */
+        return;
+    }
+    const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
+    if (s_tx_busy) {
+        if (pending_channel_history_deadline_expired(now_ms)) {
+            fail_pending_channel_history_degraded();
+        }
+        return;
+    }
+    if (maintain_pending_channel_history(now_ms)) {
+        /* Never enter synchronous reconciliation on the same owner pass that
+         * admits or waits on fresh Public terminal history. */
         return;
     }
     (void)d1l_meshcore_admin_runtime_expire(now_us);
@@ -8125,7 +8264,9 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         s_status.rejected_commands++;
         return ESP_FAIL;
     }
-    ret = remember_pending_channel_tx(channel_id, text, packet_hash);
+    ret = remember_pending_channel_tx(
+        channel_id, text, packet_hash, raw, raw_len,
+        settings->path_hash_bytes, channel.name, settings->node_name);
     secure_zero_bytes(packet_hash, sizeof(packet_hash));
     if (ret != ESP_OK) {
         secure_zero_bytes(raw, sizeof(raw));
@@ -8138,25 +8279,6 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         s_status.rejected_commands++;
         return ret;
     }
-    char route_target[17] = {0};
-    channel_route_target(channel_id, route_target);
-    const char *packet_kind = channel_packet_kind(channel_id);
-    esp_err_t route_ret = d1l_route_store_upsert_observation(
-        route_target, channel.name, packet_kind,
-        route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx", 0, 0,
-        settings->path_hash_bytes, 0, raw_len);
-    if (route_ret != ESP_OK) {
-        ESP_LOGW(TAG, "route store channel tx failed: %s",
-                 esp_err_to_name(route_ret));
-    }
-    /*
-     * The common retained-store worker owns persistence.  A synchronous
-     * packet-log flush here can hold the compose/UI caller for several
-     * seconds even though RF ownership was already transferred above.
-     */
-    append_packet_log_deferred(
-        "tx", packet_kind, 0, 0, settings->path_hash_bytes, 0, raw_len,
-        raw, raw_len, text);
     secure_zero_bytes(raw, sizeof(raw));
     return ESP_OK;
 }

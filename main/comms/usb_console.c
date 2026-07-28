@@ -2454,6 +2454,12 @@ static void cmd_mesh_status(void)
                (d1l_meshcore_route_selection_reason_t)status.dm_route_last_reason),
            (unsigned long)status.dm_route_last_path_age_ms);
     printf(
+        ",\"public_tx_history\":{\"pending\":%s,\"retries\":%lu,"
+        "\"failures\":%lu}",
+        bool_json(status.public_tx_history_pending),
+        (unsigned long)status.public_tx_history_retries,
+        (unsigned long)status.public_tx_history_failures);
+    printf(
         ",\"advert_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,"
         "\"boot_queued\":%lu,\"boot_done\":%lu,\"boot_failed\":%lu,"
         "\"last_boot\":%s,\"last_flood\":%s,\"last_node_name\":",

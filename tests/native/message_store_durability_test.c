@@ -128,6 +128,7 @@ static esp_err_t s_fail_next_sd_read;
 static esp_err_t s_fail_all_sd_reads;
 static esp_err_t s_fail_next_nvs_write;
 static bool s_replace_during_sd_write;
+static bool s_fail_next_zero_wait_take;
 static test_blob_t s_replacement;
 static int64_t s_now_us;
 static uint32_t s_random_state;
@@ -258,6 +259,7 @@ static void reset_mock(bool sd_enabled)
     s_fail_all_sd_reads = ESP_OK;
     s_fail_next_nvs_write = ESP_OK;
     s_replace_during_sd_write = false;
+    s_fail_next_zero_wait_take = false;
     s_now_us = 1000000LL;
     s_random_state = 0x13579BDFU;
 }
@@ -286,7 +288,10 @@ SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *buffer)
 BaseType_t xSemaphoreTake(SemaphoreHandle_t handle, TickType_t ticks_to_wait)
 {
     (void)handle;
-    (void)ticks_to_wait;
+    if (ticks_to_wait == 0U && s_fail_next_zero_wait_take) {
+        s_fail_next_zero_wait_take = false;
+        return 0;
+    }
     return pdTRUE;
 }
 
@@ -1231,6 +1236,53 @@ static void test_utf8_round_trip_and_invalid_input_have_no_side_effects(void)
                   mixed, sizeof(mixed)) == 0);
 }
 
+static void test_deferred_append_is_zero_wait_visible_and_worker_owned(void)
+{
+    reset_mock(false);
+    assert(d1l_message_store_init() == ESP_OK);
+    s_sd_write_count = 0U;
+    s_nvs_write_count = 0U;
+
+    const d1l_message_store_stats_t before = d1l_message_store_stats();
+    uint32_t message_seq = UINT32_MAX;
+    s_fail_next_zero_wait_take = true;
+    assert(d1l_message_store_append_channel_deferred(
+               UINT64_C(1), "tx", "D1L", "deferred-public",
+               0, 0, 1U, 0U, false, &message_seq) == ESP_ERR_TIMEOUT);
+    assert(message_seq == 0U);
+    d1l_message_store_stats_t after = d1l_message_store_stats();
+    assert(after.count == before.count);
+    assert(after.total_written == before.total_written);
+    assert(s_sd_write_count == 0U);
+    assert(s_nvs_write_count == 0U);
+
+    assert(d1l_message_store_append_channel_deferred(
+               UINT64_C(1), "tx", "D1L", "deferred-public",
+               0, 0, 1U, 0U, false, &message_seq) == ESP_OK);
+    assert(message_seq != 0U);
+    after = d1l_message_store_stats();
+    assert(after.count == before.count + 1U);
+    assert(after.total_written == before.total_written + 1U);
+    assert(after.persistence_dirty);
+    assert(after.nvs_fallback_dirty);
+    assert(s_sd_write_count == 0U);
+    assert(s_nvs_write_count == 0U);
+
+    d1l_message_entry_t visible = {0};
+    assert(d1l_message_store_copy_recent(&visible, 1U) == 1U);
+    assert(visible.seq == message_seq);
+    assert(visible.channel_id == UINT64_C(1));
+    assert(strcmp(visible.direction, "tx") == 0);
+    assert(strcmp(visible.author, "D1L") == 0);
+    assert(strcmp(visible.text, "deferred-public") == 0);
+
+    assert(d1l_message_store_flush() == ESP_OK);
+    assert(s_sd_write_count == 0U);
+    assert(s_nvs_write_count == 1U);
+    assert(!d1l_message_store_stats().persistence_dirty);
+    assert(blob_contains(slot_blob(&s_nvs), "deferred-public"));
+}
+
 int main(void)
 {
     test_sd_success_nvs_failure_retries_only_nvs();
@@ -1261,6 +1313,7 @@ int main(void)
     test_higher_epoch_replay_exhaustion_preserves_both_copies();
     test_total_counter_exhaustion_rejects_append_without_writes();
     test_utf8_round_trip_and_invalid_input_have_no_side_effects();
+    test_deferred_append_is_zero_wait_visible_and_worker_owned();
     puts("native Public message-store durability: ok");
     return 0;
 }

@@ -1459,7 +1459,7 @@ static esp_err_t upsert_observation_internal(const char *target, const char *lab
                                              const char *direction, int rssi_dbm,
                                              int snr_tenths, uint8_t path_hash_bytes,
                                              uint8_t path_hops, uint16_t payload_len,
-                                             bool persist)
+                                             bool persist, bool defer_lock)
 {
     if (!target || target[0] == '\0' ||
         path_hash_bytes == 0U || path_hash_bytes > 3U ||
@@ -1468,7 +1468,13 @@ static esp_err_t upsert_observation_internal(const char *target, const char *lab
         payload_len > D1L_ROUTE_STORE_MAX_PAYLOAD_LEN) {
         return ESP_ERR_INVALID_ARG;
     }
-    d1l_store_lock_take(&s_store_lock);
+    if (defer_lock) {
+        if (!d1l_store_lock_try_take(&s_store_lock)) {
+            return ESP_ERR_TIMEOUT;
+        }
+    } else {
+        d1l_store_lock_take(&s_store_lock);
+    }
     if (!s_loaded) {
         d1l_store_lock_give(&s_store_lock);
         return ESP_ERR_INVALID_STATE;
@@ -1569,7 +1575,18 @@ esp_err_t d1l_route_store_upsert_observation(const char *target, const char *lab
 {
     return upsert_observation_internal(target, label, kind, route, direction, rssi_dbm,
                                        snr_tenths, path_hash_bytes, path_hops,
-                                       payload_len, true);
+                                       payload_len, true, false);
+}
+
+esp_err_t d1l_route_store_upsert_observation_deferred(
+    const char *target, const char *label, const char *kind,
+    const char *route, const char *direction, int rssi_dbm,
+    int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
+    uint16_t payload_len)
+{
+    return upsert_observation_internal(
+        target, label, kind, route, direction, rssi_dbm, snr_tenths,
+        path_hash_bytes, path_hops, payload_len, true, true);
 }
 
 esp_err_t d1l_route_store_upsert_observation_volatile(const char *target, const char *label,
@@ -1580,7 +1597,7 @@ esp_err_t d1l_route_store_upsert_observation_volatile(const char *target, const 
 {
     return upsert_observation_internal(target, label, kind, route, direction, rssi_dbm,
                                        snr_tenths, path_hash_bytes, path_hops,
-                                       payload_len, false);
+                                       payload_len, false, false);
 }
 
 d1l_route_store_stats_t d1l_route_store_stats(void)
