@@ -1,5 +1,5 @@
 diff --git a/components/lora/radio.c b/components/lora/radio.c
-index 17e370241a9836fbd9763eed291351583c987452..01d50efd532bfd4f8672aee06997ac3166b52a9f 100644
+index 17e370241a9836fbd9763eed291351583c987452..88477921ff4b7ff9db1170919a01a95aba8cdab2 100644
 --- a/components/lora/radio.c
 +++ b/components/lora/radio.c
 @@ -32,7 +32,9 @@
@@ -105,8 +105,8 @@ index 17e370241a9836fbd9763eed291351583c987452..01d50efd532bfd4f8672aee06997ac31
 +
 +    /* The watchdog owns this exact transmission. Quiesce the SX1262 and
 +     * acknowledge both the radio IRQ and the TCA9535 input latch before the
-+     * runtime can admit a successor. Queued stale board events then observe
-+     * DIO1 low and cannot consume a later transmission's terminal IRQ. */
++     * runtime can admit a successor. Queued stale board events then fail the
++     * origin match and cannot clear a successor's physical DIO1 interrupt. */
 +    TimerStop( &TxTimeoutTimer );
 +    RadioStandby( );
 +    SX126xClearIrqStatus( IRQ_RADIO_ALL );
@@ -141,7 +141,7 @@ index 17e370241a9836fbd9763eed291351583c987452..01d50efd532bfd4f8672aee06997ac31
      {
          RadioEvents->TxTimeout( );
      }
-@@ -1255,11 +1324,27 @@ void RadioOnRxTimeoutIrq( void* context )
+@@ -1255,11 +1324,35 @@ void RadioOnRxTimeoutIrq( void* context )
      }
  }
  
@@ -166,6 +166,14 @@ index 17e370241a9836fbd9763eed291351583c987452..01d50efd532bfd4f8672aee06997ac31
 +        return;
 +    }
 +
++    /* Only the matching IRQ generation may acknowledge the expander latch.
++     * Otherwise a delayed A event can clear B's physical DIO1 interrupt. */
++    if( SX126xGetDio1PinState( ) == 0 )
++    {
++        RadioReleaseIrqRecovery( );
++        return;
++    }
++
 +    RadioIrqTxOrigin = origin;
 +    IrqFired = true;
 +
@@ -174,7 +182,7 @@ index 17e370241a9836fbd9763eed291351583c987452..01d50efd532bfd4f8672aee06997ac31
  }
  
  void RadioIrqProcess( void )
-@@ -1283,13 +1368,24 @@ void RadioIrqProcess( void )
+@@ -1283,13 +1376,24 @@ void RadioIrqProcess( void )
          }
          //CRITICAL_SECTION_END( );
  
@@ -203,7 +211,7 @@ index 17e370241a9836fbd9763eed291351583c987452..01d50efd532bfd4f8672aee06997ac31
              {
                  RadioEvents->TxDone( );
              }
-@@ -1347,12 +1443,23 @@ void RadioIrqProcess( void )
+@@ -1347,12 +1451,23 @@ void RadioIrqProcess( void )
  
          if( ( irqRegs & IRQ_RX_TX_TIMEOUT ) == IRQ_RX_TX_TIMEOUT )
          {
@@ -275,10 +283,10 @@ index 16a2484f2dd78550112c3276d3c071de2552fe0d..9cfa1a488eca4be17d99afc79843d776
  /*!
   * \brief Radio driver
 diff --git a/components/lora/sx126x_sensecap_board.c b/components/lora/sx126x_sensecap_board.c
-index 78a78ad6e46a23319781f8e7a7916010398aeb98..300833dfad03825968d572a6d729590584ecfd34 100644
+index 78a78ad6e46a23319781f8e7a7916010398aeb98..40fdac5bc604d17613afe72efd971d556399e26a 100644
 --- a/components/lora/sx126x_sensecap_board.c
 +++ b/components/lora/sx126x_sensecap_board.c
-@@ -27,24 +27,32 @@ static const char *TAG = "sx126x";
+@@ -27,34 +27,40 @@ static const char *TAG = "sx126x";
  static RadioOperatingModes_t OperatingMode;
  static bool init_flag = false;
  
@@ -320,17 +328,24 @@ index 78a78ad6e46a23319781f8e7a7916010398aeb98..300833dfad03825968d572a6d7295905
 +            g_lora_irq_time = event.irq_time;
              // printf("lora irq:%d\n", g_lora_irq_time);
  
-             if( SX126xGetDio1PinState()) { // Only handle DIO1 interrupt
-@@ -52,7 +60,7 @@ static void expander_io_int(void* arg)
-                 mode = SX126xGetOperatingMode();
-                 xSemaphoreGive(radio_mutex);
-                 if( mode !=  MODE_SLEEP ) { // Filter out sleep mode interrupts
+-            if( SX126xGetDio1PinState()) { // Only handle DIO1 interrupt
+-                xSemaphoreTake(radio_mutex, portMAX_DELAY);
+-                mode = SX126xGetOperatingMode();
+-                xSemaphoreGive(radio_mutex);
+-                if( mode !=  MODE_SLEEP ) { // Filter out sleep mode interrupts
 -                    (g_dioIrq) (0); //handle irq
-+                    (g_dioIrq) ((void *)(uintptr_t)event.tx_origin); //handle irq
-                 }
-             }
+-                }
+-            }
++            xSemaphoreTake(radio_mutex, portMAX_DELAY);
++            mode = SX126xGetOperatingMode();
++            xSemaphoreGive(radio_mutex);
++            if( mode !=  MODE_SLEEP ) { // Filter out sleep mode interrupts
++                (g_dioIrq) ((void *)(uintptr_t)event.tx_origin); //handle irq
++            }
          }
-@@ -231,7 +239,7 @@ void SX126xIoIrqInit( DioIrqHandler dioIrq )
+     }
+ }
+@@ -231,7 +237,7 @@ void SX126xIoIrqInit( DioIrqHandler dioIrq )
      io_conf.mode = GPIO_MODE_INPUT;
      io_conf.pull_up_en = 1;
      gpio_config(&io_conf);
@@ -339,4 +354,3 @@ index 78a78ad6e46a23319781f8e7a7916010398aeb98..300833dfad03825968d572a6d7295905
      xTaskCreate(expander_io_int, "expander_io_int", GPIO_QUEUE_STACK, NULL, 10, NULL);
  
      gpio_install_isr_service(0);
-

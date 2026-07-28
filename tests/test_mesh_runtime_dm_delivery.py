@@ -95,41 +95,6 @@ def test_dm_command_is_authorized_owned_and_persisted_before_radio_admission():
     assert "ret != ESP_ERR_NOT_FINISHED" in admission
 
 
-def test_dm_transition_retries_a_won_retained_flush_before_radio_failure():
-    source = read("main/mesh/meshcore_service.c")
-    retry = body(
-        source,
-        "static esp_err_t meshcore_service_retry_dm_transition_persistence",
-        "static esp_err_t transition_pending_dm_tx",
-    )
-    transition = body(
-        source,
-        "static esp_err_t transition_pending_dm_tx",
-        "typedef enum {\n    D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE",
-    )
-
-    assert "D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS" in retry
-    assert "D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS" in retry
-    assert "vTaskDelay(retry_delay)" in retry
-    assert "ret = d1l_dm_store_flush();" in retry
-    assert "ret != ESP_ERR_NOT_FINISHED" in retry
-
-    transition_at = transition.index("d1l_dm_store_transition_delivery(")
-    retry_gate_at = transition.index(
-        "ret == ESP_ERR_NOT_FINISHED && outcome.changed"
-    )
-    retry_at = transition.index(
-        "meshcore_service_retry_dm_transition_persistence()"
-    )
-    publish_at = transition.index(
-        "const bool publish_to_owner = "
-        "outcome.changed || outcome.persistence_retry;"
-    )
-    assert transition_at < retry_gate_at < retry_at < publish_at
-    assert "outcome.durable = ret == ESP_OK" in transition
-    assert "outcome.error = ret" in transition
-
-
 def test_outbound_dm_bounds_retained_worker_handoff_before_radio():
     source = read("main/mesh/meshcore_service.c")
     handler = body(

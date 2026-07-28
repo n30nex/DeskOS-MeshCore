@@ -1550,29 +1550,6 @@ static bool begin_pending_dm_tx(
     return true;
 }
 
-static esp_err_t meshcore_service_retry_dm_transition_persistence(void)
-{
-    const uint64_t retry_started_us = (uint64_t)esp_timer_get_time();
-    const uint64_t retry_timeout_us =
-        (uint64_t)D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS * 1000ULL;
-    TickType_t retry_delay =
-        pdMS_TO_TICKS(D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS);
-    if (retry_delay == 0U) {
-        retry_delay = 1U;
-    }
-
-    esp_err_t ret = ESP_ERR_NOT_FINISHED;
-    while ((uint64_t)esp_timer_get_time() - retry_started_us <
-           retry_timeout_us) {
-        vTaskDelay(retry_delay);
-        ret = d1l_dm_store_flush();
-        if (ret != ESP_ERR_NOT_FINISHED) {
-            return ret;
-        }
-    }
-    return ret;
-}
-
 static esp_err_t transition_pending_dm_tx(
     d1l_dm_delivery_state_t next_state,
     d1l_dm_delivery_reason_t reason, esp_err_t error)
@@ -1590,19 +1567,6 @@ static esp_err_t transition_pending_dm_tx(
     esp_err_t ret = d1l_dm_store_transition_delivery(
         session_id, expected_state, expected_revision, next_state,
         reason, error, &outcome);
-    /*
-     * An inbound ACK can leave the retained worker finishing the preceding
-     * revision just as a reply DM advances QUEUED -> WAITING_RADIO. The row
-     * transition has already won in RAM when that flush reports
-     * ESP_ERR_NOT_FINISHED; retry only its durability handoff before deciding
-     * that radio admission failed. This keeps an immediate reply from being
-     * stranded as a durable FAILED_QUEUE row without ever reaching RF.
-     */
-    if (ret == ESP_ERR_NOT_FINISHED && outcome.changed) {
-        ret = meshcore_service_retry_dm_transition_persistence();
-        outcome.durable = ret == ESP_OK;
-        outcome.error = ret;
-    }
     const bool publish_to_owner = outcome.changed || outcome.persistence_retry;
     if (publish_to_owner) {
         if (!d1l_dm_delivery_owner_apply(

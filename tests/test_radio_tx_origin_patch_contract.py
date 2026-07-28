@@ -44,19 +44,29 @@ def test_seeed_driver_latches_tx_origin_at_the_physical_irq_boundary():
     assert "RadioEvents->TxDoneWithOrigin( txDoneOrigin );" in added
     assert "RadioEvents->TxTimeoutWithOrigin( txTimeoutOrigin );" in added
 
-    # A delayed queue element for A must return before it can even read/clear
-    # B's IRQ status. The same atomic claim serializes watchdog cleanup and the
-    # vendor DIO task across ESP32 cores.
+    # A delayed queue element for A must return before it can read/clear B's
+    # expander-backed DIO1 latch. The same atomic claim serializes watchdog
+    # cleanup and the vendor DIO task across ESP32 cores.
     dio = body(added, "void RadioOnDioIrq", "void RadioIrqProcess")
     claim = dio.index("RadioTryClaimIrqRecovery( )")
     active = dio.index("activeOrigin")
     mismatch = dio.index("origin != activeOrigin")
+    clear_latch = dio.index("SX126xGetDio1PinState( )")
     process = dio.index("RadioIrqProcess();")
-    assert claim < active < mismatch < process
+    assert claim < active < mismatch < clear_latch < process
+    assert "if( SX126xGetDio1PinState( ) == 0 )" in dio
     assert "RadioReleaseIrqRecovery( );\n        return;" in dio
     assert "__atomic_compare_exchange_n( &RadioIrqRecoveryClaim" in added
     assert "__atomic_load_n( &RadioTxOrigin" in added
     assert "xQueueCreate(10, sizeof(radio_irq_event_t));" in added
+
+    board = patch.split(
+        "diff --git a/components/lora/sx126x_sensecap_board.c", 1
+    )[1]
+    board_added = added_patch_lines(board)
+    assert "-            if( SX126xGetDio1PinState())" in board
+    assert "SX126xGetDio1PinState" not in board_added
+    assert "(g_dioIrq) ((void *)(uintptr_t)event.tx_origin);" in board_added
 
 
 def test_exact_origin_watchdog_recovery_quiesces_irq_before_successor():
