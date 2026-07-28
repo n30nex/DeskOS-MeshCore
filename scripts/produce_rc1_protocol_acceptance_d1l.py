@@ -594,6 +594,25 @@ def exact_admin_contact(result: object, fingerprint: str) -> bool:
     )
 
 
+def exact_trace_contact(result: object, fingerprint: str) -> bool:
+    contact = contact_entry(result, fingerprint=fingerprint)
+    candidate = (
+        str(contact.get("public_key") or "").strip().lower()
+        if contact is not None
+        else ""
+    )
+    public_key = candidate if PUBLIC_KEY_RE.fullmatch(candidate) else None
+    return bool(
+        contact is not None
+        and public_key is not None
+        and public_key[:16].upper() == fingerprint
+        and contact.get("type") in {"repeater", "room"}
+        and contact.get("canonical") is True
+        and contact.get("can_dm") is False
+        and contact.get("verification_source") == "signed_advert"
+    )
+
+
 def public_entry(result: object, *, text: str, direction: str) -> dict[str, Any] | None:
     entries = result.get("entries") if isinstance(result, dict) else None
     if not isinstance(entries, list):
@@ -755,6 +774,7 @@ def execute(
     peer_service: str,
     peer_status_schema: str,
     admin_fingerprint: str,
+    trace_fingerprint: str,
     admin_password_path: Path,
     authorize_public_tx: bool,
     baud: int = 115200,
@@ -786,6 +806,7 @@ def execute(
     )
     peer_fingerprint = peer_public_key[:16].upper()
     admin_fingerprint = exact_fingerprint(admin_fingerprint, "admin fingerprint")
+    trace_fingerprint = exact_fingerprint(trace_fingerprint, "trace fingerprint")
     source = git_metadata(root)
     if not (
         source.get("commit") == commit
@@ -904,10 +925,11 @@ def execute(
             lambda result: (
                 exact_chat_contact(result, peer_public_key)
                 and exact_admin_contact(result, admin_fingerprint)
+                and exact_trace_contact(result, trace_fingerprint)
             ),
             timeout=rf_timeout,
             interval=poll_interval,
-            label="controlled peer and admin contacts",
+            label="controlled peer, admin, and TRACE contacts",
         )
         _step(steps, "contacts", "contacts", contacts)
 
@@ -1295,14 +1317,14 @@ def execute(
             path_result,
         )
 
-        # The controlled chat peer proves DM. The repeater Admin exchange
-        # establishes the authenticated current-boot route used by PATH,
-        # real TRACE, and zero-hop Ping after authority is cleared.
+        # The controlled chat peer proves DM. The Admin repeater remains bound
+        # to login, telemetry, PATH, and zero-hop Ping. TRACE is independently
+        # bound to an explicit canonical repeater/room contact.
         trace_request = _step(
             steps,
             "trace_request",
-            f"routes trace contact {admin_fingerprint}",
-            command(f"routes trace contact {admin_fingerprint}"),
+            f"routes trace contact {trace_fingerprint}",
+            command(f"routes trace contact {trace_fingerprint}"),
         )
         trace_tag = integer(trace_request.get("tag"), minimum=1)
         trace_result = poll(
@@ -1311,7 +1333,7 @@ def execute(
                 result.get("matched") is True
                 and result.get("zero_hop") is False
                 and str(result.get("fingerprint") or "").upper()
-                == admin_fingerprint
+                == trace_fingerprint
                 and nested(result, "last_result", "tag") == trace_tag
             ),
             timeout=rf_timeout,
@@ -1390,6 +1412,10 @@ def execute(
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
         "controlled_peer": controlled_peer,
+        "protocol_targets": {
+            "admin_fingerprint": admin_fingerprint,
+            "trace_fingerprint": trace_fingerprint,
+        },
         "steps": steps,
     }
     candidate = {
@@ -1424,6 +1450,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PEER_STATUS_SCHEMA,
     )
     parser.add_argument("--admin-fingerprint", required=True)
+    parser.add_argument("--trace-fingerprint", required=True)
     parser.add_argument("--admin-password-file", required=True)
     parser.add_argument(
         "--authorize-public-tx",
@@ -1455,6 +1482,7 @@ def main(argv: list[str] | None = None) -> int:
             peer_service=args.peer_service,
             peer_status_schema=args.peer_status_schema,
             admin_fingerprint=args.admin_fingerprint,
+            trace_fingerprint=args.trace_fingerprint,
             admin_password_path=Path(args.admin_password_file),
             authorize_public_tx=args.authorize_public_tx,
             baud=args.baud,

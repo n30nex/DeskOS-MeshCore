@@ -185,7 +185,10 @@ TRANSCRIPT_KEYS = frozenset(
         "steps",
     }
 )
-PROTOCOL_TRANSCRIPT_KEYS = TRANSCRIPT_KEYS | {"controlled_peer"}
+PROTOCOL_TRANSCRIPT_KEYS = TRANSCRIPT_KEYS | {
+    "controlled_peer",
+    "protocol_targets",
+}
 STEP_KEYS = frozenset({"sequence", "operation", "command", "response"})
 PROTOCOL_OPERATIONS = frozenset(
     {
@@ -818,6 +821,21 @@ def validate_protocol(
     data: dict[str, Any], candidate: dict[str, str]
 ) -> dict[str, bool | int]:
     controlled_peer = _controlled_peer_binding(data.get("controlled_peer"))
+    protocol_targets = data.get("protocol_targets")
+    if not (
+        isinstance(protocol_targets, dict)
+        and set(protocol_targets)
+        == {"admin_fingerprint", "trace_fingerprint"}
+    ):
+        raise EvidenceError("protocol transcript target binding is invalid")
+    admin_fingerprint = _fingerprint(
+        protocol_targets.get("admin_fingerprint")
+    )
+    trace_fingerprint = _fingerprint(
+        protocol_targets.get("trace_fingerprint")
+    )
+    if admin_fingerprint is None or trace_fingerprint is None:
+        raise EvidenceError("protocol transcript targets must be exact")
     peer_status_schema = controlled_peer["status_schema"]
     operations = PROTOCOL_OPERATIONS
     if peer_status_schema == MESHCOREBOT_STATUS_SCHEMA:
@@ -947,7 +965,7 @@ def validate_protocol(
     login_command_match = re.fullmatch(
         r"admin login ([0-9A-F]{16}) <redacted>", login_command
     )
-    admin_fingerprint = (
+    login_fingerprint = (
         login_command_match.group(1) if login_command_match else None
     )
     admin_contact = _unique_contact(
@@ -956,6 +974,14 @@ def validate_protocol(
     admin_public_key = (
         _public_key(admin_contact.get("public_key"))
         if admin_contact is not None
+        else None
+    )
+    trace_contact = _unique_contact(
+        contacts, fingerprint=trace_fingerprint
+    )
+    trace_public_key = (
+        _public_key(trace_contact.get("public_key"))
+        if trace_contact is not None
         else None
     )
 
@@ -1094,7 +1120,7 @@ def validate_protocol(
         and peer_contact.get("can_admin") is False
         and peer_contact.get("type") == "chat"
         and peer_contact.get("verification_source") == "signed_advert"
-        and admin_fingerprint is not None
+        and login_fingerprint == admin_fingerprint
         and admin_contact is not None
         and admin_public_key is not None
         and admin_public_key[:16].upper() == admin_fingerprint
@@ -1103,6 +1129,13 @@ def validate_protocol(
         and admin_contact.get("can_admin") is True
         and admin_contact.get("type") == "repeater"
         and admin_contact.get("verification_source") == "signed_advert"
+        and trace_contact is not None
+        and trace_public_key is not None
+        and trace_public_key[:16].upper() == trace_fingerprint
+        and trace_contact.get("canonical") is True
+        and trace_contact.get("can_dm") is False
+        and trace_contact.get("type") in {"repeater", "room"}
+        and trace_contact.get("verification_source") == "signed_advert"
         and (
             peer_status_schema == RADIO_LISTENER_STATUS_SCHEMA
             or (
@@ -1152,18 +1185,18 @@ def validate_protocol(
         and trace_request.get("ok") is True
         and trace_request.get("cmd") == "routes trace contact"
         and _fingerprint(trace_request.get("fingerprint"))
-        == admin_fingerprint
+        == trace_fingerprint
         and trace_request.get("queued") is True
         and trace_request.get("pending") is True
         and trace_tag is not None
         and trace_request.get("targeted_trace_rf_tx") is True
         and trace_request.get("public_rf_tx") is False
         and steps["trace_request"]["command"]
-        == f"routes trace contact {admin_fingerprint}"
+        == f"routes trace contact {trace_fingerprint}"
         and trace_result.get("ok") is True
         and trace_result.get("cmd") == "routes trace status"
         and _fingerprint(trace_result.get("fingerprint"))
-        == admin_fingerprint
+        == trace_fingerprint
         and trace_result.get("zero_hop") is False
         and trace_result.get("matched") is True
         and trace_result.get("pending", {}).get("active") is False
