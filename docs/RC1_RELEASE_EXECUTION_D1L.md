@@ -394,7 +394,9 @@ exactly `true`.
 
 Publish the API-verified release-package archive, its internal package checksum
 manifest, the Actions capture, the physical receipt and complete source bundle,
-and the final audit. A second checksum manifest binds the uploaded asset files.
+and the final audit. The package audit must have verified its checksum-bound
+`START_HERE_RC1.md` plus the Windows/Linux SD, RP2040, ESP32, and read-only test
+helpers. A second checksum manifest binds the uploaded asset files.
 
 ```bash
 RELEASE_DIR="$ROOT/artifacts/release/v1.0.0"
@@ -487,7 +489,7 @@ gh release create v1.0.0 "${RELEASE_ASSETS[@]}" \
   --target "$SHA" \
   --title "MeshCore DeskOS D1L 1.0.0" \
   --generate-notes \
-  --notes "Production Core 1.0 release from exact source ${SHA} and Actions run ${RUN}; see the attached audit and checksummed physical evidence."
+  --notes "Production Core 1.0 release from exact source ${SHA} and Actions run ${RUN}. Download d1l-release-${SHA}.zip, extract it completely, and start with START_HERE_RC1.md for Windows/Linux microSD setup, RP2040 UF2 flashing, ESP32 GUI flashing, and the read-only RC1 test. See the attached audit and checksummed physical evidence."
 
 test "$(gh release view v1.0.0 --repo n30nex/SIGUI --json tagName --jq .tagName)" = v1.0.0
 test "$(gh release view v1.0.0 --repo n30nex/SIGUI --json isDraft --jq .isDraft)" = false

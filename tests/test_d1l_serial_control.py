@@ -168,9 +168,21 @@ def test_only_intentional_paths_keep_direct_serial_opening():
         "core_flash_only_d1l.py": ["open_posix_admitted_serial"],
         "guided_sd_install_d1l.py": ["capture_official_smoke"],
         "rp2040_direct_sd_file_canary.py": ["run_canary"],
+        "test_rc1.py": ["run_read_only_checks"],
     }
     autonomous = (ROOT / "scripts" / "autonomous_hardware_validate_d1l.py").read_text(encoding="utf-8")
     assert "serial.Serial(port=sys.argv[1], baudrate=1200, timeout=0.2)" in autonomous
     direct_canary = (ROOT / "scripts" / "rp2040_direct_sd_file_canary.py").read_text(encoding="utf-8")
     assert "ser.dtr = True" in direct_canary
     assert "ser.rts = True" in direct_canary
+    end_user_test = (ROOT / "scripts" / "test_rc1.py").read_text(
+        encoding="utf-8"
+    )
+    assert "handle.dtr = False" in end_user_test
+    assert "handle.rts = False" in end_user_test
+    assert end_user_test.index("handle.dtr = False") < end_user_test.index(
+        "handle.open()"
+    )
+    assert end_user_test.index("handle.rts = False") < end_user_test.index(
+        "handle.open()"
+    )

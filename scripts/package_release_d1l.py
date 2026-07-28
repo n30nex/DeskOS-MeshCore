@@ -144,6 +144,17 @@ CORE_GENERATED_INSTALL_FILES = (
     "flash_full_8mb.ps1",
     "docs/CORE_INSTALL_RECOVERY.md",
 )
+RC1_USER_INSTALL_FILES = (
+    "START_HERE_RC1.md",
+    "prepare_sd_card.ps1",
+    "prepare_sd_card.sh",
+    "flash_rp2040.ps1",
+    "flash_rp2040.sh",
+    "test_rc1.ps1",
+    "test_rc1.sh",
+    "scripts/flash_rp2040_sd_bridge_uf2.py",
+    "scripts/test_rc1.py",
+)
 RELEASE_PROFILES = frozenset(
     {"development", CORE_RELEASE_PROFILE, FULL_FEATURE_RELEASE_PROFILE}
 )
@@ -1310,6 +1321,394 @@ def copy_sd_preparation_bundle(root: Path, package_dir: Path) -> dict:
         "filesystem": "FAT32",
         "formats_sd": False,
         "files": copied,
+    }
+
+
+def write_rc1_user_install_bundle(
+    root: Path,
+    package_dir: Path,
+    *,
+    source_commit: str,
+    sd_history_mode: str,
+) -> dict:
+    """Write checksum-bound Windows/Linux RC1 install and test helpers."""
+
+    source_scripts = {
+        "scripts/flash_rp2040_sd_bridge_uf2.py": (
+            root / "scripts" / "flash_rp2040_sd_bridge_uf2.py"
+        ),
+        "scripts/test_rc1.py": root / "scripts" / "test_rc1.py",
+    }
+    for relative, source in source_scripts.items():
+        if (
+            not source.is_file()
+            or is_link_or_reparse(source)
+            or source.stat().st_size <= 0
+        ):
+            raise ValueError(f"RC1 user helper source is invalid: {source}")
+        destination = package_dir / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+    bridge_relative = (
+        "rp2040/rp2040-sd-bridge-firmware/deskos_sd_bridge.ino.uf2"
+    )
+    bridge_path = package_dir / bridge_relative
+    if (
+        not bridge_path.is_file()
+        or is_link_or_reparse(bridge_path)
+        or bridge_path.stat().st_size <= 0
+    ):
+        raise ValueError(
+            "RC1 user install requires the production DeskOS RP2040 bridge UF2"
+        )
+
+    prepare_ps1 = package_dir / "prepare_sd_card.ps1"
+    prepare_ps1.write_text(
+        "\n".join(
+            (
+                "param([Parameter(Mandatory=$true)][string]$Target)",
+                '$ErrorActionPreference = "Stop"',
+                '$Root = Split-Path -Parent $MyInvocation.MyCommand.Path',
+                'python (Join-Path $Root "scripts/test_rc1.py") --verify-only',
+                'if ($LASTEXITCODE -ne 0) { throw "RC1 package verification failed." }',
+                'python (Join-Path $Root "scripts/prepare_deskos_sd.py") --target $Target',
+                'if ($LASTEXITCODE -ne 0) { throw "SD card preflight failed." }',
+                '$Confirm = Read-Host "Review the target above. Type PREPARE-SD to copy the DeskOS files without formatting or deleting"',
+                'if ($Confirm -ne "PREPARE-SD") { throw "SD preparation cancelled." }',
+                'python (Join-Path $Root "scripts/prepare_deskos_sd.py") --target $Target --apply',
+                'if ($LASTEXITCODE -ne 0) { throw "SD card preparation failed." }',
+                'Write-Host "DeskOS SD preparation and byte verification passed."',
+                "",
+            )
+        ),
+        encoding="ascii",
+    )
+    prepare_sh = package_dir / "prepare_sd_card.sh"
+    prepare_sh.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env sh",
+                "set -eu",
+                'if [ "$#" -ne 1 ]; then',
+                '  printf "%s\\n" "Usage: $0 /path/to/mounted-sd-card" >&2',
+                "  exit 2",
+                "fi",
+                'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+                'PYTHON_BIN="${D1L_PYTHON:-python3}"',
+                'TARGET="$1"',
+                '"$PYTHON_BIN" "$ROOT/scripts/test_rc1.py" --verify-only',
+                '"$PYTHON_BIN" "$ROOT/scripts/prepare_deskos_sd.py" --target "$TARGET"',
+                'printf "%s" "Review the target above. Type PREPARE-SD to copy without formatting or deleting: "',
+                "IFS= read -r CONFIRM",
+                'if [ "$CONFIRM" != "PREPARE-SD" ]; then',
+                '  printf "%s\\n" "SD preparation cancelled." >&2',
+                "  exit 2",
+                "fi",
+                '"$PYTHON_BIN" "$ROOT/scripts/prepare_deskos_sd.py" --target "$TARGET" --apply',
+                'printf "%s\\n" "DeskOS SD preparation and byte verification passed."',
+                "",
+            )
+        ),
+        encoding="ascii",
+    )
+    prepare_sh.chmod(0o755)
+
+    rp2040_ps1 = package_dir / "flash_rp2040.ps1"
+    rp2040_ps1.write_text(
+        "\n".join(
+            (
+                "param([Parameter(Mandatory=$true)][string]$Volume)",
+                '$ErrorActionPreference = "Stop"',
+                '$Root = Split-Path -Parent $MyInvocation.MyCommand.Path',
+                '$Helper = Join-Path $Root "scripts/flash_rp2040_sd_bridge_uf2.py"',
+                '$Artifact = Join-Path $Root "rp2040/rp2040-sd-bridge-firmware"',
+                'python (Join-Path $Root "scripts/test_rc1.py") --verify-only',
+                'if ($LASTEXITCODE -ne 0) { throw "RC1 package verification failed." }',
+                "python $Helper --artifact-dir $Artifact --volume $Volume",
+                'if ($LASTEXITCODE -ne 0) { throw "RP2040 UF2 volume preflight failed." }',
+                '$Confirm = Read-Host "Type FLASH-RP2040 to copy the verified UF2 to the validated bootloader volume"',
+                'if ($Confirm -ne "FLASH-RP2040") { throw "RP2040 flash cancelled." }',
+                "python $Helper --artifact-dir $Artifact --volume $Volume --copy",
+                'if ($LASTEXITCODE -ne 0) { throw "RP2040 UF2 copy failed." }',
+                'Write-Host "RP2040 UF2 copied. The bootloader volume should disconnect while the RP2040 reboots."',
+                "",
+            )
+        ),
+        encoding="ascii",
+    )
+    rp2040_sh = package_dir / "flash_rp2040.sh"
+    rp2040_sh.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env sh",
+                "set -eu",
+                'if [ "$#" -ne 1 ]; then',
+                '  printf "%s\\n" "Usage: $0 /path/to/mounted-uf2-volume" >&2',
+                "  exit 2",
+                "fi",
+                'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+                'PYTHON_BIN="${D1L_PYTHON:-python3}"',
+                'VOLUME="$1"',
+                'HELPER="$ROOT/scripts/flash_rp2040_sd_bridge_uf2.py"',
+                'ARTIFACT="$ROOT/rp2040/rp2040-sd-bridge-firmware"',
+                '"$PYTHON_BIN" "$ROOT/scripts/test_rc1.py" --verify-only',
+                '"$PYTHON_BIN" "$HELPER" --artifact-dir "$ARTIFACT" --volume "$VOLUME"',
+                'printf "%s" "Type FLASH-RP2040 to copy the verified UF2 to this bootloader volume: "',
+                "IFS= read -r CONFIRM",
+                'if [ "$CONFIRM" != "FLASH-RP2040" ]; then',
+                '  printf "%s\\n" "RP2040 flash cancelled." >&2',
+                "  exit 2",
+                "fi",
+                '"$PYTHON_BIN" "$HELPER" --artifact-dir "$ARTIFACT" --volume "$VOLUME" --copy',
+                'printf "%s\\n" "RP2040 UF2 copied. The volume should disconnect while the RP2040 reboots."',
+                "",
+            )
+        ),
+        encoding="ascii",
+    )
+    rp2040_sh.chmod(0o755)
+
+    test_ps1 = package_dir / "test_rc1.ps1"
+    test_ps1.write_text(
+        "\n".join(
+            (
+                "param([Parameter(Mandatory=$true)][string]$Port)",
+                '$ErrorActionPreference = "Stop"',
+                '$Root = Split-Path -Parent $MyInvocation.MyCommand.Path',
+                'python (Join-Path $Root "scripts/test_rc1.py") --port $Port',
+                'if ($LASTEXITCODE -ne 0) { throw "RC1 post-install test failed." }',
+                "",
+            )
+        ),
+        encoding="ascii",
+    )
+    test_sh = package_dir / "test_rc1.sh"
+    test_sh.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env sh",
+                "set -eu",
+                'if [ "$#" -ne 1 ]; then',
+                '  printf "%s\\n" "Usage: $0 /dev/serial/by-id/<D1L-device>" >&2',
+                "  exit 2",
+                "fi",
+                'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+                'PYTHON_BIN="${D1L_PYTHON:-python3}"',
+                '"$PYTHON_BIN" "$ROOT/scripts/test_rc1.py" --port "$1"',
+                "",
+            )
+        ),
+        encoding="ascii",
+    )
+    test_sh.chmod(0o755)
+
+    guide = package_dir / "START_HERE_RC1.md"
+    guide.write_text(
+        f"""# DeskOS D1L RC1 - Windows and Linux Install and Test
+
+This package is the exact RC1 candidate below:
+
+- firmware commit: `{source_commit}`
+- GitHub Actions run and attempt: see `manifest.json` and `README_RELEASE.md`
+- release profile: `{CORE_RELEASE_PROFILE}`
+- SD history mode: `{sd_history_mode}`
+
+Do not mix files from another download or run these tools from inside an
+archive. Extract the complete package first. Every helper verifies the complete
+`SHA256SUMS.txt` inventory before it changes a device or card.
+
+## What you need
+
+- a D1L and its data-capable USB cable;
+- a 32 GB-class or larger microSD card formatted as FAT32, not exFAT;
+- Python 3.10 or newer; and
+- for the ESP32 and final test, `esptool` and `pyserial`.
+
+Windows PowerShell setup:
+
+```powershell
+py -3 -m venv .rc1-venv
+.\\.rc1-venv\\Scripts\\Activate.ps1
+python -m pip install esptool pyserial
+Set-ExecutionPolicy -Scope Process Bypass
+```
+
+Linux setup:
+
+```sh
+python3 -m venv .rc1-venv
+. ./.rc1-venv/bin/activate
+python -m pip install esptool pyserial
+chmod +x ./*.sh
+```
+
+## 1. Prepare the microSD card
+
+The included helper does not format, erase, or overwrite a different file.
+If the card is not already FAT32, use the Windows Format dialog or a Linux disk
+utility to format only the confirmed removable card as FAT32. Formatting erases
+that card, so verify the device and drive letter yourself before doing it.
+
+On Windows, replace `E:\\` with the mounted SD card:
+
+```powershell
+.\\prepare_sd_card.ps1 -Target E:\\
+```
+
+On Linux, replace the example with the mounted SD card root:
+
+```sh
+./prepare_sd_card.sh /media/$USER/DESKOS
+```
+
+The first pass is read-only. The wrapper applies the payload only after you type
+`PREPARE-SD`, verifies every copied byte, and writes
+`deskos/card-preparation-receipt.json` on the card. Safely eject it when done.
+
+## 2. Flash the RP2040 SD-bridge side
+
+Power the D1L off. Put its RP2040 into physical BOOTSEL/UF2 mode using the
+procedure for your hardware revision. Continue only after the computer mounts a
+small UF2 bootloader volume containing `INFO_UF2.TXT`, `CURRENT.UF2`, or both.
+This is not the microSD card volume.
+
+On Windows, replace `R:\\` with the UF2 bootloader volume:
+
+```powershell
+.\\flash_rp2040.ps1 -Volume R:\\
+```
+
+On Linux, replace the example with the mounted UF2 bootloader volume:
+
+```sh
+./flash_rp2040.sh /media/$USER/RPI-RP2
+```
+
+The helper verifies the package and production bridge UF2, dry-runs against UF2
+metadata, then requires `FLASH-RP2040`. A successful copy normally makes the
+bootloader volume disconnect as the RP2040 reboots. It never formats the
+microSD card.
+
+## 3. Insert the prepared card
+
+With the D1L powered off, insert the prepared microSD card fully. Then connect
+the normal ESP32 USB/serial port.
+
+## 4. Flash the ESP32 main GUI side
+
+The normal project flash writes the exact Actions-built ESP-IDF images at their
+declared offsets. It does not erase the flash and preserves unrelated settings,
+contacts, messages, and other NVS state.
+
+Windows: find the D1L COM port in Device Manager. It must be the USB device with
+VID:PID `1A86:7523`. Enter that explicit port when prompted:
+
+```powershell
+$D1LPort = Read-Host "Enter the D1L COM port"
+.\\flash_project.ps1 -Port $D1LPort
+```
+
+Linux: the D1L must be selected through its stable by-id path, never a raw
+`/dev/ttyUSB` path:
+
+```sh
+ls -l /dev/serial/by-id/
+export D1L_PORT="{POSIX_D1L_TARGET}"
+./flash_project.sh
+```
+
+If Linux reports permission denied, add your account to the serial-device group
+used by your distribution (commonly `dialout`), sign out and back in, and retry.
+Do not run the flasher against a guessed port.
+
+`flash_full_8mb.ps1` is destructive recovery, not a normal install. Do not use
+it for RC1 testing unless you intentionally accept loss of retained state.
+
+## 5. Run the read-only RC1 test
+
+Wait at least 10 seconds after the ESP32 flash. The test sends only read-only
+console queries: `version`, `health`, `rp2040 ping`, and `storage status`. It
+does not transmit RF or format storage.
+
+Windows:
+
+```powershell
+$D1LPort = Read-Host "Enter the D1L COM port"
+.\\test_rc1.ps1 -Port $D1LPort
+```
+
+Linux:
+
+```sh
+./test_rc1.sh "{POSIX_D1L_TARGET}"
+```
+
+All four automated checks must print `PASS`: exact firmware, ESP32 board/UI,
+RP2040 bridge, and prepared FAT32 SD storage. The detailed JSON report is
+written outside the package in the operating system's temporary directory.
+
+Then check the D1L itself:
+
+1. The display starts without a crash or reboot loop.
+2. Touch each main tab and confirm scrolling and back navigation work.
+3. Open **Settings > Storage** and require the SD state to be ready.
+4. Confirm Public and direct-message history remain available after one normal
+   power cycle.
+5. Open **Map**, load one authorized current-view tile while connected to
+   Wi-Fi, revisit it, and confirm the cached view loads.
+
+## Reporting a problem
+
+Open https://github.com/n30nex/SIGUI/issues/new and attach the temporary
+`sigui-rc1-test-report.json`. Include commit `{source_commit}`, the Actions run
+and attempt printed by the test, operating system, and the step that failed. Do
+not post private messages, Wi-Fi passwords, or credentials.
+""",
+        encoding="ascii",
+    )
+
+    bindings: dict[str, dict[str, Any]] = {}
+    for relative in RC1_USER_INSTALL_FILES:
+        path = package_dir / relative
+        if (
+            not path.is_file()
+            or is_link_or_reparse(path)
+            or path.stat().st_size <= 0
+        ):
+            raise ValueError(f"RC1 user install file is invalid: {relative}")
+        bindings[relative] = {
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+    return {
+        "schema": 1,
+        "guide": "START_HERE_RC1.md",
+        "windows": {
+            "prepare_sd": "prepare_sd_card.ps1",
+            "flash_rp2040": "flash_rp2040.ps1",
+            "flash_esp32": "flash_project.ps1",
+            "test": "test_rc1.ps1",
+        },
+        "linux": {
+            "prepare_sd": "prepare_sd_card.sh",
+            "flash_rp2040": "flash_rp2040.sh",
+            "flash_esp32": "flash_project.sh",
+            "test": "test_rc1.sh",
+        },
+        "shared": {
+            "prepare_sd": "scripts/prepare_deskos_sd.py",
+            "flash_rp2040": "scripts/flash_rp2040_sd_bridge_uf2.py",
+            "test": "scripts/test_rc1.py",
+        },
+        "rp2040_artifact": {
+            "directory": "rp2040/rp2040-sd-bridge-firmware",
+            "uf2": bridge_relative,
+        },
+        "no_sd_format": True,
+        "normal_esp32_flash_erases_flash": False,
+        "test_is_read_only": True,
+        "files": bindings,
     }
 
 
@@ -2510,6 +2909,10 @@ SD history mode: `{sd_mode}`
 
 {sd_note}
 
+Start with `START_HERE_RC1.md` for the complete Windows or Linux sequence:
+prepare the FAT32 card, flash the RP2040 bridge, flash the ESP32 GUI, and run
+the exact-build read-only test.
+
 `SUPPORTED_FEATURES.md` is the authoritative package capability summary.
 `full_feature_release_ready` is always `false` for this package.
 
@@ -2533,7 +2936,8 @@ contains a checksum-verified host-side factory recovery image.
 `SHA256SUMS.txt` contains the authoritative SHA-256 value for every other file
 in the package except itself. The generated Python entrypoint and both
 normal-install wrappers verify that complete checksum tree before writing. The Windows-only recovery wrapper also
-performs the same inventory and USB identity checks before its warning.
+performs the same inventory and USB identity checks before its warning. The
+SD, RP2040, and post-install wrappers call the same complete package verifier.
 
 ## Normal USB Install
 
@@ -2576,6 +2980,41 @@ python scripts/prepare_deskos_sd.py --target <mounted-card-root> --apply
 The checked-in payload is under `sdcard/`. Optional offline tiles require a
 separate provider manifest that explicitly permits offline storage and
 background prefetch.
+
+## Flash the RP2040 bridge
+
+Put the RP2040 into physical BOOTSEL/UF2 mode and pass the mounted UF2 volume
+explicitly. The helpers reject a volume without UF2 metadata, verify the
+production `deskos_sd_bridge.ino.uf2`, dry-run first, and require typed
+confirmation before copying:
+
+```powershell
+.\\flash_rp2040.ps1 -Volume R:\\
+```
+
+```sh
+./flash_rp2040.sh /media/$USER/RPI-RP2
+```
+
+## Test the installed RC1
+
+After both firmware sides are flashed and the prepared card is inserted, wait
+at least 10 seconds. The test verifies this package and queries only `version`,
+`health`, `rp2040 ping`, and `storage status`. It sends no RF and formats
+nothing:
+
+```powershell
+$D1LPort = Read-Host "Enter the D1L COM port"
+.\\test_rc1.ps1 -Port $D1LPort
+```
+
+```sh
+./test_rc1.sh "{POSIX_D1L_TARGET}"
+```
+
+Require all four checks to print `PASS`. See `START_HERE_RC1.md` for dependency
+setup, safe card formatting guidance, Linux serial permissions, physical
+checks, and issue-reporting details.
 
 ## Recovery
 
@@ -2944,6 +3383,17 @@ def create_release_package(
         and sd_history_mode != "disabled"
         else None
     )
+    user_install = (
+        write_rc1_user_install_bundle(
+            root,
+            package_dir,
+            source_commit=expected_commit,
+            sd_history_mode=sd_history_mode,
+        )
+        if release_profile == CORE_RELEASE_PROFILE
+        and sd_history_mode != "disabled"
+        else None
+    )
 
     manifest = {
         "schema": (
@@ -2973,6 +3423,7 @@ def create_release_package(
         "debug_files": debug_files,
         "release_docs": release_docs,
         "sd_preparation": sd_preparation,
+        "user_install": user_install,
         "notice_files": notice_files,
         "scripts": scripts,
         "notes": [
