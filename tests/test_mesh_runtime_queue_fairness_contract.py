@@ -184,6 +184,9 @@ def test_tx_producers_are_held_until_the_exact_active_tx_terminal() -> None:
         "D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT",
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN",
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_QUERY",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_MUTATION",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_CLI",
     ):
         assert command in requires_idle
     assert "const bool from_held = held_cmd_valid" in task
