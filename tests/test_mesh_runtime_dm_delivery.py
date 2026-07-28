@@ -138,6 +138,64 @@ def test_outbound_dm_bounds_retained_worker_handoff_before_radio():
     )
 
 
+def test_direct_dm_flood_retry_bounds_retained_worker_handoff_before_radio():
+    source = read("main/mesh/meshcore_service.c")
+    retry = body(
+        source,
+        "static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)\n{",
+        "static esp_err_t meshcore_service_validate_room_post_session",
+    )
+
+    quiesce_at = retry.index("d1l_route_store_worker_quiesce_begin(")
+    retry_wait_at = retry.index("D1L_DM_DELIVERY_RETRY_WAIT", quiesce_at)
+    retry_transition_at = retry.index(
+        "transition_pending_dm_retry(", retry_wait_at
+    )
+    waiting_radio_at = retry.index(
+        "D1L_DM_DELIVERY_WAITING_RADIO", retry_transition_at
+    )
+    tx_active_at = retry.index(
+        "D1L_DM_DELIVERY_TX_ACTIVE", waiting_radio_at
+    )
+    operation_at = retry.index(
+        "meshcore_radio_tx_operation_begin(", tx_active_at
+    )
+    success_release_at = retry.index(
+        "d1l_route_store_worker_quiesce_end();", operation_at
+    )
+    radio_at = retry.index("Radio.SendWithOrigin(", success_release_at)
+    cleanup_label_at = retry.index("dm_retry_persistence_release:")
+    cleanup_release_at = retry.index(
+        "d1l_route_store_worker_quiesce_end();", cleanup_label_at
+    )
+
+    assert (
+        quiesce_at
+        < retry_wait_at
+        < retry_transition_at
+        < waiting_radio_at
+        < tx_active_at
+        < operation_at
+        < success_release_at
+        < radio_at
+        < cleanup_label_at
+        < cleanup_release_at
+    )
+    assert (
+        "D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS"
+        in retry[quiesce_at:retry_wait_at]
+    )
+    assert "return " not in retry[retry_wait_at:success_release_at]
+    assert retry[retry_wait_at:success_release_at].count(
+        "goto dm_retry_persistence_release;"
+    ) == 5
+    assert retry.count("d1l_route_store_worker_quiesce_end();") == 2
+    assert retry.count("Radio.SendWithOrigin(") == 1
+    assert retry[success_release_at:radio_at].strip() == (
+        "d1l_route_store_worker_quiesce_end();"
+    )
+
+
 def test_dm_console_reports_transient_storage_admission_truthfully():
     console = read("main/comms/usb_console.c")
     command = body(
