@@ -207,12 +207,6 @@ PROTOCOL_OPERATIONS = frozenset(
         "peer_after_public",
         "peer_public_send",
         "public_receive",
-        "peer_before_dm",
-        "dm_send",
-        "dm_ack",
-        "peer_after_dm",
-        "peer_dm_send",
-        "dm_receive_ack",
         "path_request",
         "path_result",
         "admin_login_request",
@@ -872,12 +866,6 @@ def validate_protocol(
     after_public = _response(steps, "peer_after_public")
     peer_public_send = _response(steps, "peer_public_send")
     public_receive = _response(steps, "public_receive")
-    before_dm = _response(steps, "peer_before_dm")
-    dm_send = _response(steps, "dm_send")
-    dm_ack = _response(steps, "dm_ack")
-    after_dm = _response(steps, "peer_after_dm")
-    peer_dm_send = _response(steps, "peer_dm_send")
-    dm_receive_ack = _response(steps, "dm_receive_ack")
     path_request = _response(steps, "path_request")
     path_result = _response(steps, "path_result")
     login_request = _response(steps, "admin_login_request")
@@ -897,8 +885,6 @@ def validate_protocol(
 
     peer_before = _peer_snapshot(before, controlled_peer)
     peer_after_public = _peer_snapshot(after_public, controlled_peer)
-    peer_before_dm = _peer_snapshot(before_dm, controlled_peer)
-    peer_after_dm = _peer_snapshot(after_dm, controlled_peer)
     peer_public_key = _peer_public_key(
         peer_before, peer_status_schema
     )
@@ -911,8 +897,6 @@ def validate_protocol(
     peer_snapshots = (
         peer_before,
         peer_after_public,
-        peer_before_dm,
-        peer_after_dm,
     )
     if not (
         peer_public_key is not None
@@ -941,17 +925,12 @@ def validate_protocol(
     public_in_token = (
         f"rc1-public-in-{candidate['firmware_commit'][:8]}-{nonce}"
     )
-    dm_out_token = f"rc1-dm-out-{candidate['firmware_commit'][:8]}-{nonce}"
-    dm_in_token = f"rc1-dm-in-{candidate['firmware_commit'][:8]}-{nonce}"
 
     advert_control, advert_result = _control_exchange(
         peer_advert, "radio.advert"
     )
     public_control, public_control_result = _control_exchange(
         peer_public_send, "radio.send_channel"
-    )
-    dm_control, dm_control_result = _control_exchange(
-        peer_dm_send, "radio.send_dm"
     )
     if peer_status_schema == MESHCOREBOT_STATUS_SCHEMA:
         resolve_control, resolve_result = _control_exchange(
@@ -1001,12 +980,6 @@ def validate_protocol(
     public_rx_entry = _unique_message(
         public_receive, text=public_in_token, direction="rx"
     )
-    dm_tx_entry = _unique_message(
-        dm_ack, text=dm_out_token, direction="tx"
-    )
-    dm_rx_entry = _unique_message(
-        dm_receive_ack, text=dm_in_token, direction="rx"
-    )
 
     path_token = path_request.get("token")
     path_tag = (
@@ -1036,12 +1009,6 @@ def validate_protocol(
     )
     after_public_count = _peer_counter(
         peer_after_public, "rx_channel_total", peer_status_schema
-    )
-    before_dm_count = _peer_counter(
-        peer_before_dm, "rx_dm_total", peer_status_schema
-    )
-    after_dm_count = _peer_counter(
-        peer_after_dm, "rx_dm_total", peer_status_schema
     )
     health_nonce = _integer(health_before.get("boot_nonce"), minimum=1)
     resolved_advert_timestamp = (
@@ -1273,57 +1240,6 @@ def validate_protocol(
         and steps["public_receive"]["command"]
         == f"messages public search {public_in_token}"
         and public_rx_entry is not None
-        and _peer_counter(
-            peer_before_dm, "rx_channel_total", peer_status_schema
-        )
-        == after_public_count
-        and before_dm_count
-        == _peer_counter(
-            peer_after_public, "rx_dm_total", peer_status_schema
-        )
-        and dm_send.get("ok") is True
-        and dm_send.get("cmd") == "mesh send dm"
-        and dm_send.get("queued") is True
-        and _fingerprint(dm_send.get("fingerprint")) == peer_fingerprint
-        and steps["dm_send"]["command"]
-        == f"mesh send dm {peer_fingerprint} {dm_out_token}"
-        and dm_ack.get("ok") is True
-        and dm_ack.get("cmd") == "messages dm"
-        and _fingerprint(dm_ack.get("fingerprint")) == peer_fingerprint
-        and steps["dm_ack"]["command"]
-        == f"messages dm {peer_fingerprint}"
-        and dm_tx_entry is not None
-        and dm_tx_entry.get("acked") is True
-        and dm_tx_entry.get("delivered") is True
-        and _integer(dm_tx_entry.get("ack_hash"), minimum=1) is not None
-        and before_dm_count is not None
-        and after_dm_count is not None
-        and 1 <= after_dm_count - before_dm_count <= 2
-        and dm_control.get("id") == f"rc1-dm-{nonce}"
-        and dm_control.get("params")
-        == {"target": identity_public_key, "text": dm_in_token}
-        and str(dm_control_result.get("target") or "").lower()
-        == identity_public_key[:12].lower()
-        and dm_control_result.get("utf8_bytes")
-        == len(dm_in_token.encode("utf-8"))
-        and _delivery_ok(dm_control_result.get("delivery"))
-        and dm_receive_ack.get("ok") is True
-        and dm_receive_ack.get("cmd") == "messages dm"
-        and _fingerprint(dm_receive_ack.get("fingerprint"))
-        == peer_fingerprint
-        and steps["dm_receive_ack"]["command"]
-        == f"messages dm {peer_fingerprint}"
-        and dm_rx_entry is not None
-        and dm_rx_entry.get("ack_response", {}).get("identity_valid") is True
-        and dm_rx_entry.get("ack_response", {}).get("state") == "sent"
-        and _integer(
-            dm_rx_entry.get("ack_response", {}).get("dispatch_count"),
-            minimum=1,
-        )
-        is not None
-        and dm_rx_entry.get("ack_response", {}).get("last_kind")
-        in {"direct_ack", "flood_ack", "flood_ack_path", "path_ack"}
-        and dm_rx_entry.get("ack_response", {}).get("last_error") == "ESP_OK"
         and path_request.get("ok") is True
         and path_request.get("cmd") == "routes probe"
         and _fingerprint(path_request.get("fingerprint"))

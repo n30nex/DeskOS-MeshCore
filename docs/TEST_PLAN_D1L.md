@@ -25,10 +25,11 @@ Required sequence:
    Actions artifact. Never enumerate or probe another Pi serial device.
 5. Run one bounded post-flash gate on that exact artifact: version/health,
    boot and five-root navigation, boot advert plus one operator-authorized
-   Public send, one DM/ACK, contact PATH/TRACE, repeater Ping, repeater login
-   plus authenticated query, Wi-Fi reconnect, SD write/remount and degraded
-   notice, and one authorized-provider Map download followed by offline cache
-   revisit.
+   Public send, one DM/ACK through the authoritative RF receipt, contact
+   PATH/TRACE, repeater Ping, repeater login plus authenticated query, Wi-Fi
+   reconnect, SD write/remount and degraded notice, and one authorized-provider
+   Map download followed by offline cache revisit. The protocol receipt must
+   not repeat the RF receipt's outbound/inbound DM exchange.
 6. Confirm SD is primary for retained history and that missing/unusable SD
    enters visible live-only RF chat without redirecting history to default
    NVS. Never format or repair media from firmware or validation.

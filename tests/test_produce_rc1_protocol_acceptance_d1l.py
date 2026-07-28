@@ -24,8 +24,6 @@ TRACE_FP = TRACE_KEY[:16].upper()
 NONCE = "123456789abc"
 PUBLIC_OUT = f"rc1-public-out-{COMMIT[:8]}-{NONCE}"
 PUBLIC_IN = f"rc1-public-in-{COMMIT[:8]}-{NONCE}"
-DM_OUT = f"rc1-dm-out-{COMMIT[:8]}-{NONCE}"
-DM_IN = f"rc1-dm-in-{COMMIT[:8]}-{NONCE}"
 CANDIDATE = {
     "firmware_commit": COMMIT,
     "actions_run": RUN,
@@ -45,12 +43,6 @@ OPERATIONS = (
     "peer_after_public",
     "peer_public_send",
     "public_receive",
-    "peer_before_dm",
-    "dm_send",
-    "dm_ack",
-    "peer_after_dm",
-    "peer_dm_send",
-    "dm_receive_ack",
     "admin_login_request",
     "admin_login_status",
     "admin_query_request",
@@ -329,63 +321,6 @@ def protocol_transcript() -> dict:
             "cmd": "messages public",
             "entries": [{"text": PUBLIC_IN, "direction": "rx"}],
         },
-        "peer_before_dm": peer_capture(channel=11, dm=5),
-        "dm_send": {
-            "schema": 1,
-            "ok": True,
-            "cmd": "mesh send dm",
-            "queued": True,
-            "fingerprint": PEER_FP,
-        },
-        "dm_ack": {
-            "schema": 1,
-            "ok": True,
-            "cmd": "messages dm",
-            "fingerprint": PEER_FP,
-            "entries": [
-                {
-                    "text": DM_OUT,
-                    "direction": "tx",
-                    "acked": True,
-                    "delivered": True,
-                    "ack_hash": 42,
-                }
-            ],
-        },
-        "peer_after_dm": peer_capture(channel=11, dm=6),
-        "peer_dm_send": control(
-            "radio.send_dm",
-            f"rc1-dm-{NONCE}",
-            {"target": IDENTITY_KEY, "text": DM_IN},
-            {
-                "target": IDENTITY_KEY[:12],
-                "utf8_bytes": len(DM_IN.encode()),
-                "delivery": {
-                    "event": "ACK",
-                    "payload": {},
-                    "acknowledged": True,
-                },
-            },
-        ),
-        "dm_receive_ack": {
-            "schema": 1,
-            "ok": True,
-            "cmd": "messages dm",
-            "fingerprint": PEER_FP,
-            "entries": [
-                {
-                    "text": DM_IN,
-                    "direction": "rx",
-                    "ack_response": {
-                        "identity_valid": True,
-                        "state": "sent",
-                        "dispatch_count": 1,
-                        "last_kind": "direct_ack",
-                        "last_error": "ESP_OK",
-                    },
-                }
-            ],
-        },
         "path_request": {
             "schema": 1,
             "ok": True,
@@ -462,12 +397,6 @@ def protocol_transcript() -> dict:
         "peer_after_public": "controlled-peer status capture",
         "peer_public_send": "controlled-peer radio.send_channel",
         "public_receive": f"messages public search {PUBLIC_IN}",
-        "peer_before_dm": "controlled-peer status capture",
-        "dm_send": f"mesh send dm {PEER_FP} {DM_OUT}",
-        "dm_ack": f"messages dm {PEER_FP}",
-        "peer_after_dm": "controlled-peer status capture",
-        "peer_dm_send": "controlled-peer radio.send_dm",
-        "dm_receive_ack": f"messages dm {PEER_FP}",
         "path_request": f"routes probe {ADMIN_FP}",
         "path_result": f"routes telemetry {ADMIN_FP}",
         "admin_login_request": f"admin login {ADMIN_FP} <redacted>",
@@ -601,32 +530,39 @@ def test_path_uses_repeater_after_logout_before_trace_and_ping():
     assert steps["ping_request"]["response"]["fingerprint"] == ADMIN_FP
 
 
-@pytest.mark.parametrize(
-    ("dm_count", "accepted"), [(6, True), (7, True), (8, False)]
-)
-def test_controlled_peer_dm_ingest_is_bounded(
-    dm_count: int,
-    accepted: bool,
+def test_protocol_transcript_excludes_the_rf_receipts_dm_exchange(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    status = peer_capture(channel=11, dm=dm_count)
-    assert runner.peer_dm_ingest_bounded(status, 5) is accepted
-
     transcript = protocol_transcript()
-    peer_after_dm = next(
-        row["response"]
-        for row in transcript["steps"]
-        if row["operation"] == "peer_after_dm"
+    operations = {row["operation"] for row in transcript["steps"]}
+    commands = [row["command"] for row in transcript["steps"]]
+
+    assert operations.isdisjoint(
+        {
+            "peer_before_dm",
+            "dm_send",
+            "dm_ack",
+            "peer_after_dm",
+            "peer_dm_send",
+            "dm_receive_ack",
+        }
     )
-    peer_after_dm["snapshot"]["counters"]["rx_dm_total"] = dm_count
-    peer_after_dm["snapshot_sha256"] = hashlib.sha256(
-        gate.canonical_json(peer_after_dm["snapshot"])
-    ).hexdigest()
-    if accepted:
-        assert validate(transcript, monkeypatch)["path"] is True
-    else:
-        with pytest.raises(gate.EvidenceError):
-            validate(transcript, monkeypatch)
+    assert not any(command.startswith("mesh send dm ") for command in commands)
+    assert not any(command.startswith("messages dm ") for command in commands)
+    assert "controlled-peer radio.send_dm" not in commands
+    assert gate.COVERAGE["dm_ack"] == "rf"
+    assert "dm_ack" not in validate(transcript, monkeypatch)
+
+    transcript["steps"].append(
+        {
+            "sequence": len(transcript["steps"]) + 1,
+            "operation": "dm_send",
+            "command": f"mesh send dm {PEER_FP} redundant",
+            "response": {"schema": 1, "ok": True, "cmd": "mesh send dm"},
+        }
+    )
+    with pytest.raises(gate.EvidenceError):
+        validate(transcript, monkeypatch)
 
 
 def _meshcorebot_transcript() -> dict:
@@ -694,8 +630,6 @@ def _meshcorebot_transcript() -> dict:
         if step["operation"] not in {
             "peer_before",
             "peer_after_public",
-            "peer_before_dm",
-            "peer_after_dm",
         }:
             continue
         old = response["snapshot"]
@@ -788,8 +722,6 @@ def _rehash_peer_capture(capture: dict) -> None:
         "wrong_hardware",
         "wrong_baud",
         "stale_poll",
-        "dm_delta_zero",
-        "dm_delta_three",
         "wrong_sender_source",
         "wrong_sender_name",
         "missing_sender_advert_timestamp",
@@ -815,7 +747,7 @@ def test_meshcorebot_profile_rejects_identity_or_correlation_drift(
             ]["control_socket"]
         )
     elif mutation in {"changed_pid", "changed_started_at"}:
-        capture = _operation_response(transcript, "peer_after_dm")
+        capture = _operation_response(transcript, "peer_after_public")
         if mutation == "changed_pid":
             capture["snapshot"]["pid"] += 1
         else:
@@ -838,14 +770,6 @@ def test_meshcorebot_profile_rejects_identity_or_correlation_drift(
             capture["snapshot"]["mesh"]["last_poll_at"] = (
                 "2026-07-25T19:00:00Z"
             )
-        _rehash_peer_capture(capture)
-    elif mutation in {"dm_delta_zero", "dm_delta_three"}:
-        before = _operation_response(transcript, "peer_before_dm")
-        capture = _operation_response(transcript, "peer_after_dm")
-        capture["snapshot"]["counters"]["rx_contact_total"] = (
-            before["snapshot"]["counters"]["rx_contact_total"]
-            + (0 if mutation == "dm_delta_zero" else 3)
-        )
         _rehash_peer_capture(capture)
     elif mutation.startswith("wrong_sender") or mutation.startswith(
         "missing_sender"
@@ -1133,12 +1057,13 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     assert "validate_protocol(transcript, candidate)" in source
     assert "--dry-run" not in source
     assert 'parser.add_argument("--boot-timeout", type=float, default=45.0)' in source
+    assert '"dm_send"' not in source
+    assert "mesh send dm" not in source
+    assert "messages dm" not in source
+    assert "radio.send_dm" not in source
     assert source.index('"cold boot console readiness"') < source.index(
         'version = _step(steps, "version"'
     )
-    assert source.index(
-        'label="inbound DM ACK dispatch"'
-    ) < source.index('label="matched repeater TRACE"')
     assert (
         source.index('admin_logout = _step(')
         < source.index('path_request = _step(')
