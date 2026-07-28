@@ -27,8 +27,8 @@ Required sequence:
    boot and five-root navigation, boot advert plus one operator-authorized
    Public send, one DM/ACK through the authoritative RF receipt, contact
    PATH/TRACE, repeater Ping, repeater login plus authenticated query, Wi-Fi
-   reconnect, SD write/remount and degraded notice, and one authorized-provider
-   Map download followed by offline cache revisit. The protocol receipt must
+   reconnect, SD write/remount and degraded notice, and one authorized-provider Map download followed by offline cache
+   revisit. The protocol receipt must
    not repeat the RF receipt's outbound/inbound DM exchange.
 6. Confirm SD is primary for retained history and that missing/unusable SD
    enters visible live-only RF chat without redirecting history to default

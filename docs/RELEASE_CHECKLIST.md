@@ -22,8 +22,8 @@
 - [ ] Pass the bounded same-artifact gate: boot/five-root UI, boot advert and
   one operator-authorized Public send, DM/ACK from the authoritative RF
   receipt, contact PATH/TRACE, repeater Ping, repeater login/authenticated
-  query, Wi-Fi reconnect, SD write/remount/degraded notice, and authorized Map
-  download/offline revisit. The protocol receipt does not repeat DM.
+  query, Wi-Fi reconnect, SD write/remount/degraded notice, and authorized Map download/offline revisit.
+  The protocol receipt does not repeat DM.
 - [ ] Verify the exact Actions host-contract evidence keeps built-in OSM
   attributed/current-view-only and pauses authorized-provider prefetch while
   interactive Map is open. The physical Map receipt is intentionally limited
