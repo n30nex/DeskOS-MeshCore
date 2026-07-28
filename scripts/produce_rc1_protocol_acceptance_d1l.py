@@ -62,16 +62,57 @@ PI_HOST = "neopi5"
 RELEASE_PROFILE = "core_1_0"
 SD_HISTORY_MODE = "conditional"
 EXPECTED_NODE_NAME = "D1L"
-DEFAULT_PEER_STATUS = Path(
+MESHCOREBOT_PEER_STATUS = Path(
+    "/opt/canadaverse/com11-meshcorebot/data/logs/meshcorebot.status.json"
+)
+MESHCOREBOT_PEER_SOCKET = Path(
+    "/run/canadaverse-control/com11/control.sock"
+)
+MESHCOREBOT_PEER_DEVICE = "/dev/krab-com11"
+MESHCOREBOT_PEER_SERVICE = "meshcorebot"
+MESHCOREBOT_PEER_PUBLIC_KEY = (
+    "0bf0a701d5ae2db679c641ee999a70d4b55b61a2b77c47337ce35c16c9c19193"
+)
+RADIO_LISTENER_PEER_STATUS = Path(
     "/opt/canadaverse/com15-responder/data/radio_listener.status.json"
 )
-DEFAULT_PEER_SOCKET = Path(
+RADIO_LISTENER_PEER_SOCKET = Path(
     "/run/canadaverse-control/com15/control.sock"
 )
-DEFAULT_PEER_DEVICE = "/dev/krab-t-echo"
-DEFAULT_PEER_PUBLIC_KEY = (
+RADIO_LISTENER_PEER_DEVICE = "/dev/krab-t-echo"
+RADIO_LISTENER_PEER_SERVICE = "openclaw-radio-listener"
+RADIO_LISTENER_PEER_PUBLIC_KEY = (
     "024999dedfd26763c5606169c3ebd34e05a9475cf78220a81078b5dd27caca44"
 )
+RADIO_LISTENER_STATUS_SCHEMA = "openclaw_radio_listener_v1"
+MESHCOREBOT_STATUS_SCHEMA = "meshcorebot_v1"
+PEER_STATUS_SCHEMAS = frozenset(
+    {RADIO_LISTENER_STATUS_SCHEMA, MESHCOREBOT_STATUS_SCHEMA}
+)
+PEER_PROFILE_BINDINGS = {
+    RADIO_LISTENER_STATUS_SCHEMA: {
+        "status_path": str(RADIO_LISTENER_PEER_STATUS),
+        "control_socket": str(RADIO_LISTENER_PEER_SOCKET),
+        "device": RADIO_LISTENER_PEER_DEVICE,
+        "service": RADIO_LISTENER_PEER_SERVICE,
+        "public_key": RADIO_LISTENER_PEER_PUBLIC_KEY,
+    },
+    MESHCOREBOT_STATUS_SCHEMA: {
+        "status_path": str(MESHCOREBOT_PEER_STATUS),
+        "control_socket": str(MESHCOREBOT_PEER_SOCKET),
+        "device": MESHCOREBOT_PEER_DEVICE,
+        "service": MESHCOREBOT_PEER_SERVICE,
+        "public_key": MESHCOREBOT_PEER_PUBLIC_KEY,
+    },
+}
+DEFAULT_PEER_STATUS_SCHEMA = MESHCOREBOT_STATUS_SCHEMA
+DEFAULT_PEER_STATUS = MESHCOREBOT_PEER_STATUS
+DEFAULT_PEER_SOCKET = MESHCOREBOT_PEER_SOCKET
+DEFAULT_PEER_DEVICE = MESHCOREBOT_PEER_DEVICE
+DEFAULT_PEER_SERVICE = MESHCOREBOT_PEER_SERVICE
+MESHCOREBOT_HARDWARE_ID = "303a:1001"
+MESHCOREBOT_BAUD = 115200
+DEFAULT_PEER_PUBLIC_KEY = MESHCOREBOT_PEER_PUBLIC_KEY
 MAX_PEER_STATUS_BYTES = 1024 * 1024
 MAX_CONTROL_RESPONSE_BYTES = 64 * 1024
 MAX_PASSWORD_BYTES = 15
@@ -121,6 +162,29 @@ def exact_fingerprint(value: object, label: str) -> str:
     if not FINGERPRINT_RE.fullmatch(normalized):
         raise ProtocolAcceptanceError(f"{label} must be exactly 16 hexadecimal characters")
     return normalized
+
+
+def exact_peer_binding(
+    *,
+    status_schema: str,
+    status_path: Path,
+    control_socket: Path,
+    device: str,
+    service: str,
+    public_key: str,
+) -> dict[str, str]:
+    binding = {
+        "status_path": str(status_path),
+        "control_socket": str(control_socket),
+        "device": device,
+        "service": service,
+        "public_key": public_key,
+    }
+    if PEER_PROFILE_BINDINGS.get(status_schema) != binding:
+        raise ProtocolAcceptanceError(
+            "controlled-peer profile does not match an exact authorized binding"
+        )
+    return {"status_schema": status_schema, **binding}
 
 
 def integer(value: object, *, minimum: int = 0) -> int | None:
@@ -231,6 +295,9 @@ def capture_peer_status(
     path: Path,
     *,
     expected_public_key: str,
+    expected_device: str = DEFAULT_PEER_DEVICE,
+    expected_service: str = DEFAULT_PEER_SERVICE,
+    status_schema: str = DEFAULT_PEER_STATUS_SCHEMA,
     max_age_seconds: float = MAX_STATUS_AGE_SECONDS,
 ) -> dict[str, Any]:
     raw = _safe_regular_file(
@@ -242,23 +309,72 @@ def capture_peer_status(
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ProtocolAcceptanceError("controlled-peer status is not JSON") from exc
-    written = json_time(data.get("status_written_at") if isinstance(data, dict) else None)
+    status = data if isinstance(data, dict) else {}
+    written = json_time(status.get("status_written_at"))
     age = (
         (datetime.now(timezone.utc) - written.astimezone(timezone.utc)).total_seconds()
         if written is not None
         else -1.0
     )
-    if not (
+    common_valid = bool(
         isinstance(data, dict)
-        and data.get("service") == "openclaw-radio-listener"
-        and isinstance(data.get("run_id"), str)
-        and bool(data["run_id"])
-        and nested(data, "serial", "mesh_connected") is True
-        and nested(data, "serial", "port") == DEFAULT_PEER_DEVICE
-        and nested(data, "serial", "public_key") == expected_public_key
-        and isinstance(data.get("counters"), dict)
+        and status.get("service") == expected_service
+        and isinstance(status.get("counters"), dict)
+        and isinstance(status.get("mesh"), dict)
         and 0.0 <= age <= max_age_seconds
-    ):
+    )
+    if status_schema == RADIO_LISTENER_STATUS_SCHEMA:
+        identity_valid = bool(
+            str(path) == str(RADIO_LISTENER_PEER_STATUS)
+            and expected_service == RADIO_LISTENER_PEER_SERVICE
+            and expected_device == RADIO_LISTENER_PEER_DEVICE
+            and expected_public_key == RADIO_LISTENER_PEER_PUBLIC_KEY
+            and isinstance(status.get("run_id"), str)
+            and bool(status["run_id"])
+            and nested(status, "serial", "mesh_connected") is True
+            and nested(status, "serial", "port") == expected_device
+            and str(nested(status, "serial", "public_key") or "").strip().lower()
+            == expected_public_key
+        )
+    elif status_schema == MESHCOREBOT_STATUS_SCHEMA:
+        started = json_time(status.get("started_at"))
+        poll_at = json_time(nested(status, "mesh", "last_poll_at"))
+        poll_age = (
+            (
+                datetime.now(timezone.utc)
+                - poll_at.astimezone(timezone.utc)
+            ).total_seconds()
+            if poll_at is not None
+            else -1.0
+        )
+        pid = status.get("pid")
+        identity_valid = bool(
+            str(path) == str(MESHCOREBOT_PEER_STATUS)
+            and expected_service == MESHCOREBOT_PEER_SERVICE
+            and expected_device == MESHCOREBOT_PEER_DEVICE
+            and expected_public_key == MESHCOREBOT_PEER_PUBLIC_KEY
+            and isinstance(pid, int)
+            and not isinstance(pid, bool)
+            and pid > 0
+            and started is not None
+            and nested(status, "serial", "active_port") == expected_device
+            and nested(status, "serial", "configured_port") == expected_device
+            and nested(status, "serial", "hardware_id")
+            == MESHCOREBOT_HARDWARE_ID
+            and nested(status, "serial", "baud_rate") == MESHCOREBOT_BAUD
+            and nested(status, "serial", "meshcore_connected") is True
+            and nested(status, "discord", "connected") is True
+            and str(nested(status, "mqtt", "device_public_key") or "")
+            .strip()
+            .lower()
+            == expected_public_key
+            and 0.0 <= poll_age <= max_age_seconds
+        )
+    else:
+        raise ProtocolAcceptanceError(
+            f"unsupported controlled-peer status schema: {status_schema}"
+        )
+    if not (common_valid and identity_valid):
         raise ProtocolAcceptanceError(
             "controlled-peer status identity, readiness, or freshness is invalid"
         )
@@ -335,18 +451,147 @@ def send_peer_control(
     return {"request": request, "response": response}
 
 
-def peer_counter(status: dict[str, Any], name: str) -> int | None:
-    return integer(nested(status, "snapshot", "counters", name))
+def peer_control_timeout(status_schema: str) -> float:
+    if status_schema == MESHCOREBOT_STATUS_SCHEMA:
+        # Meshcorebot's bounded radio.send_dm operation may spend up to 55
+        # seconds on route recovery before returning its exact response.
+        return 60.0
+    if status_schema == RADIO_LISTENER_STATUS_SCHEMA:
+        return 35.0
+    raise ProtocolAcceptanceError(
+        f"unsupported controlled-peer status schema: {status_schema}"
+    )
 
 
-def peer_dm_ingest_bounded(status: dict[str, Any], before: int) -> bool:
-    after = peer_counter(status, "rx_dm_total")
+def peer_counter(
+    status: dict[str, Any],
+    name: str,
+    status_schema: str = RADIO_LISTENER_STATUS_SCHEMA,
+) -> int | None:
+    counter_name = name
+    if status_schema == MESHCOREBOT_STATUS_SCHEMA and name == "rx_dm_total":
+        counter_name = "rx_contact_total"
+    elif status_schema not in PEER_STATUS_SCHEMAS:
+        return None
+    return integer(nested(status, "snapshot", "counters", counter_name))
+
+
+def peer_dm_ingest_bounded(
+    status: dict[str, Any],
+    before: int,
+    status_schema: str = RADIO_LISTENER_STATUS_SCHEMA,
+) -> bool:
+    after = peer_counter(status, "rx_dm_total", status_schema)
     return after is not None and 1 <= after - before <= 2
 
 
-def peer_run_id(status: dict[str, Any]) -> str | None:
-    value = nested(status, "snapshot", "run_id")
-    return value if isinstance(value, str) and value else None
+def peer_session_identity(
+    status: dict[str, Any], status_schema: str
+) -> tuple[object, ...] | None:
+    if status_schema == RADIO_LISTENER_STATUS_SCHEMA:
+        value = nested(status, "snapshot", "run_id")
+        return ("run_id", value) if isinstance(value, str) and value else None
+    if status_schema == MESHCOREBOT_STATUS_SCHEMA:
+        pid = nested(status, "snapshot", "pid")
+        started_at = nested(status, "snapshot", "started_at")
+        if (
+            isinstance(pid, int)
+            and not isinstance(pid, bool)
+            and pid > 0
+            and json_time(started_at) is not None
+        ):
+            return ("pid_started_at", pid, started_at)
+    return None
+
+
+def peer_public_sender_matches(
+    status: dict[str, Any],
+    *,
+    status_schema: str,
+    d1l_public_key: str,
+    d1l_node_name: str,
+    resolved_advert_timestamp: int | None = None,
+) -> bool:
+    snapshot = nested(status, "snapshot")
+    sender = str(nested(snapshot, "mesh", "last_rx_sender") or "").lower()
+    if sender != d1l_public_key[:12].lower():
+        return False
+    if status_schema == RADIO_LISTENER_STATUS_SCHEMA:
+        return True
+    return bool(
+        status_schema == MESHCOREBOT_STATUS_SCHEMA
+        and nested(snapshot, "mesh", "last_rx_sender_source")
+        == "unique_signed_advert_name"
+        and nested(snapshot, "mesh", "last_rx_sender_name") == d1l_node_name
+        and integer(
+            nested(snapshot, "mesh", "last_rx_sender_advert_timestamp"),
+            minimum=1,
+        )
+        == resolved_advert_timestamp
+    )
+
+
+def resolved_peer_contact(
+    exchange: object,
+    *,
+    d1l_public_key: str,
+    d1l_node_name: str,
+) -> bool:
+    response = exchange.get("response") if isinstance(exchange, dict) else None
+    result = response.get("result") if isinstance(response, dict) else None
+    return bool(
+        isinstance(result, dict)
+        and set(result)
+        == {
+            "name",
+            "match_count",
+            "unique",
+            "valid_signed_advert",
+            "public_key_prefix",
+            "last_advert",
+        }
+        and result.get("name") == d1l_node_name
+        and result.get("match_count") == 1
+        and result.get("unique") is True
+        and result.get("valid_signed_advert") is True
+        and str(result.get("public_key_prefix") or "").lower()
+        == d1l_public_key[:12].lower()
+        and integer(result.get("last_advert"), minimum=1) is not None
+    )
+
+
+def exact_chat_contact(result: object, public_key: str) -> bool:
+    contact = contact_entry(result, public_key=public_key)
+    return bool(
+        contact is not None
+        and str(contact.get("fingerprint") or "").upper()
+        == public_key[:16].upper()
+        and contact.get("type") == "chat"
+        and contact.get("canonical") is True
+        and contact.get("can_dm") is True
+        and contact.get("can_admin") is False
+        and contact.get("verification_source") == "signed_advert"
+    )
+
+
+def exact_admin_contact(result: object, fingerprint: str) -> bool:
+    contact = contact_entry(result, fingerprint=fingerprint)
+    candidate = (
+        str(contact.get("public_key") or "").strip().lower()
+        if contact is not None
+        else ""
+    )
+    public_key = candidate if PUBLIC_KEY_RE.fullmatch(candidate) else None
+    return bool(
+        contact is not None
+        and public_key is not None
+        and public_key[:16].upper() == fingerprint
+        and contact.get("type") == "repeater"
+        and contact.get("canonical") is True
+        and contact.get("can_dm") is False
+        and contact.get("can_admin") is True
+        and contact.get("verification_source") == "signed_advert"
+    )
 
 
 def public_entry(result: object, *, text: str, direction: str) -> dict[str, Any] | None:
@@ -506,6 +751,9 @@ def execute(
     peer_status_path: Path,
     peer_socket_path: Path,
     peer_public_key: str,
+    peer_device: str,
+    peer_service: str,
+    peer_status_schema: str,
     admin_fingerprint: str,
     admin_password_path: Path,
     authorize_public_tx: bool,
@@ -528,6 +776,14 @@ def execute(
     run_id = positive_decimal(github_run_id, "GitHub run ID")
     run_attempt = positive_decimal(workflow_run_attempt, "workflow run attempt")
     peer_public_key = exact_public_key(peer_public_key, "peer public key")
+    controlled_peer = exact_peer_binding(
+        status_schema=peer_status_schema,
+        status_path=peer_status_path,
+        control_socket=peer_socket_path,
+        device=peer_device,
+        service=peer_service,
+        public_key=peer_public_key,
+    )
     peer_fingerprint = peer_public_key[:16].upper()
     admin_fingerprint = exact_fingerprint(admin_fingerprint, "admin fingerprint")
     source = git_metadata(root)
@@ -581,6 +837,9 @@ def execute(
         return status_capture(
             peer_status_path,
             expected_public_key=peer_public_key,
+            expected_device=peer_device,
+            expected_service=peer_service,
+            status_schema=peer_status_schema,
         )
 
     with open_d1l_serial(
@@ -632,6 +891,7 @@ def execute(
             request_id=f"rc1-advert-{nonce}",
             operation="radio.advert",
             params={"flood": False},
+            timeout=peer_control_timeout(peer_status_schema),
         )
         _step(
             steps,
@@ -642,8 +902,8 @@ def execute(
         contacts = poll(
             lambda: command("contacts"),
             lambda result: (
-                contact_entry(result, public_key=peer_public_key) is not None
-                and contact_entry(result, fingerprint=admin_fingerprint) is not None
+                exact_chat_contact(result, peer_public_key)
+                and exact_admin_contact(result, admin_fingerprint)
             ),
             timeout=rf_timeout,
             interval=poll_interval,
@@ -657,6 +917,66 @@ def execute(
             "controlled-peer status capture",
             peer_status(),
         )
+        resolved_advert_timestamp: int | None = None
+        if peer_status_schema == MESHCOREBOT_STATUS_SCHEMA:
+            d1l_advert = _step(
+                steps,
+                "d1l_advert",
+                "mesh advert flood",
+                command("mesh advert flood"),
+            )
+            if not (
+                d1l_advert.get("cmd") == "mesh advert flood"
+                and d1l_advert.get("queued") is True
+                and d1l_advert.get("flood") is True
+            ):
+                raise ProtocolAcceptanceError(
+                    "D1L signed flood advert was not queued exactly once"
+                )
+
+            resolve_attempt = 0
+
+            def resolve_d1l_contact() -> dict[str, Any]:
+                nonlocal resolve_attempt
+                resolve_attempt += 1
+                if resolve_attempt > 999:
+                    raise ProtocolAcceptanceError(
+                        "controlled-peer contact resolution exceeded its bound"
+                    )
+                try:
+                    return control_sender(
+                        peer_socket_path,
+                        request_id=(
+                            f"rc1-resolve-{nonce}-{resolve_attempt:03d}"
+                        ),
+                        operation="radio.resolve_contact",
+                        params={"name": EXPECTED_NODE_NAME},
+                        timeout=peer_control_timeout(peer_status_schema),
+                    )
+                except ProtocolAcceptanceError:
+                    return {}
+
+            peer_resolution = poll(
+                resolve_d1l_contact,
+                lambda result: resolved_peer_contact(
+                    result,
+                    d1l_public_key=str(identity.get("public_key") or ""),
+                    d1l_node_name=EXPECTED_NODE_NAME,
+                ),
+                timeout=rf_timeout,
+                interval=poll_interval,
+                label="controlled-peer unique signed D1L advert",
+            )
+            _step(
+                steps,
+                "peer_resolve_d1l",
+                "controlled-peer radio.resolve_contact D1L",
+                peer_resolution,
+            )
+            resolved_advert_timestamp = integer(
+                nested(peer_resolution, "response", "result", "last_advert"),
+                minimum=1,
+            )
         _step(
             steps,
             "public_tx_authorization",
@@ -697,17 +1017,27 @@ def execute(
             f"packets search {public_out_token}",
             public_tx_record,
         )
-        before_public = peer_counter(before, "rx_channel_total")
+        before_public = peer_counter(
+            before, "rx_channel_total", peer_status_schema
+        )
         if before_public is None:
             raise ProtocolAcceptanceError("controlled peer lacks rx_channel_total")
         peer_after_public = poll(
             peer_status,
             lambda result: (
-                peer_run_id(result) == peer_run_id(before)
-                and peer_counter(result, "rx_channel_total") == before_public + 1
-                and str(nested(result, "snapshot", "mesh", "last_rx_sender") or "")
-                .lower()
-                .startswith(str(identity.get("public_key") or "")[:12].lower())
+                peer_session_identity(result, peer_status_schema)
+                == peer_session_identity(before, peer_status_schema)
+                and peer_counter(
+                    result, "rx_channel_total", peer_status_schema
+                )
+                == before_public + 1
+                and peer_public_sender_matches(
+                    result,
+                    status_schema=peer_status_schema,
+                    d1l_public_key=str(identity.get("public_key") or ""),
+                    d1l_node_name=str(identity.get("node_name") or ""),
+                    resolved_advert_timestamp=resolved_advert_timestamp,
+                )
             ),
             timeout=rf_timeout,
             interval=poll_interval,
@@ -727,6 +1057,7 @@ def execute(
             request_id=f"rc1-public-{nonce}",
             operation="radio.send_channel",
             params={"channel": 0, "text": public_in_token},
+            timeout=peer_control_timeout(peer_status_schema),
         )
         _step(
             steps,
@@ -782,14 +1113,19 @@ def execute(
             f"messages dm {peer_fingerprint}",
             dm_ack,
         )
-        before_dm = peer_counter(peer_before_dm, "rx_dm_total")
+        before_dm = peer_counter(
+            peer_before_dm, "rx_dm_total", peer_status_schema
+        )
         if before_dm is None:
             raise ProtocolAcceptanceError("controlled peer lacks rx_dm_total")
         peer_after_dm = poll(
             peer_status,
             lambda result: (
-                peer_run_id(result) == peer_run_id(peer_before_dm)
-                and peer_dm_ingest_bounded(result, before_dm)
+                peer_session_identity(result, peer_status_schema)
+                == peer_session_identity(peer_before_dm, peer_status_schema)
+                and peer_dm_ingest_bounded(
+                    result, before_dm, peer_status_schema
+                )
             ),
             timeout=rf_timeout,
             interval=poll_interval,
@@ -812,6 +1148,7 @@ def execute(
                 "target": exact_public_key(identity.get("public_key"), "D1L identity"),
                 "text": dm_in_token,
             },
+            timeout=peer_control_timeout(peer_status_schema),
         )
         _step(
             steps,
@@ -1053,6 +1390,7 @@ def execute(
         "expected_firmware_commit": commit,
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
+        "controlled_peer": controlled_peer,
         "steps": steps,
     }
     candidate = {
@@ -1078,6 +1416,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--peer-public-key", default=DEFAULT_PEER_PUBLIC_KEY
+    )
+    parser.add_argument("--peer-device", default=DEFAULT_PEER_DEVICE)
+    parser.add_argument("--peer-service", default=DEFAULT_PEER_SERVICE)
+    parser.add_argument(
+        "--peer-status-schema",
+        choices=sorted(PEER_STATUS_SCHEMAS),
+        default=DEFAULT_PEER_STATUS_SCHEMA,
     )
     parser.add_argument("--admin-fingerprint", required=True)
     parser.add_argument("--admin-password-file", required=True)
@@ -1107,6 +1452,9 @@ def main(argv: list[str] | None = None) -> int:
             peer_status_path=Path(args.peer_status),
             peer_socket_path=Path(args.peer_control_socket),
             peer_public_key=args.peer_public_key,
+            peer_device=args.peer_device,
+            peer_service=args.peer_service,
+            peer_status_schema=args.peer_status_schema,
             admin_fingerprint=args.admin_fingerprint,
             admin_password_path=Path(args.admin_password_file),
             authorize_public_tx=args.authorize_public_tx,

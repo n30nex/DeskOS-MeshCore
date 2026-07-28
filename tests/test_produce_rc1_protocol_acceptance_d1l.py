@@ -1,4 +1,6 @@
 import hashlib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -11,7 +13,9 @@ COMMIT = "a" * 40
 RUN = "123"
 ATTEMPT = "1"
 IDENTITY_KEY = "b" * 64
-PEER_KEY = "c" * 64
+PEER_KEY = gate.PEER_PROFILE_BINDINGS[
+    gate.RADIO_LISTENER_STATUS_SCHEMA
+]["public_key"]
 ADMIN_KEY = "d" * 64
 PEER_FP = PEER_KEY[:16].upper()
 ADMIN_FP = ADMIN_KEY[:16].upper()
@@ -237,6 +241,7 @@ def protocol_transcript() -> dict:
                     "canonical": True,
                     "can_dm": True,
                     "can_admin": False,
+                    "verification_source": "signed_advert",
                 },
                 {
                     "fingerprint": ADMIN_FP,
@@ -245,6 +250,7 @@ def protocol_transcript() -> dict:
                     "canonical": True,
                     "can_dm": False,
                     "can_admin": True,
+                    "verification_source": "signed_advert",
                 },
             ],
         },
@@ -479,6 +485,11 @@ def protocol_transcript() -> dict:
         "expected_firmware_commit": COMMIT,
         "github_actions_run": RUN,
         "workflow_run_attempt": ATTEMPT,
+        "controlled_peer": dict(
+            gate.PEER_PROFILE_BINDINGS[
+                gate.RADIO_LISTENER_STATUS_SCHEMA
+            ]
+        ),
         "steps": [
             {
                 "sequence": sequence,
@@ -539,6 +550,353 @@ def test_controlled_peer_dm_ingest_is_bounded(
     else:
         with pytest.raises(gate.EvidenceError):
             validate(transcript, monkeypatch)
+
+
+def _meshcorebot_transcript() -> dict:
+    transcript = protocol_transcript()
+    binding = dict(
+        gate.PEER_PROFILE_BINDINGS[gate.MESHCOREBOT_STATUS_SCHEMA]
+    )
+    meshcorebot_fingerprint = binding["public_key"][:16].upper()
+    transcript = json.loads(
+        json.dumps(transcript)
+        .replace(PEER_KEY, binding["public_key"])
+        .replace(PEER_FP, meshcorebot_fingerprint)
+    )
+    transcript["controlled_peer"] = binding
+    peer_before_index = next(
+        index
+        for index, step in enumerate(transcript["steps"])
+        if step["operation"] == "peer_before"
+    )
+    transcript["steps"][peer_before_index + 1 : peer_before_index + 1] = [
+        {
+            "sequence": 0,
+            "operation": "d1l_advert",
+            "command": "mesh advert flood",
+            "response": {
+                "schema": 1,
+                "ok": True,
+                "cmd": "mesh advert flood",
+                "queued": True,
+                "flood": True,
+            },
+        },
+        {
+            "sequence": 0,
+            "operation": "peer_resolve_d1l",
+            "command": "controlled-peer radio.resolve_contact D1L",
+            "response": control(
+                "radio.resolve_contact",
+                f"rc1-resolve-{NONCE}-001",
+                {"name": "D1L"},
+                {
+                    "name": "D1L",
+                    "match_count": 1,
+                    "unique": True,
+                    "valid_signed_advert": True,
+                    "public_key_prefix": IDENTITY_KEY[:12].lower(),
+                    "last_advert": 123456,
+                },
+            ),
+        },
+    ]
+    for sequence, step in enumerate(transcript["steps"], 1):
+        step["sequence"] = sequence
+    for step in transcript["steps"]:
+        response = step["response"]
+        if step["operation"] == "peer_advert":
+            response["response"]["result"] = {
+                "flood": False,
+                "delivery": {
+                    "event": "SENT",
+                    "payload": {},
+                    "acknowledged": True,
+                },
+            }
+        if step["operation"] not in {
+            "peer_before",
+            "peer_after_public",
+            "peer_before_dm",
+            "peer_after_dm",
+        }:
+            continue
+        old = response["snapshot"]
+        mesh = dict(old["mesh"])
+        if step["operation"] == "peer_after_public":
+            mesh.update(
+                {
+                    "last_rx_sender_source": "unique_signed_advert_name",
+                    "last_rx_sender_name": "D1L",
+                    "last_rx_sender_advert_timestamp": 123456,
+                }
+            )
+        snapshot = {
+            "service": "meshcorebot",
+            "pid": 17,
+            "started_at": "2026-07-25T19:00:00Z",
+            "status_written_at": old["status_written_at"],
+            "serial": {
+                "active_port": binding["device"],
+                "configured_port": binding["device"],
+                "hardware_id": gate.MESHCOREBOT_HARDWARE_ID,
+                "baud_rate": gate.MESHCOREBOT_BAUD,
+                "meshcore_connected": True,
+            },
+            "discord": {"connected": True},
+            "mqtt": {"device_public_key": binding["public_key"].upper()},
+            "counters": {
+                "rx_channel_total": old["counters"]["rx_channel_total"],
+                "rx_contact_total": old["counters"]["rx_dm_total"],
+            },
+            "mesh": {
+                **mesh,
+                "last_poll_at": old["status_written_at"],
+            },
+        }
+        response["path"] = binding["status_path"]
+        response["snapshot"] = snapshot
+        response["snapshot_sha256"] = hashlib.sha256(
+            gate.canonical_json(snapshot)
+        ).hexdigest()
+    return transcript
+
+
+def test_meshcorebot_profile_closes_chat_gate_with_distinct_admin(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    transcript = _meshcorebot_transcript()
+
+    assert validate(transcript, monkeypatch) == {
+        "boot_advert": True,
+        "public_send_count": 1,
+        "path": True,
+        "trace": True,
+        "ping": True,
+        "repeater_login": True,
+        "repeater_query": True,
+    }
+
+    peer = transcript["controlled_peer"]
+    login = next(
+        step
+        for step in transcript["steps"]
+        if step["operation"] == "admin_login_request"
+    )
+    assert peer["public_key"][:16].upper() != ADMIN_FP
+    assert ADMIN_FP in login["command"]
+
+
+def _operation_response(transcript: dict, operation: str) -> dict:
+    return next(
+        step["response"]
+        for step in transcript["steps"]
+        if step["operation"] == operation
+    )
+
+
+def _rehash_peer_capture(capture: dict) -> None:
+    capture["snapshot_sha256"] = hashlib.sha256(
+        gate.canonical_json(capture["snapshot"])
+    ).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "mixed_socket",
+        "changed_pid",
+        "changed_started_at",
+        "wrong_mqtt_key",
+        "wrong_hardware",
+        "wrong_baud",
+        "stale_poll",
+        "dm_delta_zero",
+        "dm_delta_three",
+        "wrong_sender_source",
+        "wrong_sender_name",
+        "missing_sender_advert_timestamp",
+        "listener_advert_shape",
+        "resolve_wrong_prefix",
+        "resolve_not_unique",
+        "resolve_timestamp_mismatch",
+        "resolve_after_public",
+        "chat_peer_admin_capable",
+        "admin_not_admin_capable",
+        "chat_peer_not_signed",
+        "admin_not_signed",
+    ],
+)
+def test_meshcorebot_profile_rejects_identity_or_correlation_drift(
+    mutation: str, monkeypatch: pytest.MonkeyPatch
+):
+    transcript = _meshcorebot_transcript()
+    if mutation == "mixed_socket":
+        transcript["controlled_peer"]["control_socket"] = (
+            gate.PEER_PROFILE_BINDINGS[
+                gate.RADIO_LISTENER_STATUS_SCHEMA
+            ]["control_socket"]
+        )
+    elif mutation in {"changed_pid", "changed_started_at"}:
+        capture = _operation_response(transcript, "peer_after_dm")
+        if mutation == "changed_pid":
+            capture["snapshot"]["pid"] += 1
+        else:
+            capture["snapshot"]["started_at"] = "2026-07-25T19:00:01Z"
+        _rehash_peer_capture(capture)
+    elif mutation in {
+        "wrong_mqtt_key",
+        "wrong_hardware",
+        "wrong_baud",
+        "stale_poll",
+    }:
+        capture = _operation_response(transcript, "peer_before")
+        if mutation == "wrong_mqtt_key":
+            capture["snapshot"]["mqtt"]["device_public_key"] = "e" * 64
+        elif mutation == "wrong_hardware":
+            capture["snapshot"]["serial"]["hardware_id"] = "0000:0000"
+        elif mutation == "wrong_baud":
+            capture["snapshot"]["serial"]["baud_rate"] = 9600
+        else:
+            capture["snapshot"]["mesh"]["last_poll_at"] = (
+                "2026-07-25T19:00:00Z"
+            )
+        _rehash_peer_capture(capture)
+    elif mutation in {"dm_delta_zero", "dm_delta_three"}:
+        before = _operation_response(transcript, "peer_before_dm")
+        capture = _operation_response(transcript, "peer_after_dm")
+        capture["snapshot"]["counters"]["rx_contact_total"] = (
+            before["snapshot"]["counters"]["rx_contact_total"]
+            + (0 if mutation == "dm_delta_zero" else 3)
+        )
+        _rehash_peer_capture(capture)
+    elif mutation.startswith("wrong_sender") or mutation.startswith(
+        "missing_sender"
+    ):
+        capture = _operation_response(transcript, "peer_after_public")
+        mesh = capture["snapshot"]["mesh"]
+        if mutation == "wrong_sender_source":
+            mesh["last_rx_sender_source"] = "untrusted_name"
+        elif mutation == "wrong_sender_name":
+            mesh["last_rx_sender_name"] = "not-D1L"
+        else:
+            mesh.pop("last_rx_sender_advert_timestamp")
+        _rehash_peer_capture(capture)
+    elif mutation == "listener_advert_shape":
+        advert = _operation_response(transcript, "peer_advert")
+        advert["response"]["result"] = {"sent": True, "flood": False}
+    elif mutation.startswith("resolve_"):
+        resolution = _operation_response(
+            transcript, "peer_resolve_d1l"
+        )["response"]["result"]
+        if mutation == "resolve_wrong_prefix":
+            resolution["public_key_prefix"] = "0" * 12
+        elif mutation == "resolve_not_unique":
+            resolution["unique"] = False
+        elif mutation == "resolve_timestamp_mismatch":
+            resolution["last_advert"] += 1
+        else:
+            d1l_advert = next(
+                step
+                for step in transcript["steps"]
+                if step["operation"] == "d1l_advert"
+            )
+            public_send = next(
+                step
+                for step in transcript["steps"]
+                if step["operation"] == "public_send"
+            )
+            d1l_advert["sequence"], public_send["sequence"] = (
+                public_send["sequence"],
+                d1l_advert["sequence"],
+            )
+    else:
+        contacts = _operation_response(transcript, "contacts")["entries"]
+        if mutation == "chat_peer_admin_capable":
+            contacts[0]["can_admin"] = True
+        elif mutation == "admin_not_admin_capable":
+            contacts[1]["can_admin"] = False
+        elif mutation == "chat_peer_not_signed":
+            contacts[0]["verification_source"] = "imported"
+        else:
+            contacts[1]["verification_source"] = "imported"
+
+    with pytest.raises(gate.EvidenceError):
+        validate(transcript, monkeypatch)
+
+
+def test_meshcorebot_capture_requires_exact_identity_and_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    status_path = tmp_path / "meshcorebot.status.json"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    status = {
+        "service": runner.MESHCOREBOT_PEER_SERVICE,
+        "pid": 19,
+        "started_at": now,
+        "status_written_at": now,
+        "serial": {
+            "active_port": runner.MESHCOREBOT_PEER_DEVICE,
+            "configured_port": runner.MESHCOREBOT_PEER_DEVICE,
+            "hardware_id": runner.MESHCOREBOT_HARDWARE_ID,
+            "baud_rate": runner.MESHCOREBOT_BAUD,
+            "meshcore_connected": True,
+        },
+        "discord": {"connected": True},
+        "mqtt": {
+            "device_public_key": runner.MESHCOREBOT_PEER_PUBLIC_KEY.upper()
+        },
+        "counters": {"rx_channel_total": 10, "rx_contact_total": 5},
+        "mesh": {"last_poll_at": now},
+    }
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+    monkeypatch.setattr(runner, "MESHCOREBOT_PEER_STATUS", status_path)
+
+    captured = runner.capture_peer_status(
+        status_path,
+        expected_public_key=runner.MESHCOREBOT_PEER_PUBLIC_KEY,
+        expected_device=runner.MESHCOREBOT_PEER_DEVICE,
+        expected_service=runner.MESHCOREBOT_PEER_SERVICE,
+        status_schema=runner.MESHCOREBOT_STATUS_SCHEMA,
+    )
+
+    assert runner.peer_session_identity(
+        captured, runner.MESHCOREBOT_STATUS_SCHEMA
+    ) == ("pid_started_at", 19, now)
+    assert (
+        runner.peer_counter(
+            captured, "rx_dm_total", runner.MESHCOREBOT_STATUS_SCHEMA
+        )
+        == 5
+    )
+
+    status["serial"]["active_port"] = "/dev/not-the-peer"
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+    with pytest.raises(runner.ProtocolAcceptanceError):
+        runner.capture_peer_status(
+            status_path,
+            expected_public_key=runner.MESHCOREBOT_PEER_PUBLIC_KEY,
+            expected_device=runner.MESHCOREBOT_PEER_DEVICE,
+            expected_service=runner.MESHCOREBOT_PEER_SERVICE,
+            status_schema=runner.MESHCOREBOT_STATUS_SCHEMA,
+        )
+
+
+def test_peer_status_json_array_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    status_path = tmp_path / "meshcorebot.status.json"
+    status_path.write_text("[]", encoding="ascii")
+    monkeypatch.setattr(runner, "MESHCOREBOT_PEER_STATUS", status_path)
+
+    with pytest.raises(runner.ProtocolAcceptanceError):
+        runner.capture_peer_status(
+            status_path,
+            expected_public_key=runner.MESHCOREBOT_PEER_PUBLIC_KEY,
+            expected_device=runner.MESHCOREBOT_PEER_DEVICE,
+            expected_service=runner.MESHCOREBOT_PEER_SERVICE,
+            status_schema=runner.MESHCOREBOT_STATUS_SCHEMA,
+        )
 
 
 @pytest.mark.parametrize(

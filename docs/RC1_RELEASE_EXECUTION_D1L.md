@@ -259,13 +259,28 @@ PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"
   --commit "$SHA" \
   --github-run-id "$RUN" \
   --github-run-attempt "$ATTEMPT" \
-  --peer-status /opt/canadaverse/com15-responder/data/radio_listener.status.json \
-  --peer-control-socket /run/canadaverse-control/com15/control.sock \
-  --peer-public-key 024999dedfd26763c5606169c3ebd34e05a9475cf78220a81078b5dd27caca44 \
+  --peer-status /opt/canadaverse/com11-meshcorebot/data/logs/meshcorebot.status.json \
+  --peer-control-socket /run/canadaverse-control/com11/control.sock \
+  --peer-public-key 0BF0A701D5AE2DB679C641EE999A70D4B55B61A2B77C47337CE35C16C9C19193 \
+  --peer-device /dev/krab-com11 \
+  --peer-service meshcorebot \
+  --peer-status-schema meshcorebot_v1 \
   --admin-fingerprint "$ADMIN_FINGERPRINT" \
   --admin-password-file "$ADMIN_PASSWORD_FILE" \
+  --boot-timeout 75 \
+  --command-timeout 30 \
   --authorize-public-tx
 ```
+
+The COM11 chat peer is exact and distinct from the repeater used for Admin:
+its status profile pins the service, stable device identity, public key,
+status path, control socket and status layout. Public and DM counters must
+advance under one stable Meshcorebot process session. `ADMIN_FINGERPRINT`
+must still resolve to a separate canonical repeater contact with Admin
+capability; never substitute the COM11 chat fingerprint for it.
+Before the single Public send, the runner queues one signed D1L flood advert
+and requires COM11 to resolve exactly one signed `D1L` contact to the current
+D1L key. The subsequent Public receive must reference that exact advert.
 
 ### Source 5: one saved-profile Wi-Fi reconnect cycle
 
