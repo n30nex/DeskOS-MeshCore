@@ -96,12 +96,64 @@ def write_sd_preparation(package: Path) -> dict:
     }
 
 
+def write_user_install(package: Path) -> dict:
+    payloads = {
+        "START_HERE_RC1.md": (
+            "# DeskOS D1L RC1 - Windows and Linux Install and Test\n"
+            f"commit {COMMIT}\n"
+            "GitHub Actions run and attempt: see `manifest.json`\n"
+            "prepare_sd_card.ps1 prepare_sd_card.sh\n"
+            "flash_rp2040.ps1 flash_rp2040.sh\n"
+            "flash_project.ps1 flash_project.sh\n"
+            "test_rc1.ps1 test_rc1.sh\n"
+            "Use a by-id path, never a raw tty path.\n"
+            "The test does not transmit RF or format storage.\n"
+        ).encode("ascii"),
+        "prepare_sd_card.ps1": b"# fixture\n",
+        "prepare_sd_card.sh": b"#!/usr/bin/env sh\n",
+        "flash_rp2040.ps1": b"# fixture\n",
+        "flash_rp2040.sh": b"#!/usr/bin/env sh\n",
+        "test_rc1.ps1": b"# fixture\n",
+        "test_rc1.sh": b"#!/usr/bin/env sh\n",
+        "scripts/flash_rp2040_sd_bridge_uf2.py": b"#!/usr/bin/env python3\n",
+        "scripts/test_rc1.py": b"#!/usr/bin/env python3\n",
+    }
+    bindings = {}
+    for relative, payload in payloads.items():
+        path = package / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        bindings[relative] = {
+            "size": path.stat().st_size,
+            "sha256": sha256(path),
+        }
+    for relative in ("flash_project.ps1", "flash_project.sh"):
+        path = package / relative
+        path.write_text("# fixture\n", encoding="ascii")
+    bridge = package / audit.RC1_RP2040_ARTIFACT["uf2"]
+    bridge.parent.mkdir(parents=True, exist_ok=True)
+    bridge.write_bytes(b"production bridge UF2 fixture")
+    return {
+        "schema": 1,
+        "guide": "START_HERE_RC1.md",
+        "windows": audit.RC1_WINDOWS_HELPERS,
+        "linux": audit.RC1_LINUX_HELPERS,
+        "shared": audit.RC1_SHARED_HELPERS,
+        "rp2040_artifact": audit.RC1_RP2040_ARTIFACT,
+        "no_sd_format": True,
+        "normal_esp32_flash_erases_flash": False,
+        "test_is_read_only": True,
+        "files": bindings,
+    }
+
+
 def valid_manifest(
     app_sha: str,
     app_size: int,
     *,
     package_name: str,
     sd_preparation: dict,
+    user_install: dict,
 ) -> dict:
     return {
         "schema": 2,
@@ -114,6 +166,7 @@ def valid_manifest(
         "supported_capabilities": ["sd_history"],
         "unavailable_capabilities": [],
         "sd_preparation": sd_preparation,
+        "user_install": user_install,
         "firmware_commit": COMMIT,
         "actions_run": RUN,
         "actions_run_attempt": ATTEMPT,
@@ -463,6 +516,7 @@ def release_fixture(
     app = firmware / audit.APP_NAME
     app.write_bytes(APP_BYTES)
     sd_preparation = write_sd_preparation(package)
+    user_install = write_user_install(package)
     write_json(
         package / "manifest.json",
         valid_manifest(
@@ -470,6 +524,7 @@ def release_fixture(
             app.stat().st_size,
             package_name=package.name,
             sd_preparation=sd_preparation,
+            user_install=user_install,
         ),
     )
     write_checksums(package)

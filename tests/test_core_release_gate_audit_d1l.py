@@ -19,6 +19,7 @@ COMMIT = "a" * 40
 RUN_ID = "123456789"
 RUN_ATTEMPT = "1"
 D1L_PUBLIC_KEY = audit.rf_acceptance.DEFAULT_D1L_PUBLIC_KEY
+CONTACT_PUBLIC_KEY = "1" * 64
 
 
 def d1l_identity_status(public_key: str = D1L_PUBLIC_KEY) -> dict:
@@ -139,7 +140,34 @@ def core_flash_retained_results(
             "schema": 1,
             "cmd": "contacts",
             "ok": True,
-            "entries": [{"fingerprint": "0123456789ABCDEF"}],
+            "entries": [
+                {
+                    "seq": 7,
+                    "fingerprint": CONTACT_PUBLIC_KEY[:16],
+                    "public_key": CONTACT_PUBLIC_KEY,
+                    "alias": "Test peer",
+                    "heard_name": "TestPeer",
+                    "type": "repeater",
+                    "verification_source": "signed_advert",
+                    "verified_at_ms": 1000,
+                    "signed_advert_timestamp": 100,
+                    "canonical": True,
+                    "can_dm": True,
+                    "can_admin": True,
+                    "favorite": False,
+                    "muted": False,
+                    "created_ms": 500,
+                    "last_heard_ms": 1000,
+                    "last_rssi_dbm": -60,
+                    "last_snr_tenths": 70,
+                    "out_path_known": True,
+                    "out_path_len": 1,
+                    "out_path_updated_ms": 1000,
+                    "path_hash_bytes": 1,
+                    "path_hops": "01",
+                    "updated_ms": 1000,
+                }
+            ],
         },
         identity,
     ]

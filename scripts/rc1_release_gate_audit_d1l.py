@@ -63,6 +63,57 @@ REQUIRED_SD_PREPARATION_PATHS = frozenset(
         "sdcard/deskos/map/tiles/README.txt",
     }
 )
+RC1_USER_INSTALL_FILES = frozenset(
+    {
+        "START_HERE_RC1.md",
+        "prepare_sd_card.ps1",
+        "prepare_sd_card.sh",
+        "flash_rp2040.ps1",
+        "flash_rp2040.sh",
+        "test_rc1.ps1",
+        "test_rc1.sh",
+        "scripts/flash_rp2040_sd_bridge_uf2.py",
+        "scripts/test_rc1.py",
+    }
+)
+RC1_USER_INSTALL_KEYS = frozenset(
+    {
+        "schema",
+        "guide",
+        "windows",
+        "linux",
+        "shared",
+        "rp2040_artifact",
+        "no_sd_format",
+        "normal_esp32_flash_erases_flash",
+        "test_is_read_only",
+        "files",
+    }
+)
+RC1_WINDOWS_HELPERS = {
+    "prepare_sd": "prepare_sd_card.ps1",
+    "flash_rp2040": "flash_rp2040.ps1",
+    "flash_esp32": "flash_project.ps1",
+    "test": "test_rc1.ps1",
+}
+RC1_LINUX_HELPERS = {
+    "prepare_sd": "prepare_sd_card.sh",
+    "flash_rp2040": "flash_rp2040.sh",
+    "flash_esp32": "flash_project.sh",
+    "test": "test_rc1.sh",
+}
+RC1_SHARED_HELPERS = {
+    "prepare_sd": SD_PREPARATION_SCRIPT,
+    "flash_rp2040": "scripts/flash_rp2040_sd_bridge_uf2.py",
+    "test": "scripts/test_rc1.py",
+}
+RC1_RP2040_ARTIFACT = {
+    "directory": "rp2040/rp2040-sd-bridge-firmware",
+    "uf2": (
+        "rp2040/rp2040-sd-bridge-firmware/"
+        "deskos_sd_bridge.ino.uf2"
+    ),
+}
 PHYSICAL_EVIDENCE_KIND = "d1l_rc1_bounded_physical_acceptance_evidence"
 PHYSICAL_EVIDENCE_KEYS = frozenset(
     {"schema", "kind", "receipt", "candidate", "sources", "coverage"}
@@ -456,6 +507,80 @@ def _file_inventory(root: Path) -> dict[str, tuple[int, str]] | None:
     return rows
 
 
+def rc1_user_install_contract(
+    package_dir: Path,
+    manifest: dict[str, Any],
+) -> bool:
+    user_install = manifest.get("user_install")
+    if not (
+        exact_keys(user_install, RC1_USER_INSTALL_KEYS)
+        and user_install.get("schema") == 1
+        and user_install.get("guide") == "START_HERE_RC1.md"
+        and user_install.get("windows") == RC1_WINDOWS_HELPERS
+        and user_install.get("linux") == RC1_LINUX_HELPERS
+        and user_install.get("shared") == RC1_SHARED_HELPERS
+        and user_install.get("rp2040_artifact") == RC1_RP2040_ARTIFACT
+        and user_install.get("no_sd_format") is True
+        and user_install.get("normal_esp32_flash_erases_flash") is False
+        and user_install.get("test_is_read_only") is True
+        and isinstance(user_install.get("files"), dict)
+        and set(user_install["files"]) == RC1_USER_INSTALL_FILES
+    ):
+        return False
+
+    for relative, binding in user_install["files"].items():
+        if not exact_keys(binding, frozenset({"size", "sha256"})):
+            return False
+        path = safe_package_file(package_dir, relative)
+        expected = exact_sha(binding.get("sha256"))
+        try:
+            if not (
+                path is not None
+                and path.is_file()
+                and type(binding.get("size")) is int
+                and binding["size"] > 0
+                and path.stat().st_size == binding["size"]
+                and expected is not None
+                and sha256_file(path) == expected
+            ):
+                return False
+        except OSError:
+            return False
+
+    referenced = {
+        *RC1_WINDOWS_HELPERS.values(),
+        *RC1_LINUX_HELPERS.values(),
+        *RC1_SHARED_HELPERS.values(),
+        RC1_RP2040_ARTIFACT["uf2"],
+    }
+    if any(safe_package_file(package_dir, relative) is None for relative in referenced):
+        return False
+
+    guide = safe_package_file(package_dir, "START_HERE_RC1.md")
+    if guide is None:
+        return False
+    try:
+        guide_text = guide.read_text(encoding="ascii")
+    except (OSError, UnicodeError):
+        return False
+    required_guide_text = (
+        "# DeskOS D1L RC1 - Windows and Linux Install and Test",
+        str(manifest.get("firmware_commit")),
+        "GitHub Actions run and attempt: see `manifest.json`",
+        "prepare_sd_card.ps1",
+        "prepare_sd_card.sh",
+        "flash_rp2040.ps1",
+        "flash_rp2040.sh",
+        "flash_project.ps1",
+        "flash_project.sh",
+        "test_rc1.ps1",
+        "test_rc1.sh",
+        "never a raw",
+        "does not transmit RF or format storage",
+    )
+    return all(value in guide_text for value in required_guide_text)
+
+
 def sd_primary_package_contract(
     package_dir: Path, manifest: dict[str, Any]
 ) -> bool:
@@ -490,6 +615,7 @@ def sd_primary_package_contract(
         and preparation.get("filesystem") == "FAT32"
         and preparation.get("formats_sd") is False
         and isinstance(preparation.get("files"), list)
+        and rc1_user_install_contract(package_dir, manifest)
     ):
         return False
 

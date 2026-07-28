@@ -2,6 +2,8 @@ import copy
 import json
 import os
 import re
+import subprocess
+import sys
 import types
 from pathlib import Path
 
@@ -21,6 +23,8 @@ from tests.test_package_release_d1l import (
     write_fake_notices,
     write_fake_rp2040_artifacts,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_generated_flash_runner(package: Path) -> types.ModuleType:
@@ -548,6 +552,104 @@ def test_core_supported_optional_package_requires_paired_rp2040(
             release_profile="core_1_0",
             sd_history_mode="supported_optional",
         )
+
+
+def test_core_conditional_package_includes_windows_linux_rc1_helpers(
+    tmp_path, monkeypatch
+):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    write_fake_config(tmp_path)
+    rp2040 = write_fake_rp2040_artifacts(tmp_path)
+    bridge_dir = rp2040 / "rp2040-sd-bridge-firmware"
+    old_bridge = bridge_dir / "rp2040-sd-bridge-firmware.uf2"
+    bridge = bridge_dir / "deskos_sd_bridge.ino.uf2"
+    old_bridge.rename(bridge)
+    (bridge_dir / "SHA256SUMS.txt").write_text(
+        f"{package_release_d1l.sha256_file(bridge)}  ./{bridge.name}\n",
+        encoding="ascii",
+    )
+    prepare = tmp_path / "scripts" / "prepare_deskos_sd.py"
+    prepare.write_text(
+        (ROOT / "scripts" / "prepare_deskos_sd.py").read_text(encoding="ascii"),
+        encoding="ascii",
+    )
+    sd_manifest = tmp_path / "sdcard" / "deskos" / "manifest.json"
+    sd_manifest.parent.mkdir(parents=True)
+    sd_manifest.write_text('{"schema":1}\n', encoding="ascii")
+
+    commit = "d" * 40
+    monkeypatch.setenv("GITHUB_SHA", commit)
+    monkeypatch.setenv("GITHUB_RUN_ID", "345678901")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/SIGUI")
+    monkeypatch.setenv("GITHUB_WORKFLOW", "d1l-ci")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    install_fake_source_identity(monkeypatch, commit)
+
+    manifest = package_release_d1l.create_release_package(
+        root=tmp_path,
+        build_dir=build,
+        out_dir=tmp_path / "release",
+        package_name="core-conditional",
+        full_size=0x20000,
+        rp2040_artifact_root=rp2040,
+        release_profile="core_1_0",
+        sd_history_mode="conditional",
+    )
+
+    package = tmp_path / "release" / "core-conditional"
+    user_install = manifest["user_install"]
+    assert user_install["guide"] == "START_HERE_RC1.md"
+    assert user_install["windows"] == {
+        "prepare_sd": "prepare_sd_card.ps1",
+        "flash_rp2040": "flash_rp2040.ps1",
+        "flash_esp32": "flash_project.ps1",
+        "test": "test_rc1.ps1",
+    }
+    assert user_install["linux"] == {
+        "prepare_sd": "prepare_sd_card.sh",
+        "flash_rp2040": "flash_rp2040.sh",
+        "flash_esp32": "flash_project.sh",
+        "test": "test_rc1.sh",
+    }
+    assert set(user_install["files"]) == set(
+        package_release_d1l.RC1_USER_INSTALL_FILES
+    )
+    for relative, binding in user_install["files"].items():
+        path = package / relative
+        assert path.is_file()
+        assert path.stat().st_size == binding["size"]
+        assert package_release_d1l.sha256_file(path) == binding["sha256"]
+    for relative in (
+        "prepare_sd_card.sh",
+        "flash_rp2040.sh",
+        "test_rc1.sh",
+    ):
+        assert os.access(package / relative, os.X_OK)
+
+    guide = (package / "START_HERE_RC1.md").read_text(encoding="ascii")
+    assert commit in guide
+    assert "GitHub Actions run and attempt: see `manifest.json`" in guide
+    assert "## 1. Prepare the microSD card" in guide
+    assert "## 2. Flash the RP2040 SD-bridge side" in guide
+    assert "## 4. Flash the ESP32 main GUI side" in guide
+    assert "## 5. Run the read-only RC1 test" in guide
+    assert "does not transmit RF or format storage" in guide
+    assert verify_checksum_tree(package) is True
+
+    verified = subprocess.run(
+        [sys.executable, package / "scripts" / "test_rc1.py", "--verify-only"],
+        cwd=package,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert verified.returncode == 0, verified.stderr
+    assert f"commit={commit}" in verified.stdout
+    assert "run=345678901/2" in verified.stdout
 
 
 def test_rc1_conditional_capability_truth_matches_production_surface():
