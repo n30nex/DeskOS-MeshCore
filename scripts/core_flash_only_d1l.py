@@ -123,6 +123,32 @@ RETAINED_STATE_COMMANDS = (
     "messages dm",
     "identity status",
 )
+CONTACT_RETENTION_REQUIRED_FIELDS = frozenset(
+    {
+        "alias",
+        "created_ms",
+        "favorite",
+        "fingerprint",
+        "muted",
+        "public_key",
+    }
+)
+CONTACT_RETENTION_VOLATILE_FIELDS = frozenset(
+    {
+        "last_heard_ms",
+        "last_rssi_dbm",
+        "last_snr_tenths",
+        "out_path_known",
+        "out_path_len",
+        "out_path_updated_ms",
+        "path_hash_bytes",
+        "path_hops",
+        "seq",
+        "signed_advert_timestamp",
+        "updated_ms",
+        "verified_at_ms",
+    }
+)
 EXPECTED_D1L_ROLE = "desk_companion"
 FLASH_PHASE_BOOTSTRAP = "bootstrap"
 FLASH_PHASE_RETAINED_REFLASH = "retained-reflash"
@@ -904,6 +930,50 @@ def projection_sha256(projection: dict) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def contact_retention_projection(rows: object) -> dict[str, dict] | None:
+    """Key contacts by identity while excluding only live RF observations.
+
+    All unlisted fields remain part of the comparison so aliases, user flags,
+    capabilities, and future schema additions still fail closed on mutation.
+    """
+    if not isinstance(rows, list):
+        return None
+    projected: dict[str, dict] = {}
+    required_fields = (
+        CONTACT_RETENTION_REQUIRED_FIELDS
+        | CONTACT_RETENTION_VOLATILE_FIELDS
+    )
+    for row in rows:
+        if not isinstance(row, dict) or not required_fields.issubset(row):
+            return None
+        public_key = exact_public_key(row.get("public_key"))
+        fingerprint = row.get("fingerprint")
+        alias = row.get("alias")
+        created_ms = row.get("created_ms")
+        if (
+            public_key is None
+            or not isinstance(fingerprint, str)
+            or fingerprint.strip().lower() != public_key[:16]
+            or public_key in projected
+            or not isinstance(alias, str)
+            or not isinstance(row.get("favorite"), bool)
+            or not isinstance(row.get("muted"), bool)
+            or isinstance(created_ms, bool)
+            or not isinstance(created_ms, int)
+            or created_ms < 0
+        ):
+            return None
+        stable = {
+            key: value
+            for key, value in row.items()
+            if key not in CONTACT_RETENTION_VOLATILE_FIELDS
+        }
+        stable["public_key"] = public_key
+        stable["fingerprint"] = public_key[:16]
+        projected[public_key] = stable
+    return projected
+
+
 def retained_state_preserved(before: dict, after: dict) -> bool:
     if (
         before.get("settings") != after.get("settings")
@@ -911,7 +981,7 @@ def retained_state_preserved(before: dict, after: dict) -> bool:
         != after.get("identity_public_key")
     ):
         return False
-    for field in ("public_messages", "direct_messages", "contacts"):
+    for field in ("public_messages", "direct_messages"):
         before_rows = {
             json.dumps(row, sort_keys=True, separators=(",", ":"))
             for row in before.get(field, [])
@@ -921,6 +991,13 @@ def retained_state_preserved(before: dict, after: dict) -> bool:
             for row in after.get(field, [])
         }
         if not before_rows.issubset(after_rows):
+            return False
+    before_contacts = contact_retention_projection(before.get("contacts"))
+    after_contacts = contact_retention_projection(after.get("contacts"))
+    if before_contacts is None or after_contacts is None:
+        return False
+    for public_key, before_contact in before_contacts.items():
+        if after_contacts.get(public_key) != before_contact:
             return False
     return True
 

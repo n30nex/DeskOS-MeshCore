@@ -11,6 +11,7 @@ COMMIT = "a" * 40
 RUN_ID = "123456789"
 RUN_ATTEMPT = "1"
 PUBLIC_KEY = "f" * 64
+CONTACT_PUBLIC_KEY = "1" * 64
 POSIX_PORT = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
 
 
@@ -121,6 +122,37 @@ def test_read_retained_state_retries_timeout_on_open_handle(
     ]
 
 
+def retained_contact(**overrides) -> dict:
+    row = {
+        "seq": 7,
+        "fingerprint": CONTACT_PUBLIC_KEY[:16],
+        "public_key": CONTACT_PUBLIC_KEY,
+        "alias": "Test peer",
+        "heard_name": "TestPeer",
+        "type": "repeater",
+        "verification_source": "signed_advert",
+        "verified_at_ms": 1000,
+        "signed_advert_timestamp": 100,
+        "canonical": True,
+        "can_dm": True,
+        "can_admin": True,
+        "favorite": False,
+        "muted": False,
+        "created_ms": 500,
+        "last_heard_ms": 1000,
+        "last_rssi_dbm": -60,
+        "last_snr_tenths": 70,
+        "out_path_known": True,
+        "out_path_len": 1,
+        "out_path_updated_ms": 1000,
+        "path_hash_bytes": 1,
+        "path_hops": "01",
+        "updated_ms": 1000,
+    }
+    row.update(overrides)
+    return row
+
+
 def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
     return [
         {
@@ -165,7 +197,7 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
             "schema": 1,
             "cmd": "contacts",
             "ok": True,
-            "entries": [{"fingerprint": "0123456789ABCDEF"}],
+            "entries": [retained_contact()],
         },
         {
             "schema": 1,
@@ -177,6 +209,87 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
             "role": "desk_companion",
         },
     ]
+
+
+def test_retained_state_allows_live_contact_advert_refresh():
+    before = flash.retained_state_projection(retained_state())
+    refreshed = retained_state()
+    contact = next(
+        row for row in refreshed if row.get("cmd") == "contacts"
+    )["entries"][0]
+    contact.update(
+        {
+            "seq": 9,
+            "verified_at_ms": 2000,
+            "signed_advert_timestamp": 200,
+            "last_heard_ms": 20,
+            "last_rssi_dbm": -55,
+            "last_snr_tenths": 80,
+            "out_path_known": True,
+            "out_path_len": 2,
+            "out_path_updated_ms": 2000,
+            "path_hash_bytes": 2,
+            "path_hops": "0102",
+            "updated_ms": 2000,
+        }
+    )
+    after = flash.retained_state_projection(refreshed)
+
+    assert before is not None
+    assert after is not None
+    assert before != after
+    assert flash.retained_state_preserved(before, after) is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("alias", "Changed alias"),
+        ("favorite", True),
+        ("muted", True),
+        ("created_ms", 501),
+        ("canonical", False),
+    ],
+)
+def test_retained_state_rejects_contact_identity_or_user_state_loss(
+    field,
+    value,
+):
+    before = flash.retained_state_projection(retained_state())
+    changed = retained_state()
+    contact = next(
+        row for row in changed if row.get("cmd") == "contacts"
+    )["entries"][0]
+    contact[field] = value
+    after = flash.retained_state_projection(changed)
+
+    assert before is not None
+    assert after is not None
+    assert flash.retained_state_preserved(before, after) is False
+
+
+def test_retained_state_rejects_missing_or_malformed_contact_identity():
+    before = flash.retained_state_projection(retained_state())
+    missing = retained_state()
+    next(row for row in missing if row.get("cmd") == "contacts")[
+        "entries"
+    ] = []
+    malformed = retained_state()
+    next(row for row in malformed if row.get("cmd") == "contacts")[
+        "entries"
+    ][0]["fingerprint"] = "0" * 16
+
+    assert before is not None
+    missing_projection = flash.retained_state_projection(missing)
+    malformed_projection = flash.retained_state_projection(malformed)
+    assert missing_projection is not None
+    assert malformed_projection is not None
+    assert (
+        flash.retained_state_preserved(before, missing_projection) is False
+    )
+    assert (
+        flash.retained_state_preserved(before, malformed_projection) is False
+    )
 
 
 def target_kwargs():
