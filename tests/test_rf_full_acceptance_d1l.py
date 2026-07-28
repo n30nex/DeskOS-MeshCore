@@ -2078,6 +2078,176 @@ def meshcorebot_status(observed: datetime) -> dict:
     }
 
 
+def build_meshcorebot_report(
+    *,
+    peer_before: dict,
+    peer_after: dict,
+    peer_before_receipt: dict | None,
+    peer_after_receipt: dict | None,
+    remote_control: dict | None = None,
+) -> dict:
+    return rf_accept.build_report(
+        port="COM12",
+        **windows_target_pair(),
+        baud=115200,
+        peer_status_path=rf_accept.MESHCOREBOT_PEER_STATUS_PATH,
+        peer_port=rf_accept.MESHCOREBOT_PEER_DEVICE,
+        fingerprint=rf_accept.MESHCOREBOT_PEER_FINGERPRINT,
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="rf_meshcorebot",
+        send_outbound=False,
+        steps=[],
+        peer_before=peer_before,
+        peer_after=peer_after,
+        inbound_seen_at=None,
+        peer_before_receipt=peer_before_receipt,
+        peer_after_receipt=peer_after_receipt,
+        remote_control=remote_control,
+    )
+
+
+def test_meshcorebot_report_uses_each_snapshot_capture_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    before_captured_at = datetime(
+        2026, 7, 26, 7, 15, tzinfo=timezone.utc
+    )
+    after_captured_at = datetime(
+        2026, 7, 26, 19, 31, tzinfo=timezone.utc
+    )
+    observed_at_calls = []
+    original = rf_accept.meshcorebot_peer_connected
+
+    def capture_observed_at(
+        status,
+        peer_identity,
+        fingerprint,
+        *,
+        observed_at=None,
+    ):
+        observed_at_calls.append(observed_at)
+        return original(
+            status,
+            peer_identity,
+            fingerprint,
+            observed_at=observed_at,
+        )
+
+    monkeypatch.setattr(
+        rf_accept, "meshcorebot_peer_connected", capture_observed_at
+    )
+    report = build_meshcorebot_report(
+        peer_before=meshcorebot_status(before_captured_at),
+        peer_after=meshcorebot_status(after_captured_at),
+        peer_before_receipt={
+            "captured_at": before_captured_at.isoformat()
+        },
+        peer_after_receipt={
+            "captured_at": after_captured_at.isoformat()
+        },
+    )
+
+    assert report["checks"]["controlled_peer_status_connected"] is True
+    assert observed_at_calls == [before_captured_at, after_captured_at]
+
+
+@pytest.mark.parametrize(
+    ("peer_before_receipt", "peer_after_receipt"),
+    [
+        (
+            None,
+            {"captured_at": "2026-07-26T19:31:00+00:00"},
+        ),
+        (
+            {"captured_at": "not-a-timestamp"},
+            {"captured_at": "2026-07-26T19:31:00+00:00"},
+        ),
+        (
+            {"captured_at": "2026-07-26T07:15:00+00:00"},
+            {"captured_at": "2026-07-26T19:31:00"},
+        ),
+    ],
+)
+def test_meshcorebot_report_rejects_missing_or_invalid_snapshot_capture_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+    peer_before_receipt,
+    peer_after_receipt,
+):
+    before_captured_at = datetime(
+        2026, 7, 26, 7, 15, tzinfo=timezone.utc
+    )
+    after_captured_at = datetime(
+        2026, 7, 26, 19, 31, tzinfo=timezone.utc
+    )
+
+    def unexpected_wall_clock_fallback(*_args, **_kwargs):
+        pytest.fail(
+            "Meshcorebot status must not fall back to the final wall clock"
+        )
+
+    monkeypatch.setattr(
+        rf_accept,
+        "meshcorebot_peer_connected",
+        unexpected_wall_clock_fallback,
+    )
+    report = build_meshcorebot_report(
+        peer_before=meshcorebot_status(before_captured_at),
+        peer_after=meshcorebot_status(after_captured_at),
+        peer_before_receipt=peer_before_receipt,
+        peer_after_receipt=peer_after_receipt,
+    )
+
+    assert report["checks"]["controlled_peer_status_connected"] is False
+
+
+def test_meshcorebot_deadline_observation_uses_after_capture_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    before_captured_at = datetime(
+        2026, 7, 26, 7, 15, tzinfo=timezone.utc
+    )
+    after_captured_at = datetime(
+        2026, 7, 26, 19, 31, tzinfo=timezone.utc
+    )
+    observed_at_calls = []
+
+    monkeypatch.setattr(
+        rf_accept,
+        "remote_control_deadline_only_ok",
+        lambda *_args, **_kwargs: True,
+    )
+
+    def capture_deadline_observation(**kwargs):
+        observed_at_calls.append(kwargs["observed_at"])
+        return {
+            "ok": False,
+            "observed_at": kwargs["observed_at"].isoformat(),
+        }
+
+    monkeypatch.setattr(
+        rf_accept,
+        "d1l_deadline_delivery_observation",
+        capture_deadline_observation,
+    )
+    report = build_meshcorebot_report(
+        peer_before=meshcorebot_status(before_captured_at),
+        peer_after=meshcorebot_status(after_captured_at),
+        peer_before_receipt={
+            "captured_at": before_captured_at.isoformat()
+        },
+        peer_after_receipt={
+            "captured_at": after_captured_at.isoformat()
+        },
+        remote_control={},
+    )
+
+    assert observed_at_calls == [after_captured_at]
+    assert report["controlled_peer_delivery_observation"] == {
+        "ok": False,
+        "observed_at": after_captured_at.isoformat(),
+    }
+
+
 def test_exact_meshcorebot_status_and_signed_contact_are_required():
     observed = datetime(2026, 7, 26, 7, 15, tzinfo=timezone.utc)
     status = meshcorebot_status(observed)

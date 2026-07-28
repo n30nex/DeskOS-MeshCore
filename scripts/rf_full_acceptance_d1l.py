@@ -3909,6 +3909,16 @@ def build_report(
     remote_config = local_config or ssh_config
     local_mode = local_config is not None
     remote_mode = remote_config is not None
+    peer_before_captured_at = parse_aware_timestamp(
+        peer_before_receipt.get("captured_at")
+        if isinstance(peer_before_receipt, dict)
+        else None
+    )
+    peer_after_captured_at = parse_aware_timestamp(
+        peer_after_receipt.get("captured_at")
+        if isinstance(peer_after_receipt, dict)
+        else None
+    )
     listener_mode = remote_mode or (
         peer_port == RADIO_LISTENER_PORT
         and (
@@ -4068,14 +4078,21 @@ def build_report(
     else:
         remote_flow = None
         if peer_port == MESHCOREBOT_PEER_DEVICE:
-            peer_status_ok = meshcorebot_peer_connected(
-                peer_before,
-                peer_port,
-                fingerprint,
-            ) and meshcorebot_peer_connected(
-                peer_after,
-                peer_port,
-                fingerprint,
+            peer_status_ok = bool(
+                peer_before_captured_at is not None
+                and peer_after_captured_at is not None
+                and meshcorebot_peer_connected(
+                    peer_before,
+                    peer_port,
+                    fingerprint,
+                    observed_at=peer_before_captured_at,
+                )
+                and meshcorebot_peer_connected(
+                    peer_after,
+                    peer_port,
+                    fingerprint,
+                    observed_at=peer_after_captured_at,
+                )
             )
         else:
             peer_status_ok = (
@@ -4148,6 +4165,7 @@ def build_report(
     delivery_observation = None
     if (
         peer_port == MESHCOREBOT_PEER_DEVICE
+        and peer_after_captured_at is not None
         and remote_control_deadline_only_ok(
             remote_control,
             d1l_public_key=public_key,
@@ -4163,7 +4181,7 @@ def build_report(
             fingerprint=fingerprint,
             d1l_public_key=public_key,
             token=inbound_token,
-            observed_at=datetime.now(timezone.utc),
+            observed_at=peer_after_captured_at,
         )
     meshcorebot_control_ok = (
         (
