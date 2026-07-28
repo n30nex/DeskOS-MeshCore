@@ -182,20 +182,30 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
             "result": d1l_identity_status(),
         },
         {
-            "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
-            "result": {"ok": True, "cmd": "mesh send dm"},
-        },
-        {
-            "command": "packets search rf_unit_out",
-            "result": {"ok": True, "cmd": "packets search", "entries": [{"note": "rf_unit_out"}]},
-        },
-        {
             "command": "messages dm 0BF0A701D5AE2DB6",
             "result": {
                 "ok": True,
                 "cmd": "messages dm",
                 "fingerprint": "0bf0a701d5ae2db6",
-                "entries": [{"direction": "rx", "text": "rf_unit_in"}],
+                "entries": [
+                    {
+                        "seq": 1,
+                        "direction": "rx",
+                        "text": "older message",
+                    }
+                ],
+            },
+        },
+        {
+            "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
+            "result": {"ok": True, "cmd": "mesh send dm"},
+        },
+        {
+            "command": "packets search rf_unit_out",
+            "result": {
+                "ok": True,
+                "cmd": "packets search",
+                "entries": [],
             },
         },
         {
@@ -222,18 +232,27 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
                 "fingerprint": "0bf0a701d5ae2db6",
                 "entries": [
                     {
+                        "seq": 1,
+                        "direction": "rx",
+                        "text": "older message",
+                    },
+                    {
+                        "seq": 2,
                         "fingerprint": "0bf0a701d5ae2db6",
                         "direction": "tx",
                         "text": "rf_unit_out",
+                        "delivered": True,
                         "acked": True,
                         "ack_hash": 4815162342,
                     },
                     {
+                        "seq": 3,
                         "fingerprint": "0bf0a701d5ae2db6",
                         "direction": "rx",
                         "text": "rf_unit_in",
                     },
                     {
+                        "seq": 4,
                         "fingerprint": "0bf0a701d5ae2db6",
                         "direction": "tx",
                         "text": "rf_unit_direct",
@@ -295,6 +314,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
     )
 
     assert report["ok"] is True
+    assert report["checks"]["outbound_dm"] is True
     assert report["schema"] == rf_accept.RF_FULL_ACCEPTANCE_SCHEMA == 2
     assert report["hardware_required"] is True
     assert report["physical_observed"] is True
@@ -490,6 +510,7 @@ def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
     )
 
     assert report["ok"] is False
+    assert report["checks"]["outbound_dm"] is False
     assert report["checks"]["inbound_dm"] is True
     assert report["checks"]["ack_path"] is False
     assert report["checks"]["direct_route"] is True
@@ -512,8 +533,22 @@ def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
         send_outbound=True,
         steps=[
             {"command": "identity status", "result": d1l_identity_status()},
-            {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out", "result": {"ok": True}},
-            {"command": "packets search rf_unit_out", "result": {"ok": True, "entries": [{"note": "rf_unit_out"}]}},
+            {
+                "command": "messages dm 0BF0A701D5AE2DB6",
+                "result": {
+                    "ok": True,
+                    "fingerprint": "0BF0A701D5AE2DB6",
+                    "entries": [],
+                },
+            },
+            {
+                "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
+                "result": {"ok": True},
+            },
+            {
+                "command": "packets search rf_unit_out",
+                "result": {"ok": True, "entries": []},
+            },
             {
                 "command": "routes trace 0BF0A701D5AE2DB6",
                 "result": {
@@ -530,13 +565,23 @@ def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
                     "fingerprint": "0BF0A701D5AE2DB6",
                     "entries": [
                         {
+                            "seq": 1,
                             "direction": "tx",
                             "text": "rf_unit_out",
+                            "delivered": True,
                             "acked": True,
                             "ack_hash": 4815162342,
                         },
-                        {"direction": "rx", "text": "rf_unit_in"},
-                        {"direction": "tx", "text": "rf_unit_direct"},
+                        {
+                            "seq": 2,
+                            "direction": "rx",
+                            "text": "rf_unit_in",
+                        },
+                        {
+                            "seq": 3,
+                            "direction": "tx",
+                            "text": "rf_unit_direct",
+                        },
                     ],
                 },
             },
