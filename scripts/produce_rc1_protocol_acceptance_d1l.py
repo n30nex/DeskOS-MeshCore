@@ -662,6 +662,73 @@ def poll(
     raise ProtocolAcceptanceError(f"timed out waiting for {label}: {last}")
 
 
+def authenticate_admin_session(
+    command: Callable[..., dict[str, Any]],
+    *,
+    login_wire_command: str,
+    redacted_login_command: str,
+    admin_fingerprint: str,
+    timeout: float,
+    interval: float,
+    poll_function: Callable[..., dict[str, Any]] = poll,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    def authenticated(result: dict[str, Any]) -> bool:
+        return bool(
+            result.get("state") == "authenticated"
+            and str(result.get("fingerprint") or "").upper()
+            == admin_fingerprint
+            and result.get("credential_exposed") is False
+            and result.get("session_secret_exposed") is False
+        )
+
+    for attempt in range(2):
+        login_request = command(
+            login_wire_command,
+            failure_label=redacted_login_command,
+        )
+        try:
+            login_status = poll_function(
+                lambda: command("admin status"),
+                authenticated,
+                timeout=timeout,
+                interval=interval,
+                label="authenticated repeater session",
+            )
+            return login_request, login_status
+        except ProtocolAcceptanceError as exc:
+            if not str(exc).startswith(
+                "timed out waiting for authenticated repeater session:"
+            ):
+                raise
+            terminal_status = command("admin status")
+            if response_booted(terminal_status):
+                raise ProtocolAcceptanceError(
+                    "device rebooted while confirming admin timeout"
+                ) from exc
+            if authenticated(terminal_status):
+                return login_request, terminal_status
+            retryable_timeout = bool(
+                terminal_status.get("ok") is True
+                and terminal_status.get("cmd") == "admin status"
+                and terminal_status.get("state") == "timed_out"
+                and str(terminal_status.get("fingerprint") or "").upper()
+                == admin_fingerprint
+                and terminal_status.get("last_error") == "ESP_ERR_TIMEOUT"
+                and terminal_status.get("credential_exposed") is False
+                and terminal_status.get("session_secret_exposed") is False
+            )
+            if attempt != 0 or not retryable_timeout:
+                raise
+            print(
+                "bounded admin login retry after exact timed_out state",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(interval)
+
+    raise AssertionError("bounded admin login attempts exhausted")
+
+
 def _safe_new_output(path: Path) -> Path:
     output = Path(path).resolve(strict=False)
     if output.exists() or os.path.lexists(output):
@@ -853,7 +920,7 @@ def execute(
         baudrate=baud,
         timeout=command_timeout,
     ) as ser:
-        boot_health = wait_for_console_ready(
+        wait_for_console_ready(
             ser,
             boot_timeout,
             command_timeout,
@@ -870,6 +937,8 @@ def execute(
             )
 
         version = _step(steps, "version", "version", command("version"))
+        if version.get("cmd") != "version":
+            raise ProtocolAcceptanceError("version response command changed")
         identity = _step(
             steps, "identity", "identity status", command("identity status")
         )
@@ -1095,28 +1164,19 @@ def execute(
         redacted_login_command = (
             f"admin login {admin_fingerprint} <redacted>"
         )
-        login_request = command(
-            login_wire_command,
-            failure_label=redacted_login_command,
+        login_request, admin_login_status = authenticate_admin_session(
+            command,
+            login_wire_command=login_wire_command,
+            redacted_login_command=redacted_login_command,
+            admin_fingerprint=admin_fingerprint,
+            timeout=rf_timeout,
+            interval=poll_interval,
         )
         _step(
             steps,
             "admin_login_request",
             redacted_login_command,
             login_request,
-        )
-        admin_login_status = poll(
-            lambda: command("admin status"),
-            lambda result: (
-                result.get("state") == "authenticated"
-                and str(result.get("fingerprint") or "").upper()
-                == admin_fingerprint
-                and result.get("credential_exposed") is False
-                and result.get("session_secret_exposed") is False
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="authenticated repeater session",
         )
         _step(
             steps,
@@ -1262,9 +1322,7 @@ def execute(
         health_after = _step(
             steps, "health_after", "health", command("health")
         )
-        crashlog = _step(
-            steps, "crashlog", "crashlog", command("crashlog")
-        )
+        _step(steps, "crashlog", "crashlog", command("crashlog"))
 
     d1l_target_after = resolve_target(
         POSIX_D1L_TARGET,

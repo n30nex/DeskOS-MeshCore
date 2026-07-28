@@ -988,6 +988,200 @@ def test_public_tx_requires_explicit_operator_authorization():
     assert runner.require_public_tx_authorization(True) is None
 
 
+def test_admin_session_retries_once_after_exact_timeout(capsys):
+    wire = f"admin login {ADMIN_FP} private-login"
+    redacted = f"admin login {ADMIN_FP} <redacted>"
+    calls = []
+    poll_calls = 0
+
+    def command(value, *, failure_label=None):
+        calls.append((value, failure_label))
+        if value.startswith("admin login "):
+            return {
+                "ok": True,
+                "cmd": "admin login",
+                "state": "login_pending",
+                "attempt": sum(
+                    call[0].startswith("admin login ") for call in calls
+                ),
+            }
+        assert value == "admin status"
+        return {
+            "ok": True,
+            "cmd": "admin status",
+            "state": "timed_out",
+            "fingerprint": ADMIN_FP.lower(),
+            "last_error": "ESP_ERR_TIMEOUT",
+            "credential_exposed": False,
+            "session_secret_exposed": False,
+        }
+
+    def poll_function(*_args, **_kwargs):
+        nonlocal poll_calls
+        poll_calls += 1
+        if poll_calls == 1:
+            raise runner.ProtocolAcceptanceError(
+                "timed out waiting for authenticated repeater session: {}"
+            )
+        return {
+            "ok": True,
+            "cmd": "admin status",
+            "state": "authenticated",
+            "fingerprint": ADMIN_FP.lower(),
+            "credential_exposed": False,
+            "session_secret_exposed": False,
+        }
+
+    login, status = runner.authenticate_admin_session(
+        command,
+        login_wire_command=wire,
+        redacted_login_command=redacted,
+        admin_fingerprint=ADMIN_FP,
+        timeout=1.0,
+        interval=0.0,
+        poll_function=poll_function,
+    )
+
+    assert login["attempt"] == 2
+    assert status["state"] == "authenticated"
+    assert poll_calls == 2
+    assert calls == [
+        (wire, redacted),
+        ("admin status", None),
+        (wire, redacted),
+    ]
+    captured = capsys.readouterr()
+    assert "bounded admin login retry" in captured.err
+    assert "private-login" not in captured.err
+
+
+def test_admin_session_accepts_late_authenticated_terminal_without_retry():
+    wire = f"admin login {ADMIN_FP} private-login"
+    calls = []
+
+    def command(value, *, failure_label=None):
+        calls.append((value, failure_label))
+        if value.startswith("admin login "):
+            return {"ok": True, "cmd": "admin login"}
+        return {
+            "ok": True,
+            "cmd": "admin status",
+            "state": "authenticated",
+            "fingerprint": ADMIN_FP.lower(),
+            "credential_exposed": False,
+            "session_secret_exposed": False,
+        }
+
+    def poll_function(*_args, **_kwargs):
+        raise runner.ProtocolAcceptanceError(
+            "timed out waiting for authenticated repeater session: {}"
+        )
+
+    _login, status = runner.authenticate_admin_session(
+        command,
+        login_wire_command=wire,
+        redacted_login_command=f"admin login {ADMIN_FP} <redacted>",
+        admin_fingerprint=ADMIN_FP,
+        timeout=1.0,
+        interval=0.0,
+        poll_function=poll_function,
+    )
+
+    assert status["state"] == "authenticated"
+    assert [value for value, _label in calls] == [wire, "admin status"]
+
+
+@pytest.mark.parametrize(
+    ("state", "last_error", "credential_exposed"),
+    [
+        ("rejected", "ESP_ERR_INVALID_STATE", False),
+        ("timed_out", "ESP_ERR_TIMEOUT", True),
+        ("timed_out", "ESP_ERR_INVALID_STATE", False),
+    ],
+)
+def test_admin_session_does_not_retry_unapproved_terminal_state(
+    state: str,
+    last_error: str,
+    credential_exposed: bool,
+):
+    wire = f"admin login {ADMIN_FP} private-login"
+    calls = []
+
+    def command(value, *, failure_label=None):
+        calls.append((value, failure_label))
+        if value.startswith("admin login "):
+            return {"ok": True, "cmd": "admin login"}
+        return {
+            "ok": True,
+            "cmd": "admin status",
+            "state": state,
+            "fingerprint": ADMIN_FP.lower(),
+            "last_error": last_error,
+            "credential_exposed": credential_exposed,
+            "session_secret_exposed": False,
+        }
+
+    def poll_function(*_args, **_kwargs):
+        raise runner.ProtocolAcceptanceError(
+            "timed out waiting for authenticated repeater session: {}"
+        )
+
+    with pytest.raises(runner.ProtocolAcceptanceError):
+        runner.authenticate_admin_session(
+            command,
+            login_wire_command=wire,
+            redacted_login_command=f"admin login {ADMIN_FP} <redacted>",
+            admin_fingerprint=ADMIN_FP,
+            timeout=1.0,
+            interval=0.0,
+            poll_function=poll_function,
+        )
+
+    assert [value for value, _label in calls] == [wire, "admin status"]
+
+
+def test_admin_session_stops_after_one_retry():
+    wire = f"admin login {ADMIN_FP} private-login"
+    calls = []
+
+    def command(value, *, failure_label=None):
+        calls.append((value, failure_label))
+        if value.startswith("admin login "):
+            return {"ok": True, "cmd": "admin login"}
+        return {
+            "ok": True,
+            "cmd": "admin status",
+            "state": "timed_out",
+            "fingerprint": ADMIN_FP.lower(),
+            "last_error": "ESP_ERR_TIMEOUT",
+            "credential_exposed": False,
+            "session_secret_exposed": False,
+        }
+
+    def poll_function(*_args, **_kwargs):
+        raise runner.ProtocolAcceptanceError(
+            "timed out waiting for authenticated repeater session: {}"
+        )
+
+    with pytest.raises(runner.ProtocolAcceptanceError):
+        runner.authenticate_admin_session(
+            command,
+            login_wire_command=wire,
+            redacted_login_command=f"admin login {ADMIN_FP} <redacted>",
+            admin_fingerprint=ADMIN_FP,
+            timeout=1.0,
+            interval=0.0,
+            poll_function=poll_function,
+        )
+
+    assert [value for value, _label in calls] == [
+        wire,
+        "admin status",
+        wire,
+        "admin status",
+    ]
+
+
 def test_admin_login_failure_never_exposes_wire_password(
     monkeypatch: pytest.MonkeyPatch,
 ):
