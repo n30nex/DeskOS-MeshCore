@@ -79,6 +79,38 @@ USB_PID = "7523"
 SHA_RE = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
 POSITIVE_DECIMAL_RE = re.compile(r"[1-9][0-9]*\Z")
+RADIO_LISTENER_STATUS_SCHEMA = "openclaw_radio_listener_v1"
+MESHCOREBOT_STATUS_SCHEMA = "meshcorebot_v1"
+PEER_PROFILE_BINDINGS = {
+    RADIO_LISTENER_STATUS_SCHEMA: {
+        "status_schema": RADIO_LISTENER_STATUS_SCHEMA,
+        "status_path": (
+            "/opt/canadaverse/com15-responder/data/"
+            "radio_listener.status.json"
+        ),
+        "control_socket": "/run/canadaverse-control/com15/control.sock",
+        "device": "/dev/krab-t-echo",
+        "service": "openclaw-radio-listener",
+        "public_key": (
+            "024999dedfd26763c5606169c3ebd34e05a9475cf78220a81078b5dd27caca44"
+        ),
+    },
+    MESHCOREBOT_STATUS_SCHEMA: {
+        "status_schema": MESHCOREBOT_STATUS_SCHEMA,
+        "status_path": (
+            "/opt/canadaverse/com11-meshcorebot/data/logs/"
+            "meshcorebot.status.json"
+        ),
+        "control_socket": "/run/canadaverse-control/com11/control.sock",
+        "device": "/dev/krab-com11",
+        "service": "meshcorebot",
+        "public_key": (
+            "0bf0a701d5ae2db679c641ee999a70d4b55b61a2b77c47337ce35c16c9c19193"
+        ),
+    },
+}
+MESHCOREBOT_HARDWARE_ID = "303a:1001"
+MESHCOREBOT_BAUD = 115200
 
 SOURCE_KINDS = {
     "flash": "esp32_flash",
@@ -150,6 +182,7 @@ TRANSCRIPT_KEYS = frozenset(
         "expected_firmware_commit",
         "github_actions_run",
         "workflow_run_attempt",
+        "controlled_peer",
         "steps",
     }
 )
@@ -189,6 +222,9 @@ PROTOCOL_OPERATIONS = frozenset(
         "health_after",
         "crashlog",
     }
+)
+MESHCOREBOT_PROTOCOL_OPERATIONS = frozenset(
+    {"d1l_advert", "peer_resolve_d1l"}
 )
 MAP_OPERATIONS = frozenset(
     {
@@ -539,7 +575,36 @@ def _aware_timestamp(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
 
 
-def _peer_snapshot(value: object) -> dict[str, Any]:
+def _controlled_peer_binding(value: object) -> dict[str, str]:
+    if (
+        type(value) is not dict
+        or set(value)
+        != {
+            "status_schema",
+            "status_path",
+            "control_socket",
+            "device",
+            "service",
+            "public_key",
+        }
+        or _public_key(value.get("public_key")) != value.get("public_key")
+        or not isinstance(value.get("status_path"), str)
+        or not PurePosixPath(value["status_path"]).is_absolute()
+        or not isinstance(value.get("control_socket"), str)
+        or not PurePosixPath(value["control_socket"]).is_absolute()
+    ):
+        raise EvidenceError("controlled-peer binding shape is invalid")
+    expected = PEER_PROFILE_BINDINGS.get(value.get("status_schema"))
+    if value != expected:
+        raise EvidenceError(
+            "controlled-peer binding is not one exact authorized profile"
+        )
+    return value
+
+
+def _peer_snapshot(
+    value: object, binding: dict[str, str]
+) -> dict[str, Any]:
     if (
         type(value) is not dict
         or set(value)
@@ -551,8 +616,7 @@ def _peer_snapshot(value: object) -> dict[str, Any]:
             "snapshot",
         }
         or value.get("source") != "local_peer_status_file"
-        or not isinstance(value.get("path"), str)
-        or not PurePosixPath(value["path"]).is_absolute()
+        or value.get("path") != binding["status_path"]
         or not isinstance(value.get("snapshot"), dict)
     ):
         raise EvidenceError("controlled-peer status capture shape is invalid")
@@ -565,28 +629,101 @@ def _peer_snapshot(value: object) -> dict[str, Any]:
         else -1.0
     )
     serial = snapshot.get("serial")
-    if not (
+    common_valid = bool(
         value.get("snapshot_sha256")
         == hashlib.sha256(canonical_json(snapshot)).hexdigest()
-        and snapshot.get("service") == "openclaw-radio-listener"
-        and isinstance(snapshot.get("run_id"), str)
-        and bool(snapshot["run_id"])
+        and snapshot.get("service") == binding["service"]
         and isinstance(serial, dict)
-        and serial.get("mesh_connected") is True
-        and serial.get("port") == "/dev/krab-t-echo"
-        and _public_key(serial.get("public_key")) is not None
         and isinstance(snapshot.get("counters"), dict)
         and isinstance(snapshot.get("mesh"), dict)
         and 0.0 <= freshness <= 120.0
-    ):
+    )
+    if binding["status_schema"] == RADIO_LISTENER_STATUS_SCHEMA:
+        identity_valid = bool(
+            isinstance(snapshot.get("run_id"), str)
+            and bool(snapshot["run_id"])
+            and serial.get("mesh_connected") is True
+            and serial.get("port") == binding["device"]
+            and _public_key(serial.get("public_key"))
+            == binding["public_key"]
+        )
+    else:
+        started = _aware_timestamp(snapshot.get("started_at"))
+        poll_at = _aware_timestamp(
+            snapshot.get("mesh", {}).get("last_poll_at")
+        )
+        poll_freshness = (
+            (captured - poll_at).total_seconds()
+            if captured is not None and poll_at is not None
+            else -1.0
+        )
+        pid = snapshot.get("pid")
+        mqtt = snapshot.get("mqtt")
+        discord = snapshot.get("discord")
+        identity_valid = bool(
+            binding["status_schema"] == MESHCOREBOT_STATUS_SCHEMA
+            and isinstance(pid, int)
+            and not isinstance(pid, bool)
+            and pid > 0
+            and started is not None
+            and serial.get("active_port") == binding["device"]
+            and serial.get("configured_port") == binding["device"]
+            and serial.get("hardware_id") == MESHCOREBOT_HARDWARE_ID
+            and serial.get("baud_rate") == MESHCOREBOT_BAUD
+            and serial.get("meshcore_connected") is True
+            and isinstance(discord, dict)
+            and discord.get("connected") is True
+            and isinstance(mqtt, dict)
+            and _public_key(mqtt.get("device_public_key"))
+            == binding["public_key"]
+            and 0.0 <= poll_freshness <= 120.0
+        )
+    if not (common_valid and identity_valid):
         raise EvidenceError("controlled-peer status identity or freshness is invalid")
     return snapshot
 
 
-def _peer_counter(snapshot: dict[str, Any], name: str) -> int | None:
+def _peer_public_key(
+    snapshot: dict[str, Any], status_schema: str
+) -> str | None:
+    if status_schema == RADIO_LISTENER_STATUS_SCHEMA:
+        return _public_key(snapshot.get("serial", {}).get("public_key"))
+    if status_schema == MESHCOREBOT_STATUS_SCHEMA:
+        return _public_key(snapshot.get("mqtt", {}).get("device_public_key"))
+    return None
+
+
+def _peer_session_identity(
+    snapshot: dict[str, Any], status_schema: str
+) -> tuple[object, ...] | None:
+    if status_schema == RADIO_LISTENER_STATUS_SCHEMA:
+        run_id = snapshot.get("run_id")
+        return ("run_id", run_id) if isinstance(run_id, str) and run_id else None
+    if status_schema == MESHCOREBOT_STATUS_SCHEMA:
+        pid = snapshot.get("pid")
+        started_at = snapshot.get("started_at")
+        if (
+            isinstance(pid, int)
+            and not isinstance(pid, bool)
+            and pid > 0
+            and _aware_timestamp(started_at) is not None
+        ):
+            return ("pid_started_at", pid, started_at)
+    return None
+
+
+def _peer_counter(
+    snapshot: dict[str, Any], name: str, status_schema: str
+) -> int | None:
     counters = snapshot.get("counters")
+    counter_name = (
+        "rx_contact_total"
+        if status_schema == MESHCOREBOT_STATUS_SCHEMA
+        and name == "rx_dm_total"
+        else name
+    )
     return (
-        _integer(counters.get(name))
+        _integer(counters.get(counter_name))
         if isinstance(counters, dict)
         else None
     )
@@ -679,11 +816,16 @@ def _unique_contact(
 def validate_protocol(
     data: dict[str, Any], candidate: dict[str, str]
 ) -> dict[str, bool | int]:
+    controlled_peer = _controlled_peer_binding(data.get("controlled_peer"))
+    peer_status_schema = controlled_peer["status_schema"]
+    operations = PROTOCOL_OPERATIONS
+    if peer_status_schema == MESHCOREBOT_STATUS_SCHEMA:
+        operations = operations | MESHCOREBOT_PROTOCOL_OPERATIONS
     steps = _transcript(
         data,
         candidate,
         kind=PROTOCOL_KIND,
-        operations=PROTOCOL_OPERATIONS,
+        operations=operations,
     )
     version = _response(steps, "version")
     identity = _response(steps, "identity")
@@ -694,6 +836,16 @@ def validate_protocol(
     trace_request = _response(steps, "trace_request")
     trace_result = _response(steps, "trace_result")
     before = _response(steps, "peer_before")
+    d1l_advert = (
+        _response(steps, "d1l_advert")
+        if peer_status_schema == MESHCOREBOT_STATUS_SCHEMA
+        else None
+    )
+    peer_resolution = (
+        _response(steps, "peer_resolve_d1l")
+        if peer_status_schema == MESHCOREBOT_STATUS_SCHEMA
+        else None
+    )
     public_tx_authorization = _response(steps, "public_tx_authorization")
     public_send = _response(steps, "public_send")
     public_tx_record = _response(steps, "public_tx_record")
@@ -723,17 +875,19 @@ def validate_protocol(
     if identity_public_key is None:
         raise EvidenceError("protocol transcript D1L identity is invalid")
 
-    peer_before = _peer_snapshot(before)
-    peer_after_public = _peer_snapshot(after_public)
-    peer_before_dm = _peer_snapshot(before_dm)
-    peer_after_dm = _peer_snapshot(after_dm)
-    peer_public_key = _public_key(
-        peer_before.get("serial", {}).get("public_key")
+    peer_before = _peer_snapshot(before, controlled_peer)
+    peer_after_public = _peer_snapshot(after_public, controlled_peer)
+    peer_before_dm = _peer_snapshot(before_dm, controlled_peer)
+    peer_after_dm = _peer_snapshot(after_dm, controlled_peer)
+    peer_public_key = _peer_public_key(
+        peer_before, peer_status_schema
     )
     peer_fingerprint = (
         peer_public_key[:16].upper() if peer_public_key is not None else None
     )
-    peer_run_id = peer_before.get("run_id")
+    peer_session_identity = _peer_session_identity(
+        peer_before, peer_status_schema
+    )
     peer_snapshots = (
         peer_before,
         peer_after_public,
@@ -742,9 +896,12 @@ def validate_protocol(
     )
     if not (
         peer_public_key is not None
+        and peer_public_key == controlled_peer["public_key"]
+        and peer_session_identity is not None
         and all(
-            snapshot.get("run_id") == peer_run_id
-            and _public_key(snapshot.get("serial", {}).get("public_key"))
+            _peer_session_identity(snapshot, peer_status_schema)
+            == peer_session_identity
+            and _peer_public_key(snapshot, peer_status_schema)
             == peer_public_key
             for snapshot in peer_snapshots
         )
@@ -776,6 +933,12 @@ def validate_protocol(
     dm_control, dm_control_result = _control_exchange(
         peer_dm_send, "radio.send_dm"
     )
+    if peer_status_schema == MESHCOREBOT_STATUS_SCHEMA:
+        resolve_control, resolve_result = _control_exchange(
+            peer_resolution, "radio.resolve_contact"
+        )
+    else:
+        resolve_control, resolve_result = None, None
 
     peer_contact = _unique_contact(contacts, public_key=peer_public_key)
     login_command = steps["admin_login_request"]["command"]
@@ -840,11 +1003,24 @@ def validate_protocol(
     trace_tag = _integer(trace_request.get("tag"), minimum=1)
     ping_tag = _integer(ping_request.get("tag"), minimum=1)
     advert_status = mesh_status.get("advert_tx")
-    before_public_count = _peer_counter(peer_before, "rx_channel_total")
-    after_public_count = _peer_counter(peer_after_public, "rx_channel_total")
-    before_dm_count = _peer_counter(peer_before_dm, "rx_dm_total")
-    after_dm_count = _peer_counter(peer_after_dm, "rx_dm_total")
+    before_public_count = _peer_counter(
+        peer_before, "rx_channel_total", peer_status_schema
+    )
+    after_public_count = _peer_counter(
+        peer_after_public, "rx_channel_total", peer_status_schema
+    )
+    before_dm_count = _peer_counter(
+        peer_before_dm, "rx_dm_total", peer_status_schema
+    )
+    after_dm_count = _peer_counter(
+        peer_after_dm, "rx_dm_total", peer_status_schema
+    )
     health_nonce = _integer(health_before.get("boot_nonce"), minimum=1)
+    resolved_advert_timestamp = (
+        _integer(resolve_result.get("last_advert"), minimum=1)
+        if isinstance(resolve_result, dict)
+        else None
+    )
 
     if not (
         version.get("ok") is True
@@ -894,7 +1070,18 @@ def validate_protocol(
         == identity_public_key[:16].upper()
         and advert_control.get("id") == f"rc1-advert-{nonce}"
         and advert_control.get("params") == {"flood": False}
-        and advert_result == {"sent": True, "flood": False}
+        and (
+            (
+                peer_status_schema == RADIO_LISTENER_STATUS_SCHEMA
+                and advert_result == {"sent": True, "flood": False}
+            )
+            or (
+                peer_status_schema == MESHCOREBOT_STATUS_SCHEMA
+                and set(advert_result) == {"flood", "delivery"}
+                and advert_result.get("flood") is False
+                and _delivery_ok(advert_result.get("delivery"))
+            )
+        )
         and contacts.get("ok") is True
         and contacts.get("cmd") == "contacts"
         and peer_contact is not None
@@ -902,13 +1089,64 @@ def validate_protocol(
         == peer_fingerprint
         and peer_contact.get("canonical") is True
         and peer_contact.get("can_dm") is True
+        and peer_contact.get("can_admin") is False
+        and peer_contact.get("type") == "chat"
+        and peer_contact.get("verification_source") == "signed_advert"
         and admin_fingerprint is not None
         and admin_contact is not None
         and admin_public_key is not None
         and admin_public_key[:16].upper() == admin_fingerprint
         and admin_contact.get("canonical") is True
+        and admin_contact.get("can_dm") is False
         and admin_contact.get("can_admin") is True
         and admin_contact.get("type") == "repeater"
+        and admin_contact.get("verification_source") == "signed_advert"
+        and (
+            peer_status_schema == RADIO_LISTENER_STATUS_SCHEMA
+            or (
+                isinstance(d1l_advert, dict)
+                and d1l_advert
+                == {
+                    "schema": 1,
+                    "ok": True,
+                    "cmd": "mesh advert flood",
+                    "queued": True,
+                    "flood": True,
+                }
+                and steps["d1l_advert"]["command"] == "mesh advert flood"
+                and isinstance(resolve_control, dict)
+                and re.fullmatch(
+                    rf"rc1-resolve-{nonce}-[0-9]{{3}}",
+                    str(resolve_control.get("id") or ""),
+                )
+                is not None
+                and resolve_control.get("params") == {"name": "D1L"}
+                and isinstance(resolve_result, dict)
+                and set(resolve_result)
+                == {
+                    "name",
+                    "match_count",
+                    "unique",
+                    "valid_signed_advert",
+                    "public_key_prefix",
+                    "last_advert",
+                }
+                and resolve_result.get("name") == "D1L"
+                and resolve_result.get("match_count") == 1
+                and resolve_result.get("unique") is True
+                and resolve_result.get("valid_signed_advert") is True
+                and str(resolve_result.get("public_key_prefix") or "").lower()
+                == identity_public_key[:12].lower()
+                and resolved_advert_timestamp is not None
+                and steps["peer_resolve_d1l"]["command"]
+                == "controlled-peer radio.resolve_contact D1L"
+                and steps["peer_before"]["sequence"]
+                < steps["d1l_advert"]["sequence"]
+                < steps["peer_resolve_d1l"]["sequence"]
+                < steps["public_tx_authorization"]["sequence"]
+                < steps["public_send"]["sequence"]
+            )
+        )
         and trace_request.get("ok") is True
         and trace_request.get("cmd") == "routes trace contact"
         and _fingerprint(trace_request.get("fingerprint"))
@@ -958,6 +1196,27 @@ def validate_protocol(
             peer_after_public.get("mesh", {}).get("last_rx_sender") or ""
         ).upper()
         == identity_public_key[:12].upper()
+        and (
+            peer_status_schema == RADIO_LISTENER_STATUS_SCHEMA
+            or (
+                peer_status_schema == MESHCOREBOT_STATUS_SCHEMA
+                and peer_after_public.get("mesh", {}).get(
+                    "last_rx_sender_source"
+                )
+                == "unique_signed_advert_name"
+                and peer_after_public.get("mesh", {}).get(
+                    "last_rx_sender_name"
+                )
+                == identity.get("node_name")
+                and _integer(
+                    peer_after_public.get("mesh", {}).get(
+                        "last_rx_sender_advert_timestamp"
+                    ),
+                    minimum=1,
+                )
+                == resolved_advert_timestamp
+            )
+        )
         and public_control.get("id") == f"rc1-public-{nonce}"
         and public_control.get("params")
         == {"channel": 0, "text": public_in_token}
@@ -970,10 +1229,14 @@ def validate_protocol(
         and steps["public_receive"]["command"]
         == f"messages public search {public_in_token}"
         and public_rx_entry is not None
-        and _peer_counter(peer_before_dm, "rx_channel_total")
+        and _peer_counter(
+            peer_before_dm, "rx_channel_total", peer_status_schema
+        )
         == after_public_count
         and before_dm_count
-        == _peer_counter(peer_after_public, "rx_dm_total")
+        == _peer_counter(
+            peer_after_public, "rx_dm_total", peer_status_schema
+        )
         and dm_send.get("ok") is True
         and dm_send.get("cmd") == "mesh send dm"
         and dm_send.get("queued") is True
