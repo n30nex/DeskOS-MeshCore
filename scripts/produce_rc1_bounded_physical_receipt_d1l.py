@@ -1174,9 +1174,12 @@ def validate_protocol(
         and trace_result["last_result"].get("valid") is True
         and trace_result["last_result"].get("tag") == trace_tag
         and steps["admin_logout"]["sequence"]
+        < steps["path_request"]["sequence"]
+        < steps["path_result"]["sequence"]
         < steps["trace_request"]["sequence"]
         < steps["trace_result"]["sequence"]
         < steps["ping_request"]["sequence"]
+        < steps["ping_result"]["sequence"]
         and steps["public_tx_authorization"]["command"]
         == "operator flag --authorize-public-tx"
         and public_tx_authorization
@@ -1291,18 +1294,18 @@ def validate_protocol(
         and path_request.get("ok") is True
         and path_request.get("cmd") == "routes probe"
         and _fingerprint(path_request.get("fingerprint"))
-        == peer_fingerprint
+        == admin_fingerprint
         and path_request.get("queued") is True
         and path_request.get("dm_rf_tx") is True
         and path_request.get("public_rf_tx") is False
         and path_request.get("telemetry_requested") is True
         and path_tag is not None
         and steps["path_request"]["command"]
-        == f"routes probe {peer_fingerprint}"
+        == f"routes probe {admin_fingerprint}"
         and path_result.get("ok") is True
         and path_result.get("cmd") == "routes telemetry"
         and _fingerprint(path_result.get("fingerprint"))
-        == peer_fingerprint
+        == admin_fingerprint
         and path_result.get("state") == "received"
         and path_result.get("pending") is False
         and path_result.get("pending_tag") == 0
@@ -1310,7 +1313,7 @@ def validate_protocol(
         == len(path_entries)
         and len(path_matches) == 1
         and steps["path_result"]["command"]
-        == f"routes telemetry {peer_fingerprint}"
+        == f"routes telemetry {admin_fingerprint}"
         and login_request.get("ok") is True
         and login_request.get("cmd") == "admin login"
         and login_request.get("state") == "login_pending"

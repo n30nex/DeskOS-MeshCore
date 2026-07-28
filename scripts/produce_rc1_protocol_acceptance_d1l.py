@@ -1181,47 +1181,6 @@ def execute(
             dm_receive_ack,
         )
 
-        path_request = _step(
-            steps,
-            "path_request",
-            f"routes probe {peer_fingerprint}",
-            command(f"routes probe {peer_fingerprint}"),
-        )
-        path_token = path_request.get("token")
-        if (
-            not isinstance(path_token, str)
-            or re.fullmatch(r"path_[0-9A-F]{8}", path_token) is None
-        ):
-            raise ProtocolAcceptanceError(
-                "PATH request did not return its exact correlation token"
-            )
-        path_tag = int(path_token[5:], 16)
-        path_result = poll(
-            lambda: command(f"routes telemetry {peer_fingerprint}"),
-            lambda result: (
-                result.get("state") == "received"
-                and result.get("pending") is False
-                and result.get("pending_tag") == 0
-                and integer(result.get("history_count"), minimum=1) is not None
-                and isinstance(result.get("entries"), list)
-                and any(
-                    isinstance(row, dict)
-                    and row.get("tag") == path_tag
-                    and integer(row.get("sequence"), minimum=1) is not None
-                    for row in result["entries"]
-                )
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="PATH/base telemetry response",
-        )
-        _step(
-            steps,
-            "path_result",
-            f"routes telemetry {peer_fingerprint}",
-            path_result,
-        )
-
         password_argument = admin_password or "<empty>"
         login_wire_command = (
             f"admin login {admin_fingerprint} {password_argument}"
@@ -1295,9 +1254,50 @@ def execute(
         if admin_logout.get("state") != "idle":
             raise ProtocolAcceptanceError("admin authority did not clear")
 
-        # The controlled chat peer proves DM and PATH. A directly connected
-        # chat contact does not forward TRACE, so the repeater Admin exchange
-        # above establishes the current-boot route used by the real TRACE.
+        path_request = _step(
+            steps,
+            "path_request",
+            f"routes probe {admin_fingerprint}",
+            command(f"routes probe {admin_fingerprint}"),
+        )
+        path_token = path_request.get("token")
+        if (
+            not isinstance(path_token, str)
+            or re.fullmatch(r"path_[0-9A-F]{8}", path_token) is None
+        ):
+            raise ProtocolAcceptanceError(
+                "PATH request did not return its exact correlation token"
+            )
+        path_tag = int(path_token[5:], 16)
+        path_result = poll(
+            lambda: command(f"routes telemetry {admin_fingerprint}"),
+            lambda result: (
+                result.get("state") == "received"
+                and result.get("pending") is False
+                and result.get("pending_tag") == 0
+                and integer(result.get("history_count"), minimum=1) is not None
+                and isinstance(result.get("entries"), list)
+                and any(
+                    isinstance(row, dict)
+                    and row.get("tag") == path_tag
+                    and integer(row.get("sequence"), minimum=1) is not None
+                    for row in result["entries"]
+                )
+            ),
+            timeout=rf_timeout,
+            interval=poll_interval,
+            label="PATH/base telemetry response",
+        )
+        _step(
+            steps,
+            "path_result",
+            f"routes telemetry {admin_fingerprint}",
+            path_result,
+        )
+
+        # The controlled chat peer proves DM. The repeater Admin exchange
+        # establishes the authenticated current-boot route used by PATH,
+        # real TRACE, and zero-hop Ping after authority is cleared.
         trace_request = _step(
             steps,
             "trace_request",

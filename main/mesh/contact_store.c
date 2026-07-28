@@ -1948,6 +1948,11 @@ bool d1l_contact_store_can_dm(const d1l_contact_entry_t *entry)
            strcmp(entry->type, "chat") == 0;
 }
 
+bool d1l_contact_store_can_path_probe(const d1l_contact_entry_t *entry)
+{
+    return d1l_contact_store_is_canonical(entry);
+}
+
 bool d1l_contact_store_can_admin(const d1l_contact_entry_t *entry)
 {
     return d1l_contact_store_is_canonical(entry) &&

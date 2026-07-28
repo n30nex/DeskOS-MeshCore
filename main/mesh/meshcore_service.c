@@ -2765,7 +2765,7 @@ static esp_err_t build_path_discovery_request(
     uint32_t tag, uint8_t *raw, size_t raw_size, uint8_t *out_len)
 {
     if (!settings || !settings->identity_ready || !contact || !raw ||
-        !out_len || !d1l_contact_store_can_dm(contact) ||
+        !out_len || !d1l_contact_store_can_path_probe(contact) ||
         settings->path_hash_bytes < 1U || settings->path_hash_bytes > 3U) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -8382,7 +8382,7 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     bool path_expired = false;
     ret = d1l_contact_store_prepare_path_route(
         fingerprint, now_ms, &contact, &path_expired);
-    if (ret != ESP_OK || !d1l_contact_store_can_dm(&contact)) {
+    if (ret != ESP_OK || !d1l_contact_store_can_path_probe(&contact)) {
         return ret != ESP_OK ? ret : ESP_ERR_INVALID_STATE;
     }
 

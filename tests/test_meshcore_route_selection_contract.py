@@ -73,18 +73,37 @@ def test_production_dm_send_consumes_one_boot_proven_fail_closed_route_plan():
 
 def test_path_probe_is_a_real_correlated_flood_request():
     service = read("main/mesh/meshcore_service.c")
+    contact_header = read("main/mesh/contact_store.h")
+    ui = read("main/ui/ui_phase1.c")
+    builder = service.split(
+        "static esp_err_t build_path_discovery_request", 1
+    )[1].split("static esp_err_t build_dm_ack_response", 1)[0]
     trace = service.split(
         "esp_err_t d1l_meshcore_service_request_path_discovery_probe", 1
     )[1].split("esp_err_t d1l_meshcore_service_send_trace_contact", 1)[0]
+    dm_command = service.split(
+        "static esp_err_t meshcore_service_send_dm_command", 1
+    )[1].split("esp_err_t d1l_meshcore_service_send_dm", 1)[0]
+    repeater_controls = ui.split(
+        'if (strcmp(contact->type, "repeater") == 0)', 1
+    )[1].split("} else {", 1)[0]
 
+    assert "d1l_contact_store_can_path_probe" in contact_header
+    assert "d1l_contact_store_can_path_probe(contact)" in builder
+    assert "d1l_contact_store_can_dm(contact)" not in builder
     assert "d1l_contact_store_prepare_path_route(" in trace
-    assert "d1l_contact_store_can_dm(&contact)" in trace
+    assert "d1l_contact_store_can_path_probe(&contact)" in trace
+    assert "d1l_contact_store_can_dm(&contact)" not in trace
     assert "build_path_discovery_request(" in trace
     assert "s_path_response_expectation.tag = tag" in trace
     assert "s_path_response_fingerprint" in trace
     assert "meshcore_service_send_raw(" in trace
     assert '"path_discovery_req"' in trace
     assert "meshcore_service_send_dm_command(" not in trace
+    assert "d1l_contact_store_can_dm(&contact)" in dm_command
+    assert "d1l_contact_store_can_path_probe(&contact)" not in dm_command
+    assert '"Probe"' in repeater_controls
+    assert "route_probe_request_event_cb" in repeater_controls
 
 
 def test_inbound_dm_ack_consumes_the_same_immutable_route_selection():

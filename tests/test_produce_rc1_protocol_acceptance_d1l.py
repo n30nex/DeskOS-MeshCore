@@ -49,13 +49,13 @@ OPERATIONS = (
     "peer_after_dm",
     "peer_dm_send",
     "dm_receive_ack",
-    "path_request",
-    "path_result",
     "admin_login_request",
     "admin_login_status",
     "admin_query_request",
     "admin_query_status",
     "admin_logout",
+    "path_request",
+    "path_result",
     "trace_request",
     "trace_result",
     "ping_request",
@@ -379,7 +379,7 @@ def protocol_transcript() -> dict:
             "schema": 1,
             "ok": True,
             "cmd": "routes probe",
-            "fingerprint": PEER_FP,
+            "fingerprint": ADMIN_FP,
             "queued": True,
             "token": "path_0000002A",
             "dm_rf_tx": True,
@@ -390,7 +390,7 @@ def protocol_transcript() -> dict:
             "schema": 1,
             "ok": True,
             "cmd": "routes telemetry",
-            "fingerprint": PEER_FP,
+            "fingerprint": ADMIN_FP,
             "state": "received",
             "pending": False,
             "pending_tag": 0,
@@ -457,8 +457,8 @@ def protocol_transcript() -> dict:
         "peer_after_dm": "controlled-peer status capture",
         "peer_dm_send": "controlled-peer radio.send_dm",
         "dm_receive_ack": f"messages dm {PEER_FP}",
-        "path_request": f"routes probe {PEER_FP}",
-        "path_result": f"routes telemetry {PEER_FP}",
+        "path_request": f"routes probe {ADMIN_FP}",
+        "path_result": f"routes telemetry {ADMIN_FP}",
         "admin_login_request": f"admin login {ADMIN_FP} <redacted>",
         "admin_login_status": "admin status",
         "admin_query_request": "admin telemetry",
@@ -513,7 +513,8 @@ def test_machine_transcript_closes_the_protocol_gate(
     monkeypatch: pytest.MonkeyPatch,
 ):
     assert set(OPERATIONS) == gate.PROTOCOL_OPERATIONS
-    assert validate(protocol_transcript(), monkeypatch) == {
+    transcript = protocol_transcript()
+    assert validate(transcript, monkeypatch) == {
         "boot_advert": True,
         "public_send_count": 1,
         "path": True,
@@ -522,6 +523,31 @@ def test_machine_transcript_closes_the_protocol_gate(
         "repeater_login": True,
         "repeater_query": True,
     }
+
+
+def test_path_uses_repeater_after_logout_before_trace_and_ping():
+    transcript = protocol_transcript()
+    steps = {
+        row["operation"]: row
+        for row in transcript["steps"]
+    }
+
+    assert (
+        steps["admin_logout"]["sequence"]
+        < steps["path_request"]["sequence"]
+        < steps["path_result"]["sequence"]
+        < steps["trace_request"]["sequence"]
+        < steps["trace_result"]["sequence"]
+        < steps["ping_request"]["sequence"]
+        < steps["ping_result"]["sequence"]
+    )
+    assert steps["path_request"]["command"] == f"routes probe {ADMIN_FP}"
+    assert steps["path_request"]["response"]["fingerprint"] == ADMIN_FP
+    assert (
+        steps["path_result"]["command"]
+        == f"routes telemetry {ADMIN_FP}"
+    )
+    assert steps["path_result"]["response"]["fingerprint"] == ADMIN_FP
 
 
 @pytest.mark.parametrize(
@@ -1061,3 +1087,10 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     assert source.index(
         'label="inbound DM ACK dispatch"'
     ) < source.index('label="matched repeater TRACE"')
+    assert (
+        source.index('admin_logout = _step(')
+        < source.index('path_request = _step(')
+        < source.index('label="PATH/base telemetry response"')
+        < source.index('trace_request = _step(')
+        < source.index('ping_request = _step(')
+    )
