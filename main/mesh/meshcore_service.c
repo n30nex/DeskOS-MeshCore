@@ -5544,12 +5544,26 @@ static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)
         return ret;
     }
 
+    /*
+     * The flood retry mutates the same retained delivery row through four
+     * durable states before it can own the radio. Hold the retained worker
+     * across that sequence just as initial DM admission does, otherwise an
+     * in-flight background flush can reject the retry before attempt 1 is
+     * published and leave a recoverable direct miss terminal at attempt 0.
+     */
+    ret = d1l_route_store_worker_quiesce_begin(
+        D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        fail_pending_dm_ack_timeout(ret);
+        return ret;
+    }
+
     ret = transition_pending_dm_tx(
         D1L_DM_DELIVERY_RETRY_WAIT,
         D1L_DM_DELIVERY_REASON_RETRY_SCHEDULED, ESP_ERR_TIMEOUT);
     if (ret != ESP_OK) {
         fail_pending_dm_ack_timeout(ret);
-        return ret;
+        goto dm_retry_persistence_release;
     }
     ret = transition_pending_dm_retry(retry_ack_hash);
     if (ret != ESP_OK) {
@@ -5558,7 +5572,7 @@ static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)
         } else {
             (void)fail_pending_dm_before_radio(ret);
         }
-        return ret;
+        goto dm_retry_persistence_release;
     }
 
     s_pending_dm_tx.selection = retry_selection;
@@ -5569,29 +5583,35 @@ static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)
         D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK);
     if (ret != ESP_OK) {
         (void)fail_pending_dm_before_radio(ret);
-        return ret;
+        goto dm_retry_persistence_release;
     }
     ret = transition_pending_dm_tx(
         D1L_DM_DELIVERY_TX_ACTIVE,
         D1L_DM_DELIVERY_REASON_RADIO_STARTED, ESP_OK);
     if (ret != ESP_OK) {
         (void)fail_pending_dm_before_radio(ret);
-        return ret;
+        goto dm_retry_persistence_release;
     }
     if (!meshcore_radio_tx_operation_begin(
             D1L_MESH_TX_OPERATION_DM, &s_pending_dm_tx.delivery)) {
         (void)fail_pending_dm_before_radio(ESP_ERR_INVALID_STATE);
-        return ESP_ERR_INVALID_STATE;
+        ret = ESP_ERR_INVALID_STATE;
+        goto dm_retry_persistence_release;
     }
 
     s_active_tx_ack_response = false;
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    d1l_route_store_worker_quiesce_end();
     Radio.SendWithOrigin(
         s_pending_dm_tx.raw, s_pending_dm_tx.raw_len,
         (uint32_t)s_active_radio_tx.operation_id);
     record_dm_route_selection(&retry_selection);
     return ESP_OK;
+
+dm_retry_persistence_release:
+    d1l_route_store_worker_quiesce_end();
+    return ret;
 }
 
 static esp_err_t meshcore_service_validate_room_post_session(
