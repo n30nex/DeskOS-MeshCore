@@ -9,10 +9,10 @@ COM_PATTERN = re.compile(r"\bCOM\d+\b", re.IGNORECASE)
 # Core 1.0 intentionally binds its physical evidence to the exact ports in the
 # product contract.  Keep that exception reviewable and closed: a new literal,
 # a new file, or a changed port set must update this policy explicitly.  The
-# Core runner tests separately prove that COM8/COM11/COM29 are rejection values,
-# COM12 is the only Windows D1L target, the POSIX target is an exact stable
-# by-id path, COM16 is not a Core D1L/RF target, and COM15 is the assigned
-# read-only/controlled-peer listener.
+# Core runner tests separately prove that COM8/COM11/COM29 are rejected as D1L
+# ports, COM12 is the only Windows D1L target, the POSIX target is an exact
+# stable by-id path, COM16 is not a Core D1L/RF target, COM11 is the assigned
+# chat peer, and COM15 is the assigned repeater/admin listener.
 REVIEWED_CORE_RELEASE_PORT_LITERALS = {
     "scripts/d1l_serial_target.py": {
         "COM8", "COM11", "COM12", "COM16", "COM29",
@@ -25,7 +25,8 @@ REVIEWED_CORE_RELEASE_PORT_LITERALS = {
     },
     "scripts/core_release_gate_audit_d1l.py": {"COM12", "COM16"},
     "scripts/core_smoke_d1l.py": {"COM12"},
-    "scripts/produce_rc1_protocol_acceptance_d1l.py": {"COM15"},
+    "scripts/produce_rc1_bounded_physical_receipt_d1l.py": {"COM11", "COM15"},
+    "scripts/produce_rc1_protocol_acceptance_d1l.py": {"COM11", "COM15"},
     "scripts/rf_full_acceptance_d1l.py": {"COM11", "COM15", "COM16"},
     "scripts/soak_d1l.py": {"COM12", "COM15"},
 }
