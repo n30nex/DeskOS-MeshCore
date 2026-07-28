@@ -1152,16 +1152,18 @@ def validate_protocol(
         and trace_request.get("ok") is True
         and trace_request.get("cmd") == "routes trace contact"
         and _fingerprint(trace_request.get("fingerprint"))
-        == peer_fingerprint
+        == admin_fingerprint
         and trace_request.get("queued") is True
         and trace_request.get("pending") is True
         and trace_tag is not None
         and trace_request.get("targeted_trace_rf_tx") is True
         and trace_request.get("public_rf_tx") is False
+        and steps["trace_request"]["command"]
+        == f"routes trace contact {admin_fingerprint}"
         and trace_result.get("ok") is True
         and trace_result.get("cmd") == "routes trace status"
         and _fingerprint(trace_result.get("fingerprint"))
-        == peer_fingerprint
+        == admin_fingerprint
         and trace_result.get("zero_hop") is False
         and trace_result.get("matched") is True
         and trace_result.get("pending", {}).get("active") is False
@@ -1171,6 +1173,10 @@ def validate_protocol(
         and isinstance(trace_result.get("last_result"), dict)
         and trace_result["last_result"].get("valid") is True
         and trace_result["last_result"].get("tag") == trace_tag
+        and steps["admin_logout"]["sequence"]
+        < steps["trace_request"]["sequence"]
+        < steps["trace_result"]["sequence"]
+        < steps["ping_request"]["sequence"]
         and steps["public_tx_authorization"]["command"]
         == "operator flag --authorize-public-tx"
         and public_tx_authorization

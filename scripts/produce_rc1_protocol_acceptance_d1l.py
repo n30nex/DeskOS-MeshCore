@@ -1181,32 +1181,6 @@ def execute(
             dm_receive_ack,
         )
 
-        # A contact-derived TRACE is intentionally after the controlled inbound
-        # DM. That authenticated packet establishes the exact contact path in
-        # this boot; an imported or retained contact alone is not proof of a
-        # current routable loop.
-        trace_request = _step(
-            steps,
-            "trace_request",
-            f"routes trace contact {peer_fingerprint}",
-            command(f"routes trace contact {peer_fingerprint}"),
-        )
-        trace_tag = integer(trace_request.get("tag"), minimum=1)
-        trace_result = poll(
-            lambda: command("routes trace status"),
-            lambda result: (
-                result.get("matched") is True
-                and result.get("zero_hop") is False
-                and str(result.get("fingerprint") or "").upper()
-                == peer_fingerprint
-                and nested(result, "last_result", "tag") == trace_tag
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="matched contact TRACE",
-        )
-        _step(steps, "trace_result", "routes trace status", trace_result)
-
         path_request = _step(
             steps,
             "path_request",
@@ -1320,6 +1294,31 @@ def execute(
         )
         if admin_logout.get("state") != "idle":
             raise ProtocolAcceptanceError("admin authority did not clear")
+
+        # The controlled chat peer proves DM and PATH. A directly connected
+        # chat contact does not forward TRACE, so the repeater Admin exchange
+        # above establishes the current-boot route used by the real TRACE.
+        trace_request = _step(
+            steps,
+            "trace_request",
+            f"routes trace contact {admin_fingerprint}",
+            command(f"routes trace contact {admin_fingerprint}"),
+        )
+        trace_tag = integer(trace_request.get("tag"), minimum=1)
+        trace_result = poll(
+            lambda: command("routes trace status"),
+            lambda result: (
+                result.get("matched") is True
+                and result.get("zero_hop") is False
+                and str(result.get("fingerprint") or "").upper()
+                == admin_fingerprint
+                and nested(result, "last_result", "tag") == trace_tag
+            ),
+            timeout=rf_timeout,
+            interval=poll_interval,
+            label="matched repeater TRACE",
+        )
+        _step(steps, "trace_result", "routes trace status", trace_result)
 
         cooldown_ms = integer(
             nested(trace_result, "cooldown", "remaining_ms")

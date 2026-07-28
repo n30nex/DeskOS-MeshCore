@@ -36,8 +36,6 @@ OPERATIONS = (
     "mesh_status",
     "peer_advert",
     "contacts",
-    "trace_request",
-    "trace_result",
     "peer_before",
     "public_tx_authorization",
     "public_send",
@@ -58,6 +56,8 @@ OPERATIONS = (
     "admin_query_request",
     "admin_query_status",
     "admin_logout",
+    "trace_request",
+    "trace_result",
     "ping_request",
     "ping_result",
     "health_after",
@@ -258,7 +258,7 @@ def protocol_transcript() -> dict:
             "schema": 1,
             "ok": True,
             "cmd": "routes trace contact",
-            "fingerprint": PEER_FP,
+            "fingerprint": ADMIN_FP,
             "queued": True,
             "pending": True,
             "tag": 101,
@@ -266,7 +266,7 @@ def protocol_transcript() -> dict:
             "public_rf_tx": False,
         },
         "trace_result": matched_trace(
-            "routes trace status", PEER_FP, 101, False
+            "routes trace status", ADMIN_FP, 101, False
         ),
         "peer_before": peer_capture(channel=10, dm=5),
         "public_tx_authorization": {
@@ -442,7 +442,7 @@ def protocol_transcript() -> dict:
         "mesh_status": "mesh status",
         "peer_advert": "controlled-peer radio.advert",
         "contacts": "contacts",
-        "trace_request": f"routes trace contact {PEER_FP}",
+        "trace_request": f"routes trace contact {ADMIN_FP}",
         "trace_result": "routes trace status",
         "peer_before": "controlled-peer status capture",
         "public_tx_authorization": "operator flag --authorize-public-tx",
@@ -1060,4 +1060,4 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     )
     assert source.index(
         'label="inbound DM ACK dispatch"'
-    ) < source.index('label="matched contact TRACE"')
+    ) < source.index('label="matched repeater TRACE"')
