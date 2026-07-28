@@ -220,6 +220,9 @@ Run as `neonx`. This exact COM11 identity makes the runner capture the generic
 Meshcorebot status itself, send the inbound DM through the pinned local Unix
 socket, validate its acknowledged response and retain both request/response
 sidecars. `/dev/krab-com11` is an opaque status identity and is never opened.
+This RF receipt is the sole authority for outbound/inbound DM, ACK/PATH and
+direct-route acceptance; the protocol source below does not repeat that DM
+exchange.
 
 ```bash
 RF="$EVIDENCE_DIR/rf-full-acceptance.json"
@@ -251,7 +254,9 @@ env \
 ### Source 4: boot advert, one Public send, PATH/TRACE/Ping and Admin
 
 This is the sole authorized Public send in the closing sequence. Omitting
-`--authorize-public-tx` must fail before opening serial.
+`--authorize-public-tx` must fail before opening serial. This source covers
+Public, contacts, Admin login/query/logout, PATH, split TRACE, Ping and
+health/crash only; DM remains exclusively covered by Source 3.
 
 ```bash
 PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"

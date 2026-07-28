@@ -453,8 +453,8 @@ def send_peer_control(
 
 def peer_control_timeout(status_schema: str) -> float:
     if status_schema == MESHCOREBOT_STATUS_SCHEMA:
-        # Meshcorebot's bounded radio.send_dm operation may spend up to 55
-        # seconds on route recovery before returning its exact response.
+        # Meshcorebot's bounded radio operation may spend up to 55 seconds
+        # before returning its exact response.
         return 60.0
     if status_schema == RADIO_LISTENER_STATUS_SCHEMA:
         return 35.0
@@ -474,15 +474,6 @@ def peer_counter(
     elif status_schema not in PEER_STATUS_SCHEMAS:
         return None
     return integer(nested(status, "snapshot", "counters", counter_name))
-
-
-def peer_dm_ingest_bounded(
-    status: dict[str, Any],
-    before: int,
-    status_schema: str = RADIO_LISTENER_STATUS_SCHEMA,
-) -> bool:
-    after = peer_counter(status, "rx_dm_total", status_schema)
-    return after is not None and 1 <= after - before <= 2
 
 
 def peer_session_identity(
@@ -625,10 +616,6 @@ def public_entry(result: object, *, text: str, direction: str) -> dict[str, Any]
         and row.get("direction") == direction
     ]
     return matches[0] if len(matches) == 1 else None
-
-
-def dm_entry(result: object, *, text: str, direction: str) -> dict[str, Any] | None:
-    return public_entry(result, text=text, direction=direction)
 
 
 def contact_entry(
@@ -804,7 +791,6 @@ def execute(
         service=peer_service,
         public_key=peer_public_key,
     )
-    peer_fingerprint = peer_public_key[:16].upper()
     admin_fingerprint = exact_fingerprint(admin_fingerprint, "admin fingerprint")
     trace_fingerprint = exact_fingerprint(trace_fingerprint, "trace fingerprint")
     source = git_metadata(root)
@@ -850,8 +836,6 @@ def execute(
     nonce = secrets.token_hex(6)
     public_out_token = f"rc1-public-out-{commit[:8]}-{nonce}"
     public_in_token = f"rc1-public-in-{commit[:8]}-{nonce}"
-    dm_out_token = f"rc1-dm-out-{commit[:8]}-{nonce}"
-    dm_in_token = f"rc1-dm-in-{commit[:8]}-{nonce}"
     steps: list[dict[str, Any]] = []
 
     def peer_status() -> dict[str, Any]:
@@ -1104,105 +1088,6 @@ def execute(
             public_receive,
         )
 
-        peer_before_dm = _step(
-            steps,
-            "peer_before_dm",
-            "controlled-peer status capture",
-            peer_status(),
-        )
-        dm_send = _step(
-            steps,
-            "dm_send",
-            f"mesh send dm {peer_fingerprint} {dm_out_token}",
-            command(f"mesh send dm {peer_fingerprint} {dm_out_token}"),
-        )
-        dm_ack = poll(
-            lambda: command(f"messages dm {peer_fingerprint}"),
-            lambda result: (
-                (entry := dm_entry(result, text=dm_out_token, direction="tx"))
-                is not None
-                and entry.get("acked") is True
-                and entry.get("delivered") is True
-                and integer(entry.get("ack_hash"), minimum=1) is not None
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="outbound DM ACK",
-        )
-        _step(
-            steps,
-            "dm_ack",
-            f"messages dm {peer_fingerprint}",
-            dm_ack,
-        )
-        before_dm = peer_counter(
-            peer_before_dm, "rx_dm_total", peer_status_schema
-        )
-        if before_dm is None:
-            raise ProtocolAcceptanceError("controlled peer lacks rx_dm_total")
-        peer_after_dm = poll(
-            peer_status,
-            lambda result: (
-                peer_session_identity(result, peer_status_schema)
-                == peer_session_identity(peer_before_dm, peer_status_schema)
-                and peer_dm_ingest_bounded(
-                    result, before_dm, peer_status_schema
-                )
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="controlled-peer DM receive",
-        )
-        _step(
-            steps,
-            "peer_after_dm",
-            "controlled-peer status capture",
-            peer_after_dm,
-        )
-        if dm_send.get("fingerprint", "").upper() != peer_fingerprint:
-            raise ProtocolAcceptanceError("DM send response target changed")
-
-        peer_dm_send = control_sender(
-            peer_socket_path,
-            request_id=f"rc1-dm-{nonce}",
-            operation="radio.send_dm",
-            params={
-                "target": exact_public_key(identity.get("public_key"), "D1L identity"),
-                "text": dm_in_token,
-            },
-            timeout=peer_control_timeout(peer_status_schema),
-        )
-        _step(
-            steps,
-            "peer_dm_send",
-            "controlled-peer radio.send_dm",
-            peer_dm_send,
-        )
-        dm_receive_ack = poll(
-            lambda: command(f"messages dm {peer_fingerprint}"),
-            lambda result: (
-                (entry := dm_entry(result, text=dm_in_token, direction="rx"))
-                is not None
-                and nested(entry, "ack_response", "identity_valid") is True
-                and nested(entry, "ack_response", "state") == "sent"
-                and integer(
-                    nested(entry, "ack_response", "dispatch_count"),
-                    minimum=1,
-                )
-                is not None
-                and nested(entry, "ack_response", "last_error") == "ESP_OK"
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="inbound DM ACK dispatch",
-        )
-        _step(
-            steps,
-            "dm_receive_ack",
-            f"messages dm {peer_fingerprint}",
-            dm_receive_ack,
-        )
-
         password_argument = admin_password or "<empty>"
         login_wire_command = (
             f"admin login {admin_fingerprint} {password_argument}"
@@ -1317,9 +1202,9 @@ def execute(
             path_result,
         )
 
-        # The controlled chat peer proves DM. The Admin repeater remains bound
-        # to login, telemetry, PATH, and zero-hop Ping. TRACE is independently
-        # bound to an explicit canonical repeater/room contact.
+        # The Admin repeater remains bound to login, telemetry, PATH, and
+        # zero-hop Ping. TRACE is independently bound to an explicit canonical
+        # repeater/room contact.
         trace_request = _step(
             steps,
             "trace_request",
