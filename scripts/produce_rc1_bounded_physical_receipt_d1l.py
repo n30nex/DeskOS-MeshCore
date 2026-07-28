@@ -182,10 +182,10 @@ TRANSCRIPT_KEYS = frozenset(
         "expected_firmware_commit",
         "github_actions_run",
         "workflow_run_attempt",
-        "controlled_peer",
         "steps",
     }
 )
+PROTOCOL_TRANSCRIPT_KEYS = TRANSCRIPT_KEYS | {"controlled_peer"}
 STEP_KEYS = frozenset({"sequence", "operation", "command", "response"})
 PROTOCOL_OPERATIONS = frozenset(
     {
@@ -505,9 +505,10 @@ def _transcript(
     *,
     kind: str,
     operations: frozenset[str],
+    expected_keys: frozenset[str] = TRANSCRIPT_KEYS,
 ) -> dict[str, dict[str, Any]]:
     if (
-        set(data) != TRANSCRIPT_KEYS
+        set(data) != expected_keys
         or data.get("schema") != 1
         or data.get("kind") != kind
         or not _machine_physical(data, mode="hardware")
@@ -826,6 +827,7 @@ def validate_protocol(
         candidate,
         kind=PROTOCOL_KIND,
         operations=operations,
+        expected_keys=PROTOCOL_TRANSCRIPT_KEYS,
     )
     version = _response(steps, "version")
     identity = _response(steps, "identity")
