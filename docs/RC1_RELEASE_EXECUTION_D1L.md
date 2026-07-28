@@ -129,14 +129,16 @@ The final gate also requires all of the following before it starts:
 - an installed HTTPS Map provider manifest that permits offline storage and
   background prefetch, plus configured device location;
 - the pinned local controlled peer and its current status/socket;
-- a controlled repeater/admin contact fingerprint and password.
+- a controlled repeater/admin contact fingerprint and password;
+- an explicit canonical repeater/room contact fingerprint for TRACE.
 
 Keep the admin password in a bounded regular file outside the repository. Do
 not place credentials in command arguments, evidence, shell history or Git:
 
 ```bash
 TARGET_SSID=Toddmas2.4
-ADMIN_FINGERPRINT=<16-hex-controlled-admin-fingerprint>
+ADMIN_FINGERPRINT=9880BF9B9B1DD605
+TRACE_FINGERPRINT=024999DEDFD26763
 ADMIN_PASSWORD_FILE=<absolute-path-outside-repository>
 test -f "$ADMIN_PASSWORD_FILE"
 ```
@@ -266,6 +268,7 @@ PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"
   --peer-service meshcorebot \
   --peer-status-schema meshcorebot_v1 \
   --admin-fingerprint "$ADMIN_FINGERPRINT" \
+  --trace-fingerprint "$TRACE_FINGERPRINT" \
   --admin-password-file "$ADMIN_PASSWORD_FILE" \
   --boot-timeout 75 \
   --command-timeout 30 \
@@ -278,6 +281,10 @@ status path, control socket and status layout. Public and DM counters must
 advance under one stable Meshcorebot process session. `ADMIN_FINGERPRINT`
 must still resolve to a separate canonical repeater contact with Admin
 capability; never substitute the COM11 chat fingerprint for it.
+`TRACE_FINGERPRINT` must independently resolve to exactly one canonical,
+signed repeater or room contact. It may equal `ADMIN_FINGERPRINT` when that
+contact is suitable, but the current closing run binds Admin/PATH/Ping to YKF
+Hespeler and TRACE to YKF-Hilltop.
 Before the single Public send, the runner queues one signed D1L flood advert
 and requires COM11 to resolve exactly one signed `D1L` contact to the current
 D1L key. The subsequent Public receive must reference that exact advert.

@@ -17,8 +17,10 @@ PEER_KEY = gate.PEER_PROFILE_BINDINGS[
     gate.RADIO_LISTENER_STATUS_SCHEMA
 ]["public_key"]
 ADMIN_KEY = "d" * 64
+TRACE_KEY = "e" * 64
 PEER_FP = PEER_KEY[:16].upper()
 ADMIN_FP = ADMIN_KEY[:16].upper()
+TRACE_FP = TRACE_KEY[:16].upper()
 NONCE = "123456789abc"
 PUBLIC_OUT = f"rc1-public-out-{COMMIT[:8]}-{NONCE}"
 PUBLIC_IN = f"rc1-public-in-{COMMIT[:8]}-{NONCE}"
@@ -252,13 +254,22 @@ def protocol_transcript() -> dict:
                     "can_admin": True,
                     "verification_source": "signed_advert",
                 },
+                {
+                    "fingerprint": TRACE_FP,
+                    "public_key": TRACE_KEY,
+                    "type": "repeater",
+                    "canonical": True,
+                    "can_dm": False,
+                    "can_admin": True,
+                    "verification_source": "signed_advert",
+                },
             ],
         },
         "trace_request": {
             "schema": 1,
             "ok": True,
             "cmd": "routes trace contact",
-            "fingerprint": ADMIN_FP,
+            "fingerprint": TRACE_FP,
             "queued": True,
             "pending": True,
             "tag": 101,
@@ -266,7 +277,7 @@ def protocol_transcript() -> dict:
             "public_rf_tx": False,
         },
         "trace_result": matched_trace(
-            "routes trace status", ADMIN_FP, 101, False
+            "routes trace status", TRACE_FP, 101, False
         ),
         "peer_before": peer_capture(channel=10, dm=5),
         "public_tx_authorization": {
@@ -442,7 +453,7 @@ def protocol_transcript() -> dict:
         "mesh_status": "mesh status",
         "peer_advert": "controlled-peer radio.advert",
         "contacts": "contacts",
-        "trace_request": f"routes trace contact {ADMIN_FP}",
+        "trace_request": f"routes trace contact {TRACE_FP}",
         "trace_result": "routes trace status",
         "peer_before": "controlled-peer status capture",
         "public_tx_authorization": "operator flag --authorize-public-tx",
@@ -490,6 +501,10 @@ def protocol_transcript() -> dict:
                 gate.RADIO_LISTENER_STATUS_SCHEMA
             ]
         ),
+        "protocol_targets": {
+            "admin_fingerprint": ADMIN_FP,
+            "trace_fingerprint": TRACE_FP,
+        },
         "steps": [
             {
                 "sequence": sequence,
@@ -525,6 +540,34 @@ def test_machine_transcript_closes_the_protocol_gate(
     }
 
 
+def test_protocol_targets_are_explicit_and_trace_can_reuse_admin(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    transcript = protocol_transcript()
+    transcript["protocol_targets"]["trace_fingerprint"] = ADMIN_FP
+    for step in transcript["steps"]:
+        if step["operation"] == "trace_request":
+            step["command"] = f"routes trace contact {ADMIN_FP}"
+            step["response"]["fingerprint"] = ADMIN_FP
+        elif step["operation"] == "trace_result":
+            step["response"]["fingerprint"] = ADMIN_FP
+
+    assert validate(transcript, monkeypatch)["trace"] is True
+
+
+@pytest.mark.parametrize("trace_type", ["chat", "unknown"])
+def test_protocol_rejects_non_repeater_or_room_trace_contact(
+    trace_type: str,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    transcript = protocol_transcript()
+    contacts = _operation_response(transcript, "contacts")["entries"]
+    contacts[2]["type"] = trace_type
+
+    with pytest.raises(gate.EvidenceError):
+        validate(transcript, monkeypatch)
+
+
 def test_path_uses_repeater_after_logout_before_trace_and_ping():
     transcript = protocol_transcript()
     steps = {
@@ -548,6 +591,14 @@ def test_path_uses_repeater_after_logout_before_trace_and_ping():
         == f"routes telemetry {ADMIN_FP}"
     )
     assert steps["path_result"]["response"]["fingerprint"] == ADMIN_FP
+    assert (
+        steps["trace_request"]["command"]
+        == f"routes trace contact {TRACE_FP}"
+    )
+    assert steps["trace_request"]["response"]["fingerprint"] == TRACE_FP
+    assert steps["trace_result"]["response"]["fingerprint"] == TRACE_FP
+    assert steps["ping_request"]["command"] == f"repeater ping {ADMIN_FP}"
+    assert steps["ping_request"]["response"]["fingerprint"] == ADMIN_FP
 
 
 @pytest.mark.parametrize(
@@ -1078,6 +1129,7 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     assert "port=POSIX_D1L_TARGET" in source
     assert '"manual_only": False' in source
     assert "--authorize-public-tx" in source
+    assert 'parser.add_argument("--trace-fingerprint", required=True)' in source
     assert "validate_protocol(transcript, candidate)" in source
     assert "--dry-run" not in source
     assert 'parser.add_argument("--boot-timeout", type=float, default=45.0)' in source
