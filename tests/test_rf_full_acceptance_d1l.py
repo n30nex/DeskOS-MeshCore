@@ -199,6 +199,14 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
             },
         },
         {
+            "command": "routes trace 0BF0A701D5AE2DB6",
+            "result": {
+                "ok": True,
+                "fingerprint": "0bf0a701d5ae2db6",
+                "entries": [],
+            },
+        },
+        {
             "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct",
             "result": {"ok": True, "cmd": "mesh send dm"},
         },
@@ -253,6 +261,7 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
                 "best_route": "direct",
                 "entries": [
                     {
+                        "seq": 1,
                         "target": "0bf0a701d5ae2db6",
                         "kind": "dm_text",
                         "direction": "tx",
@@ -435,6 +444,14 @@ def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
             {"command": "identity status", "result": {"ok": True, "fingerprint": "BA14729E8588E30B"}},
             {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out", "result": {"ok": True}},
             {"command": "packets search rf_unit_out", "result": {"ok": True, "entries": [{"note": "rf_unit_out"}]}},
+            {
+                "command": "routes trace 0BF0A701D5AE2DB6",
+                "result": {
+                    "ok": True,
+                    "fingerprint": "0BF0A701D5AE2DB6",
+                    "entries": [],
+                },
+            },
             {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct", "result": {"ok": True}},
             {
                 "command": "messages dm 0BF0A701D5AE2DB6",
@@ -456,6 +473,7 @@ def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
                     "fingerprint": "0BF0A701D5AE2DB6",
                     "entries": [
                         {
+                            "seq": 1,
                             "target": "0BF0A701D5AE2DB6",
                             "kind": "dm_text",
                             "direction": "tx",
@@ -496,6 +514,14 @@ def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
             {"command": "identity status", "result": d1l_identity_status()},
             {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out", "result": {"ok": True}},
             {"command": "packets search rf_unit_out", "result": {"ok": True, "entries": [{"note": "rf_unit_out"}]}},
+            {
+                "command": "routes trace 0BF0A701D5AE2DB6",
+                "result": {
+                    "ok": True,
+                    "fingerprint": "0BF0A701D5AE2DB6",
+                    "entries": [],
+                },
+            },
             {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct", "result": {"ok": True}},
             {
                 "command": "messages dm 0BF0A701D5AE2DB6",
@@ -522,6 +548,7 @@ def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
                     "fingerprint": "0BF0A701D5AE2DB6",
                     "entries": [
                         {
+                            "seq": 1,
                             "target": "0BF0A701D5AE2DB6",
                             "kind": "dm_text",
                             "direction": "tx",
@@ -982,6 +1009,79 @@ def test_outbound_terminal_waits_for_both_flags_and_times_out_closed():
             monotonic=timeout_clock.__next__,
             sleep=lambda _seconds: None,
         )
+
+
+def test_hardware_direct_send_waits_for_terminal_ack_before_snapshot():
+    source = Path(rf_accept.__file__).read_text(encoding="utf-8")
+    start = source.index(
+        'direct_baseline_messages = run_command('
+    )
+    end = source.index(
+        'run_command(ser, f"packets search {direct_token}")',
+        start,
+    )
+    direct_stage = source[start:end]
+
+    assert "require_outbound_terminal_before_peer(" in direct_stage
+    assert "baseline_messages=direct_baseline_messages" in direct_stage
+    assert "outbound_text=direct_token" in direct_stage
+    assert "timeout_sec=wait_sec" in direct_stage
+    assert "time.sleep(2.0)" not in direct_stage
+    assert (
+        source.count(
+            "max_wait_sec=CONTROLLED_PEER_SETTLE_MAX_WAIT_SEC"
+        )
+        == 3
+    )
+
+
+def test_fresh_direct_route_rejects_stale_and_accepts_new_sequence():
+    fingerprint = "0BF0A701D5AE2DB6"
+    stale = {
+        "seq": 41,
+        "target": fingerprint,
+        "kind": "dm_text",
+        "direction": "tx",
+        "route": "direct",
+    }
+    before = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [stale],
+    }
+    after_stale = {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "entries": [stale],
+    }
+    after_fresh = {
+        **after_stale,
+        "entries": [
+            stale,
+            {
+                **stale,
+                "seq": 42,
+            },
+        ],
+    }
+
+    assert not rf_accept.route_has_fresh_direct_path(
+        before,
+        after_stale,
+        fingerprint,
+    )
+    assert rf_accept.route_has_fresh_direct_path(
+        before,
+        after_fresh,
+        fingerprint,
+    )
+    malformed = json.loads(json.dumps(after_fresh))
+    malformed["entries"][-1].pop("seq")
+    assert not rf_accept.route_has_fresh_direct_path(
+        before,
+        malformed,
+        fingerprint,
+    )
 
 
 def test_rf_report_rejects_failed_then_successful_outbound_duplicate():

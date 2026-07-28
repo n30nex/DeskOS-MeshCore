@@ -3187,6 +3187,30 @@ def new_entries_by_seq(
     return fresh
 
 
+def route_has_fresh_direct_path(
+    before: dict | None,
+    after: dict | None,
+    fingerprint: str,
+) -> bool:
+    if (
+        not isinstance(before, dict)
+        or before.get("ok") is not True
+        or not fingerprints_equal(before.get("fingerprint"), fingerprint)
+        or not isinstance(after, dict)
+        or after.get("ok") is not True
+        or not fingerprints_equal(after.get("fingerprint"), fingerprint)
+    ):
+        return False
+    return route_has_direct_path(
+        {
+            "ok": True,
+            "fingerprint": fingerprint,
+            "entries": new_entries_by_seq(before, after),
+        },
+        fingerprint,
+    )
+
+
 def exact_outbound_terminal_row(
     *,
     baseline_messages: dict | None,
@@ -3933,11 +3957,23 @@ def build_report(
         steps, f"messages dm {fingerprint}"
     )
     latest_packets = latest_command_step(steps, "packets")
-    latest_route = latest_command_step(steps, f"routes trace {fingerprint}")
+    route_command = f"routes trace {fingerprint}"
+    route_steps = [
+        step for step in steps if step.get("command") == route_command
+    ]
+    latest_route = route_steps[-1] if route_steps else None
+    direct_baseline_route = (
+        route_steps[-2] if len(route_steps) >= 2 else None
+    )
     latest_health = latest_command_step(steps, "health")
     version_step = first_command_step(steps, "version")
     identity_result = identity_step.get("result", {}) if identity_step else {}
     route_result = latest_route.get("result", {}) if latest_route else {}
+    direct_baseline_route_result = (
+        direct_baseline_route.get("result", {})
+        if direct_baseline_route
+        else {}
+    )
     packets_result = latest_packets.get("result", {}) if latest_packets else {}
     messages_result = latest_messages.get("result", {}) if latest_messages else {}
     baseline_messages_result = (
@@ -4186,7 +4222,11 @@ def build_report(
             and messages_have_tx_token(
                 messages_result, direct_token, fingerprint
             )
-            and route_has_direct_path(route_result, fingerprint)
+            and route_has_fresh_direct_path(
+                direct_baseline_route_result,
+                route_result,
+                fingerprint,
+            )
         )
     controlled_peer_observed = (
         peer_status_ok
@@ -4776,6 +4816,7 @@ def _run_hardware_reserved(
                 lambda: run_command(ser, "mesh status"),
                 timeout_sec=wait_sec,
                 poll_sec=poll_sec,
+                max_wait_sec=CONTROLLED_PEER_SETTLE_MAX_WAIT_SEC,
             ):
                 raise ValueError(
                     "MeshCore owner did not become ready before outbound DM"
@@ -4865,16 +4906,30 @@ def _run_hardware_reserved(
                     lambda: run_command(ser, "mesh status"),
                     timeout_sec=wait_sec,
                     poll_sec=poll_sec,
+                    max_wait_sec=CONTROLLED_PEER_SETTLE_MAX_WAIT_SEC,
                 ):
                     raise ValueError(
                         "MeshCore owner did not become ready before direct DM"
                     )
+                run_command(ser, f"routes trace {fingerprint}")
+                direct_baseline_messages = run_command(
+                    ser, f"messages dm {fingerprint}"
+                )
                 run_command(
                     ser,
                     f"mesh send dm {fingerprint} {direct_token}",
                     max(timeout, 8.0),
                 )
-                time.sleep(2.0)
+                require_outbound_terminal_before_peer(
+                    lambda: run_command(
+                        ser, f"messages dm {fingerprint}"
+                    ),
+                    baseline_messages=direct_baseline_messages,
+                    outbound_text=direct_token,
+                    fingerprint=fingerprint,
+                    timeout_sec=wait_sec,
+                    poll_sec=poll_sec,
+                )
                 run_command(ser, f"packets search {direct_token}")
             run_command(ser, f"messages dm {fingerprint}")
         run_command(ser, "packets")
