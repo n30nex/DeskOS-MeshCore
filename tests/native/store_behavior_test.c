@@ -2244,6 +2244,48 @@ static void test_full_key_chat_without_provenance_is_not_dm_capable(void)
     assert(uri[0] == '\0');
 }
 
+static void test_path_probe_roles_do_not_expand_dm_capability(void)
+{
+    static const struct {
+        const char *type;
+        bool can_dm;
+        bool can_path_probe;
+        bool can_admin;
+    } cases[] = {
+        {"chat", true, true, false},
+        {"repeater", false, true, true},
+        {"room", false, true, true},
+        {"sensor", false, true, false},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        d1l_contact_entry_t contact = {0};
+        copy_field(contact.fingerprint, sizeof(contact.fingerprint),
+                   "0123456789abcdef");
+        copy_field(contact.public_key_hex, sizeof(contact.public_key_hex),
+                   KEY_HEX);
+        copy_field(contact.type, sizeof(contact.type), cases[i].type);
+        contact.verification_source =
+            D1L_CONTACT_VERIFICATION_URI_IMPORT;
+
+        assert(d1l_contact_store_is_canonical(&contact));
+        assert(d1l_contact_store_can_dm(&contact) == cases[i].can_dm);
+        assert(d1l_contact_store_can_path_probe(&contact) ==
+               cases[i].can_path_probe);
+        assert(d1l_contact_store_can_admin(&contact) == cases[i].can_admin);
+    }
+
+    d1l_contact_entry_t unverified_repeater = {0};
+    copy_field(unverified_repeater.fingerprint,
+               sizeof(unverified_repeater.fingerprint),
+               "0123456789abcdef");
+    copy_field(unverified_repeater.public_key_hex,
+               sizeof(unverified_repeater.public_key_hex), KEY_HEX);
+    copy_field(unverified_repeater.type, sizeof(unverified_repeater.type),
+               "repeater");
+    assert(!d1l_contact_store_can_path_probe(&unverified_repeater));
+}
+
 static void test_contact_export_role_mapping(void)
 {
     assert(d1l_contact_store_meshcore_type_id("chat") == 1U);
@@ -2333,6 +2375,7 @@ int main(void)
     test_uri_import_conflicts_and_nvs_failure_are_non_mutating();
     test_uri_import_preserves_official_names();
     test_full_key_chat_without_provenance_is_not_dm_capable();
+    test_path_probe_roles_do_not_expand_dm_capability();
     test_contact_export_role_mapping();
     puts("native node/contact store behavior: ok");
     return 0;

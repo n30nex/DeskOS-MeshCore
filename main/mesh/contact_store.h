@@ -133,6 +133,7 @@ const char *d1l_contact_store_verification_source_name(uint8_t source);
 bool d1l_contact_store_has_export_key(const d1l_contact_entry_t *entry);
 bool d1l_contact_store_is_canonical(const d1l_contact_entry_t *entry);
 bool d1l_contact_store_can_dm(const d1l_contact_entry_t *entry);
+bool d1l_contact_store_can_path_probe(const d1l_contact_entry_t *entry);
 bool d1l_contact_store_can_admin(const d1l_contact_entry_t *entry);
 esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *dest,
                                        size_t dest_size);
