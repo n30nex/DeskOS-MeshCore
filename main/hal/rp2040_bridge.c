@@ -478,6 +478,7 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
                                                  char *line, size_t line_size,
                                                  uint32_t timeout_ms,
                                                  bool extend_timeout_on_rx,
+                                                 bool caller_holds_lock,
                                                  bool *response_truncated,
                                                  const char *progress_prefix,
                                                  char *last_progress,
@@ -502,9 +503,14 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
     int64_t deadline_us = 0;
     size_t used = 0;
     bool dropping = false;
-    esp_err_t ret = take_bridge_lock(timeout_ms);
-    if (ret != ESP_OK) {
-        return ret;
+    bool lock_acquired = false;
+    esp_err_t ret = ESP_OK;
+    if (!caller_holds_lock) {
+        ret = take_bridge_lock(timeout_ms);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        lock_acquired = true;
     }
     uart_flush_input((uart_port_t)s_status.uart_port);
     const int written = uart_write_bytes((uart_port_t)s_status.uart_port, command, command_len);
@@ -568,7 +574,9 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
     ret = ESP_ERR_TIMEOUT;
 
 done:
-    give_bridge_lock();
+    if (lock_acquired) {
+        give_bridge_lock();
+    }
     return ret;
 }
 
@@ -578,8 +586,20 @@ static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
                                         bool *response_truncated)
 {
     return exchange_prefixed_line_internal(command, command_len, prefixes, prefix_count,
-                                           line, line_size, timeout_ms, false,
+                                           line, line_size, timeout_ms, false, false,
                                            response_truncated, NULL, NULL, 0);
+}
+
+static esp_err_t exchange_prefixed_line_while_locked(
+    const char *command, size_t command_len,
+    const char *const *prefixes, size_t prefix_count,
+    char *line, size_t line_size, uint32_t timeout_ms,
+    bool *response_truncated)
+{
+    return exchange_prefixed_line_internal(
+        command, command_len, prefixes, prefix_count,
+        line, line_size, timeout_ms, false, true,
+        response_truncated, NULL, NULL, 0);
 }
 
 static esp_err_t parse_sd_line_with_prefix(const char *line,
@@ -680,6 +700,8 @@ static esp_err_t parse_ping_line(const char *line, d1l_rp2040_ping_t *ping)
     (void)parse_u32_token(line, "file_chunk_max", &ping->file_chunk_max);
     (void)parse_u32_token(line, "path_max", &ping->path_max);
     (void)parse_bool_token(line, "atomic_rename", &ping->atomic_rename_supported);
+    (void)parse_bool_token(
+        line, "stream_write", &ping->stream_write_supported);
     (void)parse_bool_token(line, "sd_touch", &ping->sd_touched);
     snprintf(ping->note, sizeof(ping->note), "%s",
              ping->sd_touched ? "ping_touched_sd" : "ok_no_sd_touch");
@@ -735,11 +757,12 @@ static uint16_t next_file_request_id(void)
     return id;
 }
 
-static esp_err_t send_file_command(const char *command, size_t command_len,
-                                   uint16_t request_id, const char *expected_op,
-                                   uint8_t *out_data, size_t out_data_size,
-                                   d1l_rp2040_file_result_t *out_result,
-                                   uint32_t timeout_ms)
+static esp_err_t send_file_command_internal(
+    const char *command, size_t command_len,
+    uint16_t request_id, const char *expected_op,
+    uint8_t *out_data, size_t out_data_size,
+    d1l_rp2040_file_result_t *out_result,
+    uint32_t timeout_ms, bool caller_holds_lock)
 {
     if (!out_result) {
         return ESP_ERR_INVALID_ARG;
@@ -753,8 +776,13 @@ static esp_err_t send_file_command(const char *command, size_t command_len,
     char line[D1L_RP2040_LINE_BUFFER_SIZE];
     bool truncated = false;
     init_file_result(out_result, ESP_ERR_TIMEOUT);
-    esp_err_t ret = exchange_prefixed_line(command, command_len, prefixes, 1, line,
-                                           sizeof(line), timeout_ms, &truncated);
+    esp_err_t ret = caller_holds_lock ?
+        exchange_prefixed_line_while_locked(
+            command, command_len, prefixes, 1, line,
+            sizeof(line), timeout_ms, &truncated) :
+        exchange_prefixed_line(command, command_len, prefixes, 1,
+                               line, sizeof(line), timeout_ms,
+                               &truncated);
     if (ret != ESP_OK) {
         out_result->last_error = ret;
         out_result->response_truncated = truncated;
@@ -766,6 +794,28 @@ static esp_err_t send_file_command(const char *command, size_t command_len,
         line, request_id, expected_op, out_data, out_data_size, out_result);
     out_result->response_truncated = truncated;
     return ret;
+}
+
+static esp_err_t send_file_command(const char *command, size_t command_len,
+                                   uint16_t request_id, const char *expected_op,
+                                   uint8_t *out_data, size_t out_data_size,
+                                   d1l_rp2040_file_result_t *out_result,
+                                   uint32_t timeout_ms)
+{
+    return send_file_command_internal(
+        command, command_len, request_id, expected_op,
+        out_data, out_data_size, out_result, timeout_ms, false);
+}
+
+static esp_err_t send_file_command_while_locked(
+    const char *command, size_t command_len,
+    uint16_t request_id, const char *expected_op,
+    d1l_rp2040_file_result_t *out_result,
+    uint32_t timeout_ms)
+{
+    return send_file_command_internal(
+        command, command_len, request_id, expected_op,
+        NULL, 0U, out_result, timeout_ms, true);
 }
 
 esp_err_t d1l_rp2040_bridge_init(void)
@@ -1320,6 +1370,246 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path,
         NULL, 0, out_result, timeout_ms);
     return ret == ESP_OK ? d1l_rp2040_file_reply_bind_write(
                               out_result, offset, len) : ret;
+}
+
+static bool verified_put_continue(
+    d1l_rp2040_file_continue_cb_t should_continue,
+    void *continue_context)
+{
+    return !should_continue || should_continue(continue_context);
+}
+
+static bool verified_put_cleanup_confirmed(
+    const d1l_rp2040_file_result_t *result)
+{
+    return result && result->removed_known && result->removed;
+}
+
+static void note_verified_put_cancelled(
+    d1l_rp2040_file_result_t *result)
+{
+    if (!result) {
+        return;
+    }
+    result->ok = false;
+    result->cancelled = true;
+    result->last_error = ESP_ERR_INVALID_STATE;
+    snprintf(result->err, sizeof(result->err), "cancelled");
+    snprintf(result->note, sizeof(result->note), "cancelled");
+}
+
+static esp_err_t abort_verified_put_while_locked(
+    d1l_rp2040_file_result_t *out_result,
+    uint32_t timeout_ms)
+{
+    if (!out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint16_t request_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    const int command_len = snprintf(
+        command, sizeof(command),
+        "%s v=1 id=%u op=put_abort\n",
+        D1L_RP2040_FILE_PREFIX, (unsigned)request_id);
+    if (command_len <= 0 ||
+        (size_t)command_len >= sizeof(command)) {
+        init_file_result(out_result, ESP_ERR_INVALID_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    const esp_err_t ret = send_file_command_while_locked(
+        command, (size_t)command_len, request_id,
+        "put_abort", out_result, timeout_ms);
+    return ret == ESP_OK ?
+        d1l_rp2040_file_reply_bind_put_abort(out_result) : ret;
+}
+
+esp_err_t d1l_rp2040_bridge_file_write_verified(
+    const char *path,
+    const uint8_t *data,
+    size_t len,
+    uint32_t expected_crc32,
+    d1l_rp2040_file_continue_cb_t should_continue,
+    void *continue_context,
+    d1l_rp2040_file_result_t *out_result,
+    uint32_t timeout_ms)
+{
+    if (!path || !out_result || (!data && len > 0U) ||
+        len > UINT32_MAX || timeout_ms == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path64[D1L_RP2040_PATH64_MAX + 1U];
+    if (!encode_path(path, path64, sizeof(path64))) {
+        init_file_result(out_result, ESP_ERR_INVALID_ARG);
+        snprintf(out_result->err, sizeof(out_result->err), "bad_path");
+        snprintf(out_result->note, sizeof(out_result->note), "bad_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (crc32_bytes(data, len) != expected_crc32) {
+        init_file_result(out_result, ESP_ERR_INVALID_CRC);
+        snprintf(out_result->err, sizeof(out_result->err),
+                 "crc_mismatch");
+        snprintf(out_result->note, sizeof(out_result->note),
+                 "crc_mismatch");
+        return ESP_ERR_INVALID_CRC;
+    }
+    if (!verified_put_continue(
+            should_continue, continue_context)) {
+        init_file_result(out_result, ESP_ERR_INVALID_STATE);
+        note_verified_put_cancelled(out_result);
+        return out_result->last_error;
+    }
+    if (!s_status.uart_ready) {
+        init_file_result(out_result, s_status.init_result);
+        return s_status.init_result;
+    }
+
+    esp_err_t ret = take_bridge_lock(timeout_ms);
+    if (ret != ESP_OK) {
+        init_file_result(out_result, ret);
+        return ret;
+    }
+
+    const uint32_t expected_size = (uint32_t)len;
+    char expected_crc[9];
+    crc32_hex(expected_crc32, expected_crc);
+    bool session_maybe_active = false;
+    d1l_rp2040_file_result_t step_result = {0};
+
+    const uint16_t begin_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    int command_len = snprintf(
+        command, sizeof(command),
+        "%s v=1 id=%u op=put_begin path=%s size=%lu crc=%s\n",
+        D1L_RP2040_FILE_PREFIX, (unsigned)begin_id, path64,
+        (unsigned long)expected_size, expected_crc);
+    if (command_len <= 0 ||
+        (size_t)command_len >= sizeof(command)) {
+        init_file_result(&step_result, ESP_ERR_INVALID_SIZE);
+        ret = ESP_ERR_INVALID_SIZE;
+        goto verified_put_done;
+    }
+    ret = send_file_command_while_locked(
+        command, (size_t)command_len, begin_id,
+        "put_begin", &step_result, timeout_ms);
+    session_maybe_active = ret != ESP_ERR_NOT_SUPPORTED;
+    if (verified_put_cleanup_confirmed(&step_result)) {
+        session_maybe_active = false;
+    }
+    if (ret == ESP_OK) {
+        ret = d1l_rp2040_file_reply_bind_put_begin(
+            &step_result, expected_size, expected_crc32);
+    }
+    if (ret != ESP_OK) {
+        goto verified_put_done;
+    }
+
+    for (size_t offset = 0U; offset < len;) {
+        if (!verified_put_continue(
+                should_continue, continue_context)) {
+            note_verified_put_cancelled(&step_result);
+            ret = step_result.last_error;
+            goto verified_put_done;
+        }
+        const size_t remaining = len - offset;
+        const size_t chunk_len =
+            remaining < D1L_RP2040_FILE_CHUNK_MAX ?
+                remaining : D1L_RP2040_FILE_CHUNK_MAX;
+        char data64[D1L_RP2040_DATA64_MAX + 1U];
+        char chunk_crc[9];
+        if (!base64url_encode(
+                &data[offset], chunk_len,
+                data64, sizeof(data64))) {
+            init_file_result(
+                &step_result, ESP_ERR_INVALID_SIZE);
+            ret = ESP_ERR_INVALID_SIZE;
+            goto verified_put_done;
+        }
+        crc32_hex(
+            crc32_bytes(&data[offset], chunk_len),
+            chunk_crc);
+        const uint16_t chunk_id = next_file_request_id();
+        command_len = snprintf(
+            command, sizeof(command),
+            "%s v=1 id=%u op=put_chunk off=%lu len=%lu "
+            "data=%s crc=%s\n",
+            D1L_RP2040_FILE_PREFIX, (unsigned)chunk_id,
+            (unsigned long)offset, (unsigned long)chunk_len,
+            data64, chunk_crc);
+        if (command_len <= 0 ||
+            (size_t)command_len >= sizeof(command)) {
+            init_file_result(
+                &step_result, ESP_ERR_INVALID_SIZE);
+            ret = ESP_ERR_INVALID_SIZE;
+            goto verified_put_done;
+        }
+        ret = send_file_command_while_locked(
+            command, (size_t)command_len, chunk_id,
+            "put_chunk", &step_result, timeout_ms);
+        if (ret != ESP_OK &&
+            verified_put_cleanup_confirmed(&step_result)) {
+            session_maybe_active = false;
+        }
+        if (ret == ESP_OK) {
+            ret = d1l_rp2040_file_reply_bind_put_chunk(
+                &step_result, (uint32_t)offset, chunk_len);
+        }
+        if (ret != ESP_OK) {
+            goto verified_put_done;
+        }
+        offset += chunk_len;
+    }
+
+    if (!verified_put_continue(
+            should_continue, continue_context)) {
+        note_verified_put_cancelled(&step_result);
+        ret = step_result.last_error;
+        goto verified_put_done;
+    }
+    const uint16_t end_id = next_file_request_id();
+    command_len = snprintf(
+        command, sizeof(command),
+        "%s v=1 id=%u op=put_end\n",
+        D1L_RP2040_FILE_PREFIX, (unsigned)end_id);
+    if (command_len <= 0 ||
+        (size_t)command_len >= sizeof(command)) {
+        init_file_result(&step_result, ESP_ERR_INVALID_SIZE);
+        ret = ESP_ERR_INVALID_SIZE;
+        goto verified_put_done;
+    }
+    ret = send_file_command_while_locked(
+        command, (size_t)command_len, end_id,
+        "put_end", &step_result, timeout_ms);
+    if (ret != ESP_OK &&
+        verified_put_cleanup_confirmed(&step_result)) {
+        session_maybe_active = false;
+    }
+    if (ret == ESP_OK) {
+        ret = d1l_rp2040_file_reply_bind_put_end(
+            &step_result, expected_size, expected_crc32);
+    }
+    if (ret == ESP_OK) {
+        session_maybe_active = false;
+    }
+
+verified_put_done:
+    if (ret != ESP_OK && session_maybe_active) {
+        const bool cancelled = step_result.cancelled;
+        d1l_rp2040_file_result_t abort_result = {0};
+        const esp_err_t abort_ret =
+            abort_verified_put_while_locked(
+                &abort_result, timeout_ms);
+        if (abort_ret == ESP_OK) {
+            step_result.removed = abort_result.removed;
+        } else {
+            snprintf(step_result.note,
+                     sizeof(step_result.note), "abort_failed");
+        }
+        step_result.cancelled = cancelled;
+    }
+    *out_result = step_result;
+    out_result->last_error = ret;
+    give_bridge_lock();
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_file_append(const char *path,

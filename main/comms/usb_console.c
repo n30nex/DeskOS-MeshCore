@@ -2854,7 +2854,7 @@ static void cmd_rp2040_ping(void)
     if (ret == ESP_OK && ping.bridge_ready && ping.protocol_supported) {
         d1l_storage_status_note_valid_bridge_response();
     }
-    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"rp2040 ping\",\"code\":\"%s\",\"bridge_ready\":%s,\"protocol_supported\":%s,\"response_truncated\":%s,\"version\":%lu,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"sd_touched\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":",
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"rp2040 ping\",\"code\":\"%s\",\"bridge_ready\":%s,\"protocol_supported\":%s,\"response_truncated\":%s,\"version\":%lu,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"stream_write\":%s,\"sd_touched\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":",
            D1L_CONSOLE_SCHEMA,
            bool_json(ret == ESP_OK),
            esp_err_to_name(ret),
@@ -2866,6 +2866,7 @@ static void cmd_rp2040_ping(void)
            (unsigned long)ping.file_chunk_max,
            (unsigned long)ping.path_max,
            bool_json(ping.atomic_rename_supported),
+           bool_json(ping.stream_write_supported),
            bool_json(ping.sd_touched));
     print_json_string(ping.note[0] ? ping.note : "");
     printf("}\n");

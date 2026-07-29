@@ -2318,49 +2318,18 @@ static esp_err_t persist_validated_tile(
     candidate_tmp_owned = true;
     result->checksum_verified = false;
     d1l_rp2040_file_result_t file = {0};
-    for (size_t offset = 0U; offset < result->bytes;) {
-        if (!persistence_continue(
-                result, should_continue, continue_context)) {
-            ret = ESP_ERR_INVALID_STATE;
-            goto persist_done;
-        }
-        const size_t remaining = result->bytes - offset;
-        const size_t chunk =
-            remaining < D1L_RP2040_FILE_CHUNK_MAX ?
-                remaining : D1L_RP2040_FILE_CHUNK_MAX;
-        ret = d1l_rp2040_bridge_file_write(
-            result->tmp_path, (uint32_t)offset,
-            &buffer[offset], chunk, offset == 0U,
-            &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
-        if (ret != ESP_OK ||
-            file.offset != offset ||
-            file.length != chunk ||
-            file.size != offset + chunk) {
-            ret = ret == ESP_OK ? ESP_FAIL : ret;
-            goto persist_done;
-        }
-        result->write_tmp = true;
-        offset += chunk;
+    ret = d1l_rp2040_bridge_file_write_verified(
+        result->tmp_path, buffer, result->bytes,
+        result->content_crc32, should_continue,
+        continue_context, &file,
+        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (file.cancelled) {
+        result->cancelled = true;
     }
-    if (!persistence_continue(
-            result, should_continue, continue_context)) {
-        ret = ESP_ERR_INVALID_STATE;
-        goto persist_done;
-    }
-    d1l_map_tile_cache_record_t verify_record = {0};
-    if (!d1l_map_tile_cache_record_init(
-            1U, result->z, result->x, result->y,
-            (uint32_t)result->bytes, result->content_crc32,
-            &verify_record)) {
-        ret = ESP_ERR_INVALID_STATE;
-        goto persist_done;
-    }
-    ret = verify_tile_file_continue(
-        result->tmp_path, &verify_record, result,
-        should_continue, continue_context);
     if (ret != ESP_OK) {
         goto persist_done;
     }
+    result->write_tmp = true;
     result->checksum_verified = true;
     if (!persistence_continue(
             result, should_continue, continue_context)) {

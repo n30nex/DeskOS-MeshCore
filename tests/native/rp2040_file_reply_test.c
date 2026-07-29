@@ -134,6 +134,122 @@ static void test_request_reply_range_binding_fails_closed(void)
            ESP_ERR_INVALID_STATE);
 }
 
+static void test_stream_put_replies_require_exact_fields_and_binding(void)
+{
+    d1l_rp2040_file_result_t result = {0};
+
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=20 ok=1 op=put_begin off=0 "
+               "size=51351 crc=89ABCDEF note=ok",
+               20U, "put_begin", NULL, 0U, &result) == ESP_OK);
+    assert(result.offset == 0U);
+    assert(result.size == 51351U);
+    assert(result.crc32 == UINT32_C(0x89ABCDEF));
+    assert(d1l_rp2040_file_reply_bind_put_begin(
+               &result, 51351U, UINT32_C(0x89ABCDEF)) == ESP_OK);
+    assert(d1l_rp2040_file_reply_bind_put_begin(
+               &result, 51350U, UINT32_C(0x89ABCDEF)) ==
+           ESP_ERR_INVALID_STATE);
+
+    memset(&result, 0, sizeof(result));
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=21 ok=1 op=put_chunk off=192 "
+               "len=192 next=384 note=ok",
+               21U, "put_chunk", NULL, 0U, &result) == ESP_OK);
+    assert(result.offset == 192U);
+    assert(result.length == 192U);
+    assert(result.next_offset == 384U);
+    assert(d1l_rp2040_file_reply_bind_put_chunk(
+               &result, 192U, 192U) == ESP_OK);
+    result.next_offset = 383U;
+    assert(d1l_rp2040_file_reply_bind_put_chunk(
+               &result, 192U, 192U) == ESP_ERR_INVALID_STATE);
+
+    memset(&result, 0, sizeof(result));
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=22 ok=1 op=put_end "
+               "size=51351 crc=89ABCDEF note=ok",
+               22U, "put_end", NULL, 0U, &result) == ESP_OK);
+    assert(d1l_rp2040_file_reply_bind_put_end(
+               &result, 51351U, UINT32_C(0x89ABCDEF)) == ESP_OK);
+    result.crc32 ^= 1U;
+    assert(d1l_rp2040_file_reply_bind_put_end(
+               &result, 51351U, UINT32_C(0x89ABCDEF)) ==
+           ESP_ERR_INVALID_STATE);
+
+    memset(&result, 0, sizeof(result));
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=23 ok=1 op=put_abort "
+               "removed=1 note=ok",
+               23U, "put_abort", NULL, 0U, &result) == ESP_OK);
+    assert(result.removed);
+    assert(d1l_rp2040_file_reply_bind_put_abort(&result) == ESP_OK);
+
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=24 ok=1 op=put_begin "
+               "off=0 size=51351 note=ok",
+               24U, "put_begin", NULL, 0U, &result) != ESP_OK);
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=25 ok=1 op=put_chunk "
+               "off=0 len=192 note=ok",
+               25U, "put_chunk", NULL, 0U, &result) != ESP_OK);
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=26 ok=1 op=put_end "
+               "size=51351 note=ok",
+               26U, "put_end", NULL, 0U, &result) != ESP_OK);
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=27 ok=1 op=put_abort note=ok",
+               27U, "put_abort", NULL, 0U, &result) != ESP_OK);
+}
+
+static void test_stream_terminal_errors_expose_canonical_cleanup_truth(void)
+{
+    d1l_rp2040_file_result_t result = {0};
+
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=28 ok=0 op=put_chunk "
+               "err=write_failed removed=1 note=write_failed",
+               28U, "put_chunk", NULL, 0U, &result) == ESP_FAIL);
+    assert(result.removed_known);
+    assert(result.removed);
+    assert(strcmp(result.err, "write_failed") == 0);
+
+    memset(&result, 0, sizeof(result));
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=29 ok=0 op=put_end "
+               "err=size_mismatch removed=0 note=size_mismatch",
+               29U, "put_end", NULL, 0U, &result) == ESP_FAIL);
+    assert(result.removed_known);
+    assert(!result.removed);
+
+    memset(&result, 0, sizeof(result));
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=30 ok=0 op=put_end "
+               "err=crc_mismatch removed=yes note=crc_mismatch",
+               30U, "put_end", NULL, 0U, &result) == ESP_FAIL);
+    assert(!result.removed_known);
+    assert(strcmp(result.err, "bad_response") == 0);
+
+    memset(&result, 0, sizeof(result));
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=31 ok=0 op=put_end "
+               "err=crc_mismatch note=crc_mismatch",
+               31U, "put_end", NULL, 0U, &result) ==
+           ESP_ERR_INVALID_ARG);
+    assert(!result.removed_known);
+    assert(!result.removed);
+
+    memset(&result, 0, sizeof(result));
+    result.removed = true;
+    assert(d1l_rp2040_file_reply_bind_put_abort(&result) ==
+           ESP_ERR_INVALID_STATE);
+    result.removed_known = true;
+    assert(d1l_rp2040_file_reply_bind_put_abort(&result) == ESP_OK);
+    result.removed = false;
+    assert(d1l_rp2040_file_reply_bind_put_abort(&result) ==
+           ESP_ERR_INVALID_STATE);
+}
+
 int main(void)
 {
     test_zero_byte_eof_reply_is_valid();
@@ -142,6 +258,8 @@ int main(void)
     test_write_and_remote_error_semantics_are_preserved();
     test_stat_requires_canonical_complete_tokens();
     test_request_reply_range_binding_fails_closed();
+    test_stream_put_replies_require_exact_fields_and_binding();
+    test_stream_terminal_errors_expose_canonical_cleanup_truth();
     puts("native RP2040 file reply parser: ok");
     return 0;
 }

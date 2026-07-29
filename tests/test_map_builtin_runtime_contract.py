@@ -417,12 +417,16 @@ def test_background_persistence_is_cancelable_until_journal_intent():
     assert "cache_transaction_take_cancelable(" in persist
     assert "D1L_MAP_TILE_REQUEST_GATE_SLICE_MS" in cancellable_take
     assert "persistence_continue(" in cancellable_take
-    tile_write_loop = persist.split(
-        "for (size_t offset = 0U; offset < result->bytes;)", 1
-    )[1].split("d1l_map_tile_cache_record_t verify_record", 1)[0]
-    assert tile_write_loop.index("persistence_continue(") < tile_write_loop.index(
-        "d1l_rp2040_bridge_file_write("
-    )
+    stream_write = persist.split(
+        "d1l_rp2040_bridge_file_write_verified(", 1
+    )[1].split("write_attribution_metadata(", 1)[0]
+    assert "should_continue" in stream_write
+    assert "continue_context" in stream_write
+    assert "if (file.cancelled)" in stream_write
+    before_stream_write = persist.split(
+        "d1l_rp2040_bridge_file_write_verified(", 1
+    )[0]
+    assert "persistence_continue(" in before_stream_write
     verify_loop = verify.split("while (offset < record->size)", 1)[1]
     assert verify_loop.index("persistence_continue(") < verify_loop.index(
         "d1l_rp2040_bridge_file_read("

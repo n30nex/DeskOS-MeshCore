@@ -19,7 +19,7 @@ def test_rp2040_bridge_pin_contract():
         "expander_reset": 8,
         "bootsel_control": None,
         "uart_port": 2,
-        "baud": 115200,
+        "baud": 460800,
     }
 
 
