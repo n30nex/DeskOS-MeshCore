@@ -6,6 +6,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "app/settings_model.h"
@@ -49,6 +50,7 @@ static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_map_prefetch_status_t s_status;
 static bool s_starting;
 static TaskHandle_t s_worker;
+static SemaphoreHandle_t s_wake_lock;
 static d1l_node_marker_t *s_markers;
 static d1l_map_prefetch_point_t *s_points;
 static uint8_t *s_tile_buffer;
@@ -124,9 +126,7 @@ static void task_pause(void)
 
 static bool visible_map_active(void)
 {
-    d1l_map_view_status_t map = {0};
-    d1l_map_view_service_status(&map);
-    return map.visible;
+    return d1l_map_view_service_visible();
 }
 
 static bool prefetch_continue(void *context)
@@ -601,9 +601,7 @@ static void prefetch_worker(void *context)
         }
 
         publish_visible_pause();
-        vTaskPrioritySet(NULL, D1L_MAP_VISIBLE_WORKER_PRIORITY);
         d1l_map_view_service_run_pending();
-        vTaskPrioritySet(NULL, D1L_MAP_PREFETCH_WORKER_PRIORITY);
         task_pause();
     }
 }
@@ -647,6 +645,20 @@ esp_err_t d1l_map_prefetch_service_init(void)
         return ESP_ERR_NO_MEM;
     }
 
+    SemaphoreHandle_t wake_lock = xSemaphoreCreateMutex();
+    if (!wake_lock) {
+        heap_caps_free(s_markers);
+        heap_caps_free(s_points);
+        heap_caps_free(s_tile_buffer);
+        s_markers = NULL;
+        s_points = NULL;
+        s_tile_buffer = NULL;
+        portENTER_CRITICAL(&s_status_lock);
+        s_starting = false;
+        portEXIT_CRITICAL(&s_status_lock);
+        return ESP_ERR_NO_MEM;
+    }
+
     portENTER_CRITICAL(&s_status_lock);
     memset(&s_status, 0, sizeof(s_status));
     s_status.initialized = true;
@@ -669,12 +681,14 @@ esp_err_t d1l_map_prefetch_service_init(void)
         s_markers = NULL;
         s_points = NULL;
         s_tile_buffer = NULL;
+        vSemaphoreDelete(wake_lock);
         portENTER_CRITICAL(&s_status_lock);
         s_starting = false;
         portEXIT_CRITICAL(&s_status_lock);
         return ESP_ERR_NO_MEM;
     }
     portENTER_CRITICAL(&s_status_lock);
+    s_wake_lock = wake_lock;
     s_worker = worker;
     s_starting = false;
     portEXIT_CRITICAL(&s_status_lock);
@@ -685,10 +699,26 @@ esp_err_t d1l_map_prefetch_service_wake(void)
 {
     portENTER_CRITICAL(&s_status_lock);
     TaskHandle_t worker = s_worker;
+    SemaphoreHandle_t wake_lock = s_wake_lock;
     portEXIT_CRITICAL(&s_status_lock);
-    if (!worker) {
+    if (!worker || !wake_lock) {
         return ESP_ERR_INVALID_STATE;
     }
+    /*
+     * Serialize the visibility snapshot with priority application. A matching
+     * wake follows every visible-lease transition, so a racing transition
+     * waits here and then applies the latest state instead of losing a
+     * foreground promotion to a stale demotion.
+     */
+    if (xSemaphoreTake(wake_lock, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    vTaskPrioritySet(
+        worker,
+        visible_map_active() ?
+            D1L_MAP_VISIBLE_WORKER_PRIORITY :
+            D1L_MAP_PREFETCH_WORKER_PRIORITY);
     xTaskNotifyGive(worker);
+    xSemaphoreGive(wake_lock);
     return ESP_OK;
 }
