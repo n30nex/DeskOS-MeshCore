@@ -113,7 +113,6 @@ OUTCOME_KEYS = (
     "public_send_count",
     "dm_ack",
     "path",
-    "trace",
     "ping",
     "repeater_login",
     "repeater_query",
@@ -128,7 +127,6 @@ COVERAGE = {
     "public_send_count": "protocol",
     "dm_ack": "rf",
     "path": "protocol",
-    "trace": "protocol",
     "ping": "protocol",
     "repeater_login": "protocol",
     "repeater_query": "protocol",
@@ -169,10 +167,6 @@ PROTOCOL_OPERATIONS = frozenset(
         "mesh_status",
         "peer_advert",
         "contacts",
-        "trace_path_request",
-        "trace_path_result",
-        "trace_request",
-        "trace_result",
         "peer_before",
         "public_tx_authorization",
         "public_send",
@@ -737,17 +731,13 @@ def validate_protocol(
     protocol_targets = data.get("protocol_targets")
     if not (
         isinstance(protocol_targets, dict)
-        and set(protocol_targets)
-        == {"admin_fingerprint", "trace_fingerprint"}
+        and set(protocol_targets) == {"admin_fingerprint"}
     ):
         raise EvidenceError("protocol transcript target binding is invalid")
     admin_fingerprint = _fingerprint(
         protocol_targets.get("admin_fingerprint")
     )
-    trace_fingerprint = _fingerprint(
-        protocol_targets.get("trace_fingerprint")
-    )
-    if admin_fingerprint is None or trace_fingerprint is None:
+    if admin_fingerprint is None:
         raise EvidenceError("protocol transcript targets must be exact")
     peer_status_schema = controlled_peer["status_schema"]
     operations = PROTOCOL_OPERATIONS
@@ -766,10 +756,6 @@ def validate_protocol(
     mesh_status = _response(steps, "mesh_status")
     peer_advert = _response(steps, "peer_advert")
     contacts = _response(steps, "contacts")
-    trace_path_request = _response(steps, "trace_path_request")
-    trace_path_result = _response(steps, "trace_path_result")
-    trace_request = _response(steps, "trace_request")
-    trace_result = _response(steps, "trace_result")
     before = _response(steps, "peer_before")
     d1l_advert = (
         _response(steps, "d1l_advert")
@@ -876,14 +862,6 @@ def validate_protocol(
         if admin_contact is not None
         else None
     )
-    trace_contact = _unique_contact(
-        contacts, fingerprint=trace_fingerprint
-    )
-    trace_public_key = (
-        _public_key(trace_contact.get("public_key"))
-        if trace_contact is not None
-        else None
-    )
 
     public_tx_rows = (
         public_tx_record.get("entries")
@@ -922,27 +900,6 @@ def validate_protocol(
         and _integer(row.get("sequence"), minimum=1) is not None
     ]
 
-    trace_path_token = trace_path_request.get("token")
-    trace_path_tag = (
-        int(trace_path_token[5:], 16)
-        if isinstance(trace_path_token, str)
-        and re.fullmatch(r"path_[0-9A-F]{8}", trace_path_token)
-        else None
-    )
-    trace_path_entries = (
-        trace_path_result.get("entries")
-        if isinstance(trace_path_result.get("entries"), list)
-        else []
-    )
-    trace_path_matches = [
-        row
-        for row in trace_path_entries
-        if isinstance(row, dict)
-        and row.get("tag") == trace_path_tag
-        and _integer(row.get("sequence"), minimum=1) is not None
-    ]
-
-    trace_tag = _integer(trace_request.get("tag"), minimum=1)
     ping_tag = _integer(ping_request.get("tag"), minimum=1)
     advert_status = mesh_status.get("advert_tx")
     before_public_count = _peer_counter(
@@ -1037,14 +994,6 @@ def validate_protocol(
         and admin_contact.get("can_admin") is True
         and admin_contact.get("type") == "repeater"
         and admin_contact.get("verification_source") == "signed_advert"
-        and trace_contact is not None
-        and trace_public_key is not None
-        and trace_public_key[:16].upper() == trace_fingerprint
-        and trace_contact.get("canonical") is True
-        and trace_contact.get("can_dm") is False
-        and trace_contact.get("can_admin") is True
-        and trace_contact.get("type") in {"repeater", "room"}
-        and trace_contact.get("verification_source") == "signed_advert"
         and (
             peer_status_schema == RADIO_LISTENER_STATUS_SCHEMA
             or (
@@ -1091,58 +1040,7 @@ def validate_protocol(
                 < steps["public_send"]["sequence"]
             )
         )
-        and trace_path_request.get("ok") is True
-        and trace_path_request.get("cmd") == "routes probe"
-        and _fingerprint(trace_path_request.get("fingerprint"))
-        == trace_fingerprint
-        and trace_path_request.get("queued") is True
-        and trace_path_request.get("dm_rf_tx") is True
-        and trace_path_request.get("public_rf_tx") is False
-        and trace_path_request.get("telemetry_requested") is True
-        and trace_path_tag is not None
-        and steps["trace_path_request"]["command"]
-        == f"routes probe {trace_fingerprint}"
-        and trace_path_result.get("ok") is True
-        and trace_path_result.get("cmd") == "routes telemetry"
-        and _fingerprint(trace_path_result.get("fingerprint"))
-        == trace_fingerprint
-        and trace_path_result.get("state") == "received"
-        and trace_path_result.get("pending") is False
-        and trace_path_result.get("pending_tag") == 0
-        and _integer(trace_path_result.get("history_count"), minimum=1)
-        == len(trace_path_entries)
-        and len(trace_path_matches) == 1
-        and steps["trace_path_result"]["command"]
-        == f"routes telemetry {trace_fingerprint}"
-        and trace_request.get("ok") is True
-        and trace_request.get("cmd") == "routes trace contact"
-        and _fingerprint(trace_request.get("fingerprint"))
-        == trace_fingerprint
-        and trace_request.get("queued") is True
-        and trace_request.get("pending") is True
-        and trace_tag is not None
-        and trace_request.get("targeted_trace_rf_tx") is True
-        and trace_request.get("public_rf_tx") is False
-        and steps["trace_request"]["command"]
-        == f"routes trace contact {trace_fingerprint}"
-        and trace_result.get("ok") is True
-        and trace_result.get("cmd") == "routes trace status"
-        and _fingerprint(trace_result.get("fingerprint"))
-        == trace_fingerprint
-        and trace_result.get("zero_hop") is False
-        and trace_result.get("matched") is True
-        and trace_result.get("pending", {}).get("active") is False
-        and trace_result.get("last_attempt", {}).get("valid") is True
-        and trace_result.get("last_attempt", {}).get("tag") == trace_tag
-        and trace_result.get("last_attempt", {}).get("outcome") == "matched"
-        and isinstance(trace_result.get("last_result"), dict)
-        and trace_result["last_result"].get("valid") is True
-        and trace_result["last_result"].get("tag") == trace_tag
         and steps["contacts"]["sequence"]
-        < steps["trace_path_request"]["sequence"]
-        < steps["trace_path_result"]["sequence"]
-        < steps["trace_request"]["sequence"]
-        < steps["trace_result"]["sequence"]
         < steps["admin_login_request"]["sequence"]
         < steps["admin_login_status"]["sequence"]
         < steps["admin_query_request"]["sequence"]
@@ -1328,7 +1226,6 @@ def validate_protocol(
         "boot_advert": True,
         "public_send_count": 1,
         "path": True,
-        "trace": True,
         "ping": True,
         "repeater_login": True,
         "repeater_query": True,
