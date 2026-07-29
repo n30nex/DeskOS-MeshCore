@@ -183,6 +183,13 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
         source, "bool d1l_ui_map_viewport_refresh", "static lv_obj_t *map_menu_row"
     )
     assert "s_viewport_drag_active" in refresh
+    copied = refresh.split("if (copied) {", 1)[1].split("\n    }", 1)[0]
+    assert "lv_obj_invalidate(s_viewport_image_obj);" in copied
+    assert "lv_disp_trig_activity(NULL);" in copied
+    assert copied.index("lv_obj_invalidate(s_viewport_image_obj);") < copied.index(
+        "lv_disp_trig_activity(NULL);"
+    )
+    assert refresh.count("lv_disp_trig_activity(NULL);") == 1
 
 
 def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():

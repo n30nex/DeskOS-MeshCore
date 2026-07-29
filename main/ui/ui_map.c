@@ -1388,6 +1388,14 @@ bool d1l_ui_map_viewport_refresh(void)
         lv_obj_center(s_viewport_image_obj);
         lv_obj_clear_flag(s_viewport_image_obj, LV_OBJ_FLAG_HIDDEN);
         lv_obj_invalidate(s_viewport_image_obj);
+        /*
+         * A newly published current-view frame is visible progress, just like
+         * a user-facing loading animation. Keep the display awake while real
+         * tiles continue to arrive so the normal inactivity lock cannot
+         * repeatedly cancel and restart a slow SD-backed view. A stalled
+         * worker publishes no frame and therefore still locks on schedule.
+         */
+        lv_disp_trig_activity(NULL);
     }
     d1l_map_view_service_status(&status);
     (void)map_viewport_refresh_markers(&status);
