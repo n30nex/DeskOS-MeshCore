@@ -485,10 +485,14 @@ def open_posix_admitted_serial(
         exclusive=True,
     )
     try:
-        handle.dtr = False
+        # Match open_d1l_serial's ESP32-safe ordering.  pySerial applies DTR
+        # before RTS on open, so caching both as false can briefly leave RTS
+        # asserted by the driver while DTR is already deasserted and pulse EN.
+        handle.dtr = True
         handle.rts = False
         handle.port = port
         handle.open()
+        handle.dtr = False
         fcntl.ioctl(handle.fileno(), termios.TIOCEXCL)
     except BaseException:
         try:

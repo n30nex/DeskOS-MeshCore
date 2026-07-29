@@ -120,17 +120,18 @@ def serial_calls(path: Path) -> list[tuple[str, int]]:
     return sorted(calls, key=lambda item: item[1])
 
 
-def test_open_d1l_serial_deasserts_control_lines_before_open():
+def test_open_d1l_serial_uses_reset_safe_control_line_order():
     module = FakeSerialModule()
 
     ser = open_d1l_serial(module, port="COM_TEST", baudrate=115200, timeout=0.5)
 
     assert ser.events == [
         ("construct", None, 115200, 0.5),
-        ("dtr", False),
+        ("dtr", True),
         ("rts", False),
         ("port", "COM_TEST"),
-        ("open", False, False, "COM_TEST"),
+        ("open", True, False, "COM_TEST"),
+        ("dtr", False),
     ]
 
 
@@ -178,11 +179,21 @@ def test_only_intentional_paths_keep_direct_serial_opening():
     end_user_test = (ROOT / "scripts" / "test_rc1.py").read_text(
         encoding="utf-8"
     )
+    assert "handle.dtr = True" in end_user_test
     assert "handle.dtr = False" in end_user_test
     assert "handle.rts = False" in end_user_test
-    assert end_user_test.index("handle.dtr = False") < end_user_test.index(
+    assert end_user_test.index("handle.dtr = True") < end_user_test.index(
         "handle.open()"
     )
     assert end_user_test.index("handle.rts = False") < end_user_test.index(
         "handle.open()"
     )
+    assert end_user_test.index("handle.open()") < end_user_test.index(
+        "handle.dtr = False"
+    )
+    flash = (ROOT / "scripts" / "core_flash_only_d1l.py").read_text(
+        encoding="utf-8"
+    )
+    assert flash.index("handle.dtr = True") < flash.index("handle.open()")
+    assert flash.index("handle.rts = False") < flash.index("handle.open()")
+    assert flash.index("handle.open()") < flash.index("handle.dtr = False")
