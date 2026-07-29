@@ -228,12 +228,15 @@ env \
   --out "$RF"
 ```
 
-### Source 3: boot advert, one Public send, PATH/TRACE/Ping and Admin
+### Source 3: boot advert, targeted protocol/Admin gates, then one Public send
 
 This is the sole authorized Public send in the closing sequence. Omitting
 `--authorize-public-tx` must fail before opening serial. This source covers
 Public, contacts, Admin login/query/logout, PATH, split TRACE, Ping and
-health/crash only; DM remains exclusively covered by Source 2.
+health/crash only; DM remains exclusively covered by Source 2. Targeted
+TRACE, Admin login/query/logout, Admin PATH, and Ping must all complete before
+the controlled-peer baseline is captured and the sole Public send is
+authorized.
 
 ```bash
 PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"
@@ -253,7 +256,7 @@ PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"
   --trace-fingerprint "$TRACE_FINGERPRINT" \
   --admin-password-file "$ADMIN_PASSWORD_FILE" \
   --boot-timeout 75 \
-  --command-timeout 30 \
+  --command-timeout 60 \
   --authorize-public-tx
 ```
 

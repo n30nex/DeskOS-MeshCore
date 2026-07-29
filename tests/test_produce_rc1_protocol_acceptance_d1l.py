@@ -40,13 +40,6 @@ OPERATIONS = (
     "trace_path_result",
     "trace_request",
     "trace_result",
-    "peer_before",
-    "public_tx_authorization",
-    "public_send",
-    "public_tx_record",
-    "peer_after_public",
-    "peer_public_send",
-    "public_receive",
     "admin_login_request",
     "admin_login_status",
     "admin_query_request",
@@ -56,6 +49,13 @@ OPERATIONS = (
     "path_result",
     "ping_request",
     "ping_result",
+    "peer_before",
+    "public_tx_authorization",
+    "public_send",
+    "public_tx_record",
+    "peer_after_public",
+    "peer_public_send",
+    "public_receive",
     "health_after",
     "crashlog",
 )
@@ -529,7 +529,7 @@ def test_protocol_rejects_non_repeater_or_room_trace_contact(
         validate(transcript, monkeypatch)
 
 
-def test_trace_path_and_trace_precede_public_then_admin_path_precedes_ping():
+def test_targeted_and_admin_gates_all_precede_public_send():
     transcript = protocol_transcript()
     steps = {
         row["operation"]: row
@@ -542,14 +542,18 @@ def test_trace_path_and_trace_precede_public_then_admin_path_precedes_ping():
         < steps["trace_path_result"]["sequence"]
         < steps["trace_request"]["sequence"]
         < steps["trace_result"]["sequence"]
-        < steps["peer_before"]["sequence"]
-        < steps["public_tx_authorization"]["sequence"]
-        < steps["public_send"]["sequence"]
+        < steps["admin_login_request"]["sequence"]
+        < steps["admin_login_status"]["sequence"]
+        < steps["admin_query_request"]["sequence"]
+        < steps["admin_query_status"]["sequence"]
         < steps["admin_logout"]["sequence"]
         < steps["path_request"]["sequence"]
         < steps["path_result"]["sequence"]
         < steps["ping_request"]["sequence"]
         < steps["ping_result"]["sequence"]
+        < steps["peer_before"]["sequence"]
+        < steps["public_tx_authorization"]["sequence"]
+        < steps["public_send"]["sequence"]
     )
     assert (
         steps["trace_path_request"]["command"]
@@ -582,6 +586,41 @@ def test_trace_path_and_trace_precede_public_then_admin_path_precedes_ping():
     assert steps["trace_result"]["response"]["fingerprint"] == TRACE_FP
     assert steps["ping_request"]["command"] == f"repeater ping {ADMIN_FP}"
     assert steps["ping_request"]["response"]["fingerprint"] == ADMIN_FP
+
+
+def test_protocol_rejects_legacy_public_before_admin_order(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    transcript = protocol_transcript()
+    steps_by_operation = {
+        row["operation"]: row for row in transcript["steps"]
+    }
+    public_operations = (
+        "peer_before",
+        "public_tx_authorization",
+        "public_send",
+        "public_tx_record",
+        "peer_after_public",
+        "peer_public_send",
+        "public_receive",
+    )
+    legacy_order = [
+        operation
+        for operation in OPERATIONS
+        if operation not in public_operations
+    ]
+    insertion = legacy_order.index("admin_login_request")
+    legacy_order[insertion:insertion] = public_operations
+    transcript["steps"] = [
+        {
+            **steps_by_operation[operation],
+            "sequence": sequence,
+        }
+        for sequence, operation in enumerate(legacy_order, 1)
+    ]
+
+    with pytest.raises(gate.EvidenceError):
+        validate(transcript, monkeypatch)
 
 
 def test_protocol_transcript_excludes_the_rf_receipts_dm_exchange(
@@ -1325,10 +1364,10 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
         source.index('trace_path_request = _step(')
         < source.index('label="current-boot TRACE target PATH response"')
         < source.index('trace_request = _step(')
-        < source.index('\n        before = _step(')
-        < source.index('\n            "public_tx_authorization",')
         < source.index('admin_logout = _step(')
         < source.index('\n        path_request = _step(')
         < source.index('label="PATH/base telemetry response"')
         < source.index('ping_request = _step(')
+        < source.index('\n        before = _step(')
+        < source.index('\n            "public_tx_authorization",')
     )
