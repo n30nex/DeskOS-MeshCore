@@ -67,13 +67,13 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
         "pre_flash_target_after_open": {
             "stable_identity_sha256": "f" * 64,
         },
+        "post_flash_reset_target_before_open": {
+            "stable_identity_sha256": "f" * 64,
+        },
+        "post_flash_reset_target_after_open": {
+            "stable_identity_sha256": "f" * 64,
+        },
         "post_flash_target_after_settle": {
-            "stable_identity_sha256": "f" * 64,
-        },
-        "post_flash_capture_target_before_open": {
-            "stable_identity_sha256": "f" * 64,
-        },
-        "post_flash_capture_target_after_open": {
             "stable_identity_sha256": "f" * 64,
         },
         "d1l_target_after": {
@@ -102,12 +102,16 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
             "admitted_target_stable_identity_sha256": "f" * 64,
         },
         "post_flash_reset_error": None,
+        "post_flash_reset_binding": core_flash.POST_FLASH_RESET_BINDING,
+        "post_flash_reset_binding_ok": True,
         "post_flash_boot_settle": {
             "schema": 1,
             "kind": "d1l_post_flash_boot_settle",
             "ok": True,
-            "method": "same_admitted_handle_hold_no_console_io",
+            "method": "fresh_reset_handle_hold_no_console_io",
             "same_admitted_handle": True,
+            "separate_from_flash_handle": True,
+            "flash_handle_closed": True,
             "console_io_attempted": False,
             "settle_seconds": (
                 core_flash.MIN_POSIX_POST_FLASH_BOOT_SETTLE_SECONDS
@@ -119,15 +123,14 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
             "schema": 1,
             "kind": "d1l_post_flash_capture",
             "ok": True,
-            "method": "fresh_posix_exclusive_reopen",
-            "separate_admitted_handle": True,
-            "original_handle_closed": True,
+            "method": "same_fresh_reset_settle_handle",
+            "separate_from_flash_handle": True,
+            "same_as_reset_settle_handle": True,
+            "flash_handle_closed": True,
             "baudrate": core_flash.POST_FLASH_CAPTURE_BAUD,
             "commands": list(core_flash.RETAINED_STATE_COMMANDS),
-            "admitted_target_stable_identity_sha256": "f" * 64,
+            "recovery_target_stable_identity_sha256": "f" * 64,
             "settled_target_stable_identity_sha256": "f" * 64,
-            "capture_target_before_open_stable_identity_sha256": "f" * 64,
-            "capture_target_after_open_stable_identity_sha256": "f" * 64,
         },
         "post_flash_capture_binding": core_flash.POST_FLASH_CAPTURE_BINDING,
         "post_flash_capture_binding_ok": True,
@@ -153,6 +156,11 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
         producer.validate_flash(data, CANDIDATE)
 
     data["pre_flash_build_commit"] = "e" * 40
+    data["post_flash_reset_binding"] = "same_admitted_handle"
+    with pytest.raises(producer.EvidenceError):
+        producer.validate_flash(data, CANDIDATE)
+
+    data["post_flash_reset_binding"] = core_flash.POST_FLASH_RESET_BINDING
     data["post_flash_reset"]["method"] = "unbound-reset"
     with pytest.raises(producer.EvidenceError):
         producer.validate_flash(data, CANDIDATE)
@@ -163,7 +171,7 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
         producer.validate_flash(data, CANDIDATE)
 
 
-def test_flash_target_pair_requires_every_two_epoch_snapshot(monkeypatch):
+def test_flash_target_pair_requires_every_recovery_epoch_snapshot(monkeypatch):
     data = {
         field: {"stable_identity_sha256": "a" * 64}
         for field in producer.FLASH_TARGET_FIELDS

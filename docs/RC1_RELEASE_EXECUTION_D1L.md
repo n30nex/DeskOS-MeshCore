@@ -162,14 +162,16 @@ the retained projection survived. The baseline may be a predecessor
 `core_1_0` commit; the post-flash version must be the exact release commit.
 This phase does not erase flash, erase NVS, format SD, or touch another serial
 target.
-On Linux, the first admitted stable-identity handle remains open from esptool
-through the explicit EN reset and at least 90 seconds of boot settle. No
-console command is sent through that inherited esptool handle. The runner
-revalidates the stable target while the first handle is still open, closes it,
-revalidates again, and opens a fresh exclusive 115200-baud handle for the
-post-flash retained-state capture. The receipt binds every target snapshot,
-the no-console settle, and the separate readmission to the same stable
-identity. A shorter or non-finite `--settle-sec` is rejected before flashing.
+On Linux, the first admitted stable-identity handle is used only for preflight
+and esptool. The raw flash log is persisted, then that esptool-tainted handle
+must close before any post-flash reset or console read. The runner revalidates
+the stable target and opens one fresh exclusive 115200-baud recovery handle.
+That fresh handle performs the explicit EN reset, remains open through at
+least 90 seconds of boot settle with no console I/O, and then captures the
+post-flash retained state without another reopen. The receipt binds every
+target snapshot and proves the reset, settle, and capture used the same fresh
+handle, distinct from the closed flash handle. A shorter or non-finite
+`--settle-sec` is rejected before flashing.
 
 ```bash
 EVIDENCE_DIR="$ROOT/artifacts/rc1-final/$SHA"

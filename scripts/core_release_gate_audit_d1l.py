@@ -1393,9 +1393,9 @@ def core_flash_receipt_gate(
         flash_snapshot_fields.extend(
             (
                 "pre_flash_target_after_open",
+                "post_flash_reset_target_before_open",
+                "post_flash_reset_target_after_open",
                 "post_flash_target_after_settle",
-                "post_flash_capture_target_before_open",
-                "post_flash_capture_target_after_open",
             )
         )
     target_ok, target_identity, target_details = target_receipt_binding(

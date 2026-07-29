@@ -181,7 +181,8 @@ POST_FLASH_RESET_RESULT_KEYS = frozenset(
 )
 MIN_POSIX_POST_FLASH_BOOT_SETTLE_SECONDS = 90.0
 POST_FLASH_CAPTURE_BAUD = 115200
-POST_FLASH_CAPTURE_BINDING = "posix_exclusive_reopen_after_bound_settle"
+POST_FLASH_RESET_BINDING = "posix_exclusive_reopen_after_flash"
+POST_FLASH_CAPTURE_BINDING = "same_fresh_reset_settle_handle"
 POST_FLASH_BOOT_SETTLE_RESULT_KEYS = frozenset(
     {
         "schema",
@@ -189,6 +190,8 @@ POST_FLASH_BOOT_SETTLE_RESULT_KEYS = frozenset(
         "ok",
         "method",
         "same_admitted_handle",
+        "separate_from_flash_handle",
+        "flash_handle_closed",
         "console_io_attempted",
         "settle_seconds",
         "admitted_target_stable_identity_sha256",
@@ -201,14 +204,13 @@ POST_FLASH_CAPTURE_RESULT_KEYS = frozenset(
         "kind",
         "ok",
         "method",
-        "separate_admitted_handle",
-        "original_handle_closed",
+        "separate_from_flash_handle",
+        "same_as_reset_settle_handle",
+        "flash_handle_closed",
         "baudrate",
         "commands",
-        "admitted_target_stable_identity_sha256",
+        "recovery_target_stable_identity_sha256",
         "settled_target_stable_identity_sha256",
-        "capture_target_before_open_stable_identity_sha256",
-        "capture_target_after_open_stable_identity_sha256",
     }
 )
 
@@ -771,13 +773,33 @@ def post_flash_reset_result_ok(
 def post_flash_reset_contract_ok(receipt: object) -> bool:
     if not isinstance(receipt, dict):
         return False
+    pre_flash_target = receipt.get("pre_flash_target_after_open")
+    reset_target_before_open = receipt.get(
+        "post_flash_reset_target_before_open"
+    )
+    reset_target_after_open = receipt.get(
+        "post_flash_reset_target_after_open"
+    )
+    identities = [
+        _target_stable_identity(target)
+        for target in (
+            pre_flash_target,
+            reset_target_before_open,
+            reset_target_after_open,
+        )
+    ]
     return (
         receipt.get("post_flash_reset_required") is True
         and receipt.get("post_flash_reset_ok") is True
         and receipt.get("post_flash_reset_error") is None
+        and receipt.get("post_flash_reset_binding")
+        == POST_FLASH_RESET_BINDING
+        and receipt.get("post_flash_reset_binding_ok") is True
+        and identities[0] is not None
+        and all(identity == identities[0] for identity in identities[1:])
         and post_flash_reset_result_ok(
             receipt.get("post_flash_reset"),
-            receipt.get("pre_flash_target_after_open"),
+            reset_target_after_open,
         )
     )
 
@@ -810,8 +832,10 @@ def post_flash_boot_settle_result_ok(
         and settle.get("kind") == "d1l_post_flash_boot_settle"
         and settle.get("ok") is True
         and settle.get("method")
-        == "same_admitted_handle_hold_no_console_io"
+        == "fresh_reset_handle_hold_no_console_io"
         and settle.get("same_admitted_handle") is True
+        and settle.get("separate_from_flash_handle") is True
+        and settle.get("flash_handle_closed") is True
         and settle.get("console_io_attempted") is False
         and isinstance(settle_seconds, (int, float))
         and not isinstance(settle_seconds, bool)
@@ -829,20 +853,16 @@ def post_flash_boot_settle_result_ok(
 
 def post_flash_capture_result_ok(
     capture: object,
-    admitted_target: object,
+    recovery_target: object,
     settled_target: object,
-    capture_target_before_open: object,
-    capture_target_after_open: object,
 ) -> bool:
     if not isinstance(capture, dict):
         return False
     identities = [
         _target_stable_identity(target)
         for target in (
-            admitted_target,
+            recovery_target,
             settled_target,
-            capture_target_before_open,
-            capture_target_after_open,
         )
     ]
     if identities[0] is None or any(
@@ -854,22 +874,15 @@ def post_flash_capture_result_ok(
         and capture.get("schema") == 1
         and capture.get("kind") == "d1l_post_flash_capture"
         and capture.get("ok") is True
-        and capture.get("method") == "fresh_posix_exclusive_reopen"
-        and capture.get("separate_admitted_handle") is True
-        and capture.get("original_handle_closed") is True
+        and capture.get("method") == "same_fresh_reset_settle_handle"
+        and capture.get("separate_from_flash_handle") is True
+        and capture.get("same_as_reset_settle_handle") is True
+        and capture.get("flash_handle_closed") is True
         and capture.get("baudrate") == POST_FLASH_CAPTURE_BAUD
         and capture.get("commands") == list(RETAINED_STATE_COMMANDS)
-        and capture.get("admitted_target_stable_identity_sha256")
+        and capture.get("recovery_target_stable_identity_sha256")
         == identities[0]
         and capture.get("settled_target_stable_identity_sha256")
-        == identities[0]
-        and capture.get(
-            "capture_target_before_open_stable_identity_sha256"
-        )
-        == identities[0]
-        and capture.get(
-            "capture_target_after_open_stable_identity_sha256"
-        )
         == identities[0]
     )
 
@@ -877,33 +890,26 @@ def post_flash_capture_result_ok(
 def post_flash_capture_contract_ok(receipt: object) -> bool:
     if not isinstance(receipt, dict):
         return False
-    admitted_target = receipt.get("pre_flash_target_after_open")
+    recovery_target = receipt.get("post_flash_reset_target_after_open")
     settled_target = receipt.get("post_flash_target_after_settle")
-    capture_target_before_open = receipt.get(
-        "post_flash_capture_target_before_open"
-    )
-    capture_target_after_open = receipt.get(
-        "post_flash_capture_target_after_open"
-    )
     return (
-        receipt.get("post_flash_capture_binding")
+        post_flash_reset_contract_ok(receipt)
+        and receipt.get("post_flash_capture_binding")
         == POST_FLASH_CAPTURE_BINDING
         and receipt.get("post_flash_capture_binding_ok") is True
         and receipt.get("post_flash_capture_error") is None
         and receipt.get("target_identity_continuity_ok") is True
         and receipt.get("d1l_target_after")
-        == capture_target_after_open
+        == settled_target
         and post_flash_boot_settle_result_ok(
             receipt.get("post_flash_boot_settle"),
-            admitted_target,
+            recovery_target,
             settled_target,
         )
         and post_flash_capture_result_ok(
             receipt.get("post_flash_capture"),
-            admitted_target,
+            recovery_target,
             settled_target,
-            capture_target_before_open,
-            capture_target_after_open,
         )
     )
 
@@ -1525,6 +1531,14 @@ def run_core_flash_only(
     before_build_commit: str | None = None
     post_flash_reset: dict[str, Any] = {}
     post_flash_reset_error: str | None = None
+    post_flash_reset_target_before_open: dict[str, Any] | None = None
+    post_flash_reset_target_after_open: dict[str, Any] | None = None
+    post_flash_reset_binding = (
+        POST_FLASH_RESET_BINDING
+        if posix_binding
+        else "not_required"
+    )
+    post_flash_reset_binding_ok = False
     version: dict = {}
     health: dict = {}
     after_results: list[dict] = []
@@ -1532,8 +1546,6 @@ def run_core_flash_only(
     after_snapshot_row: dict | None = None
     d1l_target_after: dict[str, Any] | None = None
     post_flash_target_after_settle: dict[str, Any] | None = None
-    post_flash_capture_target_before_open: dict[str, Any] | None = None
-    post_flash_capture_target_after_open: dict[str, Any] | None = None
     post_flash_boot_settle: dict[str, Any] = {}
     post_flash_capture: dict[str, Any] = {}
     target_continuity_ok = False
@@ -1668,86 +1680,6 @@ def run_core_flash_only(
             raw_log_path.parent.mkdir(parents=True, exist_ok=True)
             raw_log_path.write_bytes(raw_log)
             raw_log_row = _relative_file_row(raw_log_path, root)
-            if (
-                result.get("name") == "esp32_flash"
-                and result.get("ok") is True
-                and result.get("returncode") == 0
-                and result.get("args") == command
-                and result.get("serial_handoff")
-                == "fork_inherited_open_serial"
-            ):
-                try:
-                    # esptool reconfigures the inherited tty file description
-                    # to the flash baud. Re-apply the console termios before
-                    # resetting, then keep this exact admitted handle open
-                    # through boot without using it for console I/O.
-                    admitted_handle.baudrate = serial_baud
-                    admitted_handle.timeout = serial_timeout
-                    reset_value = post_flash_resetter(
-                        admitted_handle,
-                        pre_flash_target_after_open[
-                            "stable_identity_sha256"
-                        ],
-                    )
-                    if isinstance(reset_value, dict):
-                        post_flash_reset = reset_value
-                    else:
-                        post_flash_reset_error = (
-                            "TypeError: post-flash resetter returned "
-                            f"{type(reset_value).__name__}, expected dict"
-                        )
-                except Exception as exc:
-                    post_flash_reset_error = (
-                        f"{type(exc).__name__}: {exc}"
-                    )
-                if post_flash_reset_result_ok(
-                    post_flash_reset,
-                    pre_flash_target_after_open,
-                ):
-                    time.sleep(settle_sec)
-                    try:
-                        post_flash_target_after_settle = (
-                            resolve_core_target(
-                                port,
-                                port_lister=port_lister,
-                                platform_name=platform_name,
-                            )
-                        )
-                    except ValueError as exc:
-                        target_post_error = str(exc)
-                    else:
-                        admitted_identity = (
-                            pre_flash_target_after_open[
-                                "stable_identity_sha256"
-                            ]
-                        )
-                        settled_identity = (
-                            post_flash_target_after_settle[
-                                "stable_identity_sha256"
-                            ]
-                        )
-                        post_flash_boot_settle = {
-                            "schema": 1,
-                            "kind": "d1l_post_flash_boot_settle",
-                            "ok": settled_identity == admitted_identity,
-                            "method": (
-                                "same_admitted_handle_hold_no_console_io"
-                            ),
-                            "same_admitted_handle": True,
-                            "console_io_attempted": False,
-                            "settle_seconds": float(settle_sec),
-                            "admitted_target_stable_identity_sha256": (
-                                admitted_identity
-                            ),
-                            "settled_target_stable_identity_sha256": (
-                                settled_identity
-                            ),
-                        }
-                        if settled_identity != admitted_identity:
-                            target_post_error = (
-                                "D1L target changed during the bound "
-                                "post-flash boot settle"
-                            )
         else:
             result, raw_log = flash_runner(command, root, flash_timeout)
             raw_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1756,13 +1688,6 @@ def run_core_flash_only(
     if raw_log_row is None:
         raise RuntimeError("flash runner returned without a persisted raw log")
     post_flash_reset_required = posix_binding
-    post_flash_reset_ok = (
-        not post_flash_reset_required
-        or post_flash_reset_result_ok(
-            post_flash_reset,
-            pre_flash_target_after_open,
-        )
-    )
     flash_succeeded = (
         result.get("name") == "esp32_flash"
         and result.get("ok") is True
@@ -1770,133 +1695,180 @@ def run_core_flash_only(
         and result.get("args") == command
     )
     if posix_binding and flash_succeeded:
-        original_handle_closed = _serial_handle_is_closed(admitted_handle)
-        if not post_flash_reset_ok:
-            post_flash_capture_error = (
-                "post-flash reset contract did not pass"
+        flash_handle_closed = _serial_handle_is_closed(admitted_handle)
+        reset_contract_complete = False
+        try:
+            if not flash_handle_closed:
+                raise RuntimeError(
+                    "original admitted flash handle was not closed "
+                    "before recovery reset"
+                )
+            post_flash_reset_target_before_open = resolve_core_target(
+                port,
+                port_lister=port_lister,
+                platform_name=platform_name,
             )
-        elif not post_flash_boot_settle_result_ok(
-            post_flash_boot_settle,
-            pre_flash_target_after_open,
-            post_flash_target_after_settle,
-        ):
-            post_flash_capture_error = (
-                target_post_error
-                or "post-flash boot settle contract did not pass"
-            )
-        elif not original_handle_closed:
-            post_flash_capture_error = (
-                "original admitted flash handle was not closed after settle"
-            )
-        else:
-            try:
-                post_flash_capture_target_before_open = resolve_core_target(
+            recovery_identity = pre_flash_target_after_open[
+                "stable_identity_sha256"
+            ]
+            if (
+                post_flash_reset_target_before_open[
+                    "stable_identity_sha256"
+                ]
+                != recovery_identity
+            ):
+                raise ValueError(
+                    "D1L target changed before post-flash recovery reset"
+                )
+            recovery_results: list[dict]
+            recovery_baudrate: object = None
+            recovery_handle_distinct = False
+            with posix_serial_opener(
+                port,
+                POST_FLASH_CAPTURE_BAUD,
+                serial_timeout,
+            ) as recovery_handle:
+                if recovery_handle is admitted_handle:
+                    raise RuntimeError(
+                        "post-flash recovery reused the esptool-tainted "
+                        "serial handle"
+                    )
+                recovery_handle_distinct = True
+                recovery_baudrate = getattr(
+                    recovery_handle, "baudrate", None
+                )
+                post_flash_reset_target_after_open = resolve_core_target(
                     port,
                     port_lister=port_lister,
                     platform_name=platform_name,
                 )
-                admitted_identity = pre_flash_target_after_open[
-                    "stable_identity_sha256"
-                ]
                 if (
-                    post_flash_capture_target_before_open[
+                    post_flash_reset_target_after_open[
                         "stable_identity_sha256"
                     ]
-                    != admitted_identity
+                    != recovery_identity
                 ):
                     raise ValueError(
-                        "D1L target changed before post-flash readmission"
+                        "D1L target changed while opening the fresh "
+                        "post-flash recovery handle"
                     )
-                capture_results: list[dict]
-                capture_baudrate: object = None
-                capture_handle_distinct = False
-                with posix_serial_opener(
+                reset_value = post_flash_resetter(
+                    recovery_handle,
+                    recovery_identity,
+                )
+                if not isinstance(reset_value, dict):
+                    raise TypeError(
+                        "post-flash resetter returned "
+                        f"{type(reset_value).__name__}, expected dict"
+                    )
+                post_flash_reset = reset_value
+                if not post_flash_reset_result_ok(
+                    post_flash_reset,
+                    post_flash_reset_target_after_open,
+                ):
+                    raise RuntimeError(
+                        "fresh-handle post-flash reset contract did not pass"
+                    )
+                time.sleep(settle_sec)
+                post_flash_target_after_settle = resolve_core_target(
                     port,
-                    POST_FLASH_CAPTURE_BAUD,
-                    serial_timeout,
-                ) as capture_handle:
-                    if capture_handle is admitted_handle:
-                        raise RuntimeError(
-                            "post-flash readmission reused the original "
-                            "serial handle"
-                        )
-                    capture_handle_distinct = True
-                    capture_baudrate = getattr(
-                        capture_handle, "baudrate", None
-                    )
-                    post_flash_capture_target_after_open = (
-                        resolve_core_target(
-                            port,
-                            port_lister=port_lister,
-                            platform_name=platform_name,
-                        )
-                    )
-                    d1l_target_after = (
-                        post_flash_capture_target_after_open
-                    )
-                    if (
-                        post_flash_capture_target_after_open[
-                            "stable_identity_sha256"
-                        ]
-                        != admitted_identity
-                    ):
-                        raise ValueError(
-                            "D1L target changed while opening the "
-                            "post-flash capture handle"
-                        )
-                    capture_handle.reset_input_buffer()
-                    capture_results = read_retained_state_from_handle(
-                        capture_handle,
-                        serial_timeout,
-                        serial_command_sender,
-                    )
-                after_results = capture_results
-                target_continuity_ok = True
-                post_flash_capture = {
+                    port_lister=port_lister,
+                    platform_name=platform_name,
+                )
+                settled_identity = post_flash_target_after_settle[
+                    "stable_identity_sha256"
+                ]
+                d1l_target_after = post_flash_target_after_settle
+                post_flash_boot_settle = {
                     "schema": 1,
-                    "kind": "d1l_post_flash_capture",
-                    "ok": True,
-                    "method": "fresh_posix_exclusive_reopen",
-                    "separate_admitted_handle": (
-                        capture_handle_distinct
+                    "kind": "d1l_post_flash_boot_settle",
+                    "ok": settled_identity == recovery_identity,
+                    "method": "fresh_reset_handle_hold_no_console_io",
+                    "same_admitted_handle": True,
+                    "separate_from_flash_handle": (
+                        recovery_handle_distinct
                     ),
-                    "original_handle_closed": original_handle_closed,
-                    "baudrate": capture_baudrate,
-                    "commands": list(RETAINED_STATE_COMMANDS),
+                    "flash_handle_closed": flash_handle_closed,
+                    "console_io_attempted": False,
+                    "settle_seconds": float(settle_sec),
                     "admitted_target_stable_identity_sha256": (
-                        admitted_identity
+                        recovery_identity
                     ),
                     "settled_target_stable_identity_sha256": (
-                        post_flash_target_after_settle[
-                            "stable_identity_sha256"
-                        ]
+                        settled_identity
                     ),
-                    (
-                        "capture_target_before_open_"
-                        "stable_identity_sha256"
-                    ): post_flash_capture_target_before_open[
-                        "stable_identity_sha256"
-                    ],
-                    (
-                        "capture_target_after_open_"
-                        "stable_identity_sha256"
-                    ): post_flash_capture_target_after_open[
-                        "stable_identity_sha256"
-                    ],
                 }
-                post_flash_capture_binding_ok = (
-                    post_flash_capture_result_ok(
-                        post_flash_capture,
-                        pre_flash_target_after_open,
-                        post_flash_target_after_settle,
-                        post_flash_capture_target_before_open,
-                        post_flash_capture_target_after_open,
+                if not post_flash_boot_settle_result_ok(
+                    post_flash_boot_settle,
+                    post_flash_reset_target_after_open,
+                    post_flash_target_after_settle,
+                ):
+                    raise RuntimeError(
+                        "fresh-handle post-flash boot settle contract "
+                        "did not pass"
                     )
+                post_flash_reset_binding_ok = True
+                reset_contract_complete = True
+                recovery_handle.reset_input_buffer()
+                recovery_results = read_retained_state_from_handle(
+                    recovery_handle,
+                    serial_timeout,
+                    serial_command_sender,
                 )
-            except Exception as exc:
+            after_results = recovery_results
+            target_continuity_ok = True
+            post_flash_capture = {
+                "schema": 1,
+                "kind": "d1l_post_flash_capture",
+                "ok": True,
+                "method": "same_fresh_reset_settle_handle",
+                "separate_from_flash_handle": (
+                    recovery_handle_distinct
+                ),
+                "same_as_reset_settle_handle": True,
+                "flash_handle_closed": flash_handle_closed,
+                "baudrate": recovery_baudrate,
+                "commands": list(RETAINED_STATE_COMMANDS),
+                "recovery_target_stable_identity_sha256": (
+                    recovery_identity
+                ),
+                "settled_target_stable_identity_sha256": (
+                    post_flash_target_after_settle[
+                        "stable_identity_sha256"
+                    ]
+                ),
+            }
+            post_flash_capture_binding_ok = (
+                post_flash_capture_result_ok(
+                    post_flash_capture,
+                    post_flash_reset_target_after_open,
+                    post_flash_target_after_settle,
+                )
+            )
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            if reset_contract_complete:
+                post_flash_capture_error = error
+            else:
+                post_flash_reset_error = error
                 post_flash_capture_error = (
-                    f"{type(exc).__name__}: {exc}"
+                    "post-flash reset/settle contract did not pass"
                 )
+    post_flash_reset_ok = (
+        not post_flash_reset_required
+        or (
+            post_flash_reset_binding_ok
+            and post_flash_reset_result_ok(
+                post_flash_reset,
+                post_flash_reset_target_after_open,
+            )
+            and post_flash_boot_settle_result_ok(
+                post_flash_boot_settle,
+                post_flash_reset_target_after_open,
+                post_flash_target_after_settle,
+            )
+        )
+    )
     if (
         not posix_binding
         and flash_succeeded
@@ -2038,14 +2010,14 @@ def run_core_flash_only(
         "d1l_target": d1l_target_before,
         "d1l_target_before": d1l_target_before,
         "pre_flash_target_after_open": pre_flash_target_after_open,
+        "post_flash_reset_target_before_open": (
+            post_flash_reset_target_before_open
+        ),
+        "post_flash_reset_target_after_open": (
+            post_flash_reset_target_after_open
+        ),
         "post_flash_target_after_settle": (
             post_flash_target_after_settle
-        ),
-        "post_flash_capture_target_before_open": (
-            post_flash_capture_target_before_open
-        ),
-        "post_flash_capture_target_after_open": (
-            post_flash_capture_target_after_open
         ),
         "d1l_target_after": d1l_target_after,
         "target_identity_continuity_ok": target_continuity_ok,
@@ -2056,6 +2028,8 @@ def run_core_flash_only(
         "post_flash_reset_ok": post_flash_reset_ok,
         "post_flash_reset": post_flash_reset,
         "post_flash_reset_error": post_flash_reset_error,
+        "post_flash_reset_binding": post_flash_reset_binding,
+        "post_flash_reset_binding_ok": post_flash_reset_binding_ok,
         "post_flash_boot_settle": post_flash_boot_settle,
         "post_flash_capture": post_flash_capture,
         "post_flash_capture_binding": post_flash_capture_binding,
