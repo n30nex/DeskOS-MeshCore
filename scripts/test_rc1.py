@@ -311,10 +311,14 @@ def run_read_only_checks(
 
     handle = serial.Serial(port=None, baudrate=baud, timeout=1.0)
     try:
-        handle.dtr = False
+        # pySerial applies DTR before RTS on open.  Preserve the ESP32-safe
+        # asserted-DTR/deasserted-RTS intermediate state, then release DTR
+        # only after the port is open to avoid the observed CH340 reset pulse.
+        handle.dtr = True
         handle.rts = False
         handle.port = port
         handle.open()
+        handle.dtr = False
         time.sleep(2.0)
         handle.reset_input_buffer()
         results: dict[str, dict] = {}

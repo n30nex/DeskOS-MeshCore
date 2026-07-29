@@ -45,6 +45,7 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
         "commit": COMMIT,
         "github_actions_run": "123",
         "workflow_run_attempt": "1",
+        "pre_flash_build_commit": "e" * 40,
         "device_build_commit": COMMIT,
         "erase_flash": False,
         "formats_sd": False,
@@ -57,6 +58,10 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
     monkeypatch.setattr(producer, "_find_app_row", lambda *_args, **_kwargs: True)
 
     assert producer.validate_flash(data, CANDIDATE) == {}
+
+    data["pre_flash_build_commit"] = "not-a-commit"
+    with pytest.raises(producer.EvidenceError):
+        producer.validate_flash(data, CANDIDATE)
 
 
 def test_producer_bundles_unique_machine_sources_and_hashes_receipt(
@@ -101,7 +106,7 @@ def test_producer_bundles_unique_machine_sources_and_hashes_receipt(
     assert sidecar["candidate"] == CANDIDATE
     assert sidecar["receipt"]["sha256"] == hashlib.sha256(receipt_bytes).hexdigest()
     assert set(sidecar["sources"]) == set(producer.SOURCE_ROLES)
-    assert len({row["sha256"] for row in sidecar["sources"].values()}) == 8
+    assert len({row["sha256"] for row in sidecar["sources"].values()}) == 5
     assert sidecar["coverage"] == producer.COVERAGE
 
 

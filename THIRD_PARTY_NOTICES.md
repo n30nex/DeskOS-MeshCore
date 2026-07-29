@@ -4,7 +4,7 @@ Keep this notice with source archives and public firmware release artifacts.
 
 ## SigurdOS-TDeck
 
-Portions of this project's architecture, touch-input behavior, and test strategy are informed by SigurdOS-TDeck.
+Portions of this project's architecture, touch-input behavior, and validation approach are informed by SigurdOS-TDeck.
 
 - Copyright: Copyright (C) 2025 Ben
 - License: GPL-3.0-or-later
@@ -43,7 +43,7 @@ The reviewed upstream implementation targets LilyGo T-Deck hardware. MeshCore De
 
 - Copyright: Copyright (c) 1998-2008, Brian Gladman, Worcester, UK. All rights reserved.
 - Source in this project: `third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c` and `aes.h`
-- Use: host-only WP-04 public-group conformance oracle.
+- Use: compatibility reference through the included Seeed board-support source.
 
 Redistribution and use of this software, with or without changes, is allowed
 without payment of fees or royalties provided that:

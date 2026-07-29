@@ -120,11 +120,49 @@ RELEASE_DOC_SPECS = [
         "SIGUI_CORE_1_0_PRODUCT_CONTRACT.md",
     ),
 ]
+PRODUCTION_RELEASE_DOC_SPECS = [
+    ("docs/USER_GUIDE_D1L.md", "USER_GUIDE_D1L.md"),
+    ("docs/D1L_SD_CARD_GUIDED_INSTALL.md", "D1L_SD_CARD_GUIDED_INSTALL.md"),
+    ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
+]
+NOTICE_FILE_SPECS = [
+    ("LICENSE", "LICENSE"),
+    ("THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"),
+    ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
+    ("docs/SOURCE_AUDIT_AND_ATTRIBUTION.md", "SOURCE_AUDIT_AND_ATTRIBUTION.md"),
+    (
+        "overlays/meshcore_ed25519_defined/license.txt",
+        "ORLP_ED25519_ZLIB_LICENSE.txt",
+    ),
+]
+PRODUCTION_NOTICE_FILE_SPECS = [
+    ("LICENSE", "LICENSE"),
+    ("THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"),
+    (
+        "overlays/meshcore_ed25519_defined/license.txt",
+        "ORLP_ED25519_ZLIB_LICENSE.txt",
+    ),
+]
+PRODUCTION_FORBIDDEN_PATH_WORDS = frozenset(
+    {"audit", "debug", "evidence", "gate", "smoke", "test", "testing", "tests"}
+)
+PRODUCTION_FORBIDDEN_READER_PATTERNS = (
+    re.compile(r"\btests?\b", re.IGNORECASE),
+    re.compile(r"\bsmoke\b", re.IGNORECASE),
+    re.compile(r"\bRC[12]\b", re.IGNORECASE),
+    re.compile(r"\brelease[-_ ]evidence\b", re.IGNORECASE),
+    re.compile(r"\brelease[-_ ]gate\b", re.IGNORECASE),
+    re.compile(r"\bdry[-_ ]run\b", re.IGNORECASE),
+    re.compile(r"\bsimulat(?:e|ed|ion)\b", re.IGNORECASE),
+)
 RP2040_ARTIFACT_NAMES = [
     "rp2040-sd-bridge-firmware",
     "rp2040-sd-smoke-firmware",
     "rp2040-seeed-official-sd-smoke-firmware",
 ]
+PRODUCTION_RP2040_ARTIFACT_NAMES = (
+    "rp2040-sd-bridge-firmware",
+)
 MESHCORE_CONFORMANCE_ARTIFACT_TYPE = "d1l_meshcore_wire_conformance"
 MESHCORE_CONFORMANCE_BOUNDARY = "wire_envelope_only"
 MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
@@ -144,16 +182,14 @@ CORE_GENERATED_INSTALL_FILES = (
     "flash_full_8mb.ps1",
     "docs/CORE_INSTALL_RECOVERY.md",
 )
-RC1_USER_INSTALL_FILES = (
-    "START_HERE_RC1.md",
+PRODUCTION_USER_INSTALL_FILES = (
+    "START_HERE.md",
     "prepare_sd_card.ps1",
     "prepare_sd_card.sh",
     "flash_rp2040.ps1",
     "flash_rp2040.sh",
-    "test_rc1.ps1",
-    "test_rc1.sh",
     "scripts/flash_rp2040_sd_bridge_uf2.py",
-    "scripts/test_rc1.py",
+    "scripts/verify_package.py",
 )
 RELEASE_PROFILES = frozenset(
     {"development", CORE_RELEASE_PROFILE, FULL_FEATURE_RELEASE_PROFILE}
@@ -738,13 +774,19 @@ def write_package_inventory_metadata(
     source_commit: str,
     release_profile: str = "full_feature",
     sd_history_mode: str = "conditional",
+    include_release_evidence_index: bool = True,
+    include_internal_metadata: bool = True,
 ) -> dict[str, dict]:
+    if not include_internal_metadata:
+        return {}
     payloads = package_inventory_payloads(
         root,
         source_commit,
         release_profile=release_profile,
         sd_history_mode=sd_history_mode,
     )
+    if not include_release_evidence_index:
+        payloads.pop("release_evidence_index", None)
     return {
         contract_name: write_package_metadata_artifact(
             package_dir, contract_name, source_commit, payload
@@ -774,6 +816,8 @@ def copy_meshcore_conformance_evidence(
     root: Path,
     package_dir: Path,
     expected_commit: str | None,
+    *,
+    include_in_package: bool = True,
 ) -> dict | None:
     if source is None:
         return None
@@ -863,6 +907,8 @@ def copy_meshcore_conformance_evidence(
     canonical_report = canonicalize_release_report(report)
     if canonical_report.get("evidence_profile") != CANONICAL_EVIDENCE_PROFILE:
         raise ValueError("MeshCore conformance canonical evidence profile is invalid")
+    if not include_in_package:
+        return None
 
     evidence_dir = package_dir / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -901,6 +947,8 @@ def copy_meshcore_signed_advert_evidence(
     source: Path | None,
     package_dir: Path,
     expected_commit: str | None,
+    *,
+    include_in_package: bool = True,
 ) -> dict | None:
     """Validate a raw Actions receipt and package its deterministic projection."""
 
@@ -943,6 +991,8 @@ def copy_meshcore_signed_advert_evidence(
     canonical_report = canonicalize_signed_advert_report(report, expected_commit)
     if canonical_report.get("evidence_profile") != SIGNED_ADVERT_EVIDENCE_PROFILE:
         raise ValueError("MeshCore signed-advert canonical evidence profile is invalid")
+    if not include_in_package:
+        return None
 
     evidence_dir = package_dir / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -1236,20 +1286,14 @@ def copy_optional_debug_files(build_dir: Path, package_dir: Path) -> list[dict]:
     return copied
 
 
-def copy_notice_files(root: Path, package_dir: Path) -> list[dict]:
-    notice_specs = [
-        ("LICENSE", "LICENSE"),
-        ("THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"),
-        ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
-        ("docs/SOURCE_AUDIT_AND_ATTRIBUTION.md", "SOURCE_AUDIT_AND_ATTRIBUTION.md"),
-        (
-            "overlays/meshcore_ed25519_defined/license.txt",
-            "ORLP_ED25519_ZLIB_LICENSE.txt",
-        ),
-    ]
+def copy_notice_files(
+    root: Path,
+    package_dir: Path,
+    specs: list[tuple[str, str]] = NOTICE_FILE_SPECS,
+) -> list[dict]:
     notices_dir = package_dir / "notices"
     copied = []
-    for source_rel, dest_name in notice_specs:
+    for source_rel, dest_name in specs:
         source = root / source_rel
         if not source.exists():
             continue
@@ -1264,10 +1308,14 @@ def copy_notice_files(root: Path, package_dir: Path) -> list[dict]:
     return copied
 
 
-def copy_release_docs(root: Path, package_dir: Path) -> list[dict]:
+def copy_release_docs(
+    root: Path,
+    package_dir: Path,
+    specs: list[tuple[str, str]] = RELEASE_DOC_SPECS,
+) -> list[dict]:
     docs_dir = package_dir / "docs"
     copied = []
-    for source_rel, dest_name in RELEASE_DOC_SPECS:
+    for source_rel, dest_name in specs:
         source = root / source_rel
         if not source.exists():
             continue
@@ -1280,6 +1328,46 @@ def copy_release_docs(root: Path, package_dir: Path) -> list[dict]:
             "sha256": sha256_file(dest),
         })
     return copied
+
+
+def validate_production_package_surface(package_dir: Path) -> None:
+    """Reject internal qualification material from the customer package."""
+
+    for path in sorted(package_dir.rglob("*")):
+        if is_link_or_reparse(path):
+            raise ValueError(f"Production package contains an unsafe link: {path}")
+        relative = path.relative_to(package_dir)
+        if path.is_file() and path.suffix.lower() in {".elf", ".map"}:
+            raise ValueError(
+                "Production package contains a debug-only file: "
+                f"{relative.as_posix()}"
+            )
+        for component in relative.parts:
+            words = {
+                word
+                for word in re.split(r"[^a-z0-9]+", component.lower())
+                if word
+            }
+            forbidden = sorted(words & PRODUCTION_FORBIDDEN_PATH_WORDS)
+            if forbidden:
+                raise ValueError(
+                    "Production package contains internal-only path "
+                    f"{relative.as_posix()}: {', '.join(forbidden)}"
+                )
+        if not path.is_file() or path.suffix.lower() not in {".md", ".txt"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ValueError(
+                f"Production reader document is not valid UTF-8: {relative.as_posix()}"
+            ) from exc
+        for pattern in PRODUCTION_FORBIDDEN_READER_PATTERNS:
+            if pattern.search(text):
+                raise ValueError(
+                    "Production reader document contains internal qualification "
+                    f"language: {relative.as_posix()}"
+                )
 
 
 def copy_sd_preparation_bundle(root: Path, package_dir: Path) -> dict:
@@ -1304,7 +1392,35 @@ def copy_sd_preparation_bundle(root: Path, package_dir: Path) -> dict:
         relative = source.relative_to(root)
         destination = package_dir / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        if relative.as_posix() == "scripts/prepare_deskos_sd.py":
+            text = source.read_text(encoding="utf-8")
+            bypass_option = """    parser.add_argument(
+        "--skip-filesystem-check",
+        action="store_true",
+        help="staging/test directories only; never use this to bypass a real card check",
+    )
+"""
+            bypass_call = "ensure_target(args.target, args.skip_filesystem_check)"
+            has_bypass_option = bypass_option in text
+            has_bypass_call = bypass_call in text
+            if has_bypass_option != has_bypass_call:
+                raise ValueError(
+                    "Production SD preparer source does not match the reviewed "
+                    "filesystem-bypass boundary"
+                )
+            destination.write_text(
+                (
+                    text.replace(bypass_option, "").replace(
+                        bypass_call,
+                        "ensure_target(args.target, False)",
+                    )
+                    if has_bypass_option
+                    else text
+                ),
+                encoding="utf-8",
+            )
+        else:
+            shutil.copy2(source, destination)
         copied.append(
             {
                 "path": relative.as_posix(),
@@ -1324,20 +1440,20 @@ def copy_sd_preparation_bundle(root: Path, package_dir: Path) -> dict:
     }
 
 
-def write_rc1_user_install_bundle(
+def write_production_user_install_bundle(
     root: Path,
     package_dir: Path,
     *,
     source_commit: str,
     sd_history_mode: str,
 ) -> dict:
-    """Write checksum-bound Windows/Linux RC1 install and test helpers."""
+    """Write checksum-bound Windows/Linux production install helpers."""
 
     source_scripts = {
         "scripts/flash_rp2040_sd_bridge_uf2.py": (
             root / "scripts" / "flash_rp2040_sd_bridge_uf2.py"
         ),
-        "scripts/test_rc1.py": root / "scripts" / "test_rc1.py",
+        "scripts/verify_package.py": root / "scripts" / "verify_checksums.py",
     }
     for relative, source in source_scripts.items():
         if (
@@ -1345,10 +1461,24 @@ def write_rc1_user_install_bundle(
             or is_link_or_reparse(source)
             or source.stat().st_size <= 0
         ):
-            raise ValueError(f"RC1 user helper source is invalid: {source}")
+            raise ValueError(f"Production user helper source is invalid: {source}")
         destination = package_dir / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        if relative == "scripts/flash_rp2040_sd_bridge_uf2.py":
+            text = source.read_text(encoding="utf-8")
+            if '"dry-run"' not in text or "default is dry-run" not in text:
+                raise ValueError(
+                    "Production RP2040 helper source does not match the reviewed "
+                    "preview boundary"
+                )
+            destination.write_text(
+                text.replace('"dry-run"', '"preview"').replace(
+                    "default is dry-run", "default is preview"
+                ),
+                encoding="utf-8",
+            )
+        else:
+            shutil.copy2(source, destination)
 
     bridge_relative = (
         "rp2040/rp2040-sd-bridge-firmware/deskos_sd_bridge.ino.uf2"
@@ -1360,7 +1490,7 @@ def write_rc1_user_install_bundle(
         or bridge_path.stat().st_size <= 0
     ):
         raise ValueError(
-            "RC1 user install requires the production DeskOS RP2040 bridge UF2"
+            "DeskOS 1.0 install requires the production RP2040 bridge UF2"
         )
 
     prepare_ps1 = package_dir / "prepare_sd_card.ps1"
@@ -1370,8 +1500,8 @@ def write_rc1_user_install_bundle(
                 "param([Parameter(Mandatory=$true)][string]$Target)",
                 '$ErrorActionPreference = "Stop"',
                 '$Root = Split-Path -Parent $MyInvocation.MyCommand.Path',
-                'python (Join-Path $Root "scripts/test_rc1.py") --verify-only',
-                'if ($LASTEXITCODE -ne 0) { throw "RC1 package verification failed." }',
+                'python (Join-Path $Root "scripts/verify_package.py") $Root',
+                'if ($LASTEXITCODE -ne 0) { throw "Package verification failed." }',
                 'python (Join-Path $Root "scripts/prepare_deskos_sd.py") --target $Target',
                 'if ($LASTEXITCODE -ne 0) { throw "SD card preflight failed." }',
                 '$Confirm = Read-Host "Review the target above. Type PREPARE-SD to copy the DeskOS files without formatting or deleting"',
@@ -1397,7 +1527,7 @@ def write_rc1_user_install_bundle(
                 'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
                 'PYTHON_BIN="${D1L_PYTHON:-python3}"',
                 'TARGET="$1"',
-                '"$PYTHON_BIN" "$ROOT/scripts/test_rc1.py" --verify-only',
+                '"$PYTHON_BIN" "$ROOT/scripts/verify_package.py" "$ROOT"',
                 '"$PYTHON_BIN" "$ROOT/scripts/prepare_deskos_sd.py" --target "$TARGET"',
                 'printf "%s" "Review the target above. Type PREPARE-SD to copy without formatting or deleting: "',
                 "IFS= read -r CONFIRM",
@@ -1423,8 +1553,8 @@ def write_rc1_user_install_bundle(
                 '$Root = Split-Path -Parent $MyInvocation.MyCommand.Path',
                 '$Helper = Join-Path $Root "scripts/flash_rp2040_sd_bridge_uf2.py"',
                 '$Artifact = Join-Path $Root "rp2040/rp2040-sd-bridge-firmware"',
-                'python (Join-Path $Root "scripts/test_rc1.py") --verify-only',
-                'if ($LASTEXITCODE -ne 0) { throw "RC1 package verification failed." }',
+                'python (Join-Path $Root "scripts/verify_package.py") $Root',
+                'if ($LASTEXITCODE -ne 0) { throw "Package verification failed." }',
                 "python $Helper --artifact-dir $Artifact --volume $Volume",
                 'if ($LASTEXITCODE -ne 0) { throw "RP2040 UF2 volume preflight failed." }',
                 '$Confirm = Read-Host "Type FLASH-RP2040 to copy the verified UF2 to the validated bootloader volume"',
@@ -1452,7 +1582,7 @@ def write_rc1_user_install_bundle(
                 'VOLUME="$1"',
                 'HELPER="$ROOT/scripts/flash_rp2040_sd_bridge_uf2.py"',
                 'ARTIFACT="$ROOT/rp2040/rp2040-sd-bridge-firmware"',
-                '"$PYTHON_BIN" "$ROOT/scripts/test_rc1.py" --verify-only',
+                '"$PYTHON_BIN" "$ROOT/scripts/verify_package.py" "$ROOT"',
                 '"$PYTHON_BIN" "$HELPER" --artifact-dir "$ARTIFACT" --volume "$VOLUME"',
                 'printf "%s" "Type FLASH-RP2040 to copy the verified UF2 to this bootloader volume: "',
                 "IFS= read -r CONFIRM",
@@ -1469,53 +1599,19 @@ def write_rc1_user_install_bundle(
     )
     rp2040_sh.chmod(0o755)
 
-    test_ps1 = package_dir / "test_rc1.ps1"
-    test_ps1.write_text(
-        "\n".join(
-            (
-                "param([Parameter(Mandatory=$true)][string]$Port)",
-                '$ErrorActionPreference = "Stop"',
-                '$Root = Split-Path -Parent $MyInvocation.MyCommand.Path',
-                'python (Join-Path $Root "scripts/test_rc1.py") --port $Port',
-                'if ($LASTEXITCODE -ne 0) { throw "RC1 post-install test failed." }',
-                "",
-            )
-        ),
-        encoding="ascii",
-    )
-    test_sh = package_dir / "test_rc1.sh"
-    test_sh.write_text(
-        "\n".join(
-            (
-                "#!/usr/bin/env sh",
-                "set -eu",
-                'if [ "$#" -ne 1 ]; then',
-                '  printf "%s\\n" "Usage: $0 /dev/serial/by-id/<D1L-device>" >&2',
-                "  exit 2",
-                "fi",
-                'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
-                'PYTHON_BIN="${D1L_PYTHON:-python3}"',
-                '"$PYTHON_BIN" "$ROOT/scripts/test_rc1.py" --port "$1"',
-                "",
-            )
-        ),
-        encoding="ascii",
-    )
-    test_sh.chmod(0o755)
-
-    guide = package_dir / "START_HERE_RC1.md"
+    guide = package_dir / "START_HERE.md"
     guide.write_text(
-        f"""# DeskOS D1L RC1 - Windows and Linux Install and Test
+        f"""# DeskOS D1L 1.0 - Windows and Linux Install
 
-This package is the exact RC1 candidate below:
+This is the production DeskOS D1L 1.0 package:
 
 - firmware commit: `{source_commit}`
 - GitHub Actions run and attempt: see `manifest.json` and `README_RELEASE.md`
-- release profile: `{CORE_RELEASE_PROFILE}`
+- release profile: DeskOS D1L 1.0
 - SD history mode: `{sd_history_mode}`
 
 Do not mix files from another download or run these tools from inside an
-archive. Extract the complete package first. Every helper verifies the complete
+archive. Extract the complete package first. Every installer verifies the complete
 `SHA256SUMS.txt` inventory before it changes a device or card.
 
 ## What you need
@@ -1523,13 +1619,13 @@ archive. Extract the complete package first. Every helper verifies the complete
 - a D1L and its data-capable USB cable;
 - a 32 GB-class or larger microSD card formatted as FAT32, not exFAT;
 - Python 3.10 or newer; and
-- for the ESP32 and final test, `esptool` and `pyserial`.
+- for the ESP32 installer, `esptool` and `pyserial`.
 
 Windows PowerShell setup:
 
 ```powershell
-py -3 -m venv .rc1-venv
-.\\.rc1-venv\\Scripts\\Activate.ps1
+py -3 -m venv .deskos-venv
+.\\.deskos-venv\\Scripts\\Activate.ps1
 python -m pip install esptool pyserial
 Set-ExecutionPolicy -Scope Process Bypass
 ```
@@ -1537,8 +1633,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 Linux setup:
 
 ```sh
-python3 -m venv .rc1-venv
-. ./.rc1-venv/bin/activate
+python3 -m venv .deskos-venv
+. ./.deskos-venv/bin/activate
 python -m pip install esptool pyserial
 chmod +x ./*.sh
 ```
@@ -1585,8 +1681,8 @@ On Linux, replace the example with the mounted UF2 bootloader volume:
 ./flash_rp2040.sh /media/$USER/RPI-RP2
 ```
 
-The helper verifies the package and production bridge UF2, dry-runs against UF2
-metadata, then requires `FLASH-RP2040`. A successful copy normally makes the
+The helper verifies the package, production bridge UF2, and UF2 volume metadata,
+then requires `FLASH-RP2040`. A successful copy normally makes the
 bootloader volume disconnect as the RP2040 reboots. It never formats the
 microSD card.
 
@@ -1622,84 +1718,48 @@ If Linux reports permission denied, add your account to the serial-device group
 used by your distribution (commonly `dialout`), sign out and back in, and retry.
 Do not run the flasher against a guessed port.
 
-`flash_full_8mb.ps1` is destructive recovery, not a normal install. Do not use
-it for RC1 testing unless you intentionally accept loss of retained state.
-
-## 5. Run the read-only RC1 test
-
-Wait at least 10 seconds after the ESP32 flash. The test sends only read-only
-console queries: `version`, `health`, `rp2040 ping`, and `storage status`. It
-does not transmit RF or format storage.
-
-Windows:
-
-```powershell
-$D1LPort = Read-Host "Enter the D1L COM port"
-.\\test_rc1.ps1 -Port $D1LPort
-```
-
-Linux:
-
-```sh
-./test_rc1.sh "{POSIX_D1L_TARGET}"
-```
-
-All four automated checks must print `PASS`: exact firmware, ESP32 board/UI,
-RP2040 bridge, and prepared FAT32 SD storage. The detailed JSON report is
-written outside the package in the operating system's temporary directory.
-
-Then check the D1L itself:
-
-1. The display starts without a crash or reboot loop.
-2. Touch each main tab and confirm scrolling and back navigation work.
-3. Open **Settings > Storage** and require the SD state to be ready.
-4. Confirm Public and direct-message history remain available after one normal
-   power cycle.
-5. Open **Map**, load one authorized current-view tile while connected to
-   Wi-Fi, revisit it, and confirm the cached view loads.
+`flash_full_8mb.ps1` is destructive recovery, not a normal install. Use it only
+when you intentionally accept loss of retained state.
 
 ## Reporting a problem
 
-Open https://github.com/n30nex/SIGUI/issues/new and attach the temporary
-`sigui-rc1-test-report.json`. Include commit `{source_commit}`, the Actions run
-and attempt printed by the test, operating system, and the step that failed. Do
-not post private messages, Wi-Fi passwords, or credentials.
+Open https://github.com/n30nex/SIGUI/issues/new. Include commit
+`{source_commit}`, your operating system, and the operation that failed. Do not
+post private messages, Wi-Fi passwords, or credentials.
 """,
         encoding="ascii",
     )
 
     bindings: dict[str, dict[str, Any]] = {}
-    for relative in RC1_USER_INSTALL_FILES:
+    for relative in PRODUCTION_USER_INSTALL_FILES:
         path = package_dir / relative
         if (
             not path.is_file()
             or is_link_or_reparse(path)
             or path.stat().st_size <= 0
         ):
-            raise ValueError(f"RC1 user install file is invalid: {relative}")
+            raise ValueError(f"Production user install file is invalid: {relative}")
         bindings[relative] = {
             "size": path.stat().st_size,
             "sha256": sha256_file(path),
         }
     return {
         "schema": 1,
-        "guide": "START_HERE_RC1.md",
+        "guide": "START_HERE.md",
         "windows": {
             "prepare_sd": "prepare_sd_card.ps1",
             "flash_rp2040": "flash_rp2040.ps1",
             "flash_esp32": "flash_project.ps1",
-            "test": "test_rc1.ps1",
         },
         "linux": {
             "prepare_sd": "prepare_sd_card.sh",
             "flash_rp2040": "flash_rp2040.sh",
             "flash_esp32": "flash_project.sh",
-            "test": "test_rc1.sh",
         },
         "shared": {
             "prepare_sd": "scripts/prepare_deskos_sd.py",
             "flash_rp2040": "scripts/flash_rp2040_sd_bridge_uf2.py",
-            "test": "scripts/test_rc1.py",
+            "verify_package": "scripts/verify_package.py",
         },
         "rp2040_artifact": {
             "directory": "rp2040/rp2040-sd-bridge-firmware",
@@ -1707,12 +1767,17 @@ not post private messages, Wi-Fi passwords, or credentials.
         },
         "no_sd_format": True,
         "normal_esp32_flash_erases_flash": False,
-        "test_is_read_only": True,
         "files": bindings,
     }
 
 
-def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list[dict]:
+def copy_rp2040_artifacts(
+    artifact_root: Path | None,
+    package_dir: Path,
+    *,
+    include_names: tuple[str, ...] | list[str] | None = None,
+    production_only: bool = False,
+) -> list[dict]:
     if artifact_root is None:
         return []
     try:
@@ -1725,6 +1790,12 @@ def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list
     missing = [name for name in RP2040_ARTIFACT_NAMES if not (artifact_root / name).is_dir()]
     if missing:
         raise FileNotFoundError("Missing RP2040 release artifacts: " + ", ".join(missing))
+    selected = set(RP2040_ARTIFACT_NAMES if include_names is None else include_names)
+    unknown = selected.difference(RP2040_ARTIFACT_NAMES)
+    if unknown:
+        raise ValueError(
+            "Unknown RP2040 release artifacts requested: " + ", ".join(sorted(unknown))
+        )
 
     copied = []
     rp2040_dir = package_dir / "rp2040"
@@ -1754,8 +1825,29 @@ def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list
             raise ValueError(
                 f"{artifact_name} must contain exactly one valid root SHA256SUMS.txt"
             )
+        if artifact_name not in selected:
+            continue
         dest_dir = rp2040_dir / artifact_name
-        shutil.copytree(source_dir, dest_dir)
+        if production_only:
+            source_uf2_files = sorted(source_dir.glob("*.uf2"))
+            if (
+                artifact_name != "rp2040-sd-bridge-firmware"
+                or len(source_uf2_files) != 1
+                or source_uf2_files[0].name != "deskos_sd_bridge.ino.uf2"
+            ):
+                raise ValueError(
+                    "Production RP2040 package requires exactly "
+                    "deskos_sd_bridge.ino.uf2"
+                )
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            destination = dest_dir / source_uf2_files[0].name
+            shutil.copy2(source_uf2_files[0], destination)
+            (dest_dir / "SHA256SUMS.txt").write_text(
+                f"{sha256_file(destination)}  ./{destination.name}\n",
+                encoding="ascii",
+            )
+        else:
+            shutil.copytree(source_dir, dest_dir)
         dest_manifests = sorted(dest_dir.rglob("SHA256SUMS.txt"))
         dest_manifest = dest_dir / "SHA256SUMS.txt"
         if dest_manifests != [dest_manifest] or not verify_checksum_tree(dest_dir):
@@ -2517,7 +2609,7 @@ def write_flash_scripts(
                     'if ([string]::IsNullOrWhiteSpace($Port)) { throw "Pass the operator-confirmed D1L COM port with -Port." }',
                     "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
                     'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
-                    'Write-Warning "NON-QUALIFYING MANUAL WINDOWS INSTALL: release qualification must use the Pi 5 stable by-id route."',
+                    'Write-Host "Installing DeskOS D1L 1.0 on the explicitly selected USB device."',
                     "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
                     "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort",
                     'if ($LASTEXITCODE -ne 0) { throw "Project flash failed with exit code $LASTEXITCODE" }',
@@ -2555,7 +2647,7 @@ def write_flash_scripts(
             'if ([string]::IsNullOrWhiteSpace($Port)) { throw "Pass the operator-confirmed D1L COM port with -Port." }',
             "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
             'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
-            'Write-Warning "NON-QUALIFYING MANUAL WINDOWS RECOVERY: this route cannot satisfy release qualification."',
+            'Write-Warning "DESTRUCTIVE WINDOWS RECOVERY: use only when a normal install cannot recover the device."',
             "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
             *powershell_checksum_guard_lines(),
             "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --validate-only",
@@ -2705,7 +2797,7 @@ SD history mode: `{sd_history_mode}`
 
 Unavailable capabilities are intentionally hidden or rejected before side
 effects. BLE companion transport, signed update/recovery, advanced QR sharing,
-and the on-device USB recovery service are deferred to 1.5 / RC2. The package
+    and the on-device USB recovery service are not part of Core 1.0. The package
 still contains a checksum-verified host-side factory recovery image.
 
 ## Current known limitations
@@ -2714,8 +2806,7 @@ still contains a checksum-verified host-side factory recovery image.
   primary and missing/unusable media produces visible live-only operation.
 - Signed OTA/SD update and the on-device USB recovery service are unavailable.
   A checksum-verified host-side factory recovery image remains in the package.
-- The Full Feature profile is not release-ready and is not represented by this
-  package.
+- This package contains the Core 1.0 product surface only.
 
 ## Support and reporting
 
@@ -2759,18 +2850,18 @@ SD history mode: `{sd_history_mode}`
 
 ## Before installing
 
-1. Release qualification uses only the Pi 5 stable target:
+1. On Linux, select the stable D1L target:
    `{POSIX_D1L_TARGET}`.
 2. The device must report USB VID:PID `{EXPECTED_VID:04X}:{EXPECTED_PID:04X}`.
-3. On POSIX, `/dev/ttyUSB<number>` is observational evidence only. Never pass
+3. On POSIX, `/dev/ttyUSB<number>` is unstable. Never pass
    a raw tty path to a package flash command.
-4. Windows install/recovery is a non-qualifying manual convenience. The
-   operator must pass the exact COM port explicitly; the package never chooses
+4. On Windows, the operator must pass the exact COM port explicitly. The
+   package never chooses
    or guesses a Windows port and rejects any device without the exact VID:PID.
 5. The generated entrypoint verifies every file against `SHA256SUMS.txt` and
    rejects missing, extra, linked, duplicate, or mismatched files.
 6. Read `SUPPORTED_FEATURES.md`. BLE companion transport, signed OTA/recovery,
-   and advanced QR sharing are unavailable in RC1.
+   and advanced QR sharing are unavailable in DeskOS D1L 1.0.
 7. Never format an SD card on the device.
 8. Prepare a FAT32 card with `scripts/prepare_deskos_sd.py`; the checked-in
    payload is under `sdcard/`.
@@ -2783,14 +2874,14 @@ and preserves unrelated NVS regions. Both wrappers invoke the package-root
 `flash_project.py`, which verifies the complete checksum inventory, resolves
 the exact USB identity, and gives esptool only the stable requested target.
 
-### Qualifying POSIX / Raspberry Pi 5
+### Linux
 
 ```sh
 export D1L_PORT="{POSIX_D1L_TARGET}"
 ./flash_project.sh
 ```
 
-### Non-qualifying manual Windows install
+### Windows
 
 ```powershell
 $PackageRoot = (Get-Location).Path
@@ -2798,19 +2889,14 @@ $OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
 & (Join-Path $PackageRoot "flash_project.ps1") -Port $OperatorPort
 ```
 
-This Windows helper verifies only the explicitly supplied port and its exact
-VID:PID `{EXPECTED_VID:04X}:{EXPECTED_PID:04X}`. It never scans for a fallback
-port and cannot produce release-qualification evidence.
-
-After flashing, query `version` and `health`. Require the exact commit above,
-`release_profile=core_1_0`, and the exact SD history mode above before using
-any evidence from the device.
+This Windows helper verifies the explicitly supplied port and its exact VID:PID
+`{EXPECTED_VID:04X}:{EXPECTED_PID:04X}`. It never scans for a fallback port.
 
 ## Recovery
 
 Try the normal project flash first. The full 8MB recovery image is a last
 resort: it can overwrite settings, contacts, messages, and other retained
-state. Core recovery is Windows-only, manual, and non-qualifying. No POSIX
+state. Core recovery is Windows-only and manual. No POSIX
 recovery wrapper is shipped. `flash_full_8mb.ps1` verifies the complete
 checksum inventory plus the explicitly supplied port's exact USB identity
 before it asks for port-bound confirmation.
@@ -2821,9 +2907,8 @@ $OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
 & (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port $OperatorPort
 ```
 
-Re-verify `version`, `health`, display, touch, and retained-state expectations
-after recovery. Core 1.0 supports USB install/recovery only; it does not
-support OTA or signed SD update.
+Core 1.0 supports USB install/recovery only; it does not support OTA or signed
+SD update.
 """,
         encoding="ascii",
     )
@@ -2909,12 +2994,10 @@ SD history mode: `{sd_mode}`
 
 {sd_note}
 
-Start with `START_HERE_RC1.md` for the complete Windows or Linux sequence:
-prepare the FAT32 card, flash the RP2040 bridge, flash the ESP32 GUI, and run
-the exact-build read-only test.
+Start with `START_HERE.md` for the complete Windows or Linux production install:
+prepare the FAT32 card, flash the RP2040 bridge, and flash the ESP32 GUI.
 
 `SUPPORTED_FEATURES.md` is the authoritative package capability summary.
-`full_feature_release_ready` is always `false` for this package.
 
 ## Supported matrix
 
@@ -2926,7 +3009,7 @@ the exact-build read-only test.
 
 Unavailable means hidden or rejected before side effects. BLE companion
 transport, signed OTA/recovery, advanced QR sharing, and the on-device USB
-recovery service are explicitly deferred to 1.5 / RC2. The package still
+recovery service are not part of Core 1.0. The package still
 contains a checksum-verified host-side factory recovery image.
 
 ## SHA-256 values
@@ -2935,18 +3018,18 @@ contains a checksum-verified host-side factory recovery image.
 
 `SHA256SUMS.txt` contains the authoritative SHA-256 value for every other file
 in the package except itself. The generated Python entrypoint and both
-normal-install wrappers verify that complete checksum tree before writing. The Windows-only recovery wrapper also
-performs the same inventory and USB identity checks before its warning. The
-SD, RP2040, and post-install wrappers call the same complete package verifier.
+normal-install wrappers verify that complete checksum tree before writing. The
+Windows-only recovery wrapper also performs the same inventory and USB identity
+checks before its warning. The SD and RP2040 installers call the same complete
+package verifier.
 
 ## Normal USB Install
 
 Normal project flashing writes the exact Actions-built bootloader, partition
 table, OTA selection data, and app at their ESP-IDF offsets without erasing
 unrelated NVS regions.
-Release qualification uses exactly
-`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` on the Pi 5 and requires
-VID:PID `1A86:7523`.
+Linux installation uses the stable by-id target and requires VID:PID
+`1A86:7523`.
 
 ```sh
 export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
@@ -2956,8 +3039,8 @@ export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
 On POSIX, `/dev/ttyUSB<number>` is observational only and is never an
 authorized open target.
 
-The Windows wrapper is a non-qualifying manual convenience. It requires an
-operator-supplied `-Port`, verifies that exact enumerated port has VID:PID
+The Windows wrapper requires an operator-supplied `-Port`, verifies that exact
+enumerated port has VID:PID
 `1A86:7523`, and never chooses or probes a default port:
 
 ```powershell
@@ -2985,8 +3068,8 @@ background prefetch.
 
 Put the RP2040 into physical BOOTSEL/UF2 mode and pass the mounted UF2 volume
 explicitly. The helpers reject a volume without UF2 metadata, verify the
-production `deskos_sd_bridge.ino.uf2`, dry-run first, and require typed
-confirmation before copying:
+production `deskos_sd_bridge.ino.uf2`, and require typed confirmation before
+copying:
 
 ```powershell
 .\\flash_rp2040.ps1 -Volume R:\\
@@ -2995,26 +3078,6 @@ confirmation before copying:
 ```sh
 ./flash_rp2040.sh /media/$USER/RPI-RP2
 ```
-
-## Test the installed RC1
-
-After both firmware sides are flashed and the prepared card is inserted, wait
-at least 10 seconds. The test verifies this package and queries only `version`,
-`health`, `rp2040 ping`, and `storage status`. It sends no RF and formats
-nothing:
-
-```powershell
-$D1LPort = Read-Host "Enter the D1L COM port"
-.\\test_rc1.ps1 -Port $D1LPort
-```
-
-```sh
-./test_rc1.sh "{POSIX_D1L_TARGET}"
-```
-
-Require all four checks to print `PASS`. See `START_HERE_RC1.md` for dependency
-setup, safe card formatting guidance, Linux serial permissions, physical
-checks, and issue-reporting details.
 
 ## Recovery
 
@@ -3039,8 +3102,7 @@ Never format an SD card on the device.
 Report defects at https://github.com/n30nex/SIGUI/issues/new. Include firmware
 commit `{manifest['firmware_commit']}`, Actions run
 `{manifest['actions_run']}`, run attempt
-`{manifest['actions_run_attempt']}`, this package name, and the relevant
-evidence.
+`{manifest['actions_run_attempt']}`, this package name, and what went wrong.
 
 App image: `{app['path']}`
 
@@ -3308,11 +3370,13 @@ def create_release_package(
         root,
         package_dir,
         expected_commit,
+        include_in_package=release_profile != CORE_RELEASE_PROFILE,
     )
     meshcore_signed_advert_runtime = copy_meshcore_signed_advert_evidence(
         meshcore_signed_advert_runtime_json,
         package_dir,
         expected_commit,
+        include_in_package=release_profile != CORE_RELEASE_PROFILE,
     )
 
     firmware_dir = package_dir / "firmware"
@@ -3337,18 +3401,45 @@ def create_release_package(
         else None
     )
     full_image = write_full_flash_image(build_dir, package_dir, flasher_args, full_size)
-    debug_files = copy_optional_debug_files(build_dir, package_dir)
-    notice_files = copy_notice_files(root, package_dir)
+    debug_files = (
+        []
+        if release_profile == CORE_RELEASE_PROFILE
+        else copy_optional_debug_files(build_dir, package_dir)
+    )
+    notice_files = copy_notice_files(
+        root,
+        package_dir,
+        (
+            PRODUCTION_NOTICE_FILE_SPECS
+            if release_profile == CORE_RELEASE_PROFILE
+            else NOTICE_FILE_SPECS
+        ),
+    )
     release_docs = (
         []
         if release_profile == CORE_RELEASE_PROFILE and sd_history_mode == "disabled"
-        else copy_release_docs(root, package_dir)
+        else copy_release_docs(
+            root,
+            package_dir,
+            (
+                PRODUCTION_RELEASE_DOC_SPECS
+                if release_profile == CORE_RELEASE_PROFILE
+                else RELEASE_DOC_SPECS
+            ),
+        )
     )
     if release_profile == CORE_RELEASE_PROFILE and sd_history_mode == "disabled":
         rp2040_artifacts = []
     else:
         rp2040_artifacts = copy_rp2040_artifacts(
-            rp2040_artifact_root, package_dir
+            rp2040_artifact_root,
+            package_dir,
+            include_names=(
+                PRODUCTION_RP2040_ARTIFACT_NAMES
+                if release_profile == CORE_RELEASE_PROFILE
+                else None
+            ),
+            production_only=release_profile == CORE_RELEASE_PROFILE,
         )
     if (
         release_profile == CORE_RELEASE_PROFILE
@@ -3384,7 +3475,7 @@ def create_release_package(
         else None
     )
     user_install = (
-        write_rc1_user_install_bundle(
+        write_production_user_install_bundle(
             root,
             package_dir,
             source_commit=expected_commit,
@@ -3411,12 +3502,9 @@ def create_release_package(
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "git": source_git,
         "workflow": workflow,
-        "source_build_dir": str(build_dir),
         "flash_settings": flasher_args.get("flash_settings", {}),
         "flash_files": entries,
         "rp2040_artifacts": rp2040_artifacts,
-        "meshcore_conformance": meshcore_conformance,
-        "meshcore_signed_advert_runtime": meshcore_signed_advert_runtime,
         "update_image": update_image,
         "signed_update": signed_update,
         "full_flash_image": full_image,
@@ -3429,9 +3517,18 @@ def create_release_package(
         "notes": [
             "Project flash scripts require D1L_PORT or an explicit -Port.",
             "Full 8MB flash script requires a typed confirmation because it can overwrite persisted state.",
-            "Flash backup may be skipped only when the operator explicitly requests that for hardware validation.",
         ],
     }
+    if release_profile != CORE_RELEASE_PROFILE:
+        manifest["source_build_dir"] = str(build_dir)
+        manifest["notes"].append(
+            "Flash backup may be skipped only when the operator explicitly requests that for hardware validation."
+        )
+    if release_profile != CORE_RELEASE_PROFILE:
+        manifest["meshcore_conformance"] = meshcore_conformance
+        manifest["meshcore_signed_advert_runtime"] = (
+            meshcore_signed_advert_runtime
+        )
     if release_profile == CORE_RELEASE_PROFILE:
         capability_truth = core_capability_truth(sd_history_mode)
         manifest.update(
@@ -3450,8 +3547,6 @@ def create_release_package(
                 "sd_history_state": capability_truth["sd_history_state"],
                 "storage_authority": capability_truth["storage_authority"],
                 "full_feature_release_ready": False,
-                "core_release_ready": False,
-                "ready_for_public_release": False,
                 "install_recovery_guide": {
                     "schema": CORE_INSTALL_CONTRACT_SCHEMA,
                     "usb_only": True,
@@ -3561,6 +3656,10 @@ def create_release_package(
             expected_commit,
             release_profile=release_profile,
             sd_history_mode=sd_history_mode,
+            include_release_evidence_index=(
+                release_profile != CORE_RELEASE_PROFILE
+            ),
+            include_internal_metadata=release_profile != CORE_RELEASE_PROFILE,
         )
     )
     manifest["sbom"] = write_package_sbom(
@@ -3579,6 +3678,8 @@ def create_release_package(
     )
     (package_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="ascii")
     write_release_readme(package_dir, package_name, manifest)
+    if release_profile == CORE_RELEASE_PROFILE:
+        validate_production_package_surface(package_dir)
     write_sha256sums(package_dir)
     manifest["package_dir"] = str(package_dir)
     return manifest

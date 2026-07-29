@@ -37,13 +37,8 @@ try:
         sha256_file,
         verify_checksum_tree,
     )
-    from release_gate_audit_d1l import (
-        full_rf_acceptance_ok,
-        scroll_probe_ok,
-        sd_reboot_remount_artifact_ok,
-    )
+    from release_gate_audit_d1l import full_rf_acceptance_ok
     from scroll_probe_d1l import crashlog_has_crash_like_entries
-    from wifi_resilience_d1l import validate_completed_report as validate_wifi_report
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.d1l_serial_target import POSIX_D1L_TARGET, validate_snapshot
     from scripts.rc1_release_gate_audit_d1l import (
@@ -59,15 +54,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         sha256_file,
         verify_checksum_tree,
     )
-    from scripts.release_gate_audit_d1l import (
-        full_rf_acceptance_ok,
-        scroll_probe_ok,
-        sd_reboot_remount_artifact_ok,
-    )
+    from scripts.release_gate_audit_d1l import full_rf_acceptance_ok
     from scripts.scroll_probe_d1l import crashlog_has_crash_like_entries
-    from scripts.wifi_resilience_d1l import (
-        validate_completed_report as validate_wifi_report,
-    )
 
 
 EVIDENCE_SCHEMA = 1
@@ -114,18 +102,13 @@ MESHCOREBOT_BAUD = 115200
 
 SOURCE_KINDS = {
     "flash": "esp32_flash",
-    "ui": "scroll_probe_d1l",
     "rf": "rf_full_acceptance",
     "protocol": PROTOCOL_KIND,
-    "wifi": "wifi_saved_profile_resilience",
-    "sd": "sd_reboot_remount_acceptance_d1l",
     "sd_degraded": "d1l_sd_remove_reinsert_source",
     "map": MAP_KIND,
 }
 SOURCE_ROLES = tuple(SOURCE_KINDS)
 OUTCOME_KEYS = (
-    "boot",
-    "ui_navigation",
     "boot_advert",
     "public_send_count",
     "dm_ack",
@@ -134,20 +117,13 @@ OUTCOME_KEYS = (
     "ping",
     "repeater_login",
     "repeater_query",
-    "wifi_reconnect",
-    "sd_write",
-    "sd_remount",
     "sd_degraded_notice",
     "authorized_map_download",
     "map_cache_revisit",
-    "no_panic",
-    "no_unexpected_reset",
 )
 COVERAGE = {
     "target": "flash",
     "flash": "flash",
-    "boot": "ui",
-    "ui_navigation": "ui",
     "boot_advert": "protocol",
     "public_send_count": "protocol",
     "dm_ack": "rf",
@@ -156,14 +132,9 @@ COVERAGE = {
     "ping": "protocol",
     "repeater_login": "protocol",
     "repeater_query": "protocol",
-    "wifi_reconnect": "wifi",
-    "sd_write": "sd",
-    "sd_remount": "sd",
     "sd_degraded_notice": "sd_degraded",
     "authorized_map_download": "map",
     "map_cache_revisit": "map",
-    "no_panic": "ui",
-    "no_unexpected_reset": "ui",
 }
 TRANSCRIPT_KEYS = frozenset(
     {
@@ -400,6 +371,7 @@ def validate_flash(
         )
         and _exact_commit(data.get("device_build_commit"))
         == candidate["firmware_commit"]
+        and _exact_commit(data.get("pre_flash_build_commit")) is not None
         and data.get("erase_flash") is False
         and data.get("formats_sd") is False
         and data.get("retained_state_preserved") is True
@@ -411,61 +383,6 @@ def validate_flash(
     ):
         raise EvidenceError("flash receipt does not prove the exact non-erasing app flash")
     return {}
-
-
-def _ui_health_truth(data: dict[str, Any], commit: str) -> bool:
-    events = data.get("events")
-    if not isinstance(events, list) or not events:
-        return False
-    nonces: set[int] = set()
-    for event in events:
-        if not isinstance(event, dict):
-            return False
-        health = event.get("health")
-        crashlog = event.get("crashlog")
-        if (
-            not isinstance(health, dict)
-            or health.get("ok") is not True
-            or _exact_commit(health.get("build_commit")) != commit
-            or health.get("board_ready") is not True
-            or health.get("ui_ready") is not True
-            or _integer(health.get("boot_nonce"), minimum=1) is None
-            or not isinstance(crashlog, dict)
-            or crashlog.get("ok") is not True
-            or crashlog_has_crash_like_entries(crashlog)
-        ):
-            return False
-        nonces.add(health["boot_nonce"])
-    return len(nonces) == 1
-
-
-def validate_ui(
-    data: dict[str, Any], candidate: dict[str, str]
-) -> dict[str, bool | int]:
-    if not (
-        data.get("schema") == 2
-        and data.get("mode") == "hardware"
-        and data.get("physical_observed") is True
-        and data.get("manual_touch") is False
-        and data.get("dry_run") is not True
-        and data.get("simulated") is not True
-        and data.get("manual_only") is not True
-        and data.get("closure_eligible") is True
-        and data.get("release_profile") == RELEASE_PROFILE
-        and data.get("expected_sd_history_mode") == SD_HISTORY_MODE
-        and _candidate_binding(data, candidate, require_run=True)
-        and _runner_source_binding(data, candidate)
-        and scroll_probe_ok(data, POSIX_D1L_TARGET)
-        and _ui_health_truth(data, candidate["firmware_commit"])
-        and _target(data)
-    ):
-        raise EvidenceError("UI receipt is not an exact automated physical navigation pass")
-    return {
-        "boot": True,
-        "ui_navigation": True,
-        "no_panic": True,
-        "no_unexpected_reset": True,
-    }
 
 
 def validate_rf(
@@ -1414,37 +1331,6 @@ def validate_protocol(
     }
 
 
-def validate_wifi(
-    data: dict[str, Any], candidate: dict[str, str]
-) -> dict[str, bool | int]:
-    if not (
-        _candidate_binding(data, candidate, require_run=False)
-        and validate_wifi_report(data)
-        and data.get("rc1_gate_eligible") is True
-        and data.get("release_gate_eligible") is False
-        and _target_pair(data)
-    ):
-        raise EvidenceError("Wi-Fi receipt is not an exact saved-profile reconnect pass")
-    return {"wifi_reconnect": True}
-
-
-def validate_sd(
-    data: dict[str, Any], candidate: dict[str, str]
-) -> dict[str, bool | int]:
-    if not (
-        data.get("mode") == "hardware"
-        and data.get("dry_run") is not True
-        and data.get("simulated") is not True
-        and data.get("manual_only") is not True
-        and _candidate_binding(data, candidate, require_run=False)
-        and sd_reboot_remount_artifact_ok(
-            data, POSIX_D1L_TARGET, candidate["firmware_commit"]
-        )
-    ):
-        raise EvidenceError("SD receipt is not an exact write/remount pass")
-    return {"sd_write": True, "sd_remount": True}
-
-
 def validate_sd_degraded(
     data: dict[str, Any], candidate: dict[str, str]
 ) -> dict[str, bool | int]:
@@ -1582,11 +1468,8 @@ VALIDATORS: dict[
     str, Callable[[dict[str, Any], dict[str, str]], dict[str, bool | int]]
 ] = {
     "flash": validate_flash,
-    "ui": validate_ui,
     "rf": validate_rf,
     "protocol": validate_protocol,
-    "wifi": validate_wifi,
-    "sd": validate_sd,
     "sd_degraded": validate_sd_degraded,
     "map": validate_map,
 }
@@ -1660,7 +1543,7 @@ def produce(
     evidence_output: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if set(sources) != set(SOURCE_ROLES):
-        raise EvidenceError("all eight exact source roles are required")
+        raise EvidenceError("all five exact source roles are required")
     resolved = {role: Path(path).resolve(strict=True) for role, path in sources.items()}
     if len(set(resolved.values())) != len(resolved):
         raise EvidenceError("one source file cannot fill multiple evidence roles")

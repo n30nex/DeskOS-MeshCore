@@ -17,12 +17,6 @@ ATTEMPT = "1"
 APP_BYTES = b"exact rc1 application image"
 ROLE_OUTCOMES = {
     "flash": {},
-    "ui": {
-        "boot": True,
-        "ui_navigation": True,
-        "no_panic": True,
-        "no_unexpected_reset": True,
-    },
     "rf": {"dm_ack": True},
     "protocol": {
         "boot_advert": True,
@@ -33,8 +27,6 @@ ROLE_OUTCOMES = {
         "repeater_login": True,
         "repeater_query": True,
     },
-    "wifi": {"wifi_reconnect": True},
-    "sd": {"sd_write": True, "sd_remount": True},
     "sd_degraded": {"sd_degraded_notice": True},
     "map": {
         "authorized_map_download": True,
@@ -98,25 +90,21 @@ def write_sd_preparation(package: Path) -> dict:
 
 def write_user_install(package: Path) -> dict:
     payloads = {
-        "START_HERE_RC1.md": (
-            "# DeskOS D1L RC1 - Windows and Linux Install and Test\n"
+        "START_HERE.md": (
+            "# DeskOS D1L 1.0 - Windows and Linux Install\n"
             f"commit {COMMIT}\n"
             "GitHub Actions run and attempt: see `manifest.json`\n"
             "prepare_sd_card.ps1 prepare_sd_card.sh\n"
             "flash_rp2040.ps1 flash_rp2040.sh\n"
             "flash_project.ps1 flash_project.sh\n"
-            "test_rc1.ps1 test_rc1.sh\n"
             "Use a by-id path, never a raw tty path.\n"
-            "The test does not transmit RF or format storage.\n"
         ).encode("ascii"),
         "prepare_sd_card.ps1": b"# fixture\n",
         "prepare_sd_card.sh": b"#!/usr/bin/env sh\n",
         "flash_rp2040.ps1": b"# fixture\n",
         "flash_rp2040.sh": b"#!/usr/bin/env sh\n",
-        "test_rc1.ps1": b"# fixture\n",
-        "test_rc1.sh": b"#!/usr/bin/env sh\n",
         "scripts/flash_rp2040_sd_bridge_uf2.py": b"#!/usr/bin/env python3\n",
-        "scripts/test_rc1.py": b"#!/usr/bin/env python3\n",
+        "scripts/verify_package.py": b"#!/usr/bin/env python3\n",
     }
     bindings = {}
     for relative, payload in payloads.items():
@@ -135,14 +123,13 @@ def write_user_install(package: Path) -> dict:
     bridge.write_bytes(b"production bridge UF2 fixture")
     return {
         "schema": 1,
-        "guide": "START_HERE_RC1.md",
+        "guide": "START_HERE.md",
         "windows": audit.RC1_WINDOWS_HELPERS,
         "linux": audit.RC1_LINUX_HELPERS,
         "shared": audit.RC1_SHARED_HELPERS,
         "rp2040_artifact": audit.RC1_RP2040_ARTIFACT,
         "no_sd_format": True,
         "normal_esp32_flash_erases_flash": False,
-        "test_is_read_only": True,
         "files": bindings,
     }
 
@@ -369,8 +356,6 @@ def valid_receipt(package: Path) -> dict:
             "duration_requirement_seconds": None,
         },
         "outcomes": {
-            "boot": True,
-            "ui_navigation": True,
             "boot_advert": True,
             "public_send_count": 1,
             "dm_ack": True,
@@ -379,14 +364,9 @@ def valid_receipt(package: Path) -> dict:
             "ping": True,
             "repeater_login": True,
             "repeater_query": True,
-            "wifi_reconnect": True,
-            "sd_write": True,
-            "sd_remount": True,
             "sd_degraded_notice": True,
             "authorized_map_download": True,
             "map_cache_revisit": True,
-            "no_panic": True,
-            "no_unexpected_reset": True,
         },
     }
 
@@ -414,9 +394,7 @@ def write_physical_evidence(receipt_path: Path) -> Path:
             "source_inspection": False,
             "manual_only": False,
         }
-        if role == "ui":
-            payload["manual_touch"] = False
-        elif role == "rf":
+        if role == "rf":
             payload.update(
                 {
                     "mode": "rf-full-acceptance",
@@ -434,30 +412,22 @@ def write_physical_evidence(receipt_path: Path) -> Path:
                     "manual_only": False,
                 }
             )
-        elif role == "wifi":
-            payload["truth"] = {
-                "physical_observed": True,
-                "simulated": False,
-                "dry_run": False,
-                "source_inspection": False,
-            }
-        elif role in {"sd", "sd_degraded"}:
+        elif role == "sd_degraded":
             payload["events"] = [{"event": role, "observed": True}]
-            if role == "sd_degraded":
-                payload.update(
-                    {
-                        "port": audit.PI_SERIAL_PATH,
-                        "expected_firmware_commit": COMMIT,
-                        "cycles": [
-                            {
-                                "absent": {
-                                    "mode": "live_only_no_card",
-                                    "degraded_notice_visible": True,
-                                }
+            payload.update(
+                {
+                    "port": audit.PI_SERIAL_PATH,
+                    "expected_firmware_commit": COMMIT,
+                    "cycles": [
+                        {
+                            "absent": {
+                                "mode": "live_only_no_card",
+                                "degraded_notice_visible": True,
                             }
-                        ],
-                    }
-                )
+                        }
+                    ],
+                }
+            )
         write_json(
             path,
             payload,
@@ -499,11 +469,6 @@ def release_fixture(
             )
             for role, outcomes in ROLE_OUTCOMES.items()
         },
-    )
-    monkeypatch.setattr(
-        audit,
-        "sd_reboot_remount_artifact_ok",
-        lambda _data, _port, _commit: True,
     )
     monkeypatch.setattr(
         audit,
@@ -711,12 +676,7 @@ def test_physical_source_validator_registry_must_be_complete(
             False,
             "authorized_map_download_and_cache_revisit",
         ),
-        (
-            "outcomes",
-            "no_unexpected_reset",
-            False,
-            "no_panic_or_reset_regression",
-        ),
+        ("outcomes", "sd_degraded_notice", False, "sd_degraded_notice"),
     ],
 )
 def test_each_physical_safety_or_outcome_requirement_fails_closed(
@@ -831,11 +791,11 @@ def test_manual_physical_source_sidecar_fails_closed(
         tmp_path, monkeypatch
     )
     sidecar = json.loads(evidence.read_text(encoding="ascii"))
-    source_path = tmp_path / sidecar["sources"]["ui"]["path"]
+    source_path = tmp_path / sidecar["sources"]["map"]["path"]
     source = json.loads(source_path.read_text(encoding="ascii"))
     source["manual"] = True
     write_json(source_path, source)
-    sidecar["sources"]["ui"]["sha256"] = sha256(source_path)
+    sidecar["sources"]["map"]["sha256"] = sha256(source_path)
     write_json(evidence, sidecar)
 
     report = audit.audit(

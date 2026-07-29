@@ -1,8 +1,9 @@
-# MeshCore DeskOS D1L 1.0 / RC1 User Guide
+# MeshCore DeskOS D1L 1.0 User Guide
 
-This guide covers the production `core_1_0` firmware for the Seeed SenseCAP
-Indicator D1L. DeskOS is a non-forwarding MeshCore client: it sends and
-receives user-requested traffic but does not repeat other devices' traffic.
+This guide covers the production `core_1_0` firmware with `conditional` SD
+history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
+MeshCore client: it sends and receives user-requested traffic but does not
+repeat other devices' traffic.
 
 ## First start
 
@@ -24,7 +25,7 @@ messages instead of showing only `Unknown`.
 
 The Public channel is always present. DeskOS also supports custom channels:
 create or import, select, enable, rename, make default and remove with local
-confirmation. QR sharing is intentionally absent from RC1; URI import remains
+confirmation. QR sharing is intentionally absent from 1.0; URI import remains
 available.
 
 Public and channel views support send, receive, retained history, search and
@@ -41,7 +42,7 @@ Opening or refreshing a thread does not silently retry a failed message.
 
 Contacts can be imported from the USB console with
 `contacts import <meshcore-uri>`. The touchscreen supports rename, favorite,
-mute and confirmed removal. Contact and channel QR sharing is deferred to RC2.
+mute and confirmed removal. Contact and channel QR sharing is not part of 1.0.
 
 From **Nodes**:
 
@@ -162,9 +163,9 @@ Observer is optional and uses `mqtts://`, TLS, QoS 1 and a bounded queue. It
 may publish device health and explicitly enabled location state. It never
 publishes message text, keys, contacts or forwarded RF traffic.
 
-## Deferred to 1.5 / RC2
+## Not included in 1.0
 
-The RC1 profile hides and rejects:
+DeskOS D1L 1.0 hides and rejects:
 
 - BLE companion pairing and transport;
 - contact/channel QR sharing;
@@ -200,25 +201,15 @@ crashlog
 `help` lists the active allowlist. RF transmission, remote mutation, evidence
 clearing, reboot and factory reset require explicit actions or confirmation.
 
-## Install and release evidence
+## Installation
 
-Production release firmware must come from the exact GitHub Actions run for
-the candidate commit, using `D1L_RELEASE_PROFILE=core_1_0` and
-`D1L_SD_HISTORY_MODE=conditional`. Verify its checksum tree, inventory and
-provenance before flashing. The current hardware is connected to Pi 5 host
-`neopi5` and must be selected only through:
+Use the published DeskOS D1L 1.0 download and follow its `START_HERE.md`.
+On Linux, select the D1L only through the stable by-id path:
 
 ```text
 /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
 VID:PID 1a86:7523
 ```
 
-Never substitute `/dev/ttyUSB*` or a stale Windows COM assignment. Normal
-flashing must not erase NVS or format/touch SD.
-
-Feature implementation and public-release authorization are separate. The
-release is ready only after the exact downloaded Actions artifact is flashed
-and that same commit/artifact passes the bounded
-boot/UI, advert/Public, DM/ACK, PATH/TRACE/Ping, admin, Wi-Fi reconnect, SD
-write/remount/degraded and Map download/cache-revisit checks. No soak is
-required for this release.
+Never substitute `/dev/ttyUSB*` or a guessed Windows COM assignment. Normal
+installation preserves NVS and never formats the SD card.

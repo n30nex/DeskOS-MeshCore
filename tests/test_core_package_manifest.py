@@ -99,10 +99,16 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert manifest["sd_history_mode"] == "disabled"
     assert manifest["storage_authority"] == "nvs"
     assert manifest["full_feature_release_ready"] is False
+    assert "core_release_ready" not in manifest
+    assert "ready_for_public_release" not in manifest
+    assert "source_build_dir" not in manifest
     assert manifest["rp2040_artifacts"] == []
     assert manifest["update_image"] is None
     assert not (package / "rp2040").exists()
     assert not (package / "update").exists()
+    assert manifest["debug_files"] == []
+    assert not (package / "debug").exists()
+    package_release_d1l.validate_production_package_surface(package)
     assert manifest["release_docs"] == [
         {
             "path": "docs/CORE_INSTALL_RECOVERY.md",
@@ -229,14 +235,14 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     guide = (
         package / "docs" / "CORE_INSTALL_RECOVERY.md"
     ).read_text(encoding="ascii")
-    assert "NON-QUALIFYING MANUAL WINDOWS INSTALL" in ps1
+    assert "Installing DeskOS D1L 1.0" in ps1
     assert "Parameter(Mandatory=$true)" in ps1
     assert "flash_project.py" in ps1
     assert stable_posix in sh
     assert os.access(package / "flash_project.sh", os.X_OK)
     assert "/dev/ttyUSB<number>" in guide
     assert stable_posix in guide
-    assert "non-qualifying manual convenience" in guide
+    assert "### Windows" in guide
     assert "No POSIX recovery wrapper is shipped" in " ".join(guide.split())
     for generated_text in (ps1, runner_text, recovery, guide):
         assert "COM12" not in generated_text
@@ -362,7 +368,7 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         in readme_text
     )
     assert stable_posix in readme_text
-    assert "non-qualifying manual convenience" in readme_text
+    assert "operator-supplied `-Port`" in readme_text
     assert "COM12" not in readme_text
     original_readme = readme_path.read_bytes()
     readme_path.write_bytes(original_readme + b"tampered\n")
@@ -401,29 +407,12 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert manifest["provenance"]["workflow_run_id"] == "123456789"
     assert manifest["provenance"]["workflow_run_attempt"] == "1"
 
-    capability_payload = package_release_d1l.load_required_json_object(
-        package / manifest["capability_manifest"]["path"],
-        "Core capability manifest",
-    )
-    assert capability_payload["release_profile"] == "core_1_0"
-    assert capability_payload["sd_history_mode"] == "disabled"
-    assert capability_payload["supported_capabilities"] == truth[
-        "supported_capabilities"
-    ]
-    assert capability_payload["capabilities"] == [
-        {"id": capability, "core_state": "supported"}
-        for capability in truth["supported_capabilities"]
-    ] + [
-        {"id": capability, "core_state": "unavailable"}
-        for capability in truth["unavailable_capabilities"]
-    ]
-    assert capability_payload["full_feature_release_ready"] is False
-    evidence_payload = package_release_d1l.load_required_json_object(
-        package / manifest["release_evidence_index"]["path"],
-        "Core release evidence index",
-    )
-    assert "scripts/rc1_release_gate_audit_d1l.py" in evidence_payload["note"]
-    assert "scripts/core_release_gate_audit_d1l.py" not in evidence_payload["note"]
+    assert "build_inputs" not in manifest
+    assert "capability_manifest" not in manifest
+    assert not list(package.glob("build_inputs_*.json"))
+    assert not list(package.glob("capability_manifest_*.json"))
+    assert "release_evidence_index" not in manifest
+    assert not list(package.glob("release_evidence_index_*.json"))
 
     monkeypatch.setattr(
         core_release_gate_audit_d1l,
@@ -554,7 +543,7 @@ def test_core_supported_optional_package_requires_paired_rp2040(
         )
 
 
-def test_core_conditional_package_includes_windows_linux_rc1_helpers(
+def test_core_conditional_package_is_production_only(
     tmp_path, monkeypatch
 ):
     build = tmp_path / "build"
@@ -566,10 +555,15 @@ def test_core_conditional_package_includes_windows_linux_rc1_helpers(
     old_bridge = bridge_dir / "rp2040-sd-bridge-firmware.uf2"
     bridge = bridge_dir / "deskos_sd_bridge.ino.uf2"
     old_bridge.rename(bridge)
-    (bridge_dir / "SHA256SUMS.txt").write_text(
-        f"{package_release_d1l.sha256_file(bridge)}  ./{bridge.name}\n",
-        encoding="ascii",
-    )
+    for name, content in {
+        "deskos_sd_bridge.ino.bin": b"BIN",
+        "deskos_sd_bridge.ino.elf": b"ELF",
+        "deskos_sd_bridge.ino.map": b"MAP",
+        "build-inputs.json": b"{}\n",
+        "sdfat-no-usb-patch.json": b"{}\n",
+    }.items():
+        (bridge_dir / name).write_bytes(content)
+    package_release_d1l.write_sha256sums(bridge_dir)
     prepare = tmp_path / "scripts" / "prepare_deskos_sd.py"
     prepare.write_text(
         (ROOT / "scripts" / "prepare_deskos_sd.py").read_text(encoding="ascii"),
@@ -601,21 +595,22 @@ def test_core_conditional_package_includes_windows_linux_rc1_helpers(
 
     package = tmp_path / "release" / "core-conditional"
     user_install = manifest["user_install"]
-    assert user_install["guide"] == "START_HERE_RC1.md"
+    assert "core_release_ready" not in manifest
+    assert "ready_for_public_release" not in manifest
+    assert "source_build_dir" not in manifest
+    assert user_install["guide"] == "START_HERE.md"
     assert user_install["windows"] == {
         "prepare_sd": "prepare_sd_card.ps1",
         "flash_rp2040": "flash_rp2040.ps1",
         "flash_esp32": "flash_project.ps1",
-        "test": "test_rc1.ps1",
     }
     assert user_install["linux"] == {
         "prepare_sd": "prepare_sd_card.sh",
         "flash_rp2040": "flash_rp2040.sh",
         "flash_esp32": "flash_project.sh",
-        "test": "test_rc1.sh",
     }
     assert set(user_install["files"]) == set(
-        package_release_d1l.RC1_USER_INSTALL_FILES
+        package_release_d1l.PRODUCTION_USER_INSTALL_FILES
     )
     for relative, binding in user_install["files"].items():
         path = package / relative
@@ -625,22 +620,21 @@ def test_core_conditional_package_includes_windows_linux_rc1_helpers(
     for relative in (
         "prepare_sd_card.sh",
         "flash_rp2040.sh",
-        "test_rc1.sh",
     ):
         assert os.access(package / relative, os.X_OK)
 
-    guide = (package / "START_HERE_RC1.md").read_text(encoding="ascii")
+    guide = (package / "START_HERE.md").read_text(encoding="ascii")
     assert commit in guide
     assert "GitHub Actions run and attempt: see `manifest.json`" in guide
     assert "## 1. Prepare the microSD card" in guide
     assert "## 2. Flash the RP2040 SD-bridge side" in guide
     assert "## 4. Flash the ESP32 main GUI side" in guide
-    assert "## 5. Run the read-only RC1 test" in guide
-    assert "does not transmit RF or format storage" in guide
+    assert "# DeskOS D1L 1.0 - Windows and Linux Install" in guide
+    assert "Run the read-only RC1 test" not in guide
     assert verify_checksum_tree(package) is True
 
     verified = subprocess.run(
-        [sys.executable, package / "scripts" / "test_rc1.py", "--verify-only"],
+        [sys.executable, package / "scripts" / "verify_package.py", package],
         cwd=package,
         check=False,
         text=True,
@@ -648,8 +642,130 @@ def test_core_conditional_package_includes_windows_linux_rc1_helpers(
         stderr=subprocess.PIPE,
     )
     assert verified.returncode == 0, verified.stderr
-    assert f"commit={commit}" in verified.stdout
-    assert "run=345678901/2" in verified.stdout
+    assert "FAIL" not in verified.stdout
+    production_preparer = (
+        package / "scripts" / "prepare_deskos_sd.py"
+    ).read_text(encoding="utf-8")
+    assert "--skip-filesystem-check" not in production_preparer
+    production_rp2040_helper = (
+        package / "scripts" / "flash_rp2040_sd_bridge_uf2.py"
+    ).read_text(encoding="utf-8")
+    assert "dry-run" not in production_rp2040_helper
+    assert '"preview"' in production_rp2040_helper
+    assert not (package / "test_rc1.ps1").exists()
+    assert not (package / "test_rc1.sh").exists()
+    assert not (package / "scripts" / "test_rc1.py").exists()
+    assert not (package / "evidence").exists()
+    assert "build_inputs" not in manifest
+    assert "capability_manifest" not in manifest
+    assert not list(package.glob("build_inputs_*.json"))
+    assert not list(package.glob("capability_manifest_*.json"))
+    assert not list(package.glob("release_evidence_index_*.json"))
+    assert "meshcore_conformance" not in manifest
+    assert "meshcore_signed_advert_runtime" not in manifest
+    assert manifest["debug_files"] == []
+    assert not (package / "debug").exists()
+    assert [row["path"] for row in manifest["notice_files"]] == [
+        "notices/LICENSE",
+        "notices/THIRD_PARTY_NOTICES.md",
+        "notices/ORLP_ED25519_ZLIB_LICENSE.txt",
+    ]
+    assert not (package / "notices" / "ATTRIBUTIONS.md").exists()
+    assert not (
+        package / "notices" / "SOURCE_AUDIT_AND_ATTRIBUTION.md"
+    ).exists()
+    customer_paths = [
+        path.relative_to(package).as_posix().lower()
+        for path in package.rglob("*")
+        if path.is_file()
+    ]
+    assert not [
+        path
+        for path in customer_paths
+        if "test" in path or "smoke" in path or path.startswith("evidence/")
+    ]
+    public_json = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in package.rglob("*.json")
+    ).lower()
+    for internal_marker in (
+        '"tests/',
+        "pytest",
+        "smoke",
+        "completion_ledger",
+        "source_audit",
+        "release_evidence",
+    ):
+        assert internal_marker not in public_json
+    assert [row["name"] for row in manifest["rp2040_artifacts"]] == [
+        "rp2040-sd-bridge-firmware"
+    ]
+    bridge_package = package / "rp2040" / "rp2040-sd-bridge-firmware"
+    assert sorted(
+        path.name for path in bridge_package.iterdir() if path.is_file()
+    ) == ["SHA256SUMS.txt", "deskos_sd_bridge.ino.uf2"]
+    assert verify_checksum_tree(bridge_package) is True
+    assert not (package / "rp2040" / "rp2040-sd-smoke-firmware").exists()
+    assert not (
+        package / "rp2040" / "rp2040-seeed-official-sd-smoke-firmware"
+    ).exists()
+    package_release_d1l.validate_production_package_surface(package)
+
+
+def test_production_surface_rejects_internal_artifact_names(tmp_path):
+    internal = tmp_path / "evidence" / "report.json"
+    internal.parent.mkdir()
+    internal.write_text("{}\n", encoding="ascii")
+
+    with pytest.raises(ValueError, match="internal-only path"):
+        package_release_d1l.validate_production_package_surface(tmp_path)
+
+
+def test_production_surface_rejects_debug_binary_metadata(tmp_path):
+    debug_file = tmp_path / "firmware" / "deskos.elf"
+    debug_file.parent.mkdir()
+    debug_file.write_bytes(b"ELF")
+
+    with pytest.raises(ValueError, match="debug-only file"):
+        package_release_d1l.validate_production_package_surface(tmp_path)
+
+
+def test_production_surface_rejects_customer_test_instructions(tmp_path):
+    guide = tmp_path / "START_HERE.md"
+    guide.write_text("Run the tests after installation.\n", encoding="ascii")
+
+    with pytest.raises(ValueError, match="internal qualification language"):
+        package_release_d1l.validate_production_package_surface(tmp_path)
+
+
+def test_public_release_stages_only_production_zip_and_outer_checksums():
+    release_doc = (
+        ROOT / "docs" / "RC1_RELEASE_EXECUTION_D1L.md"
+    ).read_text(encoding="utf-8")
+    assets = re.search(
+        r"RELEASE_ASSETS=\(\n(?P<body>.*?)\n\)",
+        release_doc,
+        flags=re.DOTALL,
+    )
+    assert assets is not None
+    assert re.findall(r'"\$(\w+)"', assets.group("body")) == [
+        "PACKAGE_ASSET",
+        "ASSET_SUMS",
+    ]
+    release_command = release_doc.split(
+        "gh release create v1.0.0", 1
+    )[1].split("test \"$(gh release view", 1)[0]
+    assert "--generate-notes" not in release_command
+    assert "START_HERE.md" in release_command
+    for internal_marker in (
+        "START_HERE_RC1",
+        "read-only RC1",
+        "core-actions-run",
+        "physical evidence",
+        "AUDIT_ASSET",
+        "PHYSICAL_ASSET",
+    ):
+        assert internal_marker not in release_command
 
 
 def test_rc1_conditional_capability_truth_matches_production_surface():

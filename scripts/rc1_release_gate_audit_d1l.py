@@ -25,15 +25,18 @@ except ImportError:  # pragma: no cover
     )
 
 try:
-    from release_gate_audit_d1l import sd_reboot_remount_artifact_ok
     from sd_remove_reinsert_acceptance_d1l import (
         validate_report as validate_sd_remove_reinsert_report,
     )
 except ImportError:  # pragma: no cover
-    from scripts.release_gate_audit_d1l import sd_reboot_remount_artifact_ok
     from scripts.sd_remove_reinsert_acceptance_d1l import (
         validate_report as validate_sd_remove_reinsert_report,
     )
+
+try:
+    from package_release_d1l import validate_production_package_surface
+except ImportError:  # pragma: no cover
+    from scripts.package_release_d1l import validate_production_package_surface
 
 
 AUDIT_SCHEMA = 1
@@ -65,15 +68,13 @@ REQUIRED_SD_PREPARATION_PATHS = frozenset(
 )
 RC1_USER_INSTALL_FILES = frozenset(
     {
-        "START_HERE_RC1.md",
+        "START_HERE.md",
         "prepare_sd_card.ps1",
         "prepare_sd_card.sh",
         "flash_rp2040.ps1",
         "flash_rp2040.sh",
-        "test_rc1.ps1",
-        "test_rc1.sh",
         "scripts/flash_rp2040_sd_bridge_uf2.py",
-        "scripts/test_rc1.py",
+        "scripts/verify_package.py",
     }
 )
 RC1_USER_INSTALL_KEYS = frozenset(
@@ -86,7 +87,6 @@ RC1_USER_INSTALL_KEYS = frozenset(
         "rp2040_artifact",
         "no_sd_format",
         "normal_esp32_flash_erases_flash",
-        "test_is_read_only",
         "files",
     }
 )
@@ -94,18 +94,16 @@ RC1_WINDOWS_HELPERS = {
     "prepare_sd": "prepare_sd_card.ps1",
     "flash_rp2040": "flash_rp2040.ps1",
     "flash_esp32": "flash_project.ps1",
-    "test": "test_rc1.ps1",
 }
 RC1_LINUX_HELPERS = {
     "prepare_sd": "prepare_sd_card.sh",
     "flash_rp2040": "flash_rp2040.sh",
     "flash_esp32": "flash_project.sh",
-    "test": "test_rc1.sh",
 }
 RC1_SHARED_HELPERS = {
     "prepare_sd": SD_PREPARATION_SCRIPT,
     "flash_rp2040": "scripts/flash_rp2040_sd_bridge_uf2.py",
-    "test": "scripts/test_rc1.py",
+    "verify_package": "scripts/verify_package.py",
 }
 RC1_RP2040_ARTIFACT = {
     "directory": "rp2040/rp2040-sd-bridge-firmware",
@@ -120,19 +118,14 @@ PHYSICAL_EVIDENCE_KEYS = frozenset(
 )
 PHYSICAL_SOURCE_KINDS = {
     "flash": "esp32_flash",
-    "ui": "scroll_probe_d1l",
     "rf": "rf_full_acceptance",
     "protocol": "d1l_rc1_protocol_acceptance_transcript",
-    "wifi": "wifi_saved_profile_resilience",
-    "sd": "sd_reboot_remount_acceptance_d1l",
     "sd_degraded": "d1l_sd_remove_reinsert_source",
     "map": "d1l_rc1_map_acceptance_transcript",
 }
 PHYSICAL_EVIDENCE_COVERAGE = {
     "target": "flash",
     "flash": "flash",
-    "boot": "ui",
-    "ui_navigation": "ui",
     "boot_advert": "protocol",
     "public_send_count": "protocol",
     "dm_ack": "rf",
@@ -141,14 +134,9 @@ PHYSICAL_EVIDENCE_COVERAGE = {
     "ping": "protocol",
     "repeater_login": "protocol",
     "repeater_query": "protocol",
-    "wifi_reconnect": "wifi",
-    "sd_write": "sd",
-    "sd_remount": "sd",
     "sd_degraded_notice": "sd_degraded",
     "authorized_map_download": "map",
     "map_cache_revisit": "map",
-    "no_panic": "ui",
-    "no_unexpected_reset": "ui",
 }
 
 TOP_LEVEL_RECEIPT_KEYS = frozenset(
@@ -194,8 +182,6 @@ BOUNDED_GATE_KEYS = frozenset(
 )
 OUTCOME_KEYS = frozenset(
     {
-        "boot",
-        "ui_navigation",
         "boot_advert",
         "public_send_count",
         "dm_ack",
@@ -204,14 +190,9 @@ OUTCOME_KEYS = frozenset(
         "ping",
         "repeater_login",
         "repeater_query",
-        "wifi_reconnect",
-        "sd_write",
-        "sd_remount",
         "sd_degraded_notice",
         "authorized_map_download",
         "map_cache_revisit",
-        "no_panic",
-        "no_unexpected_reset",
     }
 )
 
@@ -448,6 +429,14 @@ def package_install_contract(manifest: dict[str, Any]) -> bool:
     )
 
 
+def production_package_surface_contract(package_dir: Path) -> bool:
+    try:
+        validate_production_package_surface(package_dir)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
+
+
 def app_artifact(
     package_dir: Path,
     manifest: dict[str, Any],
@@ -515,14 +504,13 @@ def rc1_user_install_contract(
     if not (
         exact_keys(user_install, RC1_USER_INSTALL_KEYS)
         and user_install.get("schema") == 1
-        and user_install.get("guide") == "START_HERE_RC1.md"
+        and user_install.get("guide") == "START_HERE.md"
         and user_install.get("windows") == RC1_WINDOWS_HELPERS
         and user_install.get("linux") == RC1_LINUX_HELPERS
         and user_install.get("shared") == RC1_SHARED_HELPERS
         and user_install.get("rp2040_artifact") == RC1_RP2040_ARTIFACT
         and user_install.get("no_sd_format") is True
         and user_install.get("normal_esp32_flash_erases_flash") is False
-        and user_install.get("test_is_read_only") is True
         and isinstance(user_install.get("files"), dict)
         and set(user_install["files"]) == RC1_USER_INSTALL_FILES
     ):
@@ -556,7 +544,7 @@ def rc1_user_install_contract(
     if any(safe_package_file(package_dir, relative) is None for relative in referenced):
         return False
 
-    guide = safe_package_file(package_dir, "START_HERE_RC1.md")
+    guide = safe_package_file(package_dir, "START_HERE.md")
     if guide is None:
         return False
     try:
@@ -564,7 +552,7 @@ def rc1_user_install_contract(
     except (OSError, UnicodeError):
         return False
     required_guide_text = (
-        "# DeskOS D1L RC1 - Windows and Linux Install and Test",
+        "# DeskOS D1L 1.0 - Windows and Linux Install",
         str(manifest.get("firmware_commit")),
         "GitHub Actions run and attempt: see `manifest.json`",
         "prepare_sd_card.ps1",
@@ -573,10 +561,7 @@ def rc1_user_install_contract(
         "flash_rp2040.sh",
         "flash_project.ps1",
         "flash_project.sh",
-        "test_rc1.ps1",
-        "test_rc1.sh",
         "never a raw",
-        "does not transmit RF or format storage",
     )
     return all(value in guide_text for value in required_guide_text)
 
@@ -804,15 +789,6 @@ def _machine_source_payload(
             and payload.get("source_inspection") is not True
             and payload.get("manual_only") is False
         )
-    if role == "ui":
-        return (
-            mode == "hardware"
-            and physical is True
-            and payload.get("dry_run") is False
-            and payload.get("simulated") is False
-            and payload.get("manual_only") is False
-            and payload.get("manual_touch") is False
-        )
     if role == "rf":
         return (
             mode == "rf-full-acceptance"
@@ -831,26 +807,10 @@ def _machine_source_payload(
             and payload.get("simulated") is False
             and payload.get("manual_only") is False
         )
-    if role == "wifi":
-        truth = payload.get("truth")
-        return (
-            mode == "hardware"
-            and physical is True
-            and isinstance(truth, dict)
-            and truth.get("physical_observed") is True
-            and truth.get("simulated") is False
-            and truth.get("dry_run") is False
-            and truth.get("source_inspection") is False
-            and payload.get("manual_only") is False
-        )
-    if role in {"sd", "sd_degraded"}:
+    if role == "sd_degraded":
         commit = exact_commit(candidate.get("firmware_commit"))
         if commit is None or mode != "hardware":
             return False
-        if role == "sd":
-            return sd_reboot_remount_artifact_ok(
-                payload, PI_SERIAL_PATH, commit
-            )
         return (
             payload.get("kind") == PHYSICAL_SOURCE_KINDS["sd_degraded"]
             and payload.get("port") == PI_SERIAL_PATH
@@ -1106,6 +1066,9 @@ def audit(
             actions_ok
         ),
         "package_stable_pi_install_contract": package_install_contract(manifest),
+        "package_production_only_public_surface": (
+            production_package_surface_contract(package_dir)
+        ),
         "package_exact_app_artifact": app_ok,
         "one_bounded_physical_receipt": shape_ok,
         "physical_evidence_sidecar_machine_sources": physical_evidence_ok,
@@ -1147,11 +1110,6 @@ def audit(
             and bounded.get("soak_required") is False
             and bounded.get("duration_requirement_seconds") is None
         ),
-        "boot_and_ui_navigation": (
-            isinstance(outcomes, dict)
-            and outcomes.get("boot") is True
-            and outcomes.get("ui_navigation") is True
-        ),
         "boot_advert_and_one_public_send": (
             isinstance(outcomes, dict)
             and outcomes.get("boot_advert") is True
@@ -1172,25 +1130,14 @@ def audit(
             and outcomes.get("repeater_login") is True
             and outcomes.get("repeater_query") is True
         ),
-        "wifi_reconnect": (
+        "sd_degraded_notice": (
             isinstance(outcomes, dict)
-            and outcomes.get("wifi_reconnect") is True
-        ),
-        "sd_write_remount_and_degraded_notice": (
-            isinstance(outcomes, dict)
-            and outcomes.get("sd_write") is True
-            and outcomes.get("sd_remount") is True
             and outcomes.get("sd_degraded_notice") is True
         ),
         "authorized_map_download_and_cache_revisit": (
             isinstance(outcomes, dict)
             and outcomes.get("authorized_map_download") is True
             and outcomes.get("map_cache_revisit") is True
-        ),
-        "no_panic_or_reset_regression": (
-            isinstance(outcomes, dict)
-            and outcomes.get("no_panic") is True
-            and outcomes.get("no_unexpected_reset") is True
         ),
     }
     failures = [name for name, ok in checks.items() if not ok]

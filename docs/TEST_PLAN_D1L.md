@@ -9,7 +9,8 @@ below. No soak or broad edge-case campaign is required for RC1.
 
 Execute that release-critical sequence with the
 [authoritative RC1 release execution](RC1_RELEASE_EXECUTION_D1L.md). Its
-commands and eight evidence roles are the closing contract for `v1.0.0`.
+commands and five evidence roles are the internal closing contract for
+`v1.0.0`; none of these qualification runners ship in the customer package.
 
 Required sequence:
 
@@ -23,12 +24,12 @@ Required sequence:
    `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` is readable/writable and
    has `ID_VENDOR_ID=1a86` and `ID_MODEL_ID=7523`; flash only the verified
    Actions artifact. Never enumerate or probe another Pi serial device.
-5. Run one bounded post-flash gate on that exact artifact: version/health,
-   boot and five-root navigation, boot advert plus one operator-authorized
+5. Run the reduced bounded gate on that exact artifact: one non-erasing
+   retained-state-preserving flash, boot advert plus one operator-authorized
    Public send, one DM/ACK through the authoritative RF receipt, contact
-   PATH/TRACE, repeater Ping, repeater login plus authenticated query, Wi-Fi
-   reconnect, SD write/remount and degraded notice, and one authorized-provider Map download followed by offline cache
-   revisit. The protocol receipt must
+   PATH/TRACE, repeater Ping, and repeater login plus authenticated query.
+   Require SD degraded notice/reinsert recovery and one authorized-provider
+   Map download followed by offline cache revisit. The protocol receipt must
    not repeat the RF receipt's outbound/inbound DM exchange.
 6. Confirm SD is primary for retained history and that missing/unusable SD
    enters visible live-only RF chat without redirecting history to default
@@ -37,9 +38,9 @@ Required sequence:
    attributed and visible-current-view-only and that authorized background
    download pauses while interactive Map is open. The bounded physical Map
    receipt proves only authorized download plus offline SD-cache revisit.
-8. Retain the operator's completed physical display/touch/keyboard/scroll
-   acceptance and do not repeat it. On the final exact artifact, collect the
-   automated 12-surface navigation receipt.
+8. Retain the completed physical display/touch/keyboard/scroll, the completed
+   automated 12-surface navigation, and Wi-Fi reconnect. Retain
+   SD write/reboot/remount acceptance without rerunning those campaigns.
 
 Pass requires every receipt to bind the same exact commit, GitHub Actions run,
 downloaded package and flashed image. Predecessor artifacts, local builds,

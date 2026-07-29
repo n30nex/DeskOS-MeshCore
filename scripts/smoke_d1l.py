@@ -409,16 +409,20 @@ def restore_persistence_settings(
 
 
 def open_d1l_serial(serial_module, *, port: str, baudrate: int, timeout: float):
-    """Open the ESP32 console without pulsing its auto-reset control lines."""
+    """Open the ESP32 console with the reset-safe DTR/RTS order."""
     ser = serial_module.Serial(port=None, baudrate=baudrate, timeout=timeout)
     try:
-        # pySerial applies its cached DTR/RTS states while opening. Configure
-        # both while the handle is still closed so CH340-backed D1L consoles
-        # never observe pySerial's reset-prone default asserted states.
-        ser.dtr = False
+        # pySerial applies DTR before RTS while opening, after the POSIX driver
+        # may already have asserted both lines.  Opening with both cached
+        # states false therefore creates a brief DTR-off/RTS-on state that
+        # pulses EN through the ESP32 auto-reset circuit.  Keep DTR asserted
+        # until RTS has been deasserted, then release DTR after open.  This
+        # moves only through the two non-resetting control-line states.
+        ser.dtr = True
         ser.rts = False
         ser.port = port
         ser.open()
+        ser.dtr = False
     except Exception:
         try:
             ser.close()

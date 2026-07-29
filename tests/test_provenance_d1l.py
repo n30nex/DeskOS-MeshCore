@@ -102,6 +102,8 @@ def as_core_manifest(
     *,
     run_id: str = "123456",
     run_attempt: str = "1",
+    root: Path | None = None,
+    package_dir: Path | None = None,
 ) -> dict:
     core = copy.deepcopy(manifest)
     core.update(
@@ -122,6 +124,16 @@ def as_core_manifest(
             ),
         }
     )
+    if (root is None) != (package_dir is None):
+        raise ValueError("root and package_dir must be supplied together")
+    if root is not None and package_dir is not None:
+        core["sbom"] = sbom_d1l.write_package_sbom(
+            root,
+            package_dir,
+            core,
+            source_identity=source_identity(),
+            expected_source_sha=COMMIT,
+        )
     return core
 
 
@@ -300,7 +312,11 @@ def test_local_package_context_uses_allowlisted_self_asserted_builder(tmp_path):
 def test_core_statement_binds_exact_canonical_actions_invocation(tmp_path):
     write_source_inputs(tmp_path)
     package_dir, manifest = write_package_inputs(tmp_path)
-    manifest = as_core_manifest(manifest)
+    manifest = as_core_manifest(
+        manifest,
+        root=tmp_path,
+        package_dir=package_dir,
+    )
 
     statement = provenance_d1l.build_statement(
         tmp_path, package_dir, manifest, source_identity()
@@ -347,9 +363,13 @@ def test_core_validator_rejects_same_commit_other_actions_invocation(
 ):
     write_source_inputs(tmp_path)
     package_dir, manifest = write_package_inputs(tmp_path)
-    expected_manifest = as_core_manifest(manifest)
-    other_manifest = as_core_manifest(
+    expected_manifest = as_core_manifest(
         manifest,
+        root=tmp_path,
+        package_dir=package_dir,
+    )
+    other_manifest = as_core_manifest(
+        expected_manifest,
         run_id=other_run_id,
         run_attempt=other_run_attempt,
     )
@@ -406,7 +426,11 @@ def test_core_generator_rejects_incomplete_or_noncanonical_actions_identity(
 ):
     write_source_inputs(tmp_path)
     package_dir, manifest = write_package_inputs(tmp_path)
-    manifest = as_core_manifest(manifest)
+    manifest = as_core_manifest(
+        manifest,
+        root=tmp_path,
+        package_dir=package_dir,
+    )
     manifest["workflow"][field] = value
     if field == "run_id":
         manifest["actions_run"] = value

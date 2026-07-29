@@ -75,14 +75,14 @@ a degraded-mode notice and does not silently redirect persistent histories to
 NVS. Correct the card or bridge and reboot; do not format the card on the
 device.
 
-The release package also contains the exact paired RP2040 bridge and SD-smoke
-UF2 artifacts. RP2040 recovery requires its physical BOOTSEL/UF2 mode and is a
-service operation; it is not part of routine card preparation.
+The release package contains the production RP2040 SD bridge UF2. RP2040
+recovery requires its physical BOOTSEL/UF2 mode and is a service operation; it
+is not part of routine card preparation.
 
-## Release Acceptance Boundary
+## Installation boundary
 
-Production acceptance uses the exact checksum-verified GitHub Actions package
-on the Pi 5. The ESP32 target is bound only through
+The production installer checksum-verifies the package before writing. On
+Linux, the ESP32 target is selected only through
 `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` with USB identity
 `1a86:7523`; raw `/dev/ttyUSB*` paths are never accepted. Card setup itself
 does not send RF, erase NVS, flash firmware, or format storage.
