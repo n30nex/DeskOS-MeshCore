@@ -82,6 +82,8 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
             "admitted_target_stable_identity_sha256": "f" * 64,
         },
         "post_flash_reset_error": None,
+        "post_flash_capture_binding": "same_admitted_handle",
+        "post_flash_capture_binding_ok": True,
         "result": {"name": "esp32_flash", "ok": True},
     }
     monkeypatch.setattr(producer, "_machine_physical", lambda *_args, **_kwargs: True)
@@ -97,6 +99,11 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
 
     data["pre_flash_build_commit"] = "e" * 40
     data["post_flash_reset"]["method"] = "unbound-reset"
+    with pytest.raises(producer.EvidenceError):
+        producer.validate_flash(data, CANDIDATE)
+
+    data["post_flash_reset"]["method"] = "bound_posix_rts_en_pulse"
+    data["post_flash_capture_binding"] = "validated_path_reopen"
     with pytest.raises(producer.EvidenceError):
         producer.validate_flash(data, CANDIDATE)
 
