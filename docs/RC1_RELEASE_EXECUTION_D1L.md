@@ -144,7 +144,7 @@ not place credentials in command arguments, evidence, shell history or Git:
 
 ```bash
 ADMIN_FINGERPRINT=9880BF9B9B1DD605
-TRACE_FINGERPRINT=024999DEDFD26763
+TRACE_FINGERPRINT=9880BF9B9B1DD605
 ADMIN_PASSWORD_FILE=<absolute-path-outside-repository>
 test -f "$ADMIN_PASSWORD_FILE"
 ```
@@ -268,8 +268,8 @@ must still resolve to a separate canonical repeater contact with Admin
 capability; never substitute the COM11 chat fingerprint for it.
 `TRACE_FINGERPRINT` must independently resolve to exactly one canonical,
 signed repeater or room contact. It may equal `ADMIN_FINGERPRINT` when that
-contact is suitable, but the current closing run binds Admin/PATH/Ping to YKF
-Hespeler and TRACE to YKF-Hilltop.
+contact is suitable; the current closing run binds Admin/PATH/Ping and TRACE
+to the canonical YKF Hespeler repeater.
 Before the single Public send, the runner queues one signed D1L flood advert
 and requires COM11 to resolve exactly one signed `D1L` contact to the current
 D1L key. The subsequent Public receive must reference that exact advert.
