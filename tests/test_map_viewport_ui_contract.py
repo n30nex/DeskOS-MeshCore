@@ -489,6 +489,11 @@ def test_map_ui_releases_before_covers_and_automation_is_fail_closed():
 
     tab_switch = function_body(source, "static void process_pending_tab_switch", "static void process_pending_content_refresh")
     assert "d1l_ui_map_viewport_release();" in tab_switch
+    assert tab_switch.index("begin_product_navigation_wake()") < tab_switch.index(
+        "d1l_ui_map_viewport_release();"
+    )
+    assert "lv_disp_trig_activity(NULL);" in tab_switch
+    assert "unlock_event_cb(NULL);" in tab_switch
 
     capture_begin = function_body(source, "esp_err_t d1l_ui_capture_begin", "esp_err_t d1l_ui_capture_chunk")
     assert "!s_capture_shadow_ready || s_capture_active" in capture_begin
@@ -498,8 +503,26 @@ def test_map_ui_releases_before_covers_and_automation_is_fail_closed():
     assert "d1l_ui_map_viewport_set_suppressed(false);" in capture_end
 
     request_tab = function_body(source, "esp_err_t d1l_ui_phase1_request_tab", "esp_err_t d1l_ui_phase1_scroll_probe")
+    assert "request_product_navigation_wake();" in request_tab
     assert "set_map_interactive_touch_authorized(tab == D1L_UI_TAB_MAP);" in request_tab
     assert "d1l_ui_map_viewport_suppress_next_acquire();" not in request_tab
+
+    scroll_probe = function_body(
+        source,
+        "static void run_scroll_probe_on_ui_task",
+        "static void finish_pending_scroll_probe",
+    )
+    assert "request_product_navigation_wake" not in scroll_probe
+    assert scroll_probe.index(
+        "set_map_interactive_touch_authorized(false);"
+    ) < scroll_probe.index(
+        "d1l_ui_map_viewport_set_suppressed(true);"
+    ) < scroll_probe.index("request_tab_switch(tab);")
+
+    unlock = function_body(
+        source, "static void unlock_event_cb", "static bool notification_quiet_now"
+    )
+    assert "!d1l_ui_phase1_tab_switch_pending()" in unlock
 
     touch_tab = function_body(source, "static void request_tab_event_cb", "static void dock_event_cb")
     assert "set_map_interactive_touch_authorized(*tab == D1L_UI_TAB_MAP);" in touch_tab

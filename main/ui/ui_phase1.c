@@ -88,6 +88,7 @@ static d1l_board_touch_state_t s_touch_state;
 static bool s_touch_state_ready = false;
 static portMUX_TYPE s_content_refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_map_visibility_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_product_navigation_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_started = false;
 static lv_obj_t *s_screen;
 static lv_obj_t *s_top_bar;
@@ -459,6 +460,7 @@ typedef enum {
 
 static bool s_content_refresh_pending = false;
 static bool s_map_interactive_touch_authorized;
+static bool s_product_navigation_wake_pending;
 static d1l_ui_content_generation_t s_rendered_content_generation;
 static bool s_rendered_content_generation_valid = false;
 static d1l_ui_map_render_input_t s_rendered_map_input;
@@ -727,6 +729,23 @@ static bool map_interactive_touch_authorized(void)
     return authorized;
 }
 
+static void request_product_navigation_wake(void)
+{
+    portENTER_CRITICAL(&s_product_navigation_lock);
+    s_product_navigation_wake_pending = true;
+    portEXIT_CRITICAL(&s_product_navigation_lock);
+}
+
+static bool begin_product_navigation_wake(void)
+{
+    bool pending;
+    portENTER_CRITICAL(&s_product_navigation_lock);
+    pending = s_product_navigation_wake_pending;
+    s_product_navigation_wake_pending = false;
+    portEXIT_CRITICAL(&s_product_navigation_lock);
+    return pending;
+}
+
 #if D1L_ENABLE_QUALIFICATION_HOOKS
 /* Probe-gate helpers are called only while the matching probe lock is held. */
 static bool probe_gate_busy(const d1l_ui_probe_gate_t *gate)
@@ -884,6 +903,7 @@ static void map_location_clear_event_cb(lv_event_t *event);
 static void close_map_options_sheet_event_cb(lv_event_t *event);
 static void message_detail_mode_event_cb(lv_event_t *event);
 static void map_location_keyboard_event_cb(lv_event_t *event);
+static void unlock_event_cb(lv_event_t *event);
 static void process_pending_content_refresh(void);
 #if D1L_ENABLE_QUALIFICATION_HOOKS
 static void process_pending_scroll_probe(void);
@@ -8018,6 +8038,7 @@ esp_err_t d1l_ui_phase1_request_tab(const char *name)
      * Qualification automation uses its separate suppressed scroll path and
      * never calls this product Map navigation.
      */
+    request_product_navigation_wake();
     set_map_interactive_touch_authorized(tab == D1L_UI_TAB_MAP);
     if (tab == D1L_UI_TAB_MESSAGES) {
         s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
@@ -8356,6 +8377,10 @@ static void process_pending_tab_switch(void)
     d1l_ui_tab_t rendered_tab;
     if (!begin_pending_tab_switch(&rendered_tab)) {
         return;
+    }
+    if (begin_product_navigation_wake()) {
+        lv_disp_trig_activity(NULL);
+        unlock_event_cb(NULL);
     }
     d1l_ui_map_viewport_release();
     hide_sheet();
@@ -9240,6 +9265,7 @@ static void unlock_event_cb(lv_event_t *event)
         s_lock_visible = false;
         lv_obj_add_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
         if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
+            !d1l_ui_phase1_tab_switch_pending() &&
             !d1l_ui_modal_has_active() && !s_onboarding_visible) {
             request_content_refresh();
         }
