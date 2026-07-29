@@ -950,9 +950,10 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "setup confirm" not in retained_runner
     assert "COM11" not in retained_runner
     assert "COM29" not in retained_runner
-    assert "SD degraded notice/reinsert recovery" in active_plan
+    assert "exactly four fresh evidence sources: flash, RF, protocol and Map" in active_plan
     assert "SD write/reboot/remount" in active_plan
-    assert "acceptance without rerunning those campaigns" in active_plan
+    assert "prepared-card remove/reinsert cycle forward as" in active_plan
+    assert "context only; it is not a fresh receipt or outcome" in active_plan
     assert "No soak" in active_plan
     assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active_plan
     assert "ID_VENDOR_ID=1a86" in active_plan

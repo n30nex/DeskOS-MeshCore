@@ -13,6 +13,7 @@
 #include "mesh/channel_message_coordinator.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
+#include "map/map_tile_provider.h"
 #include "platform/time_service.h"
 #include "platform/secure_random.h"
 #include "storage/map_tile_store.h"
@@ -413,6 +414,9 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
     snapshot->map_tile_render_supported = D1L_MAP_TILE_RENDER_SUPPORTED;
     snapshot->map_tile_sideload_supported = false;
+    d1l_map_tile_provider_t map_provider = {0};
+    d1l_map_tile_provider_snapshot(&map_provider);
+    snapshot->map_tile_provider_configured = map_provider.configured;
     snapshot->map_location_set = settings.map_location_set;
     snapshot->map_center_source = D1L_MAP_CENTER_SOURCE_UNKNOWN;
     if (settings.map_location_set &&
@@ -1257,12 +1261,44 @@ esp_err_t d1l_app_model_save_radio_profile(const d1l_app_radio_profile_edit_t *p
 
 esp_err_t d1l_app_model_complete_onboarding(const char *node_name)
 {
-    esp_err_t ret = d1l_settings_complete_onboarding(node_name, false, false, false);
+    if (!d1l_settings_node_name_valid(node_name)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_settings_t before = {0};
+    esp_err_t ret = d1l_settings_public_snapshot(&before);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const bool first_completion = !before.onboarding_complete;
+    if (!first_completion) {
+        return d1l_settings_complete_onboarding(
+            node_name, before.wifi_enabled,
+            before.ble_companion_enabled, before.observer_enabled);
+    }
+    ret = d1l_channel_store_seed_onboarding_defaults();
     if (ret != ESP_OK) {
         return ret;
     }
     d1l_meshcore_service_init();
-    return d1l_meshcore_service_ensure_identity();
+    ret = d1l_meshcore_service_ensure_identity();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = d1l_settings_complete_onboarding(
+        node_name, before.wifi_enabled,
+        before.ble_companion_enabled, before.observer_enabled);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    /*
+     * START_RX enters the owner queue before the synchronous advert request,
+     * so the first signed flood advert cannot run ahead of RX readiness.
+     */
+    ret = d1l_meshcore_service_start_rx_async();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    return d1l_meshcore_service_request_boot_advert(true);
 }
 
 esp_err_t d1l_app_model_reset_onboarding(void)

@@ -97,6 +97,7 @@ idf_component_register(
         "ui/ui_home.c"
         "ui/ui_home_view.c"
         "ui/ui_font_symbols_14.c"
+        "ui/ui_first_start.c"
         "ui/ui_keyboard.c"
         "ui/ui_map.c"
         "ui/ui_messages.c"
@@ -168,10 +169,13 @@ endif()
 
 if(D1L_RELEASE_PROFILE STREQUAL "development")
     set(D1L_RELEASE_PROFILE_DEFINE D1L_RELEASE_PROFILE_DEVELOPMENT)
+    set(D1L_ENABLE_QUALIFICATION_HOOKS_DEFINE 1)
 elseif(D1L_RELEASE_PROFILE STREQUAL "core_1_0")
     set(D1L_RELEASE_PROFILE_DEFINE D1L_RELEASE_PROFILE_CORE_1_0)
+    set(D1L_ENABLE_QUALIFICATION_HOOKS_DEFINE 0)
 elseif(D1L_RELEASE_PROFILE STREQUAL "full_feature")
     set(D1L_RELEASE_PROFILE_DEFINE D1L_RELEASE_PROFILE_FULL_FEATURE)
+    set(D1L_ENABLE_QUALIFICATION_HOOKS_DEFINE 0)
 else()
     message(FATAL_ERROR "Root CMake did not provide a valid D1L release profile")
 endif()
@@ -193,4 +197,5 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     D1L_PARTITION_TABLE_SHA256="${D1L_PARTITION_TABLE_SHA256}"
     D1L_RELEASE_PROFILE=${D1L_RELEASE_PROFILE_DEFINE}
     D1L_SD_HISTORY_MODE=${D1L_SD_HISTORY_MODE_DEFINE}
+    D1L_ENABLE_QUALIFICATION_HOOKS=${D1L_ENABLE_QUALIFICATION_HOOKS_DEFINE}
 )

@@ -83,7 +83,7 @@ def test_invalid_identity_taps_explain_without_compose_or_rf_and_controls_are_to
     assert '"Why no DM?", 174, 0, 120, 44' in render_node
     assert '"DM", 208, 0, 54, 44' in render_node
     assert '"Close", 316, 0, 76, 44' in render_node
-    assert '"Admin", 8, 352, 104, 40' in render_node
+    assert '"Admin", 8, 352, 104, 44' in render_node
     assert '"Verified server; local authenticated login required."' in render_node
 
     render_message = ui.split("static void render_message_detail_sheet(void)", 1)[1].split(
@@ -103,14 +103,13 @@ def test_node_detail_geometry_contains_all_reason_and_management_copy() -> None:
         "void d1l_ui_node_detail_deactivate", 1
     )[0]
 
-    assert "lv_obj_set_size(controller->sheet, 448, 416);" in create
-    assert "lv_obj_set_pos(controller->sheet, 16, 60);" in create
+    assert "lv_obj_set_size(controller->sheet, 480, 480);" in create
+    assert "lv_obj_set_pos(controller->sheet, 0, 0);" in create
     assert "lv_obj_set_style_pad_all(controller->sheet, 12, 0);" in create
     assert "lv_obj_set_pos(managed_reason, 120, 360);" in render
     assert "lv_obj_set_size(managed_reason, 276, 40);" in render
-    # 12 px top padding + local y 360 + h 40 stays inside 416 px.
-    assert 12 + 360 + 40 <= 416
-    assert 60 + 416 <= 480
+    # 12 px top padding + local y 360 + h 40 stays inside 480 px.
+    assert 12 + 360 + 40 <= 480
 
 
 def test_direct_contact_and_node_dm_shortcuts_have_unclipped_44px_targets() -> None:
@@ -122,15 +121,15 @@ def test_direct_contact_and_node_dm_shortcuts_have_unclipped_44px_targets() -> N
         "void d1l_ui_nodes_render", 1
     )[0]
 
-    assert "nodes_create_panel(parent, 18, y, 424, 48)" in contact_row
-    assert "lv_obj_set_style_pad_all(row, 0, 0);" in contact_row
-    assert 'nodes_create_button(row, "DM", 368, 2, 48, 44' in contact_row
-    assert 2 + 44 <= 48
+    assert "NODES_ROW_WIDTH 448" in nodes
+    assert "NODES_ROW_HEIGHT 58" in nodes
+    assert "parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT" in contact_row
+    assert 'nodes_create_button(row, "Message", 340, 7, 84, 44' in contact_row
+    assert 7 + 44 <= 58
 
-    assert "nodes_create_panel(parent, 18, y, 424, 56)" in node_row
-    assert "lv_obj_set_style_pad_all(row, 0, 0);" in node_row
-    assert 'nodes_create_button(row, "DM", 364, 6, 52, 44' in node_row
-    assert 6 + 44 <= 56
+    assert "parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT" in node_row
+    assert 'nodes_create_button(row, "Message", 340, 7, 84, 44' in node_row
+    assert 7 + 44 <= 58
 
 
 def test_contact_sheet_carries_exact_identity_reason_instead_of_generic_role_copy() -> None:
@@ -149,7 +148,7 @@ def test_contact_sheet_carries_exact_identity_reason_instead_of_generic_role_cop
     detail = contact_ui.split("bool d1l_ui_contact_sheets_render_detail", 1)[1].split(
         "bool d1l_ui_contact_sheets_render_options", 1
     )[0]
-    assert '"DM unavailable [%s]"' in detail
+    assert '"Messaging unavailable [%s]"' in detail
     assert "d1l_ui_dm_identity_reason_code(" in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
     assert "Messaging unavailable for this role" not in detail

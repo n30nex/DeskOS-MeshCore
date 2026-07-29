@@ -132,7 +132,8 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     assert "nodes_render_node_row" in nodes_ui
     assert "render_role_badge" in node_detail_ui
     assert "D1L_UI_NODES_ACTION_OPEN_NODE" in nodes_ui
-    assert '"Node Detail"' in node_detail_ui
+    assert '"Contact"' in node_detail_ui
+    assert "role_display_label(view->role)" in node_detail_ui
     assert 'ok_begin("nodes")' in console
     assert 'strcmp(line, "nodes")' in console
     assert 'strcmp(line, "nodes clear")' in console
@@ -143,6 +144,12 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     assert '\\"favorite\\"' in console
     assert '\\"keyed\\"' in console
     assert '\\"reachable\\"' in console
-    assert 'view->keyed ? "key" : "no key"' in nodes_ui
+    node_row = nodes_ui.split(
+        "static void nodes_render_node_row", 1
+    )[1].split("static void nodes_render_empty_state", 1)[0]
+    assert 'nodes_create_button(row, "Message"' in node_row
+    assert "view->keyed" not in node_row
+    assert "entry->fingerprint" not in node_row
+    assert 'view->keyed ? "retained" : "missing"' in node_detail_ui
     assert "Verified MeshCore adverts populate this bounded heard-node store" in console
     assert "nodes" in SMOKE_COMMANDS

@@ -332,6 +332,7 @@ esp_err_t d1l_board_i2c_scan(d1l_board_status_t *out_status)
     return ESP_OK;
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_board_display_color_test(void)
 {
     if (!s_status.ready) {
@@ -371,6 +372,7 @@ esp_err_t d1l_board_display_color_test(void)
     free(line);
     return ESP_OK;
 }
+#endif
 
 esp_err_t d1l_board_touch_sample(uint8_t *touches, uint16_t *x, uint16_t *y)
 {

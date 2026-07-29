@@ -395,6 +395,25 @@ static void sanitize_printable(char *text, size_t size, bool allow_quotes)
     }
 }
 
+bool d1l_settings_node_name_valid(const char *node_name)
+{
+    if (!node_name) {
+        return false;
+    }
+    bool has_non_space = false;
+    for (size_t i = 0U; i < D1L_NODE_NAME_LEN; ++i) {
+        const unsigned char c = (unsigned char)node_name[i];
+        if (c == '\0') {
+            return i > 0U && has_non_space;
+        }
+        if (c < 32U || c > 126U || c == '"' || c == '\\') {
+            return false;
+        }
+        has_non_space = has_non_space || c != ' ';
+    }
+    return false;
+}
+
 static void zero_text_tail(char *text, size_t size, bool sensitive)
 {
     if (!text || size == 0U) {
@@ -559,7 +578,8 @@ void d1l_settings_defaults(d1l_settings_t *settings)
     }
     memset(settings, 0, sizeof(*settings));
     settings->schema_version = D1L_SETTINGS_SCHEMA_VERSION;
-    snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk");
+    snprintf(settings->node_name, sizeof(settings->node_name), "%s",
+             D1L_NODE_NAME_FACTORY_DEFAULT);
     settings->role = D1L_ROLE_DESK_COMPANION;
     settings->wifi_enabled = false;
     settings->ble_companion_enabled = false;
@@ -604,7 +624,8 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
     }
     settings->node_name[D1L_NODE_NAME_LEN - 1U] = '\0';
     if (settings->node_name[0] == '\0') {
-        snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk");
+        snprintf(settings->node_name, sizeof(settings->node_name), "%s",
+                 D1L_NODE_NAME_FACTORY_DEFAULT);
     }
     sanitize_printable(settings->node_name, sizeof(settings->node_name), false);
     reconcile_wifi_profiles(settings);
@@ -1882,13 +1903,14 @@ esp_err_t d1l_settings_clear_wifi_profile(void)
 esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enabled,
                                            bool ble_companion_enabled, bool observer_enabled)
 {
+    if (!d1l_settings_node_name_valid(node_name)) {
+        return ESP_ERR_INVALID_ARG;
+    }
     if (!settings_owner_take()) {
         return ESP_ERR_NO_MEM;
     }
     d1l_settings_t settings = s_current;
-    if (node_name && node_name[0] != '\0') {
-        snprintf(settings.node_name, sizeof(settings.node_name), "%s", node_name);
-    }
+    snprintf(settings.node_name, sizeof(settings.node_name), "%s", node_name);
     settings.role = D1L_ROLE_DESK_COMPANION;
     settings.wifi_enabled = wifi_enabled;
     settings.ble_companion_enabled = wifi_enabled ? false : ble_companion_enabled;

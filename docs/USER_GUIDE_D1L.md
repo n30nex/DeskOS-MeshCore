@@ -7,19 +7,45 @@ repeat other devices' traffic.
 
 ## First start
 
-1. Power on the D1L and complete onboarding.
-2. Set the device name and confirm the authorized radio profile.
-3. Open **Tools → Identity** and confirm the retained identity is ready.
-4. Insert a prepared FAT32 DeskOS SD card.
-5. Open **Tools → Storage** and confirm the card and data root are ready.
-6. Configure Wi-Fi if automatic Map downloads are wanted.
+Every boot begins with a full-screen readiness check. It shows live progress
+for **Display**, **Identity**, **Radio**, **Storage & maps**, and **UI** and
+does not uncover Home until all five essential rows are green. Prepared
+SD-card and NRCan map-provider status is also shown explicitly: missing or
+unprepared media is reported as not ready, never as a successful check.
 
-The dock is **Home**, **Messages**, **Nodes**, **Map**, and **Tools**. Home is a
-summary page; lists and long sheets scroll vertically.
+An already-configured device proceeds to Home without changing its retained
+settings. A factory-fresh device opens the first-start wizard:
 
-After MeshCore receive starts, DeskOS queues a signed flood advert for the
-retained device identity. This lets nearby clients attribute later Public
-messages instead of showing only `Unknown`.
+1. Enter an explicit device name. The field starts blank, and setup cannot
+   invent or accept the factory placeholder as the completed name.
+2. Optionally enter manual decimal latitude and longitude, or choose **Skip**.
+   DeskOS contains no baked-in location.
+3. Optionally enter a Wi-Fi network and masked password, or choose **Skip** for
+   offline use. The password field is wiped when the page is left.
+4. Confirm the fixed Canadian production preset:
+   **910.525 MHz, BW 62.5 kHz, SF7, CR5**.
+5. Verify the required SD and map readiness. Prepare the FAT32 card on a
+   computer; DeskOS firmware never formats cards. The prepared-card workflow
+   installs the authorized NRCan manifest at `map/offline-provider.json`.
+   **Continue** unlocks only when both are ready.
+6. Review the initial **Public**, **#bot**, and **#test** channels, then choose
+   **Finish setup**.
+
+Wi-Fi remains optional for offline MeshCore use. The prepared FAT32 card and
+NRCan provider manifest are required for the complete 1.0 setup.
+
+The dock is **Home**, **Channels**, **Contacts**, **Map**, and **Settings**.
+Home is a summary page; lists and long pages scroll vertically.
+
+A factory-fresh DeskOS does not advertise before onboarding is complete. When
+the entered name is saved, DeskOS starts MeshCore receive and queues the first
+signed flood advert for that retained identity. Later boots queue that advert
+only for an already-onboarded device. This lets nearby clients attribute later
+Public messages instead of showing only `Unknown`.
+
+On first setup, DeskOS adds the standard interoperable `#bot` and `#test`
+channels while keeping Public selected. Retained configured devices are not
+reseeded.
 
 ## Messages, channels and direct messages
 
@@ -44,7 +70,7 @@ Contacts can be imported from the USB console with
 `contacts import <meshcore-uri>`. The touchscreen supports rename, favorite,
 mute and confirmed removal. Contact and channel QR sharing is not part of 1.0.
 
-From **Nodes**:
+From **Contacts**:
 
 - **Find** sends a zero-hop discovery request and lists returned full keys,
   role and there/back SNR. Finder results are unverified until a signed advert
@@ -98,7 +124,7 @@ storage or bulk/background retrieval.
 
 ## Wi-Fi
 
-Open **Tools → Connections → Wi-Fi** to scan, save profiles, select one,
+Open **Settings → Connections → Wi-Fi** to scan, save profiles, select one,
 delete one, connect, disconnect or re-enable automatic reconnect. Passwords
 are never printed by status, logs or exports.
 
@@ -141,8 +167,8 @@ reset state. Retained history is not redirected there.
 
 - The firmware never formats an SD card.
 - Prepare a 32GB-or-larger FAT32 card with the checked-in
-  `scripts/prepare_deskos_sd.py` workflow. A provider manifest is optional and
-  is required only for authorized background/offline Map download.
+  `scripts/prepare_deskos_sd.py` workflow. The 1.0 first-start flow requires
+  the authorized NRCan provider manifest for background/offline Map download.
 - Foreign, non-FAT32 or unmountable media is preserved and reported.
 - A missing/unusable card activates a prominent degraded notice.
 - Degraded mode keeps basic live RF Public/channel/DM chat available in a
@@ -150,14 +176,14 @@ reset state. Retained history is not redirected there.
   unavailable.
 - DeskOS does not silently redirect history into default NVS.
 
-Use **Tools → Storage** before removing media or diagnosing a card.
+Use **Settings → Storage** before removing media or diagnosing a card.
 
 ## Diagnostics and Observer
 
-**Tools → Packets** provides a bounded parsed packet list, filters, search,
-detail and raw preview. The event terminal provides a bounded structured log
-without credentials or remote command secrets. Basic board, radio, storage,
-Wi-Fi, Map and crash state is available under Diagnostics.
+**Settings → Diagnostics → Packet log** provides a bounded parsed packet list,
+filters, search, detail and raw preview. The event terminal provides a bounded
+structured log without credentials or remote command secrets. Basic board,
+radio, storage, Wi-Fi, Map and crash state is available under Diagnostics.
 
 Observer is optional and uses `mqtts://`, TLS, QoS 1 and a bounded queue. It
 may publish device health and explicitly enabled location state. It never

@@ -1,6 +1,8 @@
 import hashlib
 import io
 import json
+import sys
+import types
 import zipfile
 from pathlib import Path
 
@@ -26,7 +28,6 @@ ROLE_OUTCOMES = {
         "repeater_login": True,
         "repeater_query": True,
     },
-    "sd_degraded": {"sd_degraded_notice": True},
     "map": {
         "authorized_map_download": True,
         "map_cache_revisit": True,
@@ -362,7 +363,6 @@ def valid_receipt(package: Path) -> dict:
             "ping": True,
             "repeater_login": True,
             "repeater_query": True,
-            "sd_degraded_notice": True,
             "authorized_map_download": True,
             "map_cache_revisit": True,
         },
@@ -410,22 +410,6 @@ def write_physical_evidence(receipt_path: Path) -> Path:
                     "manual_only": False,
                 }
             )
-        elif role == "sd_degraded":
-            payload["events"] = [{"event": role, "observed": True}]
-            payload.update(
-                {
-                    "port": audit.PI_SERIAL_PATH,
-                    "expected_firmware_commit": COMMIT,
-                    "cycles": [
-                        {
-                            "absent": {
-                                "mode": "live_only_no_card",
-                                "degraded_notice_visible": True,
-                            }
-                        }
-                    ],
-                }
-            )
         write_json(
             path,
             payload,
@@ -467,11 +451,6 @@ def release_fixture(
             )
             for role, outcomes in ROLE_OUTCOMES.items()
         },
-    )
-    monkeypatch.setattr(
-        audit,
-        "validate_sd_remove_reinsert_report",
-        lambda _data: True,
     )
     package = tmp_path / f"d1l-release-{COMMIT}"
     firmware = package / "firmware"
@@ -539,6 +518,41 @@ def test_exact_package_and_single_bounded_receipt_are_release_ready(
     }
 
 
+def test_stale_receipt_with_extra_sd_outcome_fails_exact_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    package, _, _, _ = release_fixture(tmp_path, monkeypatch)
+    receipt = valid_receipt(package)
+    receipt["outcomes"]["sd_degraded_notice"] = True
+
+    assert audit.receipt_shape(receipt) is False
+    assert "sd_degraded_notice" not in audit.OUTCOME_KEYS
+
+
+def test_stale_sidecar_with_extra_sd_source_fails_exact_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _, _, receipt_path, evidence_path = release_fixture(tmp_path, monkeypatch)
+    evidence = json.loads(evidence_path.read_text(encoding="ascii"))
+    evidence["sources"]["sd_degraded"] = {
+        "path": "physical-sources/sd_degraded.json",
+        "sha256": "f" * 64,
+        "kind": "d1l_sd_remove_reinsert_source",
+    }
+    write_json(evidence_path, evidence)
+
+    ok, digest = audit.physical_evidence_contract(
+        physical_receipt=receipt_path,
+        physical_evidence=evidence_path,
+        receipt=json.loads(receipt_path.read_text(encoding="ascii")),
+        repository_root=tmp_path,
+    )
+
+    assert ok is False
+    assert digest is None
+    assert "sd_degraded" not in audit.PHYSICAL_SOURCE_KINDS
+
+
 def test_rf_source_revalidation_receives_repository_evidence_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -570,6 +584,34 @@ def test_rf_source_revalidation_receives_repository_evidence_root(
 
     assert result["ready_for_public_release"] is True
     assert observed["evidence_root"] == tmp_path
+
+
+def test_package_audit_ignores_conflicting_top_level_validator_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    package, actions_receipt, receipt, evidence = release_fixture(
+        tmp_path, monkeypatch
+    )
+    shadow = types.ModuleType("produce_rc1_bounded_physical_receipt_d1l")
+    shadow.EvidenceError = aggregate.EvidenceError
+    shadow.VALIDATORS = {}
+    shadow.validate_rf = aggregate.validate_rf
+    monkeypatch.setitem(
+        sys.modules,
+        "produce_rc1_bounded_physical_receipt_d1l",
+        shadow,
+    )
+
+    result = audit.audit(
+        package,
+        actions_receipt,
+        receipt,
+        evidence,
+        repository_root=tmp_path,
+    )
+
+    assert result["ready_for_public_release"] is True
+    assert result["checks"]["physical_evidence_sidecar_machine_sources"] is True
 
 
 def test_physical_sources_are_semantically_revalidated(
@@ -674,7 +716,6 @@ def test_physical_source_validator_registry_must_be_complete(
             False,
             "authorized_map_download_and_cache_revisit",
         ),
-        ("outcomes", "sd_degraded_notice", False, "sd_degraded_notice"),
     ],
 )
 def test_each_physical_safety_or_outcome_requirement_fails_closed(

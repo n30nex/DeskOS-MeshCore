@@ -253,9 +253,9 @@ bool d1l_ui_radio_settings_create(
     if (!controller->sheet) {
         return false;
     }
-    lv_obj_set_size(controller->sheet, 448, 320);
-    lv_obj_set_pos(controller->sheet, 16, 82);
-    lv_obj_set_style_radius(controller->sheet, 8, 0);
+    lv_obj_set_size(controller->sheet, 480, 480);
+    lv_obj_set_pos(controller->sheet, 0, 0);
+    lv_obj_set_style_radius(controller->sheet, 0, 0);
     lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(controller->sheet, 1, 0);
@@ -312,26 +312,34 @@ bool d1l_ui_radio_settings_render(
 
     bool complete = true;
     char profile[80];
-    snprintf(profile, sizeof(profile), "US/CAN %.3f  BW%.1f  SF%u  CR%u",
+    snprintf(profile, sizeof(profile), "%.3f MHz  |  BW %.1f  |  SF%u / CR%u",
              ((double)controller->edit.frequency_hz) / 1000000.0,
              ((double)controller->edit.bandwidth_tenths_khz) / 10.0,
              (unsigned)controller->edit.spreading_factor,
              (unsigned)controller->edit.coding_rate);
-    lv_obj_t *title = create_label(controller->sheet, "Radio Settings", 0xF4F7FB);
+    lv_obj_t *title = create_label(controller->sheet, "Radio", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        lv_obj_set_pos(title, 8, 4);
+        lv_obj_set_pos(title, 8, 8);
     } else {
         complete = false;
     }
     complete = create_button(
-        controller, "Close", 340, 0, 76, 40, BINDING_TOP_CLOSE,
+        controller, "Close", 372, 4, 76, 44, BINDING_TOP_CLOSE,
         D1L_UI_RADIO_SETTINGS_ACTION_CLOSE) != NULL && complete;
+    lv_obj_t *preset = create_label(
+        controller->sheet, "Canada preset", 0x5EEAD4);
+    if (preset) {
+        lv_obj_set_style_text_font(preset, &lv_font_montserrat_24, 0);
+        lv_obj_set_pos(preset, 8, 58);
+    } else {
+        complete = false;
+    }
     lv_obj_t *summary = create_label(controller->sheet, profile, 0x5EEAD4);
     if (summary) {
         lv_label_set_long_mode(summary, LV_LABEL_LONG_DOT);
         lv_obj_set_width(summary, 408);
-        lv_obj_set_pos(summary, 8, 44);
+        lv_obj_set_pos(summary, 8, 88);
     } else {
         complete = false;
     }
@@ -346,7 +354,7 @@ bool d1l_ui_radio_settings_render(
     if (warning) {
         lv_label_set_long_mode(warning, LV_LABEL_LONG_DOT);
         lv_obj_set_width(warning, 408);
-        lv_obj_set_pos(warning, 8, 68);
+        lv_obj_set_pos(warning, 8, 112);
     } else {
         complete = false;
     }
@@ -355,64 +363,64 @@ bool d1l_ui_radio_settings_render(
     snprintf(line, sizeof(line), "Freq %.3f MHz",
              ((double)controller->edit.frequency_hz) / 1000000.0);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
-                                     8, 102) && complete;
+                                     8, 158) && complete;
     complete = create_button(
-        controller, "-25k", 226, 92, 72, 36, BINDING_FREQ_DOWN,
+        controller, "-25k", 246, 146, 84, 44, BINDING_FREQ_DOWN,
         D1L_UI_RADIO_SETTINGS_ACTION_FREQ_DOWN) != NULL && complete;
     complete = create_button(
-        controller, "+25k", 306, 92, 72, 36, BINDING_FREQ_UP,
+        controller, "+25k", 338, 146, 84, 44, BINDING_FREQ_UP,
         D1L_UI_RADIO_SETTINGS_ACTION_FREQ_UP) != NULL && complete;
 
     snprintf(line, sizeof(line), "BW %.1f kHz",
              ((double)controller->edit.bandwidth_tenths_khz) / 10.0);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
-                                     8, 142) && complete;
+                                     8, 208) && complete;
     complete = create_button(
-        controller, "Cycle BW", 226, 132, 152, 36, BINDING_BANDWIDTH,
+        controller, "Change bandwidth", 246, 196, 176, 44, BINDING_BANDWIDTH,
         D1L_UI_RADIO_SETTINGS_ACTION_BANDWIDTH) != NULL && complete;
 
     snprintf(line, sizeof(line), "SF %u",
              (unsigned)controller->edit.spreading_factor);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
-                                     8, 182) && complete;
+                                     8, 258) && complete;
     complete = create_button(
-        controller, "SF-", 92, 172, 62, 36, BINDING_SF_DOWN,
+        controller, "SF-", 72, 246, 64, 44, BINDING_SF_DOWN,
         D1L_UI_RADIO_SETTINGS_ACTION_SF_DOWN) != NULL && complete;
     complete = create_button(
-        controller, "SF+", 162, 172, 62, 36, BINDING_SF_UP,
+        controller, "SF+", 144, 246, 64, 44, BINDING_SF_UP,
         D1L_UI_RADIO_SETTINGS_ACTION_SF_UP) != NULL && complete;
     snprintf(line, sizeof(line), "CR %u",
              (unsigned)controller->edit.coding_rate);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
-                                     244, 182) && complete;
+                                     238, 258) && complete;
     complete = create_button(
-        controller, "Cycle", 306, 172, 72, 36, BINDING_CODING_RATE,
+        controller, "Change", 318, 246, 104, 44, BINDING_CODING_RATE,
         D1L_UI_RADIO_SETTINGS_ACTION_CODING_RATE) != NULL && complete;
 
     snprintf(line, sizeof(line), "TX %d dBm",
              (int)controller->edit.tx_power_dbm);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
-                                     8, 222) && complete;
+                                     8, 308) && complete;
     complete = create_button(
-        controller, "TX-", 106, 212, 62, 36, BINDING_TX_DOWN,
+        controller, "TX-", 96, 296, 64, 44, BINDING_TX_DOWN,
         D1L_UI_RADIO_SETTINGS_ACTION_TX_DOWN) != NULL && complete;
     complete = create_button(
-        controller, "TX+", 176, 212, 62, 36, BINDING_TX_UP,
+        controller, "TX+", 168, 296, 64, 44, BINDING_TX_UP,
         D1L_UI_RADIO_SETTINGS_ACTION_TX_UP) != NULL && complete;
     complete = create_button(
         controller,
         controller->edit.rx_boost ? "RX Boost On" : "RX Boost Off",
-        250, 212, 128, 36, BINDING_RX_BOOST,
+        246, 296, 176, 44, BINDING_RX_BOOST,
         D1L_UI_RADIO_SETTINGS_ACTION_RX_BOOST) != NULL && complete;
 
     complete = create_button(
-        controller, "US/CAN", 8, 266, 104, 40, BINDING_DEFAULTS,
+        controller, "Restore Canada", 8, 378, 136, 48, BINDING_DEFAULTS,
         D1L_UI_RADIO_SETTINGS_ACTION_DEFAULTS) != NULL && complete;
     complete = create_button(
-        controller, "Save", 124, 266, 104, 40, BINDING_SAVE,
+        controller, "Save", 152, 378, 136, 48, BINDING_SAVE,
         D1L_UI_RADIO_SETTINGS_ACTION_SAVE) != NULL && complete;
     complete = create_button(
-        controller, "Close", 240, 266, 104, 40, BINDING_BOTTOM_CLOSE,
+        controller, "Close", 296, 378, 126, 48, BINDING_BOTTOM_CLOSE,
         D1L_UI_RADIO_SETTINGS_ACTION_CLOSE) != NULL && complete;
     if (!complete) {
         invalidate_render(controller);

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "app/qualification_hooks.h"
 #include "esp_err.h"
 #include "mesh/user_text.h"
 
@@ -83,10 +84,12 @@ esp_err_t d1l_message_store_append_public(const char *direction, const char *aut
                                           const char *text, int rssi_dbm, int snr_tenths,
                                           uint8_t path_hash_bytes, uint8_t path_hops,
                                           bool delivered);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_message_store_append_public_volatile(const char *direction, const char *author,
                                                    const char *text, int rssi_dbm, int snr_tenths,
                                                    uint8_t path_hash_bytes, uint8_t path_hops,
                                                    bool delivered);
+#endif
 /* A nonzero out_seq means the row was admitted to the visible retained ring.
  * It can therefore be used to advance the matching channel cursor even when
  * the returned status reports that one persistence mirror still needs retry.
@@ -104,10 +107,12 @@ esp_err_t d1l_message_store_append_channel_deferred(
     const char *text, int rssi_dbm, int snr_tenths,
     uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
     uint32_t *out_seq);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_message_store_append_channel_volatile(
     uint64_t channel_id, const char *direction, const char *author,
     const char *text, int rssi_dbm, int snr_tenths,
     uint8_t path_hash_bytes, uint8_t path_hops, bool delivered);
+#endif
 d1l_message_store_stats_t d1l_message_store_stats(void);
 /* Coherent secret-free snapshot of every durable channel row. max_entries
  * must fit the complete bounded ring so callers cannot reconcile from a

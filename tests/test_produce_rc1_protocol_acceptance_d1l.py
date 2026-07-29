@@ -1225,6 +1225,7 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     assert "--trace-fingerprint" not in source
     assert "validate_protocol(transcript, candidate)" in source
     assert "--dry-run" not in source
+    assert "ADMIN_PATH_SETTLE_SECONDS = 60.0" in source
     assert 'parser.add_argument("--boot-timeout", type=float, default=75.0)' in source
     assert '"dm_send"' not in source
     assert "mesh send dm" not in source
@@ -1235,6 +1236,7 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     )
     assert (
         source.index('admin_logout = _step(')
+        < source.index("time.sleep(ADMIN_PATH_SETTLE_SECONDS)")
         < source.index('\n        path_request = _step(')
         < source.index('label="PATH/base telemetry response"')
         < source.index('ping_request = _step(')

@@ -58,9 +58,6 @@ constexpr const char *DESKOS_MAP_DIR = "/deskos/map";
 constexpr const char *DESKOS_MAP_MANIFEST = "/deskos/map/manifest.json";
 constexpr const char *DESKOS_MAP_MANIFEST_TMP = "/deskos/map/manifest.json.tmp";
 constexpr const char *DESKOS_MAP_MANIFEST_BAD = "/deskos/map/manifest.json.bad";
-constexpr const char *DESKOS_CANARY_DIR = "/deskos/canary";
-constexpr const char *DESKOS_FILE_OPS_PROBE = "/deskos/probe.tmp";
-constexpr const char *DESKOS_JSON_PROBE = "/deskos/probe.json";
 constexpr const char DESKOS_MANIFEST_PAYLOAD[] =
     "{\"name\":\"MeshCore DeskOS D1L SD\",\"schema\":1,"
     "\"created_by\":\"MeshCore DeskOS D1L\","
@@ -72,8 +69,6 @@ constexpr const char DESKOS_MAP_MANIFEST_PAYLOAD[] =
     "\"interactive_download_supported\":true,"
     "\"background_prefetch_supported\":false,"
     "\"source\":\"openstreetmap-standard\"}\n";
-constexpr const char DESKOS_FILE_OPS_PROBE_PAYLOAD[] = "d1l-sd-file-ops-ready\n";
-constexpr const char DESKOS_JSON_PROBE_PAYLOAD[] = "{\"schema\":1,\"probe\":\"d1l\"}\n";
 constexpr uint32_t FILE_WORKER_IDLE_WAIT_MS = 10000;
 constexpr size_t FILE_LINE_MAX = 512;
 constexpr size_t RX_LINE_MAX = FILE_LINE_MAX + 1;
@@ -1699,68 +1694,6 @@ bool write_text_file_direct(const char *path, const char *payload) {
     return written == strlen(payload);
 }
 
-bool text_file_matches(const char *path, const char *payload) {
-    if (!SD.exists(path)) {
-        return false;
-    }
-    File file = SD.open(path, "r");
-    if (!file || file.isDirectory()) {
-        if (file) {
-            file.close();
-        }
-        return false;
-    }
-    const size_t expected_len = strlen(payload);
-    if (static_cast<size_t>(file.size()) != expected_len || expected_len > 512U) {
-        file.close();
-        return false;
-    }
-    char buffer[513];
-    const int read_len = file.read(reinterpret_cast<uint8_t *>(buffer), expected_len);
-    file.close();
-    if (read_len < 0 || static_cast<size_t>(read_len) != expected_len) {
-        return false;
-    }
-    buffer[expected_len] = '\0';
-    return strcmp(buffer, payload) == 0;
-}
-
-bool write_verify_remove_text_file(const char *path, const char *payload) {
-    if (!write_text_file_direct(path, payload)) {
-        (void)remove_file_if_present(path);
-        return false;
-    }
-    const bool ok = text_file_matches(path, payload);
-    (void)remove_file_if_present(path);
-    return ok;
-}
-
-bool deskos_root_accepts_file_ops() {
-    (void)remove_file_if_present(DESKOS_FILE_OPS_PROBE);
-    return write_verify_remove_text_file(DESKOS_FILE_OPS_PROBE,
-                                         DESKOS_FILE_OPS_PROBE_PAYLOAD);
-}
-
-bool repair_deskos_root_for_file_ops() {
-    if (deskos_root_accepts_file_ops()) {
-        return true;
-    }
-    (void)remove_file_if_present(DESKOS_FILE_OPS_PROBE);
-    (void)remove_file_if_present(DESKOS_JSON_PROBE);
-
-    (void)SD.remove(DESKOS_ROOT);
-    if (SD.exists(DESKOS_ROOT)) {
-        (void)SD.rmdir(DESKOS_ROOT);
-    }
-    if (SD.exists(DESKOS_ROOT)) {
-        return false;
-    }
-    if (!SD.mkdir(DESKOS_ROOT) && !SD.exists(DESKOS_ROOT)) {
-        return false;
-    }
-    return deskos_root_accepts_file_ops();
-}
-
 using ManifestValidator = bool (*)(const char *);
 
 bool write_atomic_text_file(const char *final_path,
@@ -1845,10 +1778,6 @@ bool prepare_deskos_structure(const char **note) {
         *note = "deskos_map_dir_unavailable";
         return false;
     }
-    if (!ensure_directory(DESKOS_CANARY_DIR)) {
-        *note = "deskos_canary_dir_unavailable";
-        return false;
-    }
     if (SD.exists(DESKOS_MANIFEST)) {
         if (!manifest_valid()) {
             if (!preserve_invalid_manifest(DESKOS_MANIFEST,
@@ -1863,21 +1792,8 @@ bool prepare_deskos_structure(const char **note) {
     } else {
         created = true;
         if (!write_manifest()) {
-            if (!repair_deskos_root_for_file_ops()) {
-                *note = "deskos_write_unavailable";
-                return false;
-            }
-            if (write_manifest()) {
-                *note = "structure_created_after_root_repair";
-                return true;
-            }
-            if (!write_verify_remove_text_file(DESKOS_JSON_PROBE,
-                                               DESKOS_JSON_PROBE_PAYLOAD)) {
-                *note = "deskos_json_unavailable";
-                return false;
-            }
-            *note = "manifest_deferred_file_ops_ready";
-            return true;
+            *note = "deskos_manifest_unavailable";
+            return false;
         }
     }
     if (SD.exists(DESKOS_MAP_MANIFEST)) {

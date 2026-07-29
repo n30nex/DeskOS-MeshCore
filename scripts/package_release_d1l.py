@@ -147,13 +147,64 @@ PRODUCTION_FORBIDDEN_PATH_WORDS = frozenset(
     {"audit", "debug", "evidence", "gate", "smoke", "test", "testing", "tests"}
 )
 PRODUCTION_FORBIDDEN_READER_PATTERNS = (
-    re.compile(r"\btests?\b", re.IGNORECASE),
+    # The interoperable user channel is literally named "#test"; reject
+    # qualification prose while allowing that exact hashtag in instructions.
+    re.compile(r"(?<!#)\btests?\b", re.IGNORECASE),
     re.compile(r"\bsmoke\b", re.IGNORECASE),
     re.compile(r"\bRC[12]\b", re.IGNORECASE),
     re.compile(r"\brelease[-_ ]evidence\b", re.IGNORECASE),
     re.compile(r"\brelease[-_ ]gate\b", re.IGNORECASE),
     re.compile(r"\bdry[-_ ]run\b", re.IGNORECASE),
     re.compile(r"\bsimulat(?:e|ed|ion)\b", re.IGNORECASE),
+)
+PRODUCTION_FORBIDDEN_ESP_PAYLOAD_MARKERS = (
+    b"display test",
+    b"touch test",
+    b"ui scroll-probe",
+    b"ui compose-probe",
+    b"ui data-canary",
+    b"ui capture status",
+    b"ui capture begin",
+    b"ui capture chunk",
+    b"ui capture end",
+    b"map acceptance status",
+    b"map acceptance open",
+    b"storage filecanary",
+    b"storage map-tile-canary",
+    b"storage map-tile-check",
+    b"storage export-canary",
+    b"storage retained-canary",
+    b"core retained-witness",
+    b"synthetic ui refresh canary",
+    b"synthetic retained-history canary",
+    b"test from deskos d1l",
+    b"ui-data-canary",
+    b"ui_canary",
+    b"ui canary",
+    b"sd-retained-canary",
+    b"sd_canary",
+    b"sd canary",
+    b"canary/fc-",
+    b"d1l desk",
+    b"c0dec0dec0dec0de",
+    b"contact probe",
+    b"scroll probe dm",
+    b"probe dm",
+    b"probe contact",
+    b"deskos probe",
+    b"43.6532",
+    b"probenet",
+    b"probe-pass",
+)
+PRODUCTION_FORBIDDEN_RP2040_PAYLOAD_MARKERS = (
+    b"/deskos/canary",
+    b"deskos_canary_dir_unavailable",
+    b"/deskos/probe.tmp",
+    b"/deskos/probe.json",
+    b"d1l-sd-file-ops-ready",
+    b'{"schema":1,"probe":"d1l"}',
+    b"deskos_sd_bridge_smoke",
+    b"deskos_sd_bridge_official_smoke",
 )
 RP2040_ARTIFACT_NAMES = [
     "rp2040-sd-bridge-firmware",
@@ -1342,6 +1393,20 @@ def validate_production_package_surface(package_dir: Path) -> None:
                 "Production package contains a debug-only file: "
                 f"{relative.as_posix()}"
             )
+        if path.is_file() and path.suffix.lower() in {".bin", ".uf2"}:
+            payload = path.read_bytes().lower()
+            markers = (
+                PRODUCTION_FORBIDDEN_RP2040_PAYLOAD_MARKERS
+                if path.suffix.lower() == ".uf2"
+                else PRODUCTION_FORBIDDEN_ESP_PAYLOAD_MARKERS
+            )
+            for marker in markers:
+                if marker in payload:
+                    raise ValueError(
+                        "Production firmware payload contains an internal "
+                        f"qualification marker: {relative.as_posix()}: "
+                        f"{marker.decode('ascii', errors='replace')}"
+                    )
         for component in relative.parts:
             words = {
                 word
@@ -1661,6 +1726,9 @@ On Linux, replace the example with the mounted SD card root:
 The first pass is read-only. The wrapper applies the payload only after you type
 `PREPARE-SD`, verifies every copied byte, and writes
 `deskos/card-preparation-receipt.json` on the card. Safely eject it when done.
+The included payload installs the authorized Natural Resources Canada provider
+manifest at `deskos/map/offline-provider.json`; first setup verifies both the
+prepared card and this manifest before it can finish.
 
 ## 2. Flash the RP2040 SD-bridge side
 
@@ -1720,6 +1788,23 @@ Do not run the flasher against a guessed port.
 
 `flash_full_8mb.ps1` is destructive recovery, not a normal install. Use it only
 when you intentionally accept loss of retained state.
+
+## 5. Complete first setup on the screen
+
+On every boot, wait for the full-screen readiness progress to show Display,
+Identity, Radio, Storage & maps, and UI as ready. A fresh device then asks you
+to:
+
+1. enter the MeshCore name other people will see;
+2. optionally enter manual decimal latitude and longitude;
+3. optionally save Wi-Fi, or continue offline;
+4. confirm the Canadian 910.525 MHz / 62.5 kHz / SF7 / CR5 preset;
+5. verify the prepared FAT32 card and included NRCan provider; and
+6. review Public, #bot, and #test before finishing.
+
+The normal dock is Home, Channels, Contacts, Map, and Settings. DeskOS does not
+ship a local identity, position, nearby-node list, or qualification data; those
+are established only from your setup and real MeshCore traffic.
 
 ## Reporting a problem
 
@@ -2769,8 +2854,9 @@ def write_supported_features(
     else:
         sd_text = (
             "SD is the primary retained-data store when the paired bridge and "
-            "prepared FAT32 card are ready. Without SD, DeskOS remains in "
-            "visible live-only RF chat mode."
+            "prepared FAT32 card and authorized NRCan provider are ready. "
+            "First setup and later startup readiness stay covered until that "
+            "required media is available."
         )
     path.write_text(
         f"""# MeshCore DeskOS D1L Core 1.0 Supported Features
@@ -2864,7 +2950,8 @@ SD history mode: `{sd_history_mode}`
    and advanced QR sharing are unavailable in DeskOS D1L 1.0.
 7. Never format an SD card on the device.
 8. Prepare a FAT32 card with `scripts/prepare_deskos_sd.py`; the checked-in
-   payload is under `sdcard/`.
+   payload under `sdcard/` includes the required authorized NRCan provider
+   manifest.
 
 ## Normal non-erasing USB install
 
@@ -2973,7 +3060,9 @@ def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -
                 if sd_mode == "supported_optional"
                 else (
                     "SD is primary when the paired bridge and prepared FAT32 "
-                    "card are ready; otherwise DeskOS is visibly live-only."
+                    "card plus authorized NRCan provider are ready. First "
+                    "setup and later startup readiness wait for that required "
+                    "media."
                 )
             )
         )
@@ -3060,9 +3149,9 @@ python scripts/prepare_deskos_sd.py --target <mounted-card-root>
 python scripts/prepare_deskos_sd.py --target <mounted-card-root> --apply
 ```
 
-The checked-in payload is under `sdcard/`. Optional offline tiles require a
-separate provider manifest that explicitly permits offline storage and
-background prefetch.
+The checked-in payload is under `sdcard/` and installs the required authorized
+Natural Resources Canada provider manifest. Any replacement provider must
+explicitly permit offline storage and background prefetch.
 
 ## Flash the RP2040 bridge
 
@@ -3370,13 +3459,13 @@ def create_release_package(
         root,
         package_dir,
         expected_commit,
-        include_in_package=release_profile != CORE_RELEASE_PROFILE,
+        include_in_package=release_profile not in PRODUCTION_RELEASE_PROFILES,
     )
     meshcore_signed_advert_runtime = copy_meshcore_signed_advert_evidence(
         meshcore_signed_advert_runtime_json,
         package_dir,
         expected_commit,
-        include_in_package=release_profile != CORE_RELEASE_PROFILE,
+        include_in_package=release_profile not in PRODUCTION_RELEASE_PROFILES,
     )
 
     firmware_dir = package_dir / "firmware"
@@ -3403,7 +3492,7 @@ def create_release_package(
     full_image = write_full_flash_image(build_dir, package_dir, flasher_args, full_size)
     debug_files = (
         []
-        if release_profile == CORE_RELEASE_PROFILE
+        if release_profile in PRODUCTION_RELEASE_PROFILES
         else copy_optional_debug_files(build_dir, package_dir)
     )
     notice_files = copy_notice_files(
@@ -3411,7 +3500,7 @@ def create_release_package(
         package_dir,
         (
             PRODUCTION_NOTICE_FILE_SPECS
-            if release_profile == CORE_RELEASE_PROFILE
+            if release_profile in PRODUCTION_RELEASE_PROFILES
             else NOTICE_FILE_SPECS
         ),
     )
@@ -3423,7 +3512,7 @@ def create_release_package(
             package_dir,
             (
                 PRODUCTION_RELEASE_DOC_SPECS
-                if release_profile == CORE_RELEASE_PROFILE
+                if release_profile in PRODUCTION_RELEASE_PROFILES
                 else RELEASE_DOC_SPECS
             ),
         )
@@ -3436,10 +3525,10 @@ def create_release_package(
             package_dir,
             include_names=(
                 PRODUCTION_RP2040_ARTIFACT_NAMES
-                if release_profile == CORE_RELEASE_PROFILE
+                if release_profile in PRODUCTION_RELEASE_PROFILES
                 else None
             ),
-            production_only=release_profile == CORE_RELEASE_PROFILE,
+            production_only=release_profile in PRODUCTION_RELEASE_PROFILES,
         )
     if (
         release_profile == CORE_RELEASE_PROFILE
@@ -3519,12 +3608,12 @@ def create_release_package(
             "Full 8MB flash script requires a typed confirmation because it can overwrite persisted state.",
         ],
     }
-    if release_profile != CORE_RELEASE_PROFILE:
+    if release_profile not in PRODUCTION_RELEASE_PROFILES:
         manifest["source_build_dir"] = str(build_dir)
         manifest["notes"].append(
             "Flash backup may be skipped only when the operator explicitly requests that for hardware validation."
         )
-    if release_profile != CORE_RELEASE_PROFILE:
+    if release_profile not in PRODUCTION_RELEASE_PROFILES:
         manifest["meshcore_conformance"] = meshcore_conformance
         manifest["meshcore_signed_advert_runtime"] = (
             meshcore_signed_advert_runtime
@@ -3657,9 +3746,11 @@ def create_release_package(
             release_profile=release_profile,
             sd_history_mode=sd_history_mode,
             include_release_evidence_index=(
-                release_profile != CORE_RELEASE_PROFILE
+                release_profile not in PRODUCTION_RELEASE_PROFILES
             ),
-            include_internal_metadata=release_profile != CORE_RELEASE_PROFILE,
+            include_internal_metadata=(
+                release_profile not in PRODUCTION_RELEASE_PROFILES
+            ),
         )
     )
     manifest["sbom"] = write_package_sbom(
@@ -3678,7 +3769,7 @@ def create_release_package(
     )
     (package_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="ascii")
     write_release_readme(package_dir, package_name, manifest)
-    if release_profile == CORE_RELEASE_PROFILE:
+    if release_profile in PRODUCTION_RELEASE_PROFILES:
         validate_production_package_surface(package_dir)
     write_sha256sums(package_dir)
     manifest["package_dir"] = str(package_dir)

@@ -125,27 +125,28 @@ def test_radio_renderer_preserves_layout_labels_and_all_touch_bindings():
     source = read("main/ui/ui_radio_settings.c")
 
     for label in (
-        "Radio Settings",
+        "Radio",
+        "Canada preset",
         "Live RF matches saved profile",
         "Saved profile pending next radio start/apply",
         "Radio apply status unavailable",
         "-25k",
         "+25k",
-        "Cycle BW",
+        "Change bandwidth",
         "SF-",
         "SF+",
-        "Cycle",
+        "Change",
         "TX-",
         "TX+",
         "RX Boost On",
         "RX Boost Off",
-        "US/CAN",
+        "Restore Canada",
         "Save",
         "Close",
     ):
         assert f'"{label}"' in source
-    assert "lv_obj_set_size(controller->sheet, 448, 320);" in source
-    assert "lv_obj_set_pos(controller->sheet, 16, 82);" in source
+    assert "lv_obj_set_size(controller->sheet, 480, 480);" in source
+    assert "lv_obj_set_pos(controller->sheet, 0, 0);" in source
     assert source.count("BINDING_") >= 26
     assert "BINDING_TOP_CLOSE = 0" in source
     assert "BINDING_BOTTOM_CLOSE" in source

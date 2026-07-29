@@ -150,6 +150,63 @@ static void assert_public_default(void)
     assert(info.is_default);
 }
 
+static void test_onboarding_defaults_are_interoperable_and_idempotent(void)
+{
+    static const uint8_t bot_secret[D1L_CHANNEL_SECRET_128_LEN] = {
+        0xebU, 0x50U, 0xa1U, 0xbcU, 0xb3U, 0xe4U, 0xe5U, 0xd7U,
+        0xbfU, 0x69U, 0xa5U, 0x7cU, 0x9dU, 0xadU, 0xa2U, 0x11U,
+    };
+    static const uint8_t test_secret[D1L_CHANNEL_SECRET_128_LEN] = {
+        0x9cU, 0xd8U, 0xfcU, 0xf2U, 0x2aU, 0x47U, 0x33U, 0x3bU,
+        0x59U, 0x1dU, 0x96U, 0xa2U, 0xb8U, 0x48U, 0xb7U, 0x3fU,
+    };
+
+    mock_nvs_reset();
+    assert(d1l_channel_store_init() == ESP_OK);
+    assert(d1l_channel_store_seed_onboarding_defaults() == ESP_OK);
+
+    d1l_channel_info_t channels[D1L_CHANNEL_STORE_CAPACITY] = {0};
+    size_t count = 0U;
+    uint64_t active_channel_id = 0U;
+    d1l_channel_store_stats_t stats = {0};
+    assert(d1l_channel_store_snapshot(
+               channels, D1L_CHANNEL_STORE_CAPACITY, &count,
+               &active_channel_id, &stats) == ESP_OK);
+    assert(count == 3U);
+    assert(active_channel_id == D1L_CHANNEL_PUBLIC_ID);
+    assert_public_default();
+
+    const d1l_channel_info_t *bot = NULL;
+    const d1l_channel_info_t *test = NULL;
+    for (size_t i = 0U; i < count; ++i) {
+        if (strcmp(channels[i].name, "#bot") == 0) {
+            bot = &channels[i];
+        } else if (strcmp(channels[i].name, "#test") == 0) {
+            test = &channels[i];
+        }
+    }
+    assert(bot != NULL && bot->enabled && !bot->is_default);
+    assert(test != NULL && test->enabled && !test->is_default);
+
+    d1l_channel_protocol_key_t bot_key = {0};
+    d1l_channel_protocol_key_t test_key = {0};
+    assert(d1l_channel_store_copy_protocol_key(
+               bot->channel_id, &bot_key) == ESP_OK);
+    assert(d1l_channel_store_copy_protocol_key(
+               test->channel_id, &test_key) == ESP_OK);
+    assert(bot_key.secret_len == D1L_CHANNEL_SECRET_128_LEN);
+    assert(test_key.secret_len == D1L_CHANNEL_SECRET_128_LEN);
+    assert(memcmp(bot_key.secret, bot_secret, sizeof(bot_secret)) == 0);
+    assert(memcmp(test_key.secret, test_secret, sizeof(test_secret)) == 0);
+
+    const uint32_t mutations = stats.total_mutations;
+    assert(d1l_channel_store_seed_onboarding_defaults() == ESP_OK);
+    stats = d1l_channel_store_stats();
+    assert(stats.count == 3U);
+    assert(stats.total_mutations == mutations);
+    assert_public_default();
+}
+
 static void test_default_add_persist_and_unread(void)
 {
     mock_nvs_reset();
@@ -903,6 +960,7 @@ static void test_v1_migration_failures_clear_unloaded_ram(void)
 
 int main(void)
 {
+    test_onboarding_defaults_are_interoperable_and_idempotent();
     test_default_add_persist_and_unread();
     test_retained_reconcile_repairs_failure_reboot_and_eviction();
     test_collisions_capacity_defaults_and_rollback();

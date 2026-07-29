@@ -63,16 +63,17 @@ def test_more_scenarios_are_deterministic_bounded_and_side_effect_free(tmp_path:
             assert first_view["touch_target_issues"] == []
 
     degraded = view_map(reports["storage-degraded"])
-    assert "SD needs attention" in degraded["settings_storage_maps_expanded"]["labels"]
-    assert "Needs attention" in degraded["settings_storage_maps_expanded"]["labels"]
+    storage_labels = degraded["settings_storage_maps_expanded"]["labels"]
+    assert "SD Card" in storage_labels
+    assert "Needs attention" in storage_labels
 
     ready = view_map(reports["more-connectivity-ready"])
-    assert {"Connected", "On", "Ready"} <= set(
+    assert {"Connected", "On", "Not configured"} <= set(
         ready["settings_connections_expanded"]["labels"]
     )
 
     applying = view_map(reports["more-connectivity-applying"])
-    assert {"Connecting", "Off", "Applying"} <= set(
+    assert {"Connecting", "Off", "Not configured"} <= set(
         applying["settings_connections_expanded"]["labels"]
     )
 

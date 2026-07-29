@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "app/qualification_hooks.h"
 #include "esp_err.h"
 
 #include "mesh/contact_store.h"
@@ -146,11 +147,13 @@ esp_err_t d1l_dm_store_append_rx_identity_deferred(
     uint32_t ack_hash,
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     d1l_dm_store_append_outcome_t *outcome);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint, const char *contact_alias,
                                        const char *direction, const char *text, int rssi_dbm,
                                        int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
                                        uint8_t attempt, bool delivered, bool acked,
                                        uint32_t ack_hash);
+#endif
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry);
 bool d1l_dm_store_find_rx_identity(
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],

@@ -5,7 +5,15 @@
 
 #include "lvgl.h"
 
-static lv_obj_t *nodes_create_label(lv_obj_t *parent, const char *text, uint32_t color)
+#define NODES_ROW_X 16
+#define NODES_ROW_WIDTH 448
+#define NODES_ROW_HEIGHT 58
+#define NODES_ROW_GAP 4
+#define NODES_MIN_TOUCH_HEIGHT 44
+
+static lv_obj_t *nodes_create_label(lv_obj_t *parent,
+                                    const char *text,
+                                    uint32_t color)
 {
     if (!parent || !text) {
         return NULL;
@@ -28,7 +36,11 @@ static void nodes_set_dot_width(lv_obj_t *label, lv_coord_t width)
     lv_obj_set_width(label, width);
 }
 
-static lv_obj_t *nodes_create_panel(lv_obj_t *parent, int x, int y, int width, int height)
+static lv_obj_t *nodes_create_panel(lv_obj_t *parent,
+                                    int x,
+                                    int y,
+                                    int width,
+                                    int height)
 {
     if (!parent) {
         return NULL;
@@ -43,7 +55,7 @@ static lv_obj_t *nodes_create_panel(lv_obj_t *parent, int x, int y, int width, i
     lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(panel, lv_color_hex(0x263241), 0);
     lv_obj_set_style_border_width(panel, 1, 0);
-    lv_obj_set_style_pad_all(panel, 12, 0);
+    lv_obj_set_style_pad_all(panel, 0, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     return panel;
 }
@@ -54,10 +66,12 @@ static lv_obj_t *nodes_create_button(lv_obj_t *parent,
                                      int y,
                                      int width,
                                      int height,
+                                     uint32_t accent,
+                                     bool enabled,
                                      lv_event_cb_t callback,
                                      void *user_data)
 {
-    if (!parent || !text) {
+    if (!parent || !text || height < NODES_MIN_TOUCH_HEIGHT) {
         return NULL;
     }
     lv_obj_t *button = lv_btn_create(parent);
@@ -67,15 +81,23 @@ static lv_obj_t *nodes_create_button(lv_obj_t *parent,
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
+    lv_obj_set_style_bg_color(
+        button, lv_color_hex(accent == 0xF87171 ? 0x2A1118 : 0x1E2A36), 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(
+        button, lv_color_hex(accent == 0xF87171 ? 0x7F1D1D : 0x34566A), 0);
+    lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_shadow_width(button, 0, 0);
-    lv_obj_t *label = nodes_create_label(button, text, 0xF4F7FB);
+    lv_obj_set_style_pad_all(button, 0, 0);
+    lv_obj_t *label = nodes_create_label(
+        button, text, enabled ? accent : 0x667787);
     if (label) {
         lv_obj_center(label);
     }
-    if (callback) {
+    if (enabled && callback) {
         lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, user_data);
+    } else {
+        lv_obj_add_state(button, LV_STATE_DISABLED);
     }
     return button;
 }
@@ -83,99 +105,139 @@ static lv_obj_t *nodes_create_button(lv_obj_t *parent,
 static const char *nodes_role_badge_text(const char *role)
 {
     if (!role || role[0] == '\0') {
-        return "NODE";
+        return "Node";
     }
     if (strcmp(role, "room") == 0) {
-        return "ROOM";
+        return "Room";
     }
     if (strcmp(role, "repeater") == 0) {
-        return "RPT";
+        return "Repeater";
     }
     if (strcmp(role, "sensor") == 0) {
-        return "SNS";
+        return "Sensor";
     }
-    if (strcmp(role, "companion") == 0) {
-        return "CMP";
+    if (strcmp(role, "companion") == 0 || strcmp(role, "chat") == 0) {
+        return "Chat";
     }
-    return "NODE";
+    return "Node";
+}
+
+static const char *nodes_role_avatar_text(const char *role)
+{
+    const char *label = nodes_role_badge_text(role);
+    if (strcmp(label, "Room") == 0) {
+        return "RM";
+    }
+    if (strcmp(label, "Repeater") == 0) {
+        return "R";
+    }
+    if (strcmp(label, "Sensor") == 0) {
+        return "S";
+    }
+    if (strcmp(label, "Chat") == 0) {
+        return "C";
+    }
+    return "?";
 }
 
 static uint32_t nodes_role_color(const char *role)
 {
-    if (!role || role[0] == '\0') {
-        return 0x93C5FD;
-    }
-    if (strcmp(role, "room") == 0) {
+    const char *label = nodes_role_badge_text(role);
+    if (strcmp(label, "Room") == 0) {
         return 0xA7F3D0;
     }
-    if (strcmp(role, "repeater") == 0) {
+    if (strcmp(label, "Repeater") == 0) {
         return 0xFBBF24;
     }
-    if (strcmp(role, "sensor") == 0) {
+    if (strcmp(label, "Sensor") == 0) {
         return 0xC4B5FD;
     }
-    if (strcmp(role, "companion") == 0) {
+    if (strcmp(label, "Chat") == 0) {
         return 0x5EEAD4;
     }
     return 0x93C5FD;
 }
 
-static lv_obj_t *nodes_render_role_badge(lv_obj_t *parent,
-                                         const char *role,
-                                         lv_coord_t x,
-                                         lv_coord_t y,
-                                         lv_coord_t width)
+static lv_obj_t *nodes_render_role_avatar(lv_obj_t *parent,
+                                          const char *role,
+                                          int x,
+                                          int y)
 {
-    lv_obj_t *badge = nodes_create_panel(parent, x, y, width, 24);
-    if (!badge) {
+    lv_obj_t *avatar = nodes_create_panel(parent, x, y, 40, 40);
+    if (!avatar) {
         return NULL;
     }
-    lv_obj_set_style_radius(badge, 6, 0);
-    lv_obj_set_style_bg_color(badge, lv_color_hex(0x10202A), 0);
-    lv_obj_set_style_border_color(badge, lv_color_hex(nodes_role_color(role)), 0);
-    lv_obj_set_style_pad_all(badge, 0, 0);
-
+    const uint32_t accent = nodes_role_color(role);
+    lv_obj_set_style_radius(avatar, 20, 0);
+    lv_obj_set_style_bg_color(avatar, lv_color_hex(0x10202A), 0);
+    lv_obj_set_style_border_color(avatar, lv_color_hex(accent), 0);
     lv_obj_t *label = nodes_create_label(
-        badge, nodes_role_badge_text(role), nodes_role_color(role));
-    nodes_set_dot_width(label, width - 6);
+        avatar, nodes_role_avatar_text(role), accent);
     if (label) {
         lv_obj_center(label);
     }
-    return badge;
+    return avatar;
 }
 
-static void nodes_render_role_count(lv_obj_t *parent,
-                                    int x,
-                                    const char *label,
-                                    size_t count,
-                                    uint32_t accent)
+static const char *nodes_contact_route_label(
+    const d1l_contact_entry_t *entry)
 {
-    if (!parent || !label) {
-        return;
+    if (!entry || !entry->out_path_valid) {
+        return "Flood";
     }
-    lv_obj_t *chip = nodes_create_panel(parent, x, 58, 76, 38);
-    if (!chip) {
-        return;
-    }
-    lv_obj_set_style_radius(chip, 6, 0);
-    lv_obj_set_style_bg_color(chip, lv_color_hex(0x10202A), 0);
-    lv_obj_set_style_border_color(chip, lv_color_hex(accent), 0);
-    lv_obj_set_style_pad_all(chip, 0, 0);
+    return entry->path_hops == 0U ? "Direct" : "Saved path";
+}
 
-    lv_obj_t *name = nodes_create_label(chip, label, 0xA7B4BE);
-    if (name) {
-        nodes_set_dot_width(name, 70);
-        lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(name, 3, 1);
+static void nodes_node_route_label(const d1l_node_view_t *view,
+                                   char *dest,
+                                   size_t dest_size)
+{
+    if (!dest || dest_size == 0U) {
+        return;
     }
-    char value[24];
-    snprintf(value, sizeof(value), "%u", (unsigned)count);
-    lv_obj_t *number = nodes_create_label(chip, value, accent);
-    if (number) {
-        nodes_set_dot_width(number, 70);
-        lv_obj_set_style_text_align(number, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(number, 3, 18);
+    if (!view || !view->reachable) {
+        snprintf(dest, dest_size, "%s", "Quiet");
+    } else if (view->node.path_hops == 0U) {
+        snprintf(dest, dest_size, "%s", "Direct");
+    } else {
+        snprintf(dest, dest_size, "%u hop%s",
+                 (unsigned)view->node.path_hops,
+                 view->node.path_hops == 1U ? "" : "s");
     }
+}
+
+static bool nodes_node_matches_contact(
+    const d1l_ui_nodes_controller_t *controller,
+    const d1l_node_view_t *view)
+{
+    if (!controller || !view || view->node.fingerprint[0] == '\0') {
+        return false;
+    }
+    for (size_t i = 0U; i < controller->rendered.contact_row_count; ++i) {
+        const char *fingerprint =
+            controller->rendered.contact_rows[i].fingerprint;
+        if (fingerprint[0] != '\0' &&
+            strcmp(fingerprint, view->node.fingerprint) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static size_t nodes_nearby_count(
+    const d1l_ui_nodes_controller_t *controller)
+{
+    if (!controller) {
+        return 0U;
+    }
+    size_t count = 0U;
+    for (size_t i = 0U; i < controller->rendered.node_row_count; ++i) {
+        if (!nodes_node_matches_contact(
+                controller, &controller->rendered.node_rows[i])) {
+            count++;
+        }
+    }
+    return count;
 }
 
 static void nodes_dispatch_global_event_cb(lv_event_t *event)
@@ -197,67 +259,9 @@ static void nodes_dispatch_global_event_cb(lv_event_t *event)
         &action_event, binding->controller->action_context);
 }
 
-static void nodes_render_summary(d1l_ui_nodes_controller_t *controller,
-                                 lv_obj_t *parent,
-                                 const d1l_ui_nodes_view_model_t *view_model)
-{
-    if (!controller || !parent || !view_model) {
-        return;
-    }
-    lv_obj_t *summary = nodes_create_panel(parent, 18, 16, 424, 104);
-    if (!summary) {
-        return;
-    }
-    lv_obj_set_style_pad_all(summary, 0, 0);
-
-    lv_obj_t *title = nodes_create_label(summary, "Heard Nodes", 0x8EA0AE);
-    if (title) {
-        lv_obj_set_pos(title, 12, 6);
-    }
-    char total[32];
-    snprintf(total, sizeof(total), "%u", (unsigned)view_model->role_counts.total);
-    lv_obj_t *total_label = nodes_create_label(summary, total, 0x5EEAD4);
-    if (total_label) {
-        lv_obj_set_style_text_font(total_label, &lv_font_montserrat_24, 0);
-        lv_obj_set_pos(total_label, 12, 27);
-    }
-    char contacts[48];
-    snprintf(contacts, sizeof(contacts), "%u contact%s",
-             (unsigned)view_model->contact_count,
-             view_model->contact_count == 1U ? "" : "s");
-    lv_obj_t *contact_label = nodes_create_label(summary, contacts, 0xA7F3D0);
-    if (contact_label) {
-        nodes_set_dot_width(contact_label, 112);
-        lv_obj_set_style_text_align(contact_label, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_pos(contact_label, 164, 14);
-    }
-    controller->find_nearby = (d1l_ui_nodes_action_binding_t) {
-        .controller = controller,
-    };
-    controller->clear_heard = (d1l_ui_nodes_action_binding_t) {
-        .controller = controller,
-    };
-    nodes_create_button(summary, "Find", 286, 6, 58, 44,
-                        nodes_dispatch_global_event_cb,
-                        &controller->find_nearby);
-    nodes_create_button(summary, "Clear", 350, 6, 62, 44,
-                        nodes_dispatch_global_event_cb,
-                        &controller->clear_heard);
-
-    nodes_render_role_count(summary, 12, "Chat", view_model->role_counts.chat_companion,
-                            0x5EEAD4);
-    nodes_render_role_count(summary, 92, "Repeater", view_model->role_counts.repeater,
-                            0xFBBF24);
-    nodes_render_role_count(summary, 172, "Room", view_model->role_counts.room_server,
-                            0xA7F3D0);
-    nodes_render_role_count(summary, 252, "Sensor", view_model->role_counts.sensor,
-                            0xC4B5FD);
-    nodes_render_role_count(summary, 332, "Unknown", view_model->role_counts.unknown,
-                            0x93C5FD);
-}
-
-static void nodes_dispatch_contact_event(d1l_ui_nodes_action_binding_t *binding,
-                                         d1l_ui_nodes_action_t action)
+static void nodes_dispatch_contact_event(
+    d1l_ui_nodes_action_binding_t *binding,
+    d1l_ui_nodes_action_t action)
 {
     if (!binding || !binding->controller) {
         return;
@@ -282,19 +286,22 @@ static void nodes_dispatch_contact_event(d1l_ui_nodes_action_binding_t *binding,
 static void nodes_dispatch_contact_open_event_cb(lv_event_t *event)
 {
     nodes_dispatch_contact_event(
-        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) : NULL,
+        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) :
+                NULL,
         D1L_UI_NODES_ACTION_OPEN_CONTACT);
 }
 
 static void nodes_dispatch_contact_dm_event_cb(lv_event_t *event)
 {
     nodes_dispatch_contact_event(
-        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) : NULL,
+        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) :
+                NULL,
         D1L_UI_NODES_ACTION_OPEN_CONTACT_DM);
 }
 
-static void nodes_dispatch_node_event(d1l_ui_nodes_action_binding_t *binding,
-                                      d1l_ui_nodes_action_t action)
+static void nodes_dispatch_node_event(
+    d1l_ui_nodes_action_binding_t *binding,
+    d1l_ui_nodes_action_t action)
 {
     if (!binding || !binding->controller) {
         return;
@@ -319,28 +326,81 @@ static void nodes_dispatch_node_event(d1l_ui_nodes_action_binding_t *binding,
 static void nodes_dispatch_node_open_event_cb(lv_event_t *event)
 {
     nodes_dispatch_node_event(
-        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) : NULL,
+        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) :
+                NULL,
         D1L_UI_NODES_ACTION_OPEN_NODE);
 }
 
 static void nodes_dispatch_node_dm_event_cb(lv_event_t *event)
 {
     nodes_dispatch_node_event(
-        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) : NULL,
+        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) :
+                NULL,
         D1L_UI_NODES_ACTION_OPEN_NODE_DM);
 }
 
-static void nodes_render_contact_row(d1l_ui_nodes_controller_t *controller,
-                                     lv_obj_t *parent,
-                                     int y,
-                                     size_t index)
+static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
+                                lv_obj_t *parent,
+                                size_t nearby_count)
 {
-    if (!controller || !parent || index >= controller->rendered.contact_row_count) {
+    if (!controller || !parent) {
         return;
     }
-    const d1l_contact_entry_t *entry = &controller->rendered.contact_rows[index];
+    lv_obj_t *title = nodes_create_label(parent, "Contacts", 0xF4F7FB);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_obj_set_pos(title, 16, 6);
+    }
+    char summary[64];
+    snprintf(summary, sizeof(summary), "%u saved | %u nearby",
+             (unsigned)controller->rendered.contact_count,
+             (unsigned)nearby_count);
+    lv_obj_t *meta = nodes_create_label(parent, summary, 0x8EA0AE);
+    if (meta) {
+        nodes_set_dot_width(meta, 274);
+        lv_obj_set_pos(meta, 16, 34);
+    }
+
+    controller->find_nearby = (d1l_ui_nodes_action_binding_t) {
+        .controller = controller,
+    };
+    controller->clear_heard = (d1l_ui_nodes_action_binding_t) {
+        .controller = controller,
+    };
+    nodes_create_button(parent, "Find", 304, 4, 70, 44, 0xA7F3D0, true,
+                        nodes_dispatch_global_event_cb,
+                        &controller->find_nearby);
+    nodes_create_button(parent, "Clear", 382, 4, 70, 44, 0xF87171,
+                        controller->rendered.node_row_count > 0U,
+                        nodes_dispatch_global_event_cb,
+                        &controller->clear_heard);
+}
+
+static void nodes_render_section_label(lv_obj_t *parent,
+                                       int y,
+                                       const char *text)
+{
+    lv_obj_t *label = nodes_create_label(parent, text, 0x8EA0AE);
+    if (label) {
+        lv_obj_set_pos(label, 20, y);
+    }
+}
+
+static void nodes_render_contact_row(
+    d1l_ui_nodes_controller_t *controller,
+    lv_obj_t *parent,
+    int y,
+    size_t index)
+{
+    if (!controller || !parent ||
+        index >= controller->rendered.contact_row_count) {
+        return;
+    }
+    const d1l_contact_entry_t *entry =
+        &controller->rendered.contact_rows[index];
     const bool can_dm = controller->rendered.contact_can_dm[index];
-    lv_obj_t *row = nodes_create_panel(parent, 18, y, 424, 48);
+    lv_obj_t *row = nodes_create_panel(
+        parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT);
     if (!row) {
         return;
     }
@@ -350,35 +410,38 @@ static void nodes_render_contact_row(d1l_ui_nodes_controller_t *controller,
         .row_index = index,
     };
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, nodes_dispatch_contact_open_event_cb, LV_EVENT_CLICKED, binding);
-    /* Direct-action children need the row's full physical height. Keep the
-     * row content unpadded and place text explicitly so the 44 px DM target
-     * is not clipped down to the former 32 px content box. */
-    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_add_event_cb(
+        row, nodes_dispatch_contact_open_event_cb, LV_EVENT_CLICKED, binding);
 
-    lv_obj_t *alias = nodes_create_label(row, entry->alias, 0xF4F7FB);
-    nodes_set_dot_width(alias, 166);
-    if (alias) {
-        lv_obj_align(alias, LV_ALIGN_TOP_LEFT, 8, 4);
+    nodes_render_role_avatar(row, entry->type, 8, 9);
+    const char *display_name = entry->alias[0] ? entry->alias :
+        (entry->heard_name[0] ? entry->heard_name : "Saved contact");
+    lv_obj_t *name = nodes_create_label(
+        row, display_name,
+        entry->muted ? 0x8EA0AE : (entry->favorite ? 0xFBBF24 : 0xF4F7FB));
+    nodes_set_dot_width(name, can_dm ? 246 : 320);
+    if (name) {
+        lv_obj_set_pos(name, 58, 7);
+    }
+    char meta[144];
+    snprintf(meta, sizeof(meta), "%s | %s%s",
+             nodes_role_badge_text(entry->type),
+             nodes_contact_route_label(entry),
+             entry->muted ? " | Muted" :
+             (entry->favorite ? " | Favorite" : ""));
+    lv_obj_t *details = nodes_create_label(row, meta, 0x8EA0AE);
+    nodes_set_dot_width(details, can_dm ? 266 : 344);
+    if (details) {
+        lv_obj_set_pos(details, 58, 31);
     }
     if (can_dm) {
-        nodes_create_button(row, "DM", 368, 2, 48, 44,
+        nodes_create_button(row, "Message", 340, 7, 84, 44, 0xA7F3D0, true,
                             nodes_dispatch_contact_dm_event_cb, binding);
     } else {
-        lv_obj_t *type = nodes_create_label(
-            row, entry->type[0] ? entry->type : "unknown", 0xA7F3D0);
-        if (type) {
-            lv_obj_align(type, LV_ALIGN_TOP_RIGHT, -8, 4);
+        lv_obj_t *chevron = nodes_create_label(row, ">", 0x8EA0AE);
+        if (chevron) {
+            lv_obj_set_pos(chevron, 426, 20);
         }
-    }
-    char meta[128];
-    snprintf(meta, sizeof(meta), "%.8s  %s  %s  rssi %d", entry->fingerprint,
-             entry->public_key_hex[0] ? "key" : "no key",
-             entry->out_path_valid ? "path" : "flood", entry->last_rssi_dbm);
-    lv_obj_t *details = nodes_create_label(row, meta, 0x8EA0AE);
-    nodes_set_dot_width(details, 344);
-    if (details) {
-        lv_obj_align(details, LV_ALIGN_BOTTOM_LEFT, 8, -4);
     }
 }
 
@@ -387,13 +450,15 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
                                   int y,
                                   size_t index)
 {
-    if (!controller || !parent || index >= controller->rendered.node_row_count) {
+    if (!controller || !parent ||
+        index >= controller->rendered.node_row_count) {
         return;
     }
     const d1l_node_view_t *view = &controller->rendered.node_rows[index];
     const d1l_node_entry_t *entry = &view->node;
     const bool can_dm = controller->rendered.node_can_dm[index];
-    lv_obj_t *row = nodes_create_panel(parent, 18, y, 424, 56);
+    lv_obj_t *row = nodes_create_panel(
+        parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT);
     if (!row) {
         return;
     }
@@ -403,34 +468,101 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
         .row_index = index,
     };
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, nodes_dispatch_node_open_event_cb, LV_EVENT_CLICKED, binding);
-    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_add_event_cb(
+        row, nodes_dispatch_node_open_event_cb, LV_EVENT_CLICKED, binding);
 
+    nodes_render_role_avatar(row, view->role, 8, 9);
+    const char *display_name = view->display_name[0] ? view->display_name :
+        (entry->name[0] ? entry->name : "Nearby node");
     lv_obj_t *name = nodes_create_label(
-        row,
-        view->display_name[0] ? view->display_name :
-        (entry->name[0] ? entry->name : entry->fingerprint),
-        0xF4F7FB);
-    nodes_set_dot_width(name, 240);
+        row, display_name, view->muted ? 0x8EA0AE :
+        (view->favorite ? 0xFBBF24 : 0xF4F7FB));
+    nodes_set_dot_width(name, can_dm ? 246 : 320);
     if (name) {
-        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 8, 4);
+        lv_obj_set_pos(name, 58, 7);
     }
-    nodes_render_role_badge(row, view->role, can_dm ? 278 : 336, 4,
-                            can_dm ? 60 : 68);
-    if (can_dm) {
-        nodes_create_button(row, "DM", 364, 6, 52, 44,
-                            nodes_dispatch_node_dm_event_cb, binding);
-    }
-    const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
-    char meta[128];
-    snprintf(meta, sizeof(meta), "%.8s  %s  %s  rssi %d  snr %s%d.%d",
-             entry->fingerprint, view->keyed ? "key" : "no key",
-             view->reachable ? "reachable" : "quiet", entry->rssi_dbm,
-             entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
+    char route[32];
+    nodes_node_route_label(view, route, sizeof(route));
+    char meta[144];
+    snprintf(meta, sizeof(meta), "%s | %s%s",
+             nodes_role_badge_text(view->role), route,
+             view->muted ? " | Muted" :
+             (view->favorite ? " | Favorite" : ""));
     lv_obj_t *details = nodes_create_label(row, meta, 0x8EA0AE);
-    nodes_set_dot_width(details, can_dm ? 344 : 392);
+    nodes_set_dot_width(details, can_dm ? 266 : 344);
     if (details) {
-        lv_obj_align(details, LV_ALIGN_BOTTOM_LEFT, 8, -4);
+        lv_obj_set_pos(details, 58, 31);
+    }
+    if (can_dm) {
+        nodes_create_button(row, "Message", 340, 7, 84, 44, 0xA7F3D0, true,
+                            nodes_dispatch_node_dm_event_cb, binding);
+    } else {
+        lv_obj_t *chevron = nodes_create_label(row, ">", 0x8EA0AE);
+        if (chevron) {
+            lv_obj_set_pos(chevron, 426, 20);
+        }
+    }
+}
+
+static void nodes_render_empty_state(
+    d1l_ui_nodes_controller_t *controller,
+    lv_obj_t *parent)
+{
+    lv_obj_t *panel = nodes_create_panel(parent, 16, 76, 448, 210);
+    if (!panel) {
+        return;
+    }
+    lv_obj_t *icon = nodes_create_panel(panel, 196, 18, 48, 48);
+    if (icon) {
+        lv_obj_set_style_radius(icon, 24, 0);
+        lv_obj_set_style_border_color(icon, lv_color_hex(0x5EEAD4), 0);
+        lv_obj_t *plus = nodes_create_label(icon, "+", 0x5EEAD4);
+        if (plus) {
+            lv_obj_set_style_text_font(plus, &lv_font_montserrat_24, 0);
+            lv_obj_center(plus);
+        }
+    }
+    lv_obj_t *title = nodes_create_label(panel, "No contacts yet", 0xF4F7FB);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_obj_set_width(title, 416);
+        lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(title, 16, 76);
+    }
+    lv_obj_t *copy = nodes_create_label(
+        panel,
+        "Nearby nodes appear here after a signed advert.",
+        0x8EA0AE);
+    if (copy) {
+        lv_label_set_long_mode(copy, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(copy, 360);
+        lv_obj_set_style_text_align(copy, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(copy, 44, 108);
+    }
+    nodes_create_button(panel, "Find nearby", 126, 150, 196, 48,
+                        0xA7F3D0, true, nodes_dispatch_global_event_cb,
+                        &controller->find_nearby);
+}
+
+static void nodes_render_empty_section(lv_obj_t *parent,
+                                       int y,
+                                       const char *title,
+                                       const char *detail)
+{
+    lv_obj_t *panel = nodes_create_panel(
+        parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT);
+    if (!panel) {
+        return;
+    }
+    lv_obj_t *title_label = nodes_create_label(panel, title, 0xF4F7FB);
+    if (title_label) {
+        nodes_set_dot_width(title_label, 416);
+        lv_obj_set_pos(title_label, 12, 7);
+    }
+    lv_obj_t *detail_label = nodes_create_label(panel, detail, 0x8EA0AE);
+    if (detail_label) {
+        nodes_set_dot_width(detail_label, 416);
+        lv_obj_set_pos(detail_label, 12, 31);
     }
 }
 
@@ -446,8 +578,10 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
     if (view_model != &controller->rendered) {
         controller->rendered = *view_model;
     }
-    if (controller->rendered.contact_row_count > D1L_APP_SNAPSHOT_CONTACT_PREVIEW) {
-        controller->rendered.contact_row_count = D1L_APP_SNAPSHOT_CONTACT_PREVIEW;
+    if (controller->rendered.contact_row_count >
+        D1L_APP_SNAPSHOT_CONTACT_PREVIEW) {
+        controller->rendered.contact_row_count =
+            D1L_APP_SNAPSHOT_CONTACT_PREVIEW;
     }
     if (controller->rendered.node_row_count > D1L_NODE_STORE_CAPACITY) {
         controller->rendered.node_row_count = D1L_NODE_STORE_CAPACITY;
@@ -457,60 +591,46 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
     controller->action_handler = action_handler;
     controller->action_context = action_context;
 
-    nodes_render_summary(controller, parent, &controller->rendered);
+    const size_t nearby_count = nodes_nearby_count(controller);
+    nodes_render_header(controller, parent, nearby_count);
+    if (controller->rendered.contact_row_count == 0U && nearby_count == 0U) {
+        nodes_render_empty_state(controller, parent);
+        return;
+    }
 
-    int y = 136;
-    if (controller->rendered.contact_row_count > 0U) {
-        lv_obj_t *contacts = nodes_create_label(parent, "Contacts", 0x8EA0AE);
-        if (contacts) {
-            lv_obj_set_pos(contacts, 26, y);
-        }
-        y += 24;
-        for (size_t i = 0; i < controller->rendered.contact_row_count && y <= 190; ++i) {
+    int y = 62;
+    nodes_render_section_label(parent, y, "Saved contacts");
+    y += 24;
+    if (controller->rendered.contact_row_count == 0U) {
+        nodes_render_empty_section(
+            parent, y, "No saved contacts yet",
+            "Tap a nearby node to view its identity.");
+        y += NODES_ROW_HEIGHT + NODES_ROW_GAP;
+    } else {
+        for (size_t i = 0U;
+             i < controller->rendered.contact_row_count; ++i) {
             nodes_render_contact_row(controller, parent, y, i);
-            y += 54;
+            y += NODES_ROW_HEIGHT + NODES_ROW_GAP;
         }
-        lv_obj_t *heard = nodes_create_label(parent, "Heard", 0x8EA0AE);
-        if (heard) {
-            lv_obj_set_pos(heard, 26, y + 4);
+    }
+
+    y += 8;
+    nodes_render_section_label(parent, y, "Nearby");
+    y += 24;
+    size_t rendered_nearby = 0U;
+    for (size_t i = 0U; i < controller->rendered.node_row_count; ++i) {
+        if (nodes_node_matches_contact(
+                controller, &controller->rendered.node_rows[i])) {
+            continue;
         }
-        y += 28;
-    }
-    lv_obj_t *all_heard = nodes_create_label(parent, "All Heard", 0x8EA0AE);
-    if (all_heard) {
-        lv_obj_set_pos(all_heard, 26, y + 4);
-    }
-    y += 28;
-    for (size_t i = 0; i < controller->rendered.node_row_count; ++i) {
         nodes_render_node_row(controller, parent, y, i);
-        y += 62;
+        y += NODES_ROW_HEIGHT + NODES_ROW_GAP;
+        rendered_nearby++;
     }
-    if (controller->rendered.node_row_count == 0U) {
-        lv_obj_t *empty = nodes_create_label(parent, "No heard nodes yet", 0x8EA0AE);
-        if (empty) {
-            lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 154);
-        }
-        static const char *const notes[] = {
-            "Listening for signed adverts from nearby MeshCore nodes.",
-            "Contacts appear separately when a retained public key exists.",
-            "Role counts use exact roles from the rendered node query.",
-            "Scroll proof keeps this empty-state layout validated too.",
-        };
-        int note_y = 206;
-        for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); ++i) {
-            lv_obj_t *note = nodes_create_panel(parent, 18, note_y, 424, 52);
-            if (!note) {
-                continue;
-            }
-            lv_obj_set_style_pad_all(note, 8, 0);
-            lv_obj_t *text = nodes_create_label(note, notes[i], 0x8EA0AE);
-            if (text) {
-                lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-                lv_obj_set_width(text, 392);
-                lv_obj_align(text, LV_ALIGN_LEFT_MID, 0, 0);
-            }
-            note_y += 58;
-        }
+    if (rendered_nearby == 0U) {
+        nodes_render_empty_section(
+            parent, y, "No other nearby nodes",
+            "Listening for signed adverts.");
     }
 }
 

@@ -17,7 +17,7 @@ d1l_ui_chrome_layout_t d1l_ui_chrome_layout_for_screen(d1l_ui_screen_t screen)
         .content_height = D1L_UI_DOCKED_CONTENT_HEIGHT,
         .content_scrollable = true,
         .dock_visible = true,
-        .header_detail_visible = true,
-        .title = "MeshCore DeskOS",
+        .header_detail_visible = false,
+        .title = "",
     };
 }

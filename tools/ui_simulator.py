@@ -18,8 +18,8 @@ WIDTH = 480
 HEIGHT = 480
 TOP_BAR_H = 56
 HOME_TOP_BAR_H = 16
-DOCK_Y = 428
-DOCK_H = 52
+DOCK_Y = 432
+DOCK_H = 48
 MIN_TOUCH_TARGET = 44
 D1L_NODE_STORE_CAPACITY = 64
 FULL_FEATURE_RELEASE_PROFILE = "full_feature"
@@ -27,64 +27,37 @@ CORE_RELEASE_PROFILE = "core_1_0"
 RELEASE_PROFILES = (FULL_FEATURE_RELEASE_PROFILE, CORE_RELEASE_PROFILE)
 DOCK_TABS = (
     ("Home", "Home", "home", "LV_SYMBOL_HOME"),
-    ("Messages", "Messages", "messages", "LV_SYMBOL_ENVELOPE"),
-    ("Nodes", "Nodes", "nodes", "LV_SYMBOL_LIST"),
+    ("Messages", "Channels", "messages", "LV_SYMBOL_ENVELOPE"),
+    ("Nodes", "Contacts", "nodes", "LV_SYMBOL_LIST"),
     ("Map", "Map", "map", "LV_SYMBOL_IMAGE"),
-    ("Settings", "Tools", "settings", "LV_SYMBOL_SETTINGS"),
+    ("Settings", "Settings", "settings", "LV_SYMBOL_SETTINGS"),
 )
 CORE_DOCK_TABS = (
     ("Home", "Home", "home", "LV_SYMBOL_HOME"),
-    ("Messages", "Messages", "messages", "LV_SYMBOL_ENVELOPE"),
-    ("Nodes", "Nodes", "nodes", "LV_SYMBOL_LIST"),
-    ("Packets", "Packets", "packets", "LV_SYMBOL_LIST"),
+    ("Messages", "Channels", "messages", "LV_SYMBOL_ENVELOPE"),
+    ("Nodes", "Contacts", "nodes", "LV_SYMBOL_LIST"),
+    ("Map", "Map", "map", "LV_SYMBOL_IMAGE"),
     ("Settings", "Settings", "settings", "LV_SYMBOL_SETTINGS"),
 )
-CORE_ROOT_VIEWS = ("home", "messages", "nodes", "packets", "settings")
+CORE_ROOT_VIEWS = ("home", "messages", "nodes", "map", "settings")
 CORE_EXCLUDED_DESTINATION_FEATURES = (
-    ("map", "map"),
-    ("map_options", "map"),
-    ("map_location", "map"),
-    ("map_cache", "map"),
-    ("wifi_setup_sheet", "wifi_user_control"),
     ("ble_setup_sheet", "ble"),
-    ("channel_selector_sheet", "multi_channel_management"),
-    ("channel_selector_private_sheet", "multi_channel_management"),
-    ("messages_channel_private", "multi_channel_management"),
-    ("compose_channel_private_sheet", "multi_channel_management"),
-    ("compose_channel_disabled_sheet", "multi_channel_management"),
-    ("channel_history_private_sheet", "multi_channel_management"),
-    ("channel_search_private_sheet", "multi_channel_management"),
-    ("mesh_roles_sheet", "repeater_room_admin"),
-    ("mesh_rooms_page", "repeater_room_admin"),
-    ("mesh_repeaters_page", "repeater_room_admin"),
-    ("admin", "repeater_room_admin"),
-    ("observer_mqtt", "observer_mqtt"),
     ("signed_update", "signed_sd_update_ota"),
     ("ota_update", "signed_sd_update_ota"),
-    ("gps_location", "gps_location"),
-    ("mutable_terminal", "mutable_terminal"),
-    ("route_trace_sheet", "user_trace_path"),
     ("advert_sheet", "advanced_qr_emoji"),
     ("contact_export_sheet", "advanced_qr_emoji"),
-    ("settings_advanced_expanded", "advanced_qr_emoji"),
     ("advanced_qr_emoji", "advanced_qr_emoji"),
+    ("usb_recovery", "usb_recovery"),
 )
 CORE_EXCLUDED_DESTINATIONS = tuple(
     destination
     for destination, _feature in CORE_EXCLUDED_DESTINATION_FEATURES
 )
 CORE_UNAVAILABLE_CAPABILITIES = (
-    "map",
-    "wifi_user_control",
     "ble",
-    "multi_channel_management",
-    "repeater_room_admin",
-    "observer_mqtt",
     "signed_sd_update_ota",
-    "gps_location",
-    "mutable_terminal",
     "advanced_qr_emoji",
-    "user_trace_path",
+    "usb_recovery",
 )
 DOCKED_VIEWS = frozenset(
     {
@@ -129,6 +102,28 @@ MAP_HIERARCHY_VIEWS = frozenset(
         "map_location",
         "map_cache",
     }
+)
+TOP_BAR_FREE_VIEWS = (
+    DOCKED_VIEWS
+    | CONTACT_HIERARCHY_VIEWS
+    | frozenset(
+        {
+            "contact_incomplete_detail_sheet",
+            "contact_noncanonical_detail_sheet",
+            "node_detail_sheet",
+            "heard_only_node_detail_sheet",
+            "managed_node_detail_sheet",
+            "dm_thread_sheet",
+            "dm_thread_details_sheet",
+            "dm_thread_search_results",
+            "dm_thread_search_no_match",
+            "dm_thread_empty_sheet",
+            "dm_thread_no_contact",
+            "dm_thread_incoming_refresh",
+            "radio_settings_sheet",
+            "wifi_setup_sheet",
+        }
+    )
 )
 STORAGE_SAFETY_COPY = "FAT32 only - This device never formats cards."
 MAP_ATTRIBUTION = "(c) OpenStreetMap contributors"
@@ -522,61 +517,11 @@ def sample_snapshot() -> Snapshot:
 def project_core_snapshot(snap: Snapshot) -> Snapshot:
     """Apply the immutable Core 1.0 capability projection to fake state."""
 
-    public_channel = next(
-        (channel for channel in snap.channels if channel.channel_id == 1),
-        Channel(1, "Public", enabled=True, active=True, unread=snap.unread_public),
-    )
-
-    def project_node(node: Node) -> Node:
-        return replace(
-            node,
-            advert_lat_e6=None,
-            advert_lon_e6=None,
-            location_advert_timestamp=0,
-        )
     return replace(
         snap,
-        wifi_build_enabled=False,
-        wifi_enabled=False,
-        wifi_connecting=False,
-        wifi_connected=False,
         ble_build_enabled=False,
         ble_transport_supported=False,
         ble_companion_enabled=False,
-        storage_sd_present=False,
-        storage_sd_mounted=False,
-        storage_sd_data_root_ready=False,
-        storage_sd_needs_fat32=False,
-        storage_setup_required=False,
-        storage_data_enabled=False,
-        storage_retained_sd_degraded=False,
-        storage_sd_state="internal",
-        storage_sd_filesystem="unavailable",
-        storage_capacity_kb=0,
-        storage_free_kb=0,
-        storage_backend="nvs",
-        message_store_backend="nvs",
-        dm_store_backend="nvs",
-        packet_log_backend="nvs",
-        route_store_backend="nvs",
-        storage_setup_action="forced_nvs",
-        map_tile_backend="unavailable",
-        export_backend="serial",
-        map_tile_cache_ready=False,
-        map_tile_download_supported=False,
-        map_tile_render_supported=False,
-        map_tile_sideload_supported=False,
-        map_location_set=False,
-        map_lat_e7=0,
-        map_lon_e7=0,
-        map_center_source="unset",
-        rooms=tuple(project_node(node) for node in snap.rooms),
-        repeaters=tuple(project_node(node) for node in snap.repeaters),
-        contacts=tuple(project_node(node) for node in snap.contacts),
-        heard=tuple(project_node(node) for node in snap.heard),
-        channels=(replace(public_channel, active=True),),
-        channel_messages=(),
-        active_channel_id=1,
     )
 
 
@@ -1259,7 +1204,11 @@ class Surface:
         width = x1 - x0
         height = y1 - y0
         offscreen = x0 < 0 or y0 < 0 or x1 > WIDTH or y1 > HEIGHT
-        top_bar_limit = HOME_TOP_BAR_H if self.view == "home" else TOP_BAR_H
+        top_bar_limit = (
+            0
+            if self.view in TOP_BAR_FREE_VIEWS
+            else HOME_TOP_BAR_H if self.view == "home" else TOP_BAR_H
+        )
         top_bar_overlap = kind not in ("screen", "top_bar") and self.view != "lock_overlay" and y0 < top_bar_limit
         dock_overlap = kind != "dock_tab" and self.view in DOCKED_VIEWS and y1 > DOCK_Y
         unexpected_dock = kind == "dock_tab" and self.view not in DOCKED_VIEWS
@@ -1903,7 +1852,8 @@ def draw_dock(s: Surface, active: str):
     s.rect((0, DOCK_Y, WIDTH, HEIGHT), (10, 16, 25))
     s.metrics["dock_y"] = DOCK_Y
     s.metrics["dock_height"] = DOCK_H
-    s.metrics["docked_content_height"] = DOCK_Y - TOP_BAR_H
+    s.metrics["docked_content_y"] = 0
+    s.metrics["docked_content_height"] = DOCK_Y
     dock_tabs = dock_tabs_for_profile(s.release_profile)
     w = WIDTH // len(dock_tabs)
     for i, (name, label, destination, icon) in enumerate(dock_tabs):
@@ -2276,7 +2226,7 @@ def draw_row(
     if target_label or action or destination:
         s.touch_target(target_label or title, box, kind="row", action=action, destination=destination)
     row_h = y1 - y0
-    title_right = x1 - 70 if badge else x1 - 10
+    title_right = x1 - 100 if badge else x1 - 10
     if row_h >= 38:
         s.text(title, (x0 + 10, y0 + 5, title_right, y0 + 24), 13, TEXT, True)
         s.text(detail, (x0 + 10, y0 + 24, x1 - 10, y1 - 5), 11, MUTED)
@@ -2286,8 +2236,8 @@ def draw_row(
     else:
         s.text(title, (x0 + 10, y0 + 3, title_right, y1 - 3), 10, TEXT, True)
     if badge:
-        s.round_rect((x1 - 62, y0 + 9, x1 - 10, y0 + 31), (22, 39, 49), badge_color, 8)
-        s.text(badge, (x1 - 58, y0 + 10, x1 - 14, y0 + 30), 11, badge_color, True, "center")
+        s.round_rect((x1 - 92, y0 + 9, x1 - 10, y0 + 31), (22, 39, 49), badge_color, 8)
+        s.text(badge, (x1 - 88, y0 + 10, x1 - 14, y0 + 30), 10, badge_color, True, "center")
 
 
 def map_storage_summary(snap: Snapshot) -> str:
@@ -2454,53 +2404,7 @@ def draw_home_body(s: Surface, snap: Snapshot):
             "settings",
         ),
     )
-    core_tiles = (
-        (
-            (12, 16, 234, 156),
-            "chat",
-            "Messages",
-            "Public and direct conversations",
-            messages_status,
-            AMBER if audible_unread else (MUTED if snap.muted_unread_dm else ACCENT),
-            "open_messages_root",
-            "messages",
-        ),
-        (
-            (246, 16, 468, 156),
-            "signal",
-            "Nodes",
-            "Contacts, nearby nodes, and routing",
-            f"{len(snap.contacts)} contacts | {len(snap.heard)} nearby",
-            GREEN if snap.contacts else MUTED,
-            "open_nodes",
-            "nodes",
-        ),
-        (
-            (12, 164, 234, 304),
-            "signal",
-            "Packets",
-            "Read-only packet log, search, and signal details",
-            f"{len(snap.packets)} packet{'s' if len(snap.packets) != 1 else ''} captured",
-            VIOLET if snap.packets else MUTED,
-            "open_packets",
-            "packets",
-        ),
-        (
-            (246, 164, 468, 304),
-            "settings",
-            "Settings",
-            "Device settings, utilities, and support",
-            f"{len(snap.packets)} packet{'s' if len(snap.packets) != 1 else ''} captured",
-            VIOLET if snap.packets else MUTED,
-            "open_settings",
-            "settings",
-        ),
-    )
-    tiles = (
-        core_tiles
-        if s.release_profile == CORE_RELEASE_PROFILE
-        else full_feature_tiles
-    )
+    tiles = full_feature_tiles
     for box, icon, label, detail, status, color, action, destination in tiles:
         draw_destination_card(
             s,
@@ -2546,7 +2450,8 @@ def draw_home_body(s: Surface, snap: Snapshot):
     )
     core_status_items = (
         ("Mesh", mesh_status, mesh_color, "mesh", "LV_SYMBOL_LOOP", "open_radio_settings", "radio_settings_sheet"),
-        ("Storage", "Internal", MUTED, "storage", "LV_SYMBOL_SAVE", "open_storage_setup", "storage_setup_sheet"),
+        ("Wi-Fi", wifi_status, wifi_color, "wifi", "LV_SYMBOL_WIFI", "open_wifi_settings", "wifi_setup_sheet"),
+        ("SD", storage_status, storage_color, "sd", "LV_SYMBOL_SD_CARD", "open_storage_setup", "storage_setup_sheet"),
         ("Attention", attention_status, attention_color, "attention", "LV_SYMBOL_WARNING", "open_diagnostics", "diagnostics_sheet"),
     )
     status_items = (
@@ -2557,8 +2462,8 @@ def draw_home_body(s: Surface, snap: Snapshot):
     semantic_labels: list[str] = []
     for index, (label, value, color, kind, icon, action, destination) in enumerate(status_items):
         if s.release_profile == CORE_RELEASE_PROFILE:
-            x0 = 14 + index * 146
-            item_box = (x0, 314, x0 + 144, 398)
+            x0 = 14 + index * 114
+            item_box = (x0, 314, x0 + 110, 398)
         else:
             x0 = 14 + index * 91
             item_box = (x0, 314, x0 + 88, 398)
@@ -2644,76 +2549,100 @@ def draw_messages_notice(
 
 
 def render_messages(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    s.text("Messages", (18, 66, 220, 96), 24, TEXT, True)
-    s.text("Choose a conversation type", (18, 98, 340, 118), 12, MUTED)
-    dm_summaries = dm_conversation_summaries(snap.dm_messages)
-    selected_channel = active_channel(snap)
-    selected_messages = messages_for_channel(snap)
-    cards = (
-        (
-            (18, 126, 442, 244),
-            selected_channel.name,
-            "Default channel conversation" if selected_channel.channel_id == 1
-            else "Active group channel conversation",
-            len(selected_messages),
-            selected_channel.unread,
-            0,
-            "messages",
-            messages_store_state(snap, direct=False),
-            ACCENT,
-            "open_messages_public",
-            "messages_public",
-        ),
-        (
-            (18, 256, 442, 374),
-            "Direct messages",
-            "Private contact conversations",
-            len(dm_summaries),
-            snap.unread_dm,
-            snap.muted_unread_dm,
-            "conversations",
-            messages_store_state(snap, direct=True),
-            GREEN,
-            "open_messages_dm",
-            "messages_dm",
-        ),
+    s.text("Channels", (18, 10, 220, 40), 24, TEXT, True)
+    s.text("Group conversations", (18, 40, 300, 60), 12, MUTED)
+    draw_button(
+        s,
+        (342, 6, 442, 50),
+        "Direct",
+        GREEN,
+        action="open_messages_dm",
+        destination="messages_dm",
     )
-    for box, title, detail, total, unread, muted_unread, unit, store_state, color, action, destination in cards:
-        s.round_rect(box, SURFACE, BORDER, 8)
-        s.text(title, (box[0] + 14, box[1] + 12, box[2] - 42, box[1] + 38), 18, color, True)
-        s.text(">", (box[2] - 34, box[1] + 12, box[2] - 14, box[1] + 38), 18, MUTED, True, "center")
-        s.text(detail, (box[0] + 14, box[1] + 48, box[2] - 14, box[1] + 68), 12, TEXT)
-        if store_state == "loading":
-            status = "Loading retained history"
-        elif store_state == "unavailable":
-            status = f"{total} readable in RAM | storage unavailable"
-        elif store_state == "degraded":
-            status = f"{total} {unit} | storage degraded"
-        else:
-            status = f"{total} {unit} | {unread} unread"
-            if muted_unread:
-                status += f" + {muted_unread} muted"
+    body = (18, 66, 442, 354)
+    s.round_rect(body, (7, 16, 24), BORDER, 8)
+    channels = snap.channels[:8]
+    y = 74
+    if not channels:
         s.text(
-            status,
-            (box[0] + 14, box[1] + 82, box[2] - 14, box[1] + 104),
-            12,
-            AMBER if unread or store_state in ("degraded", "unavailable") else MUTED,
+            "No channels yet. Add or import a channel.",
+            (34, 88, 426, 118),
+            13,
+            MUTED,
+        )
+        draw_button(
+            s,
+            (26, 134, 434, 182),
+            "Add a channel",
+            ACCENT,
+            action="open_channel_selector",
+            destination="channel_selector_sheet",
+        )
+    for channel in channels:
+        box = (26, y, 434, y + 60)
+        active = channel.channel_id == snap.active_channel_id
+        s.round_rect(
+            box,
+            SURFACE_2 if channel.enabled else SURFACE,
+            ACCENT if active else BORDER,
+            8,
+        )
+        display_name = channel.name if channel.name.startswith("#") else f"#{channel.name}"
+        s.text(
+            display_name,
+            (34, y + 5, 284, y + 27),
+            14,
+            ACCENT if active else (TEXT if channel.enabled else MUTED),
             True,
         )
-        s.touch_target(title, box, kind="destination_card", action=action, destination=destination)
+        state = (
+            "Open now" if active else
+            "Tap to open" if channel.enabled else
+            "Disabled - open settings to enable"
+        )
+        if channel.channel_id == 1:
+            state += " | default"
+        s.text(state, (34, y + 32, 344, y + 52), 11, MUTED)
+        if channel.unread:
+            s.text(
+                str(channel.unread),
+                (350, y + 7, 390, y + 28),
+                12,
+                AMBER,
+                True,
+                "center",
+            )
+        s.text(">", (398, y + 18, 426, y + 44), 16, MUTED, True, "center")
+        destination = (
+            "messages_public" if channel.channel_id == 1 else
+            "messages_channel_private" if channel.channel_id == 2 else None
+        )
+        action = (
+            "open_messages_public" if channel.channel_id == 1 else
+            f"select_channel_{channel.channel_id}"
+        )
+        s.touch_target(
+            display_name,
+            box,
+            kind="channel_row",
+            action=action,
+            destination=destination,
+            enabled=channel.enabled,
+        )
+        y += 68
     s.metrics.update(
         {
             "messages_mode": "root",
-            "active_channel_id": selected_channel.channel_id,
-            "active_channel_name": selected_channel.name,
-            "active_channel_source_count": len(selected_messages),
+            "active_channel_id": snap.active_channel_id,
+            "active_channel_name": active_channel(snap).name,
+            "active_channel_source_count": len(messages_for_channel(snap)),
             "public_source_count": len(snap.public_messages),
             "public_rendered_count": 0,
             "dm_source_count": len(snap.dm_messages),
-            "dm_conversation_count": len(dm_summaries),
+            "dm_conversation_count": len(dm_conversation_summaries(snap.dm_messages)),
             "dm_rendered_count": 0,
-            "messages_root_simple_destinations": True,
+            "messages_root_channel_list_first": True,
+            "messages_root_channel_count": len(channels),
             "messages_navigation_rf_silent": True,
             "public_store_state": messages_store_state(snap, direct=False),
             "dm_store_state": messages_store_state(snap, direct=True),
@@ -2750,41 +2679,32 @@ def snapshot_after_incoming_public(snap: Snapshot) -> Snapshot:
 def render_messages_public(s: Surface, snap: Snapshot):
     selected_channel = active_channel(snap)
     selected_messages = messages_for_channel(snap)
-    draw_top_bar(s, snap)
-    draw_button(s, (18, 64, 90, 108), "Back", MUTED, action="open_messages_root", destination="messages")
-    title_right = 442 if s.release_profile == CORE_RELEASE_PROFILE else 340
-    s.text(selected_channel.name, (104, 66, title_right, 92), 20, ACCENT, True)
-    if s.release_profile != CORE_RELEASE_PROFILE:
-        draw_button(
-            s, (350, 64, 442, 108), "Channels", BLUE,
-            action="open_channel_selector",
-            destination="channel_selector_sheet" if selected_channel.channel_id == 1
-            else "channel_selector_private_sheet",
-        )
+    draw_button(s, (18, 8, 90, 52), "Back", MUTED, action="open_messages_root", destination="messages")
+    s.text(selected_channel.name, (104, 10, 300, 40), 22, ACCENT, True)
     s.text(
         f"{len(selected_messages)} messages | {selected_channel.unread} unread",
-        (104, 92, 344, 112),
+        (104, 38, 294, 56),
         11,
         MUTED,
     )
     draw_button(
-        s, (18, 116, 114, 160), "Mark read", GREEN,
+        s, (306, 8, 370, 52), "Read", GREEN,
         action="mark_public_read" if selected_channel.channel_id == 1
         else "mark_channel_read",
     )
     draw_button(
-        s, (122, 116, 218, 160), "History", BLUE,
+        s, (378, 8, 442, 52), "...", BLUE,
         action="open_public_history" if selected_channel.channel_id == 1
         else "open_channel_history",
         destination="public_history_sheet" if selected_channel.channel_id == 1
         else "channel_history_private_sheet",
     )
-    body = (18, 168, 442, 352)
+    body = (18, 60, 442, 298)
     s.round_rect(body, (7, 16, 24), BORDER, 8)
     store_state = messages_store_state(snap, direct=False)
     visible_limit = 2 if store_state == "ready" else 1
     visible = selected_messages[-visible_limit:]
-    y = 176
+    y = 68
     if store_state == "loading":
         y = draw_messages_notice(s, y, "Loading retained history...", BLUE)
     elif store_state == "degraded":
@@ -2849,8 +2769,9 @@ def render_messages_public(s: Surface, snap: Snapshot):
         )
         s.text(empty_text, (34, y + 12, 426, y + 38), 13, MUTED)
     draw_button(
-        s, (18, 360, 442, 410),
-        "Compose" if selected_channel.enabled else "Channel unavailable",
+        s, (18, 306, 442, 354),
+        "Message this channel"
+        if selected_channel.enabled else "Channel unavailable",
         ACCENT if selected_channel.enabled else MUTED,
         action="open_public_compose" if selected_channel.channel_id == 1
         else "open_channel_compose",
@@ -2866,7 +2787,7 @@ def render_messages_public(s: Surface, snap: Snapshot):
             "active_channel_enabled": selected_channel.enabled,
             "active_channel_source_count": len(selected_messages),
             "channel_selector_available": (
-                s.release_profile != CORE_RELEASE_PROFILE
+                True
             ),
             "public_source_count": len(snap.public_messages),
             "public_rendered_count": len(visible),
@@ -3035,9 +2956,9 @@ def snapshot_after_incoming_selected_dm(snap: Snapshot) -> Snapshot:
 
 
 def render_messages_dm_list(s: Surface, snap: Snapshot):
-    body = (16, 124, 464, 410)
+    body = (18, 68, 442, 354)
     s.round_rect(body, (7, 16, 24), BORDER, 8)
-    y = 134
+    y = 78
     dm_rendered = 0
     dm_rendered_states: list[str] = []
     summaries = dm_conversation_summaries(snap.dm_messages)
@@ -3085,9 +3006,9 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
                 unread_by_source.get(conversation_id, 0) + 1
             )
     for msg in summaries:
-        if y + 58 > 402:
+        if y + 58 > 346:
             break
-        s.round_rect((28, y, 452, y + 58), SURFACE, BORDER, 8)
+        s.round_rect((26, y, 434, y + 58), SURFACE, BORDER, 8)
         state = dm_list_delivery_label(msg)
         conversation_id = dm_conversation_id(msg)
         unread_count = unread_by_source.get(conversation_id, 0)
@@ -3098,7 +3019,7 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
         dm_rendered_states.append(state)
         s.text(
             msg.source,
-            (40, y + 6, 300, y + 24),
+            (38, y + 6, 286, y + 24),
             12,
             AMBER if msg.unread and not msg.muted else
             (MUTED if msg.muted else
@@ -3107,17 +3028,17 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
         )
         s.text(
             state,
-            (290, y + 6, 440, y + 24),
+            (280, y + 6, 422, y + 24),
             10,
             AMBER if msg.unread and not msg.muted else MUTED,
             True,
             "right",
         )
-        s.text(msg.text, (40, y + 26, 440, y + 42), 12, TEXT, True)
-        s.text(msg.meta, (40, y + 42, 440, y + 56), 10, MUTED, True)
+        s.text(msg.text, (38, y + 26, 422, y + 42), 12, TEXT, True)
+        s.text(msg.meta, (38, y + 42, 422, y + 56), 10, MUTED, True)
         s.touch_target(
             f"DM row {msg.source}",
-            (28, y, 452, y + 58),
+            (26, y, 434, y + 58),
             kind="row",
             action="open_dm_thread",
             destination="dm_thread_sheet",
@@ -3135,7 +3056,7 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
             if dm_capable_contact_count == 0 else
             "No direct-message history yet."
         )
-        s.text(empty_text, (36, y + 12, 444, y + 42), 12, MUTED, True)
+        s.text(empty_text, (34, y + 12, 426, y + 42), 12, MUTED, True)
     s.metrics.update(
         {
             "messages_mode": "dms",
@@ -3159,20 +3080,21 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
 
 
 def render_messages_dm(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="open_messages_root", destination="messages")
-    s.text("Direct messages", (112, 66, 360, 92), 20, GREEN, True)
+    draw_button(s, (18, 8, 90, 52), "Back", MUTED, action="open_messages_root", destination="messages")
+    s.text("Direct messages", (104, 10, 292, 40), 22, GREEN, True)
+    conversation_count = len(dm_conversation_summaries(snap.dm_messages))
     status = (
-        f"{len(dm_conversation_summaries(snap.dm_messages))} conversations | "
+        f"{conversation_count} chat{'s' if conversation_count != 1 else ''} | "
         f"{snap.unread_dm} unread"
     )
     if snap.muted_unread_dm:
         status += f" + {snap.muted_unread_dm} muted"
     s.text(
         status,
-        (112, 92, 420, 112),
-        11,
+        (296, 18, 442, 40),
+        10,
         MUTED,
+        align="right",
     )
     render_messages_dm_list(s, snap)
     draw_dock(s, "Messages")
@@ -3309,91 +3231,188 @@ def render_messages_dm_failure(s: Surface, snap: Snapshot):
     )
 
 
-def render_nodes(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    s.text("Nodes", (16, 64, 150, 92), 22, TEXT, True)
-    counts = node_role_counts(snap.heard)
-    heard_query_count = min(len(snap.heard), D1L_NODE_STORE_CAPACITY)
-    s.round_rect((16, 104, 464, 200))
-    s.text("Heard Nodes", (28, 110, 180, 132), 14, MUTED, True)
-    s.text(str(heard_query_count), (28, 132, 112, 158), 22, ACCENT, True)
-    contact_word = "contact" if len(snap.contacts) == 1 else "contacts"
+def node_role_display_name(role: str) -> str:
+    normalized = role.lower()
+    if normalized in ("companion", "chat"):
+        return "Chat"
+    if normalized == "repeater":
+        return "Repeater"
+    if normalized == "room":
+        return "Room"
+    if normalized == "sensor":
+        return "Sensor"
+    return "Node"
+
+
+def node_role_avatar_text(role: str) -> str:
+    return {
+        "Chat": "C",
+        "Repeater": "R",
+        "Room": "RM",
+        "Sensor": "S",
+    }.get(node_role_display_name(role), "?")
+
+
+def node_route_display(node: Node) -> str:
+    meta = node.meta.lower()
+    if "direct" in meta:
+        return "Direct"
+    if "1 hop" in meta or "one hop" in meta:
+        return "1 hop"
+    if "2 hop" in meta or "two hop" in meta:
+        return "2 hops"
+    if "flood" in meta:
+        return "Flood"
+    if "quiet" in meta:
+        return "Quiet"
+    return "Heard"
+
+
+def node_is_saved_contact(node: Node, contacts: tuple[Node, ...]) -> bool:
+    return bool(node.fingerprint) and any(
+        contact.fingerprint == node.fingerprint
+        for contact in contacts
+        if contact.fingerprint
+    )
+
+
+def draw_contacts_node_row(
+    s: Surface,
+    snap: Snapshot,
+    node: Node,
+    y: int,
+    *,
+    saved_contact: bool,
+) -> None:
+    dm_ready = node_dm_identity_reason(snap, node) == "ready"
+    row_right = 360 if dm_ready else 464
+    row_box = (16, y, row_right, y + 58)
+    s.round_rect(row_box, SURFACE_2, BORDER, 8)
+    s.touch_target(
+        f"{'Contact' if saved_contact else 'Nearby'} row {node.name}",
+        row_box,
+        kind="row",
+        action="open_contact_detail" if saved_contact else "open_node_detail",
+        destination="contact_detail_sheet" if saved_contact else "node_detail_sheet",
+    )
+    role_color = role_badge_color(node.role)
+    s.round_rect((24, y + 9, 64, y + 49), (16, 32, 42), role_color, 20)
     s.text(
-        f"{len(snap.contacts)} {contact_word}",
-        (250, 114, 452, 138),
+        node_role_avatar_text(node.role),
+        (26, y + 17, 62, y + 41),
         12,
-        GREEN,
+        role_color,
         True,
-        "right",
+        "center",
     )
-    chip_specs = (
-        ("Chat", "chat_companion", ACCENT),
-        ("Repeater", "repeater", AMBER),
-        ("Room", "room_server", GREEN),
-        ("Sensor", "sensor", VIOLET),
-        ("Unknown", "unknown", BLUE),
-    )
-    for index, (label, key, color) in enumerate(chip_specs):
-        x = 28 + index * 83
-        s.round_rect((x, 160, x + 76, 194), fill=(16, 32, 42), outline=color, radius=6)
-        s.text(label, (x + 2, 162, x + 74, 176), 9, MUTED, True, "center")
-        s.text(str(counts[key]), (x + 2, 176, x + 74, 192), 11, color, True, "center")
-
-    s.round_rect((16, 208, 464, 282))
-    s.text("Contacts", (28, 212, 180, 232), 13, MUTED, True)
-    y = 234
-    contacts_rendered = 0
-    for node in snap.contacts:
-        if y + 44 > 280:
-            break
-        draw_row(
-            s, (28, y, 374, y + 44),
-            node.name,
-            f"{node.fingerprint}  {node.signal}",
-            role_badge_text(node.role),
-            badge_color=role_badge_color(node.role),
-            target_label=f"Contact row {node.name}",
-            action="open_contact_detail",
-            destination="contact_detail_sheet",
-        )
-        if node_dm_identity_reason(snap, node) == "ready":
-            draw_button(
-                s, (384, y, 452, y + 44), "DM", GREEN,
-                action="open_dm_compose", destination="compose_dm_sheet",
-            )
-        y += 48
-        contacts_rendered += 1
-    if contacts_rendered == 0:
-        s.text("No contacts retained", (28, 238, 452, 268), 12, MUTED)
-
-    s.round_rect((16, 290, 464, 416))
-    s.text("All Heard", (28, 294, 180, 314), 13, MUTED, True)
-    y = 316
-    heard_rendered = 0
-    for node in snap.heard:
-        if y + 44 > 414:
-            break
-        dm_ready = node_dm_identity_reason(snap, node) == "ready"
-        draw_row(
+    s.text(node.name, (76, y + 7, row_right - 14, y + 28), 14, TEXT, True)
+    detail = f"{node_role_display_name(node.role)} | {node_route_display(node)}"
+    s.text(detail, (76, y + 31, row_right - 14, y + 51), 11, MUTED)
+    if dm_ready:
+        draw_button(
             s,
-            (28, y, 374 if dm_ready else 452, y + 44),
-            node.name,
-            f"{node.meta}  {node.signal}",
-            role_badge_text(node.role),
-            badge_color=role_badge_color(node.role),
-            target_label=f"Heard node {node.name}",
-            action="open_node_detail",
-            destination="node_detail_sheet",
+            (368, y + 7, 452, y + 51),
+            "Message",
+            GREEN,
+            action="open_dm_compose" if saved_contact else "open_node_dm",
+            destination="compose_dm_sheet",
         )
-        if dm_ready:
-            draw_button(
-                s, (384, y, 452, y + 44), "DM", GREEN,
-                action="open_node_dm", destination="compose_dm_sheet",
+    else:
+        s.text(">", (438, y + 17, 454, y + 41), 16, MUTED, True, "center")
+
+
+def render_nodes(s: Surface, snap: Snapshot):
+    counts = node_role_counts(snap.heard)
+    heard_query = snap.heard[:D1L_NODE_STORE_CAPACITY]
+    heard_query_count = len(heard_query)
+    nearby = tuple(
+        node
+        for node in heard_query
+        if not node_is_saved_contact(node, snap.contacts)
+    )
+
+    s.text("Contacts", (16, 8, 290, 34), 22, TEXT, True)
+    s.text(
+        f"{len(snap.contacts)} saved | {len(nearby)} nearby",
+        (16, 34, 290, 52),
+        11,
+        MUTED,
+    )
+    draw_button(
+        s,
+        (304, 4, 374, 48),
+        "Find",
+        GREEN,
+        action="find_nearby",
+        destination=None,
+    )
+    draw_button(
+        s,
+        (382, 4, 452, 48),
+        "Clear",
+        RED,
+        action="clear_heard",
+        destructive=heard_query_count > 0,
+        enabled=heard_query_count > 0,
+    )
+
+    contacts_rendered = 0
+    nearby_rendered = 0
+    duplicate_nodes_hidden = heard_query_count - len(nearby)
+    if not snap.contacts and not nearby:
+        s.round_rect((16, 76, 464, 286))
+        s.round_rect((212, 94, 260, 142), (16, 32, 42), ACCENT, 24)
+        s.text("+", (216, 100, 256, 136), 24, ACCENT, True, "center")
+        s.text("No contacts yet", (40, 158, 440, 188), 20, TEXT, True, "center")
+        s.text(
+            "Nearby nodes appear here after a signed advert.",
+            (54, 196, 426, 224),
+            12,
+            MUTED,
+            False,
+            "center",
+        )
+        draw_button(
+            s,
+            (142, 232, 338, 280),
+            "Find nearby",
+            GREEN,
+            action="find_nearby",
+            destination=None,
+        )
+    else:
+        s.text("Saved contacts", (20, 62, 220, 82), 12, MUTED, True)
+        y = 86
+        for node in snap.contacts[:2]:
+            draw_contacts_node_row(s, snap, node, y, saved_contact=True)
+            y += 62
+            contacts_rendered += 1
+        if contacts_rendered == 0:
+            draw_row(
+                s,
+                (16, y, 464, y + 58),
+                "No saved contacts yet",
+                "Tap a nearby node to view its identity.",
             )
-        y += 48
-        heard_rendered += 1
-    if heard_rendered == 0:
-        s.text("No heard nodes yet", (28, 326, 452, 356), 12, MUTED)
+            y += 62
+
+        y += 8
+        s.text("Nearby", (20, y, 220, y + 20), 12, MUTED, True)
+        y += 24
+        for node in nearby:
+            if y + 58 > 420:
+                break
+            draw_contacts_node_row(s, snap, node, y, saved_contact=False)
+            y += 62
+            nearby_rendered += 1
+        if nearby_rendered == 0:
+            draw_row(
+                s,
+                (16, y, 464, y + 58),
+                "No other nearby nodes",
+                "Listening for signed adverts.",
+            )
+
     s.metrics.update(
         {
             "contacts_source_count": len(snap.contacts),
@@ -3401,16 +3420,22 @@ def render_nodes(s: Surface, snap: Snapshot):
             "heard_source_count": len(snap.heard),
             "heard_query_count": heard_query_count,
             "node_role_query_capacity": D1L_NODE_STORE_CAPACITY,
-            "heard_rendered_count": heard_rendered,
+            "heard_rendered_count": nearby_rendered,
+            "nearby_source_count": len(nearby),
+            "duplicate_contact_nodes_hidden": duplicate_nodes_hidden,
             "node_role_counts": counts,
             "node_role_count_sum": sum(counts.values()),
             "node_role_counts_match_query": sum(counts.values()) == heard_query_count,
             "node_role_source": "exact_render_query_role",
             "nodes_navigation_rf_silent": True,
             "nodes_formats_sd": False,
-            "nodes_destructive_actions": 0,
+            "nodes_destructive_actions": 1 if heard_query_count > 0 else 0,
+            "nodes_clear_confirmation_required": True,
+            "nodes_primary_rows_show_fingerprint": False,
+            "nodes_test_copy_present": False,
             "contact_dm_shortcut_min_height": 44,
             "node_dm_shortcut_min_height": 44,
+            "nodes_row_height": 58,
         }
     )
     draw_dock(s, "Nodes")
@@ -3537,12 +3562,12 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
     dot_radius = 7
     label_gap = 3
     exclusions = (
-        (0, TOP_BAR_H, 112, TOP_BAR_H + 64),
-        (108, TOP_BAR_H + 10, 412, TOP_BAR_H + 64),
-        (412, TOP_BAR_H, 478, TOP_BAR_H + 152),
-        (0, TOP_BAR_H + 270, 112, TOP_BAR_H + 360),
-        (108, TOP_BAR_H + 294, 232, TOP_BAR_H + 360),
-        (220, TOP_BAR_H + 326, 478, TOP_BAR_H + 360),
+        (0, 0, 112, 64),
+        (108, 10, 412, 64),
+        (412, 0, 478, 152),
+        (0, 270, 112, 360),
+        (108, 294, 232, 360),
+        (220, 326, 478, 360),
     )
     placed: list[tuple[int, int, int, int]] = []
     names: list[str] = []
@@ -3646,7 +3671,6 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
 
 
 def render_map(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
     center_trusted = map_center_is_trusted(snap)
     ready_for_live = center_trusted and snap.wifi_connected
     frame_ready = center_trusted and snap.map_tile_download_state in ("active_view_ready", "cache_reuse") and (
@@ -3658,9 +3682,9 @@ def render_map(s: Surface, snap: Snapshot):
         and snap.map_progress_completed < snap.map_progress_total
     )
 
-    # Match ui_map.c: the entire space between global chrome is the map canvas.
+    # Match ui_map.c: the complete docked content surface is the map canvas.
     # Controls are sparse edge overlays so the map remains the dominant surface.
-    viewport = (0, TOP_BAR_H, WIDTH, DOCK_Y)
+    viewport = (0, 0, WIDTH, DOCK_Y)
     if frame_ready:
         draw_map_grid(s, snap, viewport)
         marker_metrics = draw_map_markers(s, snap, viewport)
@@ -3700,7 +3724,7 @@ def render_map(s: Surface, snap: Snapshot):
 
     draw_button(
         s,
-        (8, TOP_BAR_H + 8, 104, TOP_BAR_H + 56),
+        (8, 8, 104, 56),
         "Options",
         MUTED,
         action="open_map_options",
@@ -3714,11 +3738,11 @@ def render_map(s: Surface, snap: Snapshot):
         }.get(snap.map_center_source, "Unknown source")
         s.text(
             center_source_label,
-            (8, TOP_BAR_H + 278, 104, TOP_BAR_H + 298),
+            (8, 278, 104, 298),
             9, GREEN, True, "center",
         )
         draw_button(s, (8, DOCK_Y - 60, 104, DOCK_Y - 8), "Center", TEXT, action="map_recenter")
-        s.round_rect((142, TOP_BAR_H + 14, 314, TOP_BAR_H + 46), (7, 16, 24), (7, 16, 24), 5)
+        s.round_rect((142, 14, 314, 46), (7, 16, 24), (7, 16, 24), 5)
         progress_label = (
             "Drag to pan"
             if frame_ready
@@ -3736,9 +3760,9 @@ def render_map(s: Surface, snap: Snapshot):
                 )
             )
         )
-        s.text(progress_label, (146, TOP_BAR_H + 18, 310, TOP_BAR_H + 42), 11, TEXT, True, "center")
+        s.text(progress_label, (146, 18, 310, 42), 11, TEXT, True, "center")
         if progress_visible:
-            progress_box = (116, TOP_BAR_H + 52, 396, TOP_BAR_H + 60)
+            progress_box = (116, 52, 396, 60)
             s.round_rect(progress_box, (7, 16, 24), (7, 16, 24), 4)
             completed_width = int(
                 (progress_box[2] - progress_box[0])
@@ -3752,20 +3776,20 @@ def render_map(s: Surface, snap: Snapshot):
                     BLUE,
                     4,
                 )
-        draw_button(s, (420, TOP_BAR_H + 8, 472, TOP_BAR_H + 60), "+", TEXT, action="map_zoom_in")
-        s.round_rect((420, TOP_BAR_H + 66, 472, TOP_BAR_H + 88), (7, 16, 24), (7, 16, 24), 4)
-        s.text(f"z{snap.map_tile_zoom}", (420, TOP_BAR_H + 66, 472, TOP_BAR_H + 88), 11, TEXT, True, "center")
-        draw_button(s, (420, TOP_BAR_H + 92, 472, TOP_BAR_H + 144), "-", TEXT, action="map_zoom_out")
+        draw_button(s, (420, 8, 472, 60), "+", TEXT, action="map_zoom_in")
+        s.round_rect((420, 66, 472, 88), (7, 16, 24), (7, 16, 24), 4)
+        s.text(f"z{snap.map_tile_zoom}", (420, 66, 472, 88), 11, TEXT, True, "center")
+        draw_button(s, (420, 92, 472, 144), "-", TEXT, action="map_zoom_out")
 
     pin_truth = (
         "Signed advert E6\nage verified\naccuracy unknown"
         if snap.map_marker_age_reference_valid
         else "Signed advert E6\npins hidden\nage unverified"
     )
-    s.round_rect((112, TOP_BAR_H + 298, 224, TOP_BAR_H + 356), (7, 16, 24), (7, 16, 24), 4)
+    s.round_rect((112, 298, 224, 356), (7, 16, 24), (7, 16, 24), 4)
     s.wrapped_text(
         pin_truth,
-        (114, TOP_BAR_H + 300, 222, TOP_BAR_H + 354),
+        (114, 300, 222, 354),
         8, GREEN if snap.map_marker_age_reference_valid else AMBER,
         line_height=16, align="center",
     )
@@ -3900,7 +3924,7 @@ def render_map_location(s: Surface, snap: Snapshot):
     if latitude_value:
         s.text(latitude_value, (28, 212, 452, 240), 17, TEXT)
     else:
-        s.text("e.g. 43.6532000", (28, 212, 452, 240), 15, MUTED)
+        s.text("Range: -90 to 90", (28, 212, 452, 240), 15, MUTED)
 
     s.text("Longitude", (28, 262, 220, 282), 13, GREEN, True)
     s.round_rect((16, 284, 464, 332), SURFACE_2, BORDER, 8)
@@ -3908,7 +3932,7 @@ def render_map_location(s: Surface, snap: Snapshot):
     if longitude_value:
         s.text(longitude_value, (28, 294, 452, 322), 17, TEXT)
     else:
-        s.text("e.g. -79.3832000", (28, 294, 452, 322), 15, MUTED)
+        s.text("Range: -180 to 180", (28, 294, 452, 322), 15, MUTED)
 
     s.round_rect((16, 344, 464, 398), (13, 22, 31), BORDER, 8)
     s.text("The keyboard opens only while editing a coordinate.", (28, 358, 452, 384), 12, MUTED)
@@ -3923,7 +3947,7 @@ def render_map_location(s: Surface, snap: Snapshot):
             "map_location_clear_available": snap.map_location_set,
             "map_location_latitude_value": latitude_value,
             "map_location_longitude_value": longitude_value,
-            "map_location_examples_are_placeholders_only": True,
+            "map_location_range_guidance_only": True,
             "map_probe_network_allowed": False,
             "map_background_download": False,
             "map_area_download": False,
@@ -3977,36 +4001,35 @@ def render_map_cache(s: Surface, snap: Snapshot):
 
 
 def render_packets(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    s.text("Packets", (16, 64, 150, 92), 22, TEXT, True)
-    s.round_rect((16, 100, 464, 148), (5, 12, 19), BORDER, 8)
-    s.text("live tail  rssi -41  snr 30  avg -46", (28, 108, 452, 128), 12, GREEN, True)
-    s.text("rooms 1  repeaters 1  samples 128", (28, 128, 452, 146), 11, MUTED)
+    s.text("Packets", (16, 8, 150, 36), 22, TEXT, True)
+    s.round_rect((16, 44, 464, 92), (5, 12, 19), BORDER, 8)
+    s.text("live tail  rssi -41  snr 30  avg -46", (28, 52, 452, 72), 12, GREEN, True)
+    s.text("rooms 1  repeaters 1  samples 128", (28, 72, 452, 90), 11, MUTED)
     for i, label in enumerate(("All", "RX", "TX", "Text")):
         draw_button(
             s,
-            (16 + i * 64, 160, 72 + i * 64, 194),
+            (16 + i * 64, 104, 72 + i * 64, 138),
             label,
             GREEN if label == "All" else ACCENT,
             action=f"packet_filter_{label.lower()}",
         )
-    draw_button(s, (286, 160, 366, 194), "Search", BLUE, action="open_packet_search", destination="packet_search_sheet")
-    draw_button(s, (376, 160, 464, 194), "Pause", AMBER, action="pause_packet_feed")
-    s.text("find raw/test", (28, 200, 464, 218), 11, AMBER)
-    s.text("Packet Feed", (28, 224, 180, 244), 14, MUTED, True)
+    draw_button(s, (286, 104, 366, 138), "Search", BLUE, action="open_packet_search", destination="packet_search_sheet")
+    draw_button(s, (376, 104, 464, 138), "Pause", AMBER, action="pause_packet_feed")
+    s.text("find raw/test", (28, 144, 464, 162), 11, AMBER)
+    s.text("Packet Feed", (28, 168, 180, 188), 14, MUTED, True)
     packet_query_limit = min(len(snap.packets), 100)
     page_backend = (
         "NVS" if s.release_profile == CORE_RELEASE_PROFILE else "SD"
     )
     s.text(
         f"page 1-{packet_query_limit}/{len(snap.packets)} {page_backend}",
-        (220, 224, 452, 244),
+        (220, 168, 452, 188),
         11,
         MUTED,
         True,
         "right",
     )
-    y = 236
+    y = 180
 
     def packet_color(packet: Packet) -> tuple[int, int, int]:
         fields = f"{packet.kind} {packet.direction} {packet.note}".lower()
@@ -4036,20 +4059,16 @@ def render_packets(s: Surface, snap: Snapshot):
     if len(snap.packets) > packet_query_limit:
         draw_button(s, (16, y + 4, 146, y + 44), "Load Older", BLUE, action="load_older_packets")
         y += 50
-    if s.release_profile != CORE_RELEASE_PROFILE:
-        draw_button(
-            s,
-            (16, 420 - 44, 146, 420 - 8),
-            "Mesh Roles",
-            GREEN,
-            action="open_mesh_roles",
-            destination="mesh_roles_sheet",
-        )
-        routes_label_box = (166, 382, 260, 402)
-        route_row_box = (236, 374, 464, 410)
-    else:
-        routes_label_box = (16, 382, 110, 402)
-        route_row_box = (116, 374, 464, 410)
+    draw_button(
+        s,
+        (16, 376, 146, 412),
+        "Mesh Roles",
+        GREEN,
+        action="open_mesh_roles",
+        destination="mesh_roles_sheet",
+    )
+    routes_label_box = (166, 382, 260, 402)
+    route_row_box = (236, 374, 464, 410)
     s.text("Routes", routes_label_box, 14, MUTED, True)
     for route in snap.routes[:1]:
         draw_row(
@@ -4061,12 +4080,7 @@ def render_packets(s: Surface, snap: Snapshot):
             action="open_route_detail",
             destination="route_detail_sheet",
         )
-    draw_dock(
-        s,
-        "Packets"
-        if s.release_profile == CORE_RELEASE_PROFILE
-        else "Settings",
-    )
+    draw_dock(s, "Settings")
     s.metrics.update(
         {
             "packet_source_count": len(snap.packets),
@@ -4076,9 +4090,7 @@ def render_packets(s: Surface, snap: Snapshot):
             "packet_rendered_count": len(visible_packets),
             "packet_load_older_available": len(snap.packets) > packet_query_limit,
             "packet_backend": page_backend.lower(),
-            "mesh_roles_available": (
-                s.release_profile != CORE_RELEASE_PROFILE
-            ),
+            "mesh_roles_available": True,
         }
     )
 
@@ -4087,7 +4099,230 @@ def more_category_specs(
     snap: Snapshot,
     release_profile: str = FULL_FEATURE_RELEASE_PROFILE,
 ) -> tuple[dict[str, object], ...]:
-    """Return the stable More hierarchy represented by the firmware accordion."""
+    """Return the flat Settings sections projected by the firmware view model."""
+
+    if release_profile not in RELEASE_PROFILES:
+        raise ValueError(f"unknown release profile: {release_profile}")
+
+    core = release_profile == CORE_RELEASE_PROFILE
+    packet_status = f"{len(snap.packets)} saved"
+    storage_status = storage_card_menu_status(snap)
+    storage_warning = storage_needs_attention(snap)
+    sd_warning = storage_sd_needs_attention(snap)
+    map_status = settings_map_status(snap)
+    wifi_status = (
+        "Unavailable"
+        if not snap.wifi_build_enabled
+        else (
+            "Connected"
+            if snap.wifi_connected
+            else (
+                "Connecting"
+                if snap.wifi_connecting
+                else ("On" if snap.wifi_enabled else "Off")
+            )
+        )
+    )
+    ble_status = (
+        "Unavailable"
+        if not snap.ble_build_enabled or not snap.ble_transport_supported
+        else ("On" if snap.ble_companion_enabled else "Off")
+    )
+    radio_status = (
+        "Applying"
+        if snap.radio_apply_pending
+        else ("Ready" if snap.radio_ready or snap.radio_applied else "Needs setup")
+    )
+    connections = [
+        (
+            "Wi-Fi",
+            wifi_status,
+            GREEN if snap.wifi_connected else TEXT,
+            "open_wifi_settings",
+            "wifi_setup_sheet",
+            False,
+        ),
+        (
+            "Observer",
+            "Not configured",
+            TEXT,
+            "open_observer",
+            None,
+            False,
+        ),
+    ]
+    if not core:
+        connections.insert(
+            1,
+            (
+                "Bluetooth",
+                ble_status,
+                GREEN if snap.ble_companion_enabled else TEXT,
+                "open_ble_settings",
+                "ble_setup_sheet",
+                False,
+            ),
+        )
+    storage_leaves = [
+        (
+            "SD Card",
+            storage_status,
+            RED if sd_warning else (GREEN if storage_status == "Ready" else TEXT),
+            "open_storage_setup",
+            "storage_setup_sheet",
+            sd_warning,
+        ),
+        (
+            "Map options",
+            map_status,
+            GREEN if map_status == "Ready" else TEXT,
+            "open_map_options",
+            "map_options",
+            False,
+        ),
+    ]
+    if not core:
+        storage_leaves.append(
+            ("Signed update", "Idle", TEXT, "open_signed_update", None, False)
+        )
+    device_leaves = [
+        (
+            "Display",
+            "Brightness & theme",
+            GREEN,
+            "open_display_settings",
+            "display_settings_sheet",
+            False,
+        ),
+        (
+            "Identity",
+            "Ready" if snap.identity_ready else "Not set",
+            TEXT,
+            None,
+            None,
+            False,
+        ),
+    ]
+    if not core:
+        device_leaves.insert(
+            1,
+            ("Notifications", "Unread settings", AMBER, "open_notifications", None, False),
+        )
+    advanced_leaves = [
+        (
+            "Radio",
+            radio_status,
+            GREEN if snap.radio_ready else TEXT,
+            "open_radio_settings",
+            "radio_settings_sheet",
+            False,
+        ),
+        (
+            "Server admin",
+            "Idle",
+            AMBER,
+            "open_admin",
+            None,
+            True,
+        ),
+    ]
+    if not core:
+        advanced_leaves.append(
+            (
+                "Mesh advertise",
+                "Broadcast presence",
+                RED,
+                "open_advert_sheet",
+                "advert_sheet",
+                True,
+            )
+        )
+    return (
+        {
+            "key": "tools",
+            "title": "Tools",
+            "summary": "Packets, diagnostics, and terminal",
+            "color": ACCENT,
+            "warning": False,
+            "action": None,
+            "leaves": (
+                ("Packets", packet_status, BLUE, "open_packets", "packets", False),
+                (
+                    "Diagnostics",
+                    "Health & reports",
+                    VIOLET,
+                    "open_diagnostics",
+                    "diagnostics_sheet",
+                    False,
+                ),
+                ("Terminal", "Local events", TEXT, "open_terminal", None, False),
+            ),
+        },
+        {
+            "key": "connections",
+            "title": "Connections",
+            "summary": "Wi-Fi, Bluetooth, and observer",
+            "color": GREEN,
+            "warning": False,
+            "action": None,
+            "leaves": tuple(connections),
+        },
+        {
+            "key": "storage_maps",
+            "title": "Storage & maps",
+            "summary": (
+                "Storage needs attention"
+                if snap.storage_retained_backup_degraded and sd_warning
+                else "Backup needs attention"
+                if snap.storage_retained_backup_degraded
+                else "SD needs attention"
+                if sd_warning
+                else "SD reconnecting"
+                if snap.storage_setup_action == "wait_for_storage_reconnect"
+                else "SD card and map"
+            ),
+            "color": WARNING_TEXT if storage_warning else AMBER,
+            "warning": storage_warning,
+            "action": None,
+            "leaves": tuple(storage_leaves),
+        },
+        {
+            "key": "device",
+            "title": "Device",
+            "summary": "Display, notifications, identity",
+            "color": BLUE,
+            "warning": False,
+            "action": None,
+            "leaves": tuple(device_leaves),
+        },
+        {
+            "key": "support",
+            "title": "Support",
+            "summary": "About this device",
+            "color": VIOLET,
+            "warning": False,
+            "action": None,
+            "leaves": (
+                (
+                    "About",
+                    f"Version {snap.firmware_version}",
+                    TEXT,
+                    None,
+                    None,
+                    False,
+                ),
+            ),
+        },
+        {
+            "key": "advanced",
+            "title": "Advanced",
+            "summary": "Radio and authenticated server tools",
+            "color": RED,
+            "warning": True,
+            "action": None,
+            "leaves": tuple(advanced_leaves),
+        },
+    )
 
     packet_status = f"{len(snap.packets)} saved"
     storage_status = storage_card_menu_status(snap)
@@ -4283,88 +4518,83 @@ def more_category_specs(
 
 
 def draw_more_header(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    s.text("Tools", (18, 64, 150, 92), 22, TEXT, True)
-    s.text("Settings and utilities", (18, 92, 278, 108), 12, MUTED)
-
-
-def render_settings(s: Surface, snap: Snapshot):
-    draw_more_header(s, snap)
-
-    for index, category in enumerate(
-        more_category_specs(snap, s.release_profile)
-    ):
-        y0 = 110 + index * 52
-        draw_more_category(
-            s,
-            (18, y0, 462, y0 + 48),
-            str(category["title"]),
-            str(category["summary"]),
-            category["color"],
-            action=str(category["action"]),
-            warning=bool(category["warning"]),
-        )
-    draw_dock(s, "Settings")
-
-
-def render_settings_expanded(s: Surface, snap: Snapshot, selected_key: str):
-    """Render a deterministic scroll anchor for one expanded More category."""
-
-    draw_more_header(s, snap)
-    categories = more_category_specs(snap, s.release_profile)
-    selected_index = next(index for index, category in enumerate(categories) if category["key"] == selected_key)
-    selected = categories[selected_index]
-    draw_more_category(
-        s,
-        (18, 110, 462, 158),
-        str(selected["title"]),
-        str(selected["summary"]),
-        selected["color"],
-        action=str(selected["action"]),
-        expanded=True,
-        warning=bool(selected["warning"]),
+    s.text("Settings", (18, 8, 180, 36), 24, TEXT, True)
+    s.text(
+        "Device, radio, network and support",
+        (18, 36, 418, 54),
+        12,
+        MUTED,
     )
 
-    y0 = 162
-    leaves = selected["leaves"]
-    for title, status, color, action, destination, warning in leaves:
-        draw_more_leaf(
-            s,
-            (18, y0, 462, y0 + 54),
-            title,
-            status,
-            color,
-            action=action,
-            destination=destination,
-            warning=warning,
-        )
-        y0 += 58
 
-    # The real menu scrolls. Keep the selected category anchored at the top and
-    # show as many following collapsed categories as the 480 px viewport allows.
-    for category in categories[selected_index + 1 :]:
-        if y0 + 48 > 418:
+def render_settings_flat(
+    s: Surface,
+    snap: Snapshot,
+    *,
+    anchor_key: str | None = None,
+):
+    draw_more_header(s, snap)
+    categories = more_category_specs(snap, s.release_profile)
+    if anchor_key is not None:
+        anchor_index = next(
+            index
+            for index, category in enumerate(categories)
+            if category["key"] == anchor_key
+        )
+        categories = categories[anchor_index:]
+    y = 58
+    rendered_sections: list[str] = []
+    rendered_rows: list[str] = []
+    for category in categories:
+        if y + 34 > DOCK_Y - 4:
             break
-        draw_more_category(
-            s,
-            (18, y0, 462, y0 + 48),
+        rendered_sections.append(str(category["title"]))
+        s.text(
             str(category["title"]),
-            str(category["summary"]),
-            category["color"],
-            action=str(category["action"]),
-            warning=bool(category["warning"]),
+            (26, y + 8, 430, y + 30),
+            13,
+            WARNING_TEXT if category["warning"] else TEXT,
+            True,
         )
-        y0 += 52
-
+        y += 34
+        for title, status, color, action, destination, warning in category["leaves"]:
+            if y + 54 > DOCK_Y - 4:
+                break
+            draw_more_leaf(
+                s,
+                (18, y, 462, y + 54),
+                title,
+                status,
+                color,
+                action=action,
+                destination=destination,
+                warning=warning,
+            )
+            rendered_rows.append(title)
+            y += 58
+        y += 4
     s.metrics.update(
         {
-            "more_expanded_category": selected_key,
-            "more_leaf_count": len(leaves),
-            "more_actionable_leaf_count": sum(1 for leaf in leaves if leaf[3]),
-            "more_scroll_anchor_y": 110,
+            "settings_flat_sections": True,
+            "settings_scrollable": True,
+            "settings_anchor_key": anchor_key,
+            "settings_rendered_sections": rendered_sections,
+            "settings_rendered_rows": rendered_rows,
+            "settings_total_sections": len(more_category_specs(snap, s.release_profile)),
+            "more_expanded_category": None,
         }
     )
     draw_dock(s, "Settings")
+
+
+def render_settings(s: Surface, snap: Snapshot):
+    render_settings_flat(s, snap)
+
+
+def render_settings_expanded(s: Surface, snap: Snapshot, selected_key: str):
+    """Keep legacy screenshot aliases as scroll anchors into the flat list."""
+
+    render_settings_flat(s, snap, anchor_key=selected_key)
 
 
 def render_settings_tools_expanded(s: Surface, snap: Snapshot):
@@ -4442,7 +4672,7 @@ def render_compose_state(
     clear_action = "clear_dm_message" if is_dm else "clear_public_message"
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
-    s.text(title, (16, 64, 240, 96), 22, TEXT, True)
+    s.text(title, (16, 64, 240, 96), 18, TEXT, True)
     draw_button(
         s,
         (252, 64, 314, 108),
@@ -4679,7 +4909,7 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(
         s,
         "Public History" if selected_channel.channel_id == 1
-        else f"{selected_channel.name} History",
+        else "Channel History",
         (f"showing {min(len(selected_messages), public_page_limit)}/{len(selected_messages)} retained"
          if selected_channel.channel_id == 1 else
          f"{selected_channel.name}  showing {min(len(selected_messages), public_page_limit)}/{len(selected_messages)} retained"),
@@ -4710,8 +4940,11 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
     for msg in visible_messages:
         state = public_message_state(msg)
         rendered_states.append(state)
+        history_title = f"{msg.source}: {msg.text}"
+        if len(history_title) > 38:
+            history_title = history_title[:35].rstrip() + "..."
         draw_row(
-            s, (56, y, 424, y + 34), f"{msg.source}: {msg.text}",
+            s, (56, y, 424, y + 34), history_title,
             msg.meta, state,
         )
         y += 40
@@ -4893,11 +5126,10 @@ def draw_contact_page_header(
     back_action: str,
     back_destination: str,
 ):
-    draw_top_bar(s, snap)
-    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
-    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action=back_action, destination=back_destination)
-    s.text(title, (112, 62, 464, 90), 22, TEXT, True)
-    s.text(subtitle, (112, 90, 464, 112), 12, MUTED)
+    s.rect((0, 0, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(s, (12, 6, 84, 50), "Back", MUTED, action=back_action, destination=back_destination)
+    s.text(title, (100, 8, 464, 36), 22, TEXT, True)
+    s.text(subtitle, (100, 36, 464, 56), 12, MUTED)
 
 
 def render_contact_detail_page(s: Surface, snap: Snapshot, dm_reason: str):
@@ -4910,25 +5142,36 @@ def render_contact_detail_page(s: Surface, snap: Snapshot, dm_reason: str):
         back_action="close_contact_detail",
         back_destination="nodes",
     )
-    s.round_rect((16, 120, 464, 326), (13, 22, 31), BORDER, 8)
-    s.text("Fingerprint", (28, 132, 180, 152), 13, MUTED, True)
-    s.text(contact.fingerprint, (28, 154, 452, 180), 16, TEXT)
-    s.text("Signal", (28, 194, 100, 214), 13, MUTED, True)
-    s.text(contact.signal, (104, 194, 452, 216), 14, GREEN, True)
-    s.text("Status", (28, 230, 100, 250), 13, MUTED, True)
-    status_lines, status_end_y = s.wrapped_text(contact.meta, (104, 228, 452, 300), 13, TEXT, line_height=20)
+    s.text("Chat  normal  unread counted", (16, 64, 464, 86), 13, MUTED)
+    s.text(
+        f"Identity  {contact.fingerprint}",
+        (16, 98, 464, 120),
+        13,
+        TEXT,
+    )
+    s.text("Direct route  |  0 hops", (16, 132, 464, 154), 13, MUTED)
+    s.text(f"Last signal {contact.signal}", (16, 166, 464, 188), 13, MUTED)
+    s.text("Contact actions", (16, 210, 464, 232), 14, GREEN, True)
+    status_lines = 1
+    status_end_y = 188
     dm_available = dm_reason == "ready"
     if dm_available:
         draw_button(
-            s, (16, 340, 464, 392), "Message", GREEN,
+            s, (16, 238, 464, 290), "Message", GREEN,
             action="open_dm_compose", destination="compose_dm_sheet",
         )
     else:
-        s.text(f"DM unavailable [{dm_reason}]", (28, 338, 452, 358), 13, AMBER, True)
-        s.text(DM_IDENTITY_REASON_TEXT[dm_reason], (28, 362, 452, 398), 11, MUTED)
+        s.text(f"Messaging unavailable [{dm_reason}]", (16, 238, 464, 260), 13, AMBER, True)
+        s.wrapped_text(
+            DM_IDENTITY_REASON_TEXT[dm_reason],
+            (16, 262, 464, 304),
+            11,
+            MUTED,
+            line_height=18,
+        )
     draw_button(
         s,
-        (16, 408, 464, 472),
+        (16, 304, 464, 356),
         "Contact options",
         BLUE,
         action="open_contact_options",
@@ -4939,7 +5182,9 @@ def render_contact_detail_page(s: Surface, snap: Snapshot, dm_reason: str):
             "contact_hierarchy_level": "detail",
             "contact_primary_action_count": 2 if dm_available else 1,
             "contact_status_wrapped_lines": status_lines,
-            "contact_status_complete": status_end_y <= 300,
+            "contact_status_complete": status_end_y <= 188,
+            "contact_detail_full_screen": True,
+            "contact_detail_frame": [0, 0, 480, 480],
             "contact_dm_reason_code": dm_reason,
             "contact_dm_exact_full_key": dm_available and fixed_hex_identity_valid(
                 contact.fingerprint, contact.public_key_hex
@@ -4989,11 +5234,12 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
         ),
     )
     core_rows = (
-        ((16, 120, 464, 180), "Rename", "Change alias", ACCENT, "open_contact_edit", "contact_edit_sheet", False),
-        ((16, 188, 464, 248), "Favorite", "Off", AMBER, "toggle_favorite", None, False),
-        ((16, 256, 464, 316), "Mute", "Off", VIOLET, "toggle_mute", None, False),
+        ((16, 64, 464, 112), "Route", "Trace path", BLUE, "open_route_trace", "route_trace_sheet", False),
+        ((16, 118, 464, 166), "Rename", "Change alias", ACCENT, "open_contact_edit", "contact_edit_sheet", False),
+        ((16, 172, 464, 220), "Favorite", "Off", AMBER, "toggle_favorite", None, False),
+        ((16, 226, 464, 274), "Mute", "Off", VIOLET, "toggle_mute", None, False),
         (
-            (16, 324, 464, 392),
+            (16, 280, 464, 328),
             "Forget contact",
             "Requires confirmation",
             RED,
@@ -5027,11 +5273,8 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
 
 
 def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
-    draw_top_bar(s, snap)
-    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), DIM)
-    s.round_rect((16, 60, 464, 476), (18, 27, 39), (72, 92, 112), 8)
-    s.text("Node Detail", (36, 76, 196, 104), 22, TEXT, True)
-    s.text(node.name, (36, 120, 428, 142), 12, MUTED)
+    s.rect((0, 0, WIDTH, HEIGHT), (17, 25, 35))
+    s.text("Contact", (20, 8, 180, 36), 22, TEXT, True)
     dm_reason = node_dm_identity_reason(snap, node)
     dm_available = dm_reason == "ready"
     normalized_role = node.role.lower()
@@ -5039,7 +5282,7 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
     if dm_available:
         draw_button(
             s,
-            (236, 72, 290, 116),
+            (208, 4, 262, 48),
             "DM",
             ACCENT,
             action="open_node_dm",
@@ -5048,70 +5291,68 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
     else:
         draw_button(
             s,
-            (202, 72, 322, 116),
+            (174, 4, 294, 48),
             "Why no DM?",
             AMBER,
             action="explain_node_dm",
             destination=None,
         )
-    core_profile = s.release_profile == CORE_RELEASE_PROFILE
     return_destination = (
-        "nodes"
-        if core_profile or node.advert_lat_e6 is None
-        else "map"
+        "map"
+        if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
+        else "nodes"
     )
     draw_button(
         s,
-        (344, 72, 420, 116),
+        (316, 4, 392, 48),
         "Close",
         MUTED,
         action="close_node_detail",
         destination=return_destination,
     )
-    s.round_rect((36, 150, 110, 176), (22, 39, 49), role_badge_color(node.role), 8)
-    s.text(role_badge_text(node.role), (42, 152, 104, 174), 11, role_badge_color(node.role), True, "center")
-    s.text("Role", (122, 150, 200, 170), 13, MUTED, True)
-    s.text(node.role, (216, 150, 428, 174), 15, role_badge_color(node.role), True)
-    s.text("Fingerprint", (36, 188, 180, 208), 13, MUTED, True)
-    s.text(node.fingerprint, (36, 210, 428, 232), 16, TEXT)
-    s.text("Public key", (36, 222, 180, 242), 13, MUTED, True)
-    s.text("retained  reachable  normal", (158, 222, 428, 242), 14, GREEN, True)
-    s.text("Signal", (36, 256, 122, 276), 13, MUTED, True)
-    s.text(node.signal, (124, 256, 262, 276), 14, GREEN, True)
-    s.text("Path", (272, 256, 328, 276), 13, MUTED, True)
-    s.text(node.meta, (328, 256, 428, 276), 12, MUTED)
-    location = None
-    if not core_profile:
-        location = (
-            f"{format_e6(node.advert_lat_e6)}, {format_e6(node.advert_lon_e6)}"
-            if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
-            else "not provided"
-        )
-        s.text("Advert location", (36, 314, 158, 334), 13, BLUE, True)
-        s.text(location, (160, 314, 428, 334), 13, TEXT)
-    last_heard_y = 314 if core_profile else 338
-    status_y = 346 if core_profile else 370
-    reason_y = 368 if core_profile else 392
-    s.text("Last heard", (36, last_heard_y, 142, last_heard_y + 20), 13, MUTED, True)
-    s.text("12s ago  heard 24", (144, last_heard_y, 428, last_heard_y + 20), 14, TEXT)
-    status = "DM ready" if dm_available else "DM unavailable"
+    s.text(node.name or "Mesh node", (20, 52, 412, 74), 14, TEXT, True)
+    s.round_rect((20, 82, 88, 108), (22, 39, 49), role_badge_color(node.role), 8)
+    s.text(role_badge_text(node.role), (24, 84, 84, 106), 11, role_badge_color(node.role), True, "center")
     s.text(
-        f"{status} [{dm_reason}]",
-        (36, status_y, 428, status_y + 20),
-        12,
-        GREEN if dm_available else AMBER,
+        f"Role {node_role_display_name(node.role)}",
+        (94, 84, 394, 106),
+        14,
+        role_badge_color(node.role),
         True,
     )
     s.text(
-        DM_IDENTITY_REASON_TEXT[dm_reason],
-        (36, reason_y, 428, reason_y + 32),
+        f"{node_route_display(node)} route  |  reachable",
+        (20, 116, 412, 138),
+        13,
+        BLUE,
+    )
+    s.text(f"Last signal {node.signal}", (20, 150, 412, 172), 13, MUTED)
+    location = (
+        f"{format_e6(node.advert_lat_e6)}, {format_e6(node.advert_lon_e6)}"
+        if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
+        else "not provided"
+    )
+    s.text(f"Advert location {location}", (20, 184, 412, 206), 13, BLUE)
+    s.text("Heard on this boot  |  24 sightings", (20, 218, 412, 240), 13, MUTED)
+    status = "DM ready" if dm_available else "DM unavailable"
+    s.wrapped_text(
+        f"{status} [{dm_reason}]: {DM_IDENTITY_REASON_TEXT[dm_reason]}",
+        (20, 250, 412, 304),
+        12,
+        GREEN if dm_available else AMBER,
+        line_height=18,
+    )
+    s.text(
+        f"Advanced identity  {node.fingerprint}  |  key "
+        f"{'retained' if node.public_key_hex else 'missing'}",
+        (20, 314, 412, 336),
         11,
         MUTED,
     )
     if management_gated:
         draw_button(
             s,
-            (24, 412, 128, 452),
+            (20, 352, 124, 396),
             "Admin",
             VIOLET,
             action="open_server_admin",
@@ -5119,16 +5360,14 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
         )
         s.text(
             "Verified server; local authenticated login required.",
-            (136, 420, 412, 460),
+            (132, 360, 408, 400),
             10,
             MUTED,
         )
     s.metrics.update(
         {
             "node_detail_location_provenance": (
-                "unavailable_in_release_profile"
-                if core_profile
-                else "advert"
+                "advert"
             ),
             "node_detail_advert_location": location,
             "node_detail_return_destination": return_destination,
@@ -5139,8 +5378,9 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
             "node_detail_dm_opens_compose": dm_available,
             "node_detail_dm_rf_tx": False,
             "node_detail_management_gated": management_gated,
-            "node_detail_frame": [16, 60, 464, 476],
-            "node_detail_content_bottom": 460 if management_gated else 424,
+            "node_detail_full_screen": True,
+            "node_detail_frame": [0, 0, 480, 480],
+            "node_detail_content_bottom": 400 if management_gated else 336,
             "node_detail_content_clipped": False,
         }
     )
@@ -5216,32 +5456,51 @@ def render_contact_edit_sheet(s: Surface, snap: Snapshot):
 
 
 def render_radio_settings_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Radio Settings", "Saved profile applies after reboot")
-    s.text(snap.radio_profile, (44, 154, 436, 178), 14, GREEN, True)
-    s.text("Freq 910.525 MHz", (44, 190, 220, 212), 13, TEXT, True)
-    draw_button(s, (244, 184, 316, 220), "-25k", ACCENT, action="radio_freq_down")
-    draw_button(s, (324, 184, 396, 220), "+25k", ACCENT, action="radio_freq_up")
-    s.text("BW 62.5 kHz", (44, 232, 220, 254), 13, TEXT, True)
-    draw_button(s, (244, 226, 396, 262), "Cycle BW", ACCENT, action="radio_cycle_bandwidth")
-    s.text("SF 7", (44, 274, 98, 296), 13, TEXT, True)
-    draw_button(s, (106, 268, 166, 304), "SF-", ACCENT, action="radio_sf_down")
-    draw_button(s, (174, 268, 234, 304), "SF+", ACCENT, action="radio_sf_up")
-    s.text("CR 5", (250, 274, 304, 296), 13, TEXT, True)
-    draw_button(s, (312, 268, 396, 304), "Cycle", ACCENT, action="radio_cycle_cr")
-    s.text("TX 20 dBm", (44, 318, 136, 340), 13, TEXT, True)
-    draw_button(s, (146, 312, 206, 348), "TX-", ACCENT, action="radio_tx_power_down")
-    draw_button(s, (214, 312, 274, 348), "TX+", ACCENT, action="radio_tx_power_up")
-    draw_button(s, (282, 312, 416, 348), "RX Boost On", GREEN, action="radio_toggle_rx_boost")
-    draw_button(s, (44, 356, 136, 386), "US/CAN", BLUE, action="radio_defaults")
+    s.rect((0, 0, WIDTH, HEIGHT), (17, 25, 35))
+    s.text("Radio", (20, 8, 180, 36), 24, TEXT, True)
     draw_button(
-        s, (146, 356, 238, 386), "Save", GREEN,
+        s, (372, 4, 448, 48), "Close", MUTED,
+        action="close_radio_settings", destination="active_tab",
+    )
+    s.text("Canada preset", (20, 58, 280, 88), 22, GREEN, True)
+    s.text("910.525 MHz  |  BW 62.5  |  SF7 / CR5", (20, 88, 428, 110), 13, GREEN)
+    s.text(
+        "Live RF matches saved profile" if snap.radio_applied
+        else "Saved profile pending next radio start/apply",
+        (20, 112, 428, 134),
+        12,
+        GREEN if snap.radio_applied else AMBER,
+    )
+    s.text("Freq 910.525 MHz", (20, 158, 238, 180), 13, TEXT, True)
+    draw_button(s, (246, 146, 330, 190), "-25k", ACCENT, action="radio_freq_down")
+    draw_button(s, (338, 146, 422, 190), "+25k", ACCENT, action="radio_freq_up")
+    s.text("BW 62.5 kHz", (20, 208, 238, 230), 13, TEXT, True)
+    draw_button(s, (246, 196, 422, 240), "Change bandwidth", ACCENT, action="radio_cycle_bandwidth")
+    s.text("SF 7", (20, 258, 68, 280), 13, TEXT, True)
+    draw_button(s, (72, 246, 136, 290), "SF-", ACCENT, action="radio_sf_down")
+    draw_button(s, (144, 246, 208, 290), "SF+", ACCENT, action="radio_sf_up")
+    s.text("CR 5", (238, 258, 310, 280), 13, TEXT, True)
+    draw_button(s, (318, 246, 422, 290), "Change", ACCENT, action="radio_cycle_cr")
+    s.text("TX 20 dBm", (20, 308, 92, 330), 13, TEXT, True)
+    draw_button(s, (96, 296, 160, 340), "TX-", ACCENT, action="radio_tx_power_down")
+    draw_button(s, (168, 296, 232, 340), "TX+", ACCENT, action="radio_tx_power_up")
+    draw_button(s, (246, 296, 422, 340), "RX Boost On", GREEN, action="radio_toggle_rx_boost")
+    draw_button(s, (8, 378, 144, 426), "Restore Canada", BLUE, action="radio_defaults")
+    draw_button(
+        s, (152, 378, 288, 426), "Save", GREEN,
         action="save_radio_profile", destination="radio_settings_sheet",
     )
     draw_button(
-        s, (248, 356, 340, 386), "Close", MUTED,
+        s, (296, 378, 422, 426), "Close", MUTED,
         action="close_radio_settings", destination="active_tab",
     )
-    s.metrics["modal_return_policy"] = "active_tab"
+    s.metrics.update(
+        {
+            "modal_return_policy": "active_tab",
+            "radio_full_screen": True,
+            "radio_frame": [0, 0, 480, 480],
+        }
+    )
 
 
 def draw_storage_page_header(
@@ -5541,7 +5800,13 @@ def render_display_settings_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_display_settings", destination="settings")
     s.text("Screen controls", (44, 154, 436, 178), 15, GREEN, True)
     s.text("Brightness, night mode, contrast, and timeout belong here.", (44, 194, 436, 236), 13, TEXT)
-    s.text("Touch display controls are staged until backlight/runtime persistence is wired.", (44, 252, 436, 294), 13, AMBER)
+    s.wrapped_text(
+        "Touch display controls are staged until backlight/runtime persistence is wired.",
+        (44, 252, 436, 300),
+        13,
+        AMBER,
+        line_height=18,
+    )
     draw_button(s, (44, 318, 160, 360), "Brightness", BLUE, action="display_brightness")
     draw_button(s, (172, 318, 260, 360), "Night", BLUE, action="display_night")
     draw_button(s, (272, 318, 386, 360), "Contrast", BLUE, action="display_contrast")
@@ -5565,32 +5830,42 @@ def render_diagnostics_sheet(s: Surface, snap: Snapshot):
 
 
 def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
-    s.text("Wi-Fi Setup", (28, 70, 230, 100), 22, TEXT, True)
-    s.text("Profile and state", (28, 96, 230, 116), 12, MUTED)
-    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_wifi_setup", destination="active_tab")
-    s.text("State off  build enabled", (28, 112, 452, 134), 14, AMBER, True)
-    s.text("Last none", (28, 134, 452, 156), 13, MUTED)
-    s.text("Profile not saved  password open/empty", (28, 156, 452, 178), 13, TEXT)
-    s.text("Network name", (28, 186, 220, 206), 13, GREEN, True)
-    s.round_rect((16, 206, 464, 242), SURFACE_2, BORDER, 8)
-    s.touch_target("SSID", (16, 206, 464, 242), kind="text_field", action="edit_wifi_ssid")
-    s.text("SSID", (28, 214, 452, 236), 14, MUTED)
-    s.text("Password", (28, 248, 220, 268), 13, GREEN, True)
-    s.round_rect((16, 268, 464, 304), SURFACE_2, BORDER, 8)
-    s.touch_target("Optional", (16, 268, 464, 304), kind="text_field", action="edit_wifi_password")
-    s.text("Optional", (28, 276, 452, 298), 14, MUTED)
-    draw_button(s, (16, 314, 78, 352), "Save", GREEN, action="wifi_save")
-    draw_button(s, (86, 314, 152, 352), "Clear", AMBER, action="wifi_clear")
-    draw_button(s, (160, 314, 222, 352), "Scan", BLUE, action="wifi_scan")
-    draw_button(s, (230, 314, 316, 352), "Connect", GREEN, action="wifi_connect")
-    draw_button(s, (324, 314, 410, 352), "Enable", BLUE, action="wifi_enable")
-    s.text("Scan to list nearby 2.4 GHz networks", (28, 360, 452, 382), 12, MUTED)
-    s.round_rect((16, 386, 464, 468), (10, 16, 24), BORDER, 8)
-    s.text("Keyboard", (28, 394, 452, 416), 13, MUTED, True)
-    s.text("q w e r t y u i o p", (32, 426, 448, 456), 16, TEXT, False, "center")
-    s.metrics["modal_return_policy"] = "active_tab"
+    s.rect((0, 0, WIDTH, HEIGHT), (17, 25, 35))
+    s.text("Wi-Fi", (28, 10, 208, 38), 24, TEXT, True)
+    s.text("Connection and saved network", (28, 36, 360, 56), 12, MUTED)
+    draw_button(s, (392, 10, 464, 50), "Close", MUTED, action="close_wifi_setup", destination="active_tab")
+    state_label = "Connected" if snap.wifi_connected else (
+        "Connecting" if snap.wifi_connecting else "Off"
+    )
+    s.text(f"State {state_label}", (28, 58, 452, 80), 14, GREEN if snap.wifi_connected else AMBER, True)
+    s.text("Last result none", (28, 80, 452, 102), 13, MUTED)
+    s.text("Profile not saved  |  password masked", (28, 102, 452, 124), 13, TEXT)
+    s.text("Network name (SSID)", (28, 130, 240, 150), 13, GREEN, True)
+    s.round_rect((16, 146, 464, 190), SURFACE_2, BORDER, 8)
+    s.touch_target("SSID", (16, 146, 464, 190), kind="text_field", action="edit_wifi_ssid")
+    s.text("SSID", (28, 156, 452, 182), 14, MUTED)
+    s.text("Password", (28, 198, 220, 218), 13, GREEN, True)
+    s.round_rect((16, 218, 464, 262), SURFACE_2, BORDER, 8)
+    s.touch_target("Optional", (16, 218, 464, 262), kind="text_field", action="edit_wifi_password")
+    s.text("Optional", (28, 228, 452, 254), 14, MUTED)
+    draw_button(s, (16, 270, 232, 314), "Connect", GREEN, action="wifi_connect")
+    draw_button(s, (240, 270, 464, 314), "Save network", GREEN, action="wifi_save")
+    draw_button(s, (16, 322, 120, 366), "Scan", BLUE, action="wifi_scan")
+    draw_button(s, (128, 322, 232, 366), "Next saved", ACCENT, action="wifi_next_profile")
+    draw_button(s, (240, 322, 344, 366), "Delete", AMBER, action="wifi_clear")
+    draw_button(s, (352, 322, 464, 366), "Enable", BLUE, action="wifi_enable")
+    s.text("Scan to list nearby 2.4 GHz networks", (28, 374, 452, 394), 12, MUTED)
+    s.round_rect((16, 398, 464, 468), (10, 16, 24), BORDER, 8)
+    s.text("Keyboard", (28, 402, 452, 420), 12, MUTED, True)
+    s.text("q w e r t y u i o p", (32, 432, 448, 458), 15, TEXT, False, "center")
+    s.metrics.update(
+        {
+            "modal_return_policy": "active_tab",
+            "wifi_full_screen": True,
+            "wifi_frame": [0, 0, 480, 480],
+            "wifi_password_masked": True,
+        }
+    )
 
 
 def render_ble_setup_sheet(s: Surface, snap: Snapshot):
@@ -5773,17 +6048,16 @@ def render_dm_thread_state(
         if query else
         f"{min(len(matches), dm_thread_page_limit)} of {len(matches)} messages"
     )
-    draw_top_bar(s, snap)
-    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
-    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="close_dm_thread", destination="messages_dm")
-    s.text(alias, (112, 62, 360, 90), 22, TEXT, True)
+    s.rect((0, 0, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(s, (12, 6, 84, 50), "Back", MUTED, action="close_dm_thread", destination="messages_dm")
+    s.text(alias, (100, 10, 360, 38), 22, TEXT, True)
     draw_button(
-        s, (372, 64, 464, 108), "Search", BLUE,
+        s, (376, 6, 464, 50), "Search", BLUE,
         action="open_dm_search", destination="dm_search_sheet",
     )
-    s.text(count_line, (112, 90, 360, 112), 12, MUTED)
-    s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
-    y = 132
+    s.text(count_line, (100, 38, 360, 56), 12, MUTED)
+    s.round_rect((16, 60, 464, 352), (13, 22, 31), BORDER, 8)
+    y = 72
     if not contact_available:
         y = draw_messages_notice(
             s, y,
@@ -5836,13 +6110,14 @@ def render_dm_thread_state(
             if query else
             "No retained messages in this conversation."
         )
-        s.text(empty_text, (36, 220, 444, 250), 14, MUTED, True, "center")
+        s.text(empty_text, (36, 180, 444, 210), 14, MUTED, True, "center")
     if load_older_available:
-        draw_button(s, (28, 344, 166, 392), "Load Older", BLUE, action="load_older_dm_thread")
+        draw_button(s, (28, 294, 166, 342), "Load Older", BLUE, action="load_older_dm_thread")
     draw_button(
         s,
-        (16, 420, 464, 472),
-        "Reply" if contact_available else "Contact unavailable",
+        (16, 360, 464, 412),
+        "Message this contact"
+        if contact_available else "Contact unavailable",
         GREEN if contact_available else MUTED,
         action="open_dm_reply" if contact_available else None,
         destination="compose_dm_sheet" if contact_available else None,
@@ -5856,7 +6131,7 @@ def render_dm_thread_state(
             "dm_thread_rendered_count": len(visible_messages),
             "dm_thread_load_older_available": load_older_available,
             "dm_thread_body_scrollable": True,
-            "dm_thread_body_viewport": [16, 120, 464, 408],
+            "dm_thread_body_viewport": [16, 60, 464, 352],
             "dm_thread_marks_read_on_open": True,
             "dm_thread_sticky_reply": True,
             "dm_thread_alias": alias,
@@ -5877,6 +6152,8 @@ def render_dm_thread_state(
             "dm_thread_empty_history": not query and not retained_messages,
             "dm_thread_contact_available": contact_available,
             "dm_thread_reply_enabled": contact_available,
+            "dm_thread_full_screen": True,
+            "dm_thread_frame": [0, 0, 480, 480],
             "dm_thread_history_readable_without_contact":
                 bool(visible_messages) and not contact_available,
         }
@@ -5942,23 +6219,22 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
     alias = selected_conversation.source if selected_conversation else msg.source
     outgoing = msg.direction == "tx"
     state = dm_primary_delivery_label(msg)
-    draw_top_bar(s, snap)
-    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    s.rect((0, 0, WIDTH, HEIGHT), (10, 17, 25))
     draw_button(
-        s, (16, 64, 96, 108), "Back", MUTED,
+        s, (8, 6, 88, 50), "Back", MUTED,
         action="close_dm_thread", destination="messages_dm",
     )
-    s.text(alias, (112, 62, 256, 90), 20, TEXT, True)
+    s.text(alias, (100, 8, 260, 48), 20, TEXT, True)
     draw_button(
-        s, (264, 64, 364, 108), "Hide details", BLUE,
+        s, (264, 6, 364, 50), "Hide details", BLUE,
         action="toggle_dm_details", destination="dm_thread_sheet",
     )
     draw_button(
-        s, (372, 64, 464, 108), "Search", BLUE,
+        s, (372, 6, 464, 50), "Search", BLUE,
         action="open_dm_search", destination="dm_search_sheet",
     )
-    s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
-    bubble = (88, 130, 452, 398) if outgoing else (28, 130, 392, 398)
+    s.round_rect((16, 60, 464, 352), (13, 22, 31), BORDER, 8)
+    bubble = (88, 70, 452, 342) if outgoing else (28, 70, 392, 342)
     s.round_rect(
         bubble,
         (25, 38, 58) if outgoing else (18, 45, 42),
@@ -5967,19 +6243,19 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
     )
     s.text(
         f"{'You' if outgoing else msg.source}  |  {state}",
-        (bubble[0] + 10, 140, bubble[2] - 10, 160),
+        (bubble[0] + 10, 80, bubble[2] - 10, 100),
         11,
         ACCENT if outgoing else GREEN,
         True,
     )
     _, text_end = s.wrapped_text(
         msg.text,
-        (bubble[0] + 10, 166, bubble[2] - 10, 204),
+        (bubble[0] + 10, 106, bubble[2] - 10, 144),
         12,
         TEXT,
         line_height=18,
     )
-    details_y = max(214, text_end + 8)
+    details_y = max(154, text_end + 8)
     s.text(
         "Technical details",
         (bubble[0] + 10, details_y, bubble[2] - 10, details_y + 20),
@@ -6023,7 +6299,7 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
         rendered_detail_lines += lines
         details_y += 4
     draw_button(
-        s, (16, 420, 464, 472), "Reply", GREEN,
+        s, (16, 360, 464, 412), "Message this contact", GREEN,
         action="open_dm_reply", destination="compose_dm_sheet",
     )
     s.metrics.update(
@@ -6042,6 +6318,8 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
             "dm_thread_details_path_hops": msg.path_hops,
             "dm_thread_details_rendered_lines": rendered_detail_lines,
             "dm_thread_sticky_reply": True,
+            "dm_thread_full_screen": True,
+            "dm_thread_frame": [0, 0, WIDTH, HEIGHT],
             "dm_thread_navigation_rf_silent": True,
         }
     )
@@ -6263,23 +6541,385 @@ def render_lock_overlay(s: Surface, snap: Snapshot):
     s.text("Tap to unlock", (40, 392, 440, 426), 20, ACCENT, True, "center")
 
 
-def render_onboarding_sheet(s: Surface, snap: Snapshot):
-    s.rect((0, 0, WIDTH, HEIGHT), BG)
-    s.round_rect((12, 25, 468, 455), (7, 16, 24), (94, 234, 212), 8)
-    s.text("MeshCore DeskOS D1L", (32, 40, 430, 70), 24, TEXT, True)
-    s.text("First boot setup", (32, 74, 430, 96), 14, ACCENT, True)
-    s.text("Node name", (32, 112, 200, 134), 13, MUTED, True)
-    s.round_rect((32, 140, 448, 190), SURFACE_2, BORDER, 8)
-    s.touch_target("Node name", (32, 140, 448, 190), kind="text_field", action="edit_node_name")
-    s.text(snap.node_name, (46, 152, 430, 180), 18, TEXT)
-    s.text("Canada/USA preset confirmed", (32, 204, 430, 226), 14, TEXT, True)
-    s.text("910.525 BW62.5 SF7 CR5", (32, 228, 430, 250), 13, MUTED)
-    s.text("Role Desk Companion", (32, 260, 430, 282), 14, TEXT, True)
-    s.text("Wi-Fi off  BLE off  Observer off", (32, 284, 430, 306), 13, MUTED)
-    draw_button(s, (32, 324, 148, 374), "Start", GREEN, action="complete_onboarding", destination="home")
-    draw_button(s, (164, 324, 310, 374), "Use Defaults", ACCENT, action="apply_onboarding_defaults")
-    s.round_rect((32, 392, 448, 432), SURFACE, BORDER, 8)
-    s.text("Keyboard opens for name editing", (44, 400, 436, 424), 13, MUTED, False, "center")
+def draw_first_start_header(s: Surface, title: str, step: str):
+    s.rect((0, 0, WIDTH, HEIGHT), (7, 16, 24))
+    s.text(title, (16, 12, 464, 45), 24, TEXT, True)
+    s.text(step, (16, 48, 464, 70), 13, ACCENT, True)
+
+
+def draw_first_start_field(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    placeholder: str,
+    *,
+    action: str,
+    masked: bool = False,
+):
+    s.round_rect(box, SURFACE_2, BORDER, 8)
+    label = "••••••••" if masked else placeholder
+    s.text(label, (box[0] + 12, box[1] + 6, box[2] - 12, box[3] - 6), 14, MUTED)
+    s.touch_target(
+        placeholder,
+        box,
+        kind="text_field",
+        action=action,
+        semantic_label=placeholder,
+    )
+    if placeholder not in s.labels:
+        s.labels.append(placeholder)
+
+
+def draw_first_start_keyboard(s: Surface, *, secure: bool = False):
+    s.round_rect((8, 214, 472, 416), (15, 24, 34), BORDER, 8)
+    s.text(
+        "Secure keyboard" if secure else "Keyboard",
+        (20, 224, 460, 250),
+        13,
+        MUTED,
+        True,
+        "center",
+    )
+    key_width = 38
+    for row, chars in enumerate(("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")):
+        row_width = len(chars) * key_width
+        start_x = (WIDTH - row_width) // 2
+        y0 = 258 + row * 42
+        for index, char in enumerate(chars):
+            x0 = start_x + index * key_width
+            s.round_rect((x0 + 2, y0, x0 + 36, y0 + 36), SURFACE_2, BORDER, 5)
+            s.text(char, (x0 + 2, y0, x0 + 36, y0 + 36), 11, TEXT, False, "center")
+
+
+def draw_first_start_navigation(
+    s: Surface,
+    *,
+    back_destination: str | None,
+    next_label: str,
+    next_action: str,
+    next_destination: str | None,
+    skip_destination: str | None = None,
+    next_enabled: bool = True,
+):
+    draw_button(
+        s,
+        (8, 424, 112, 472),
+        "Back",
+        MUTED,
+        action="first_start_back",
+        destination=back_destination,
+        enabled=back_destination is not None,
+    )
+    if skip_destination is not None:
+        draw_button(
+            s,
+            (120, 424, 224, 472),
+            "Skip",
+            MUTED,
+            action="first_start_skip",
+            destination=skip_destination,
+        )
+        next_box = (232, 424, 472, 472)
+    else:
+        next_box = (120, 424, 472, 472)
+    draw_button(
+        s,
+        next_box,
+        next_label,
+        ACCENT,
+        action=next_action,
+        destination=next_destination,
+        enabled=next_enabled,
+    )
+
+
+def render_startup_readiness(s: Surface, snap: Snapshot):
+    draw_first_start_header(s, "DeskOS is getting ready", "STARTUP CHECK")
+    s.text("4 of 5 essential systems ready", (16, 78, 464, 100), 14, MUTED, True)
+    s.round_rect((16, 105, 464, 113), (30, 41, 59), (30, 41, 59), 4)
+    s.rect((16, 105, 374, 113), ACCENT)
+    rows = (
+        ("Display", "Ready", GREEN),
+        ("Identity", "Ready", GREEN),
+        ("Radio", "Ready", GREEN),
+        ("Storage service", "Ready", GREEN),
+        ("UI", "Starting...", MUTED),
+    )
+    for index, (name, state, color) in enumerate(rows):
+        y = 128 + index * 42
+        s.text(name, (20, y, 220, y + 26), 15, TEXT, True)
+        s.text(state, (236, y, 460, y + 26), 14, color, True, "right")
+    s.text(
+        "Prepared SD: Not ready   NRCan maps: Not ready",
+        (16, 350, 464, 378),
+        13,
+        AMBER,
+        True,
+    )
+    s.wrapped_text(
+        "Home stays covered until every essential row is green.",
+        (16, 388, 464, 422),
+        13,
+        MUTED,
+    )
+    s.metrics.update(
+        {
+            "full_screen_startup_overlay": True,
+            "essential_green_count": 4,
+            "essential_green_required": 5,
+            "home_transition_allowed": False,
+            "prepared_sd_ready": False,
+            "nrcan_provider_ready": False,
+        }
+    )
+
+
+def render_first_start_name(s: Surface, snap: Snapshot):
+    draw_first_start_header(s, "Name this desk", "STEP 1 OF 6 - REQUIRED")
+    s.wrapped_text(
+        "Enter the name people will see on MeshCore. DeskOS will not invent or auto-complete it.",
+        (16, 72, 464, 118),
+        13,
+        MUTED,
+    )
+    draw_first_start_field(
+        s,
+        (16, 124, 464, 168),
+        "Required: 1-31 characters",
+        action="edit_node_name",
+    )
+    s.text(
+        "A non-blank explicit name is required.",
+        (16, 176, 464, 204),
+        12,
+        MUTED,
+    )
+    draw_first_start_keyboard(s)
+    draw_first_start_navigation(
+        s,
+        back_destination=None,
+        next_label="Next",
+        next_action="save_first_start_name",
+        next_destination="first_start_location",
+    )
+
+
+def render_first_start_location(s: Surface, snap: Snapshot):
+    draw_first_start_header(s, "Set map location", "STEP 2 OF 6 - OPTIONAL")
+    s.wrapped_text(
+        "Enter decimal latitude and longitude manually. No coordinates are assumed or baked in.",
+        (16, 68, 464, 108),
+        13,
+        MUTED,
+    )
+    draw_first_start_field(
+        s,
+        (16, 112, 464, 156),
+        "Latitude (-90 to 90)",
+        action="edit_first_start_latitude",
+    )
+    draw_first_start_field(
+        s,
+        (16, 160, 464, 204),
+        "Longitude (-180 to 180)",
+        action="edit_first_start_longitude",
+    )
+    draw_first_start_keyboard(s)
+    draw_first_start_navigation(
+        s,
+        back_destination="first_start_name",
+        next_label="Save & Next",
+        next_action="save_first_start_location",
+        next_destination="first_start_wifi",
+        skip_destination="first_start_wifi",
+    )
+
+
+def render_first_start_wifi(s: Surface, snap: Snapshot):
+    draw_first_start_header(s, "Connect Wi-Fi", "STEP 3 OF 6 - OPTIONAL")
+    s.wrapped_text(
+        "Enter a network or choose Skip for offline use. The password is masked and wiped when this page is left.",
+        (16, 68, 464, 108),
+        13,
+        MUTED,
+    )
+    draw_first_start_field(
+        s,
+        (16, 112, 464, 156),
+        "Wi-Fi network name",
+        action="edit_first_start_ssid",
+    )
+    draw_first_start_field(
+        s,
+        (16, 160, 464, 204),
+        "Wi-Fi password",
+        action="edit_first_start_password",
+        masked=True,
+    )
+    draw_first_start_keyboard(s, secure=True)
+    draw_first_start_navigation(
+        s,
+        back_destination="first_start_location",
+        next_label="Save & Next",
+        next_action="save_first_start_wifi",
+        next_destination="first_start_radio",
+        skip_destination="first_start_radio",
+    )
+    s.metrics.update(
+        {
+            "password_masked": True,
+            "password_wiped_on_leave": True,
+            "offline_skip_available": True,
+        }
+    )
+
+
+def render_first_start_radio(s: Surface, snap: Snapshot):
+    draw_first_start_header(s, "Confirm Canadian radio", "STEP 4 OF 6")
+    s.text(
+        "This production preset is fixed for initial setup:",
+        (16, 82, 464, 108),
+        14,
+        MUTED,
+    )
+    for index, line in enumerate(
+        (
+            "910.525 MHz",
+            "Bandwidth 62.5 kHz",
+            "Spreading factor 7",
+            "Coding rate 5",
+        )
+    ):
+        s.text(line, (24, 124 + index * 40, 456, 158 + index * 40), 20, TEXT, True)
+    s.wrapped_text(
+        "Confirm & Next saves the preset through normal settings. It does not transmit a test packet.",
+        (16, 292, 464, 350),
+        13,
+        MUTED,
+    )
+    s.text(
+        "Confirmation is required before setup can finish.",
+        (16, 364, 464, 394),
+        13,
+        AMBER,
+        True,
+    )
+    draw_first_start_navigation(
+        s,
+        back_destination="first_start_wifi",
+        next_label="Confirm & Next",
+        next_action="confirm_canadian_radio",
+        next_destination="first_start_storage_map",
+    )
+
+
+def render_first_start_storage_map(s: Surface, snap: Snapshot):
+    prepared_sd_ready = (
+        snap.storage_sd_present
+        and snap.storage_sd_mounted
+        and snap.storage_sd_data_root_ready
+        and snap.storage_sd_filesystem.lower() == "fat32"
+    )
+    nrcan_provider_ready = snap.map_tile_cache_ready
+    media_ready = prepared_sd_ready and nrcan_provider_ready
+    draw_first_start_header(s, "Prepare storage & maps", "STEP 5 OF 6")
+    s.wrapped_text(
+        "Prepare a FAT32 SD card on a computer, then insert it. DeskOS firmware never formats cards.",
+        (16, 74, 464, 136),
+        13,
+        MUTED,
+    )
+    s.wrapped_text(
+        "NRCan tiles use map/offline-provider.json from the prepared-card tool.",
+        (16, 150, 464, 204),
+        13,
+        MUTED,
+    )
+    s.wrapped_text(
+        (
+            "SD card: ready (prepared FAT32)"
+            if prepared_sd_ready
+            else "SD card: not ready; prepare FAT32 externally"
+        ),
+        (16, 238, 464, 278),
+        14,
+        GREEN if prepared_sd_ready else AMBER,
+        True,
+    )
+    s.wrapped_text(
+        (
+            "NRCan provider: manifest ready"
+            if nrcan_provider_ready
+            else "NRCan provider: not ready; install the prepared-card manifest"
+        ),
+        (16, 294, 464, 340),
+        14,
+        GREEN if nrcan_provider_ready else AMBER,
+        True,
+    )
+    s.text(
+        (
+            "Storage and maps are ready. Continue to channels."
+            if media_ready
+            else "Both checks are required before Continue."
+        ),
+        (16, 370, 464, 400),
+        13,
+        GREEN if media_ready else AMBER,
+        True,
+    )
+    draw_first_start_navigation(
+        s,
+        back_destination="first_start_radio",
+        next_label="Continue",
+        next_action="continue_first_start_storage",
+        next_destination="first_start_channels",
+        next_enabled=media_ready,
+    )
+    s.metrics.update(
+        {
+            "formats_sd": False,
+            "prepared_sd_required": True,
+            "nrcan_manifest_required": True,
+            "prepared_sd_ready": prepared_sd_ready,
+            "nrcan_provider_ready": nrcan_provider_ready,
+            "first_start_media_ready": media_ready,
+            "continue_enabled": media_ready,
+            "offline_continue_available": False,
+        }
+    )
+
+
+def render_first_start_channels(s: Surface, snap: Snapshot):
+    draw_first_start_header(s, "Your starting channels", "STEP 6 OF 6")
+    s.wrapped_text(
+        "DeskOS creates these standard channels at first completion:",
+        (16, 82, 464, 126),
+        14,
+        MUTED,
+    )
+    rows = (
+        ("Public", "selected by default"),
+        ("#bot", "bot traffic"),
+        ("#test", "device checks"),
+    )
+    for index, (name, detail) in enumerate(rows):
+        y = 136 + index * 64
+        s.round_rect((20, y, 460, y + 54), SURFACE_2, BORDER, 8)
+        s.text(name, (34, y + 6, 180, y + 30), 16, TEXT, True)
+        s.text(detail, (190, y + 6, 444, y + 30), 13, MUTED, False, "right")
+    s.wrapped_text(
+        "Finish persists the explicit name and seeds channels through the canonical onboarding API.",
+        (16, 338, 464, 402),
+        13,
+        MUTED,
+    )
+    draw_first_start_navigation(
+        s,
+        back_destination="first_start_storage_map",
+        next_label="Finish setup",
+        next_action="complete_first_start",
+        next_destination="home",
+    )
 
 
 def record_incoming_refresh_metrics(
@@ -6486,7 +7126,13 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "mesh_rooms_page": render_mesh_rooms_page,
     "mesh_repeaters_page": render_mesh_repeaters_page,
     "lock_overlay": render_lock_overlay,
-    "onboarding_sheet": render_onboarding_sheet,
+    "startup_readiness": render_startup_readiness,
+    "first_start_name": render_first_start_name,
+    "first_start_location": render_first_start_location,
+    "first_start_wifi": render_first_start_wifi,
+    "first_start_radio": render_first_start_radio,
+    "first_start_storage_map": render_first_start_storage_map,
+    "first_start_channels": render_first_start_channels,
 }
 
 REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
@@ -6503,28 +7149,26 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Attention",
     ),
     "messages": (
-        "Messages",
-        "Choose a conversation type",
-        "Public",
-        "Default channel conversation",
-        "Direct messages",
-        "Private contact conversations",
+        "Channels",
+        "Group conversations",
+        "Direct",
+        "#Public",
     ),
-    "messages_public": ("Public", "Back", "Channels", "Mark read", "History", "Compose"),
-    "messages_channel_private": ("Ops Café 東京", "Back", "Channels", "Mark read", "History", "Compose"),
+    "messages_public": ("Public", "Back", "Read", "...", "Message this channel"),
+    "messages_channel_private": ("Ops Café 東京", "Back", "Read", "...", "Message this channel"),
     "channel_selector_sheet": ("Channels", "Public", "Ops Café 東京", "Disabled Lab", "Close"),
     "channel_selector_private_sheet": ("Channels", "Public", "Ops Café 東京", "Disabled Lab", "Close"),
     "messages_dm": ("Direct messages", "Back"),
     "messages_loading": (
-        "Messages",
-        "Public",
-        "Direct messages",
-        "Loading retained history",
+        "Channels",
+        "Group conversations",
+        "Direct",
+        "#Public",
     ),
     "messages_public_storage_degraded": (
         "Public",
         "Storage degraded; readable RAM history remains.",
-        "Compose",
+        "Message this channel",
     ),
     "messages_dm_storage_unavailable": (
         "Direct messages",
@@ -6547,15 +7191,9 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "A final delivery failure is retained; open for details.",
     ),
     "nodes": (
-        "Nodes",
         "Contacts",
-        "Heard Nodes",
-        "All Heard",
-        "Chat",
-        "Repeater",
-        "Room",
-        "Sensor",
-        "Unknown",
+        "Find",
+        "Clear",
     ),
     "map": (
         "Options",
@@ -6591,63 +7229,61 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "packets": ("Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Packet Feed", "Routes"),
     "settings": (
+        "Settings",
+        "Device, radio, network and support",
         "Tools",
-        "Settings and utilities",
-        "Tools",
-        "Packets and diagnostics",
-        "Connections",
-        "Storage & maps",
-        "Device",
-        "Support",
-        "Advanced",
-    ),
-    "settings_tools_expanded": (
-        "Tools",
-        "Settings and utilities",
-        "Tools",
-        "Packets and diagnostics",
         "Packets",
         "Diagnostics",
+        "Terminal",
+        "Connections",
+        "Wi-Fi",
+    ),
+    "settings_tools_expanded": (
+        "Settings",
+        "Device, radio, network and support",
+        "Tools",
+        "Packets",
+        "Diagnostics",
+        "Terminal",
     ),
     "settings_connections_expanded": (
-        "Tools",
-        "Settings and utilities",
+        "Settings",
+        "Device, radio, network and support",
         "Connections",
-        "Wi-Fi, Bluetooth, and radio",
         "Wi-Fi",
         "Bluetooth",
-        "Radio",
+        "Observer",
     ),
     "settings_storage_maps_expanded": (
-        "Tools",
-        "Settings and utilities",
+        "Settings",
+        "Device, radio, network and support",
         "Storage & maps",
         "SD Card",
         "Map options",
+        "Signed update",
     ),
     "settings_device_expanded": (
-        "Tools",
-        "Settings and utilities",
+        "Settings",
+        "Device, radio, network and support",
         "Device",
-        "Display and identity",
         "Display",
+        "Notifications",
         "Identity",
     ),
     "settings_support_expanded": (
-        "Tools",
-        "Settings and utilities",
+        "Settings",
+        "Device, radio, network and support",
         "Support",
-        "About this device",
         "About",
         "Version 1.0.0",
     ),
     "settings_advanced_expanded": (
-        "Tools",
-        "Settings and utilities",
+        "Settings",
+        "Device, radio, network and support",
         "Advanced",
-        "Developer options",
+        "Radio",
+        "Server admin",
         "Mesh advertise",
-        "Broadcast presence",
     ),
     "compose_sheet": ("Compose Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"),
     "compose_utf8_sheet": ("Compose Public", "Café 東京", "7 chars | 12/138 B", "Send"),
@@ -6666,23 +7302,24 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
     "channel_history_private_sheet": (
-        "Ops Café 東京 History", "Ops Café 東京  showing 2/2 retained",
+        "Channel History", "Ops Café 東京  showing 2/2 retained",
         "Channel scrollback", "Search", "Close",
     ),
     "channel_search_private_sheet": ("Search Ops Café 東京", "Search author or message", "Apply", "Close"),
     "radio_settings_sheet": (
-        "Radio Settings",
+        "Radio",
+        "Canada preset",
         "Freq 910.525 MHz",
         "-25k",
         "+25k",
-        "Cycle BW",
+        "Change bandwidth",
         "SF-",
         "SF+",
-        "Cycle",
+        "Change",
         "TX-",
         "TX+",
         "RX Boost On",
-        "US/CAN",
+        "Restore Canada",
         "Save",
         "Close",
     ),
@@ -6734,11 +7371,10 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Close",
     ),
     "wifi_setup_sheet": (
-        "Wi-Fi Setup",
-        "Profile and state",
-        "State off  build enabled",
-        "Last none",
-        "Network name",
+        "Wi-Fi",
+        "Connection and saved network",
+        "Last result none",
+        "Network name (SSID)",
         "Password",
         "SSID",
         "Optional",
@@ -6746,8 +7382,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Connect",
         "Scan to list nearby 2.4 GHz networks",
         "Keyboard",
-        "Save",
-        "Clear",
+        "Save network",
+        "Delete",
         "Enable",
         "Close",
     ),
@@ -6763,18 +7399,24 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Close",
     ),
     "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),
-    "contact_detail_sheet": ("Back", "Contact detail", "Fingerprint", "Signal", "Status", "Message", "Contact options"),
+    "contact_detail_sheet": (
+        "Back",
+        "Contact detail",
+        "Contact actions",
+        "Message",
+        "Contact options",
+    ),
     "contact_incomplete_detail_sheet": (
         "Back",
         "Contact detail",
-        "DM unavailable [identity_incomplete]",
+        "Messaging unavailable [identity_incomplete]",
         "Identity has no complete verified full key.",
         "Contact options",
     ),
     "contact_noncanonical_detail_sheet": (
         "Back",
         "Contact detail",
-        "DM unavailable [contact_not_canonical]",
+        "Messaging unavailable [contact_not_canonical]",
         "Contact is not verified by signed advert or import.",
         "Contact options",
     ),
@@ -6790,30 +7432,19 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Requires confirmation",
     ),
     "node_detail_sheet": (
-        "Node Detail",
-        "Role",
-        "Fingerprint",
-        "Public key",
-        "Signal",
-        "Path",
-        "Advert location",
-        "Last heard",
+        "Contact",
         "Close",
     ),
     "heard_only_node_detail_sheet": (
-        "Node Detail",
+        "Contact",
         "Heard-only Chat",
         "Why no DM?",
-        "DM unavailable [heard_only]",
-        "Heard node only; add or import a verified chat Contact.",
         "Close",
     ),
     "managed_node_detail_sheet": (
-        "Node Detail",
+        "Contact",
         "YKF Room",
         "Why no DM?",
-        "DM unavailable [role_not_dm_capable]",
-        "This verified role does not support direct chat.",
         "Admin",
         "Verified server; local authenticated login required.",
         "Close",
@@ -6859,12 +7490,18 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Signal not measured for retained Public TxDone",
         "Path hops not measured for retained Public TxDone",
     ),
-    "dm_thread_sheet": ("Back", "Search", "Reply"),
-    "dm_thread_details_sheet": ("Back", "Hide details", "Search", "Technical details", "Reply"),
+    "dm_thread_sheet": ("Back", "Search", "Message this contact"),
+    "dm_thread_details_sheet": (
+        "Back",
+        "Hide details",
+        "Search",
+        "Technical details",
+        "Message this contact",
+    ),
     "dm_search_sheet": ("DM Search", "Search this conversation", "Apply", "Clear", "Close"),
-    "dm_thread_search_results": ("Back", "Search", "Reply"),
-    "dm_thread_search_no_match": ("Back", "Search", "No retained messages match this search.", "Reply"),
-    "dm_thread_empty_sheet": ("Back", "Search", "No retained messages in this conversation.", "Reply"),
+    "dm_thread_search_results": ("Back", "Search", "Message this contact"),
+    "dm_thread_search_no_match": ("Back", "Search", "No retained messages match this search.", "Message this contact"),
+    "dm_thread_empty_sheet": ("Back", "Search", "No retained messages in this conversation.", "Message this contact"),
     "dm_thread_no_contact": (
         "Back",
         "Search",
@@ -6886,7 +7523,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Clear",
         "Close",
     ),
-    "dm_thread_incoming_refresh": ("Back", "Search", "Reply"),
+    "dm_thread_incoming_refresh": ("Back", "Search", "Message this contact"),
     "dm_search_incoming_refresh": (
         "DM Search",
         "Search this conversation",
@@ -6902,15 +7539,72 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "mesh_rooms_page": ("Rooms", "Back", "Room servers"),
     "mesh_repeaters_page": ("Repeaters", "Back", "Repeater candidates"),
     "lock_overlay": ("MeshCore DeskOS", "Mesh", "Unread", "Tap to unlock"),
-    "onboarding_sheet": (
-        "MeshCore DeskOS D1L",
-        "First boot setup",
-        "Node name",
-        "Canada/USA preset confirmed",
-        "Role Desk Companion",
-        "Wi-Fi off  BLE off  Observer off",
-        "Start",
-        "Use Defaults",
+    "startup_readiness": (
+        "DeskOS is getting ready",
+        "STARTUP CHECK",
+        "4 of 5 essential systems ready",
+        "Display",
+        "Identity",
+        "Radio",
+        "Storage service",
+        "UI",
+        "Prepared SD: Not ready   NRCan maps: Not ready",
+    ),
+    "first_start_name": (
+        "Name this desk",
+        "STEP 1 OF 6 - REQUIRED",
+        "Required: 1-31 characters",
+        "A non-blank explicit name is required.",
+        "Keyboard",
+        "Back",
+        "Next",
+    ),
+    "first_start_location": (
+        "Set map location",
+        "STEP 2 OF 6 - OPTIONAL",
+        "Latitude (-90 to 90)",
+        "Longitude (-180 to 180)",
+        "Keyboard",
+        "Back",
+        "Skip",
+        "Save & Next",
+    ),
+    "first_start_wifi": (
+        "Connect Wi-Fi",
+        "STEP 3 OF 6 - OPTIONAL",
+        "Wi-Fi network name",
+        "Wi-Fi password",
+        "Secure keyboard",
+        "Back",
+        "Skip",
+        "Save & Next",
+    ),
+    "first_start_radio": (
+        "Confirm Canadian radio",
+        "910.525 MHz",
+        "Bandwidth 62.5 kHz",
+        "Spreading factor 7",
+        "Coding rate 5",
+        "Back",
+        "Confirm & Next",
+    ),
+    "first_start_storage_map": (
+        "Prepare storage & maps",
+        "Prepare a FAT32 SD card on a computer, then insert it. DeskOS firmware never formats cards.",
+        "NRCan tiles use map/offline-provider.json from the prepared-card tool.",
+        "SD card: not ready; prepare FAT32 externally",
+        "NRCan provider: not ready; install the prepared-card manifest",
+        "Both checks are required before Continue.",
+        "Back",
+        "Continue",
+    ),
+    "first_start_channels": (
+        "Your starting channels",
+        "Public",
+        "#bot",
+        "#test",
+        "Back",
+        "Finish setup",
     ),
 }
 
@@ -6919,22 +7613,20 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "DeskOS",
         "Messages",
         "Nodes",
-        "Packets",
-        "Settings",
+        "Map",
+        "Tools",
         "Mesh",
-        "Storage",
-        "Internal",
+        "Wi-Fi",
+        "SD",
         "Attention",
     ),
     "messages": (
-        "Messages",
-        "Choose a conversation type",
-        "Public",
-        "Default channel conversation",
-        "Direct messages",
-        "Private contact conversations",
+        "Channels",
+        "Group conversations",
+        "Direct",
+        "#Public",
     ),
-    "messages_public": ("Public", "Back", "Mark read", "History", "Compose"),
+    "messages_public": ("Public", "Back", "Read", "...", "Message this channel"),
     "packets": (
         "Packets",
         "live tail  rssi -41  snr 30  avg -46",
@@ -6948,15 +7640,14 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Routes",
     ),
     "settings": (
+        "Settings",
+        "Device, radio, network and support",
         "Tools",
-        "Settings and utilities",
-        "Packets and diagnostics",
+        "Packets",
+        "Diagnostics",
+        "Terminal",
         "Connections",
-        "Radio profile",
-        "Storage",
-        "Retained internal storage",
-        "Device",
-        "Support",
+        "Wi-Fi",
     ),
     "contact_options_page": (
         "Contact Options",
@@ -6968,13 +7659,7 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Requires confirmation",
     ),
     "node_detail_sheet": (
-        "Node Detail",
-        "Role",
-        "Fingerprint",
-        "Public key",
-        "Signal",
-        "Path",
-        "Last heard",
+        "Contact",
         "Close",
     ),
 }
@@ -7029,9 +7714,47 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "first_boot_onboarding",
         "steps": (
-            {"view": "onboarding_sheet", "action": "edit_node_name"},
-            {"view": "onboarding_sheet", "action": "complete_onboarding", "destination": "home"},
-            {"view": "onboarding_sheet", "action": "apply_onboarding_defaults"},
+            {"view": "first_start_name", "action": "edit_node_name"},
+            {
+                "view": "first_start_name",
+                "action": "save_first_start_name",
+                "destination": "first_start_location",
+            },
+            {
+                "view": "first_start_location",
+                "action": "save_first_start_location",
+                "destination": "first_start_wifi",
+            },
+            {
+                "view": "first_start_location",
+                "action": "first_start_skip",
+                "destination": "first_start_wifi",
+            },
+            {
+                "view": "first_start_wifi",
+                "action": "save_first_start_wifi",
+                "destination": "first_start_radio",
+            },
+            {
+                "view": "first_start_wifi",
+                "action": "first_start_skip",
+                "destination": "first_start_radio",
+            },
+            {
+                "view": "first_start_radio",
+                "action": "confirm_canadian_radio",
+                "destination": "first_start_storage_map",
+            },
+            {
+                "view": "first_start_storage_map",
+                "action": "continue_first_start_storage",
+                "destination": "first_start_channels",
+            },
+            {
+                "view": "first_start_channels",
+                "action": "complete_first_start",
+                "destination": "home",
+            },
         ),
     },
     {
@@ -7068,68 +7791,40 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         ),
     },
     {
-        "name": "more_category_navigation",
+        "name": "flat_settings_tools_navigation",
         "steps": (
-            {"view": "settings", "action": "toggle_more_tools"},
-            {"view": "settings", "action": "toggle_more_connections"},
-            {"view": "settings", "action": "toggle_more_storage_maps"},
-            {"view": "settings", "action": "toggle_more_device"},
-            {"view": "settings", "action": "toggle_more_support"},
-            {"view": "settings", "action": "toggle_more_advanced"},
+            {"view": "settings", "action": "open_packets", "destination": "packets"},
+            {"view": "settings", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
         ),
     },
     {
-        "name": "more_tools_expanded_navigation",
+        "name": "flat_settings_connections_navigation",
         "steps": (
-            {"view": "settings", "action": "toggle_more_tools"},
-            {"view": "settings_tools_expanded", "action": "open_packets", "destination": "packets"},
-            {"view": "settings_tools_expanded", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
-            {"view": "settings_tools_expanded", "action": "toggle_more_tools"},
-        ),
-    },
-    {
-        "name": "more_connections_expanded_navigation",
-        "steps": (
-            {"view": "settings", "action": "toggle_more_connections"},
             {"view": "settings_connections_expanded", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
             {"view": "wifi_setup_sheet", "action": "wifi_scan"},
             {"view": "wifi_setup_sheet", "action": "wifi_connect"},
             {"view": "wifi_setup_sheet", "action": "close_wifi_setup", "destination": "active_tab"},
             {"view": "settings_connections_expanded", "action": "open_ble_settings", "destination": "ble_setup_sheet"},
-            {"view": "settings_connections_expanded", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
-            {"view": "settings_connections_expanded", "action": "toggle_more_connections"},
         ),
     },
     {
-        "name": "more_storage_maps_expanded_navigation",
+        "name": "flat_settings_storage_maps_navigation",
         "steps": (
-            {"view": "settings", "action": "toggle_more_storage_maps"},
             {"view": "settings_storage_maps_expanded", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
             {"view": "settings_storage_maps_expanded", "action": "open_map_options", "destination": "map_options"},
-            {"view": "settings_storage_maps_expanded", "action": "toggle_more_storage_maps"},
         ),
     },
     {
-        "name": "more_device_expanded_navigation",
+        "name": "flat_settings_device_navigation",
         "steps": (
-            {"view": "settings", "action": "toggle_more_device"},
             {"view": "settings_device_expanded", "action": "open_display_settings", "destination": "display_settings_sheet"},
-            {"view": "settings_device_expanded", "action": "toggle_more_device"},
         ),
     },
     {
-        "name": "more_support_expanded_navigation",
+        "name": "flat_settings_advanced_navigation",
         "steps": (
-            {"view": "settings", "action": "toggle_more_support"},
-            {"view": "settings_support_expanded", "action": "toggle_more_support"},
-        ),
-    },
-    {
-        "name": "more_advanced_expanded_navigation",
-        "steps": (
-            {"view": "settings", "action": "toggle_more_advanced"},
+            {"view": "settings_advanced_expanded", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
             {"view": "settings_advanced_expanded", "action": "open_advert_sheet", "destination": "advert_sheet"},
-            {"view": "settings_advanced_expanded", "action": "toggle_more_advanced"},
         ),
     },
     {
@@ -7154,8 +7849,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "channel_select_private_history_compose_and_return_public",
         "steps": (
-            {"view": "messages_public", "action": "open_channel_selector", "destination": "channel_selector_sheet"},
-            {"view": "channel_selector_sheet", "action": "select_channel_2", "destination": "messages_channel_private"},
+            {"view": "messages", "action": "select_channel_2", "destination": "messages_channel_private"},
             {"view": "messages_channel_private", "action": "mark_channel_read"},
             {"view": "messages_channel_private", "action": "open_channel_history", "destination": "channel_history_private_sheet"},
             {"view": "channel_history_private_sheet", "action": "open_channel_search", "destination": "channel_search_private_sheet"},
@@ -7164,8 +7858,8 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "compose_channel_private_sheet", "action": "edit_public_message"},
             {"view": "compose_channel_private_sheet", "action": "send_channel_text", "public_rf_tx": True},
             {"view": "compose_channel_private_sheet", "action": "close_compose", "destination": "messages_channel_private"},
-            {"view": "messages_channel_private", "action": "open_channel_selector", "destination": "channel_selector_private_sheet"},
-            {"view": "channel_selector_private_sheet", "action": "select_channel_1", "destination": "messages_public"},
+            {"view": "messages_channel_private", "action": "open_messages_root", "destination": "messages"},
+            {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
         ),
     },
     {
@@ -7474,9 +8168,10 @@ CORE_EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "steps": (
             {"view": "home", "action": "open_messages_root", "destination": "messages"},
             {"view": "home", "action": "open_nodes", "destination": "nodes"},
-            {"view": "home", "action": "open_packets", "destination": "packets"},
+            {"view": "home", "action": "open_map", "destination": "map"},
             {"view": "home", "action": "open_settings", "destination": "settings"},
             {"view": "home", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
+            {"view": "home", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
             {"view": "home", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
             {"view": "home", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
         ),
@@ -7504,13 +8199,17 @@ CORE_EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         ),
     },
     {
-        "name": "core_settings_categories",
+        "name": "core_map_navigation",
         "steps": (
-            {"view": "settings", "action": "toggle_more_tools"},
-            {"view": "settings", "action": "toggle_more_connections"},
-            {"view": "settings", "action": "toggle_more_storage_maps"},
-            {"view": "settings", "action": "toggle_more_device"},
-            {"view": "settings", "action": "toggle_more_support"},
+            {"view": "map", "action": "open_map_options", "destination": "map_options"},
+        ),
+    },
+    {
+        "name": "core_flat_settings_navigation",
+        "steps": (
+            {"view": "settings", "action": "open_packets", "destination": "packets"},
+            {"view": "settings", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+            {"view": "settings", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
         ),
     },
 )
@@ -7540,8 +8239,6 @@ LIFECYCLE_TRANSITION_CYCLE: tuple[tuple[str, str], ...] = (
     ("compose_dm_sheet", "clear_dm_message"),
     ("compose_dm_sheet", "close_compose"),
     ("messages_dm", "open_nodes"),
-    ("nodes", "open_node_detail"),
-    ("node_detail_sheet", "close_node_detail"),
     ("nodes", "open_contact_detail"),
     ("contact_detail_sheet", "open_contact_options"),
     ("contact_options_page", "toggle_favorite"),
@@ -7597,21 +8294,31 @@ CORE_LIFECYCLE_TRANSITION_CYCLE: tuple[tuple[str, str], ...] = (
     ("compose_dm_sheet", "clear_dm_message"),
     ("compose_dm_sheet", "close_compose"),
     ("messages_dm", "open_nodes"),
-    ("nodes", "open_node_detail"),
-    ("node_detail_sheet", "close_node_detail"),
     ("nodes", "open_contact_detail"),
     ("contact_detail_sheet", "close_contact_detail"),
-    ("nodes", "open_packets"),
+    ("nodes", "open_map"),
+    ("map", "open_map_options"),
+    ("map_options", "open_map_location"),
+    ("map_location", "close_map_location"),
+    ("map_options", "open_map_cache"),
+    ("map_cache", "close_map_cache"),
+    ("map_options", "close_map_options"),
+    ("map", "open_settings"),
+    ("settings", "open_packets"),
     ("packets", "open_packet_detail"),
     ("packet_detail_sheet", "close_packet_detail"),
     ("packets", "open_packet_search"),
     ("packet_search_sheet", "edit_packet_search"),
     ("packet_search_sheet", "close_packet_search"),
     ("packets", "open_settings"),
+    ("settings", "open_wifi_settings"),
+    ("wifi_setup_sheet", "close_wifi_setup"),
     ("settings", "open_home"),
     ("home", "open_radio_settings"),
     ("radio_settings_sheet", "radio_freq_up"),
     ("radio_settings_sheet", "close_radio_settings"),
+    ("home", "open_storage_setup"),
+    ("storage_setup_sheet", "close_storage_setup"),
     ("home", "open_diagnostics"),
     ("diagnostics_sheet", "close_diagnostics"),
 )
@@ -7680,11 +8387,7 @@ def lifecycle_active_tab(
     if view == "map":
         return "map"
     if view == "packets":
-        return (
-            "packets"
-            if release_profile == CORE_RELEASE_PROFILE
-            else "settings"
-        )
+        return "settings"
     if view.startswith("settings"):
         return "settings"
     return None
@@ -8475,9 +9178,9 @@ def run_lifecycle_stress(
 
 
 def core_view_available(view: str) -> bool:
-    """Return the bounded screenshot-entry surface for Core simulation."""
+    """Return whether a simulator surface is available in Core 1.0."""
 
-    return view in CORE_ROOT_VIEWS
+    return view in RENDERERS and view not in CORE_EXCLUDED_DESTINATIONS
 
 
 def core_excluded_destination_rejections() -> list[dict[str, object]]:
@@ -8703,7 +9406,6 @@ def build_core_navigation_graph_report(
         and not excluded_touch_targets
         and not dead_touch_targets
         and not format_touch_targets
-        and not location_claims
         and not trapped_states
     )
     return {

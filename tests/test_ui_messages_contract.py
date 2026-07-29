@@ -60,14 +60,15 @@ def test_messages_hierarchy_is_simple_bounded_and_navigation_is_rf_silent():
     assert "D1L_UI_MESSAGES_MODE_PUBLIC" in header
     assert "D1L_UI_MESSAGES_MODE_DIRECT" in header
     assert "D1L_UI_MESSAGES_ACTION_SHOW_ROOT" in header
-    assert '"Choose a conversation type"' in source
-    assert '"Default channel conversation"' in source
-    assert '"Private contact conversations"' in source
-    assert "messages_render_root_card(" in source
-    assert "messages_create_scroll_body(parent, 18, 112, 424, 184)" in source
+    assert '"Channels"' in source
+    assert '"Group conversations"' in source
+    assert '"Direct"' in source
+    assert "messages_render_channel_row(" in source
+    assert "messages_create_scroll_body(parent, 18, 66, 424, 288)" in source
+    assert "D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL" in source
     assert "messages_create_scroll_body(parent, 18, 68, 424, 286)" in source
-    assert '"Compose" : "Channel unavailable"' in source
-    assert "18, 304, 424, 50" in source
+    assert '"Message this channel                         >"' in source
+    assert "18, 306, 424, 48" in source
     assert "D1L_UI_MESSAGES_ACTION_SEND_PUBLIC_TEST" not in header
     assert "d1l_app_model_send_public_test()" not in phase1
     assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);" in source
@@ -117,7 +118,13 @@ def test_direct_list_projects_unique_conversations_with_thread_cursor_truth():
     assert "snapshot->recent_dm_unread_count" in phase1
     assert "snapshot->recent_dm_muted" in phase1
     assert '"%lu unread%s | %s"' in messages
-    assert '"%u conversations | %lu unread + %lu excluded"' in messages
+    direct_row = messages.split("static void messages_render_dm_row", 1)[1].split(
+        "static void messages_render_channel_row", 1
+    )[0]
+    assert '"%lu unread%s | %s"' in direct_row
+    assert '"Mesh contact"' in direct_row
+    assert "entry->contact_fingerprint" not in direct_row
+    assert '"rssi %d  snr %s  hops %u"' not in direct_row
 
 
 def test_public_conversation_bubbles_align_and_show_truthful_time_and_state():
@@ -135,8 +142,25 @@ def test_public_conversation_bubbles_align_and_show_truthful_time_and_state():
     assert "outgoing ? 76 : 8" in bubble
     assert "LV_LABEL_LONG_WRAP" in bubble
     assert "D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE" in bubble
-    assert "details >" in bubble
+    assert '"rssi %d | snr %s | hops %u | details >"' not in bubble
+    assert '"path bytes %u | details >"' not in bubble
     assert '"queued"' not in bubble
+
+
+def test_primary_message_lists_do_not_expose_diagnostic_identity_or_radio_data():
+    source = read("main/ui/ui_messages.c")
+    direct_row = source.split("static void messages_render_dm_row", 1)[1].split(
+        "static void messages_render_channel_row", 1
+    )[0]
+    channel_row = source.split("static void messages_render_channel_row", 1)[1].split(
+        "static int messages_render_store_notice", 1
+    )[0]
+    for primary_row in (direct_row, channel_row):
+        lowered = primary_row.lower()
+        assert "fingerprint" not in lowered
+        assert "rssi" not in lowered
+        assert "snr" not in lowered
+        assert "probe" not in lowered
 
 
 def test_channel_mark_read_targets_the_exact_active_channel():

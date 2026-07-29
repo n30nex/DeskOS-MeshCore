@@ -52,7 +52,7 @@ def provider_status(
     return {
         "schema": 1,
         "ok": True,
-        "cmd": "map acceptance status",
+        "cmd": "map provider status",
         "configured": True,
         "authorized_provider": True,
         "provider_refresh_ok": True,
@@ -381,7 +381,7 @@ def test_offline_revisit_requires_new_generation_complete_cache_and_zero_network
     )
 
 
-def test_firmware_exposes_machine_map_acceptance_and_blocks_osm_bulk_prefetch():
+def test_firmware_exposes_product_map_status_and_blocks_osm_bulk_prefetch():
     console = (ROOT / "main/comms/usb_console.c").read_text(encoding="utf-8")
     provider_c = (ROOT / "main/map/map_tile_provider.c").read_text(
         encoding="utf-8"
@@ -395,19 +395,13 @@ def test_firmware_exposes_machine_map_acceptance_and_blocks_osm_bulk_prefetch():
     prefetch_h = (ROOT / "main/map/map_prefetch_service.h").read_text(
         encoding="utf-8"
     )
-    ui_c = (ROOT / "main/ui/ui_phase1.c").read_text(encoding="utf-8")
-    ui_h = (ROOT / "main/ui/ui_phase1.h").read_text(encoding="utf-8")
-    view_c = (ROOT / "main/map/map_view_service.c").read_text(
-        encoding="utf-8"
-    )
-    view_h = (ROOT / "main/map/map_view_service.h").read_text(
+    qualification = (ROOT / "main/app/qualification_hooks.h").read_text(
         encoding="utf-8"
     )
 
-    assert '"map acceptance status"' in console
-    assert '"map acceptance open"' in console
-    assert '\\"forced_sd_reload\\":true' in console
-    assert '\\"configured_device_center\\":true' in console
+    assert '"map provider status"' in console
+    assert 'ok_begin("map provider status")' in console
+    assert '"map acceptance status"' not in console
     assert "D1L_RELEASE_COMMAND_READ_ONLY" in console
     assert '\\"osm_standard_endpoint\\":' in console
     assert '\\"node_radius_km\\":' in console
@@ -422,25 +416,10 @@ def test_firmware_exposes_machine_map_acceptance_and_blocks_osm_bulk_prefetch():
     assert prefetch_c.index("++s_network_requests_total;") < prefetch_c.index(
         "ret = d1l_map_tile_store_fetch("
     )
-    assert "d1l_ui_phase1_request_map_acceptance" in ui_h
-    assert "d1l_ui_phase1_request_map_acceptance" in ui_c
-    assert "d1l_ui_modal_has_active()" in ui_c
-    assert "set_map_interactive_touch_authorized(true);" in ui_c
-    assert "d1l_ui_map_viewport_prepare_acceptance" in ui_c
-    assert "d1l_map_view_service_force_reload_next_acquire" in view_h
-    assert "force_reload_next_acquire" in view_c
-
-
-def test_map_acceptance_renders_behind_lock_without_dismissing_user_state():
-    ui_c = (ROOT / "main/ui/ui_phase1.c").read_text(encoding="utf-8")
-    request = ui_c.split(
-        "esp_err_t d1l_ui_phase1_request_map_acceptance(void)", 1
-    )[1].split("esp_err_t d1l_ui_phase1_scroll_probe", 1)[0]
-
-    assert "s_lock_visible" not in request
-    assert "s_onboarding_visible" in request
-    assert "d1l_ui_modal_has_active()" in request
-    assert "unlock_event_cb" not in request
+    assert "D1L_ENABLE_QUALIFICATION_HOOKS" in qualification
+    assert "map provider status" in runner.COMMANDS
+    assert "map acceptance open" not in runner.COMMANDS
+    assert "reboot" in runner.COMMANDS
 
 
 def test_console_readiness_retries_a_command_lost_before_init(

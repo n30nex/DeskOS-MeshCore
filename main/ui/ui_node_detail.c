@@ -342,12 +342,9 @@ bool d1l_ui_node_detail_create(d1l_ui_node_detail_controller_t *controller,
     if (!controller->sheet) {
         return false;
     }
-    /* The deepest managed-role copy ends at local y=396. With the retained
-     * 12 px padding this bounded 416 px sheet keeps every reason visible
-     * below the 56 px top bar and above the physical display edge. */
-    lv_obj_set_size(controller->sheet, 448, 416);
-    lv_obj_set_pos(controller->sheet, 16, 60);
-    lv_obj_set_style_radius(controller->sheet, 8, 0);
+    lv_obj_set_size(controller->sheet, 480, 480);
+    lv_obj_set_pos(controller->sheet, 0, 0);
+    lv_obj_set_style_radius(controller->sheet, 0, 0);
     lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(controller->sheet, 1, 0);
@@ -384,7 +381,7 @@ bool d1l_ui_node_detail_render(
     bool complete = true;
     char line[192];
 
-    lv_obj_t *title = create_label(controller->sheet, "Node Detail", 0xF4F7FB);
+    lv_obj_t *title = create_label(controller->sheet, "Contact", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
         configure_dot_label(title, 160, 8, 4);
@@ -416,36 +413,23 @@ bool d1l_ui_node_detail_render(
     configure_dot_label(role, 300, 94, 82);
     complete = role != NULL && complete;
 
-    snprintf(line, sizeof(line), "Fingerprint %.16s",
-             entry->fingerprint[0] ? entry->fingerprint : "-");
-    lv_obj_t *fingerprint = create_label(controller->sheet, line, 0xE5EDF5);
-    configure_dot_label(fingerprint, 392, 8, 116);
-    complete = fingerprint != NULL && complete;
-
-    snprintf(line, sizeof(line), "Public key %s  %s  %s",
-             view->keyed ? "retained" : "missing",
-             view->favorite ? "favorite" : "normal",
-             view->muted ? "unread excluded" : "unread counted");
-    lv_obj_t *key = create_label(controller->sheet, line, 0x8EA0AE);
-    configure_dot_label(key, 392, 8, 150);
-    complete = key != NULL && complete;
+    snprintf(line, sizeof(line), "%s route  |  %u hop%s  |  %s",
+             entry->path_hops > 0U ? "Direct" : "Flood",
+             (unsigned)entry->path_hops,
+             entry->path_hops == 1U ? "" : "s",
+             view->reachable ? "reachable" : "quiet");
+    lv_obj_t *route = create_label(controller->sheet, line, 0x93C5FD);
+    configure_dot_label(route, 392, 8, 116);
+    complete = route != NULL && complete;
 
     const int snr_abs = entry->snr_tenths < 0 ?
         -entry->snr_tenths : entry->snr_tenths;
-    snprintf(line, sizeof(line), "Signal rssi %d  snr %s%d.%d  %s",
+    snprintf(line, sizeof(line), "Last signal %d dBm  |  SNR %s%d.%d",
              entry->rssi_dbm, entry->snr_tenths < 0 ? "-" : "",
-             snr_abs / 10, snr_abs % 10,
-             view->reachable ? "reachable" : "quiet");
+             snr_abs / 10, snr_abs % 10);
     lv_obj_t *signal = create_label(controller->sheet, line, 0x8EA0AE);
-    configure_dot_label(signal, 392, 8, 184);
+    configure_dot_label(signal, 392, 8, 150);
     complete = signal != NULL && complete;
-
-    snprintf(line, sizeof(line), "Path hops %u  hash %u byte  advert %lums",
-             entry->path_hops, entry->path_hash_bytes,
-             (unsigned long)entry->advert_timestamp);
-    lv_obj_t *path = create_label(controller->sheet, line, 0x8EA0AE);
-    configure_dot_label(path, 392, 8, 218);
-    complete = path != NULL && complete;
 
     if (d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
         if (entry->location_valid) {
@@ -459,19 +443,18 @@ bool d1l_ui_node_detail_render(
             snprintf(line, sizeof(line), "Advert location not provided");
         }
         lv_obj_t *location = create_label(controller->sheet, line, 0x93C5FD);
-        configure_dot_label(location, 392, 8, 242);
+        configure_dot_label(location, 392, 8, 184);
         complete = location != NULL && complete;
     }
 
-    snprintf(line, sizeof(line), "Last heard %lums  first %lums  count %lu",
-             (unsigned long)entry->last_heard_ms,
-             (unsigned long)entry->first_heard_ms,
-             (unsigned long)entry->heard_count);
+    snprintf(line, sizeof(line), "Heard on this boot  |  %lu sighting%s",
+             (unsigned long)entry->heard_count,
+             entry->heard_count == 1U ? "" : "s");
     lv_obj_t *heard = create_label(controller->sheet, line, 0x8EA0AE);
-    configure_dot_label(heard, 392, 8, 266);
+    configure_dot_label(heard, 392, 8, 218);
     complete = heard != NULL && complete;
 
-    snprintf(line, sizeof(line), "DM %s [%s]: %s",
+    snprintf(line, sizeof(line), "Messaging %s [%s]: %s",
              controller->rendered.dm_can_open_compose ? "ready" : "unavailable",
              d1l_ui_dm_identity_reason_code(controller->rendered.dm_reason),
              d1l_ui_dm_identity_reason_text(controller->rendered.dm_reason));
@@ -481,14 +464,20 @@ bool d1l_ui_node_detail_render(
     if (dm_reason) {
         lv_label_set_long_mode(dm_reason, LV_LABEL_LONG_WRAP);
         lv_obj_set_size(dm_reason, 392, 54);
-        lv_obj_set_pos(dm_reason, 8, 298);
+        lv_obj_set_pos(dm_reason, 8, 250);
     } else {
         complete = false;
     }
+    snprintf(line, sizeof(line), "Advanced identity  %.16s  |  key %s",
+             entry->fingerprint[0] ? entry->fingerprint : "-",
+             view->keyed ? "retained" : "missing");
+    lv_obj_t *identity = create_label(controller->sheet, line, 0x8EA0AE);
+    configure_dot_label(identity, 392, 8, 314);
+    complete = identity != NULL && complete;
     if (controller->rendered.management_gated &&
         d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
         complete = create_button(
-            controller, "Admin", 8, 352, 104, 40,
+            controller, "Admin", 8, 352, 104, 44,
             BINDING_OPEN_ADMIN,
             D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN) != NULL && complete;
         lv_obj_t *managed_reason = create_label(

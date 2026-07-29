@@ -42,8 +42,8 @@ def test_nodes_expose_finder_and_confirmed_retained_clear() -> None:
 
     assert "D1L_UI_NODES_ACTION_FIND_NEARBY" in nodes_header
     assert "D1L_UI_NODES_ACTION_CLEAR_HEARD" in nodes_header
-    assert 'nodes_create_button(summary, "Find"' in nodes
-    assert 'nodes_create_button(summary, "Clear"' in nodes
+    assert 'nodes_create_button(parent, "Find"' in nodes
+    assert 'nodes_create_button(parent, "Clear"' in nodes
     assert '"Find Nearby"' in phase1
     assert "Zero-hop RF only." in phase1
     assert "Discovery keys are unverified until a signed advert is received." in phase1

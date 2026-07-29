@@ -117,6 +117,7 @@ MAX_PEER_STATUS_BYTES = 1024 * 1024
 MAX_CONTROL_RESPONSE_BYTES = 64 * 1024
 MAX_PASSWORD_BYTES = 15
 MAX_STATUS_AGE_SECONDS = 120.0
+ADMIN_PATH_SETTLE_SECONDS = 60.0
 COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
 PUBLIC_KEY_RE = re.compile(r"[0-9a-f]{64}\Z")
 FINGERPRINT_RE = re.compile(r"[0-9A-F]{16}\Z")
@@ -1029,6 +1030,12 @@ def execute(
         )
         if admin_logout.get("state") != "idle":
             raise ProtocolAcceptanceError("admin authority did not clear")
+
+        # The zero-hop repeater can answer Admin successfully and still miss
+        # an immediately following PATH probe while its RF exchange settles.
+        # Keep Public fail-closed and allow that prior targeted exchange to
+        # clear before issuing the separately correlated PATH request.
+        time.sleep(ADMIN_PATH_SETTLE_SECONDS)
 
         path_request = _step(
             steps,

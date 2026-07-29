@@ -108,7 +108,11 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert "d1l_app_model_mark_channel_read(channel_id)" in mark_channel
     assert "d1l_app_model_mark_public_read()" not in mark_channel
     assert "d1l_app_model_mark_messages_read" not in ui
-    assert 'parent, "Mark read", 18, 60, 96, 44' in messages_ui
+    public_view = messages_ui.split(
+        "static void messages_render_public", 1
+    )[1].split("static void messages_render_direct", 1)[0]
+    assert 'parent, "Read", 306, 8, 64, 44' in public_view
+    assert "D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ" in public_view
     assert 'return unread ? "New" : "Received";' in messages_ui
     assert "snapshot->muted_dm_unread_count" in ui
     assert "read_dm_thread_event_cb" not in ui

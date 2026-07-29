@@ -9,7 +9,7 @@ below. No soak or broad edge-case campaign is required for RC1.
 
 Execute that release-critical sequence with the
 [authoritative RC1 release execution](RC1_RELEASE_EXECUTION_D1L.md). Its
-commands and five evidence roles are the internal closing contract for
+commands and four fresh evidence roles are the internal closing contract for
 `v1.0.0`; none of these qualification runners ship in the customer package.
 
 Required sequence:
@@ -27,10 +27,11 @@ Required sequence:
 5. Run the reduced bounded gate on that exact artifact: one non-erasing
    retained-state-preserving flash, boot advert plus one operator-authorized
    Public send, one DM/ACK through the authoritative RF receipt, contact
-   PATH/TRACE, repeater Ping, and repeater login plus authenticated query.
-   Require SD degraded notice/reinsert recovery and one authorized-provider
-   Map download followed by offline cache revisit. The protocol receipt must
-   not repeat the RF receipt's outbound/inbound DM exchange.
+   PATH, repeater Ping, repeater login plus authenticated query, and one authorized-provider
+   Map download followed by offline cache revisit. Require
+   exactly four fresh evidence sources: flash, RF, protocol and Map. The
+   protocol receipt must not repeat the RF receipt's outbound/inbound DM
+   exchange.
 6. Confirm SD is primary for retained history and that missing/unusable SD
    enters visible live-only RF chat without redirecting history to default
    NVS. Never format or repair media from firmware or validation.
@@ -40,7 +41,9 @@ Required sequence:
    receipt proves only authorized download plus offline SD-cache revisit.
 8. Retain the completed physical display/touch/keyboard/scroll, the completed
    automated 12-surface navigation, and Wi-Fi reconnect. Retain
-   SD write/reboot/remount acceptance without rerunning those campaigns.
+   SD write/reboot/remount acceptance without rerunning those campaigns. Carry
+   the prior operator-observed prepared-card remove/reinsert cycle forward as
+   context only; it is not a fresh receipt or outcome.
 
 Pass requires every receipt to bind the same exact commit, GitHub Actions run,
 downloaded package and flashed image. Predecessor artifacts, local builds,
@@ -228,7 +231,38 @@ Coverage:
 - Autonomous-runner safety override: `scripts/autonomous_hardware_validate_d1l.py` is planning-only and rejects hardware execution before orchestration. Its legacy direct-flash and post-flash mutation paths do not yet bind the exact full D1L key or the current Pi stable target. Use only `--dry-run`; hardware evidence must use the narrow exact-candidate flash, smoke, UI, reboot, RF, and soak runners.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus schema-v2 `ui-sim-report.json`, cover the main touch surfaces and nested pages, fail on missing labels or measured overflow, emit 44x44 touch targets, flag RF/destructive/format-capable actions, and keep `formats_sd=false`. Storage retains its proven hierarchy. Map renders the actual current view plus `Map -> Map options -> Set location or Cache status`; its canvas fills the content region without a map-local title row, and sparse edge overlays show one-finger pan plus direct 48x48-or-larger `-`/`+`/`Center` controls, default zoom 10, the 8-through-14 range, permanent provider attribution, the visible-tile limit of 9, one zoom per visible generation, completed same-view frame reuse, and cache reuse. Cache status may report the authorized SD provider, configured tile budget, and queued/running/paused/complete background-prefetch state, but the UI exposes no arbitrary URL/key/source editor or arbitrary-coordinate batch action. Simulator and scroll-probe automation suppress tile networking and never start a background download. The `map-ready` fixture must show bright, non-red, role-aware signed-advert markers with readable names below them and no ambiguous saved-center pin; `map-downloading` must visibly show determinate `Downloading n/N` progress.
 - P0 UI hardware-script contract: `scripts/ui_corruption_probe_d1l.py --dry-run --rounds 20`, `scripts/ui_capture_d1l.py --dry-run`, `scripts/ui_compose_keyboard_capture_d1l.py --dry-run --targets all`, and `scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache` stay host-only and require an explicit port for hardware mode. All-tab and Map probes must enter Map through the network-suppressed `ui scroll-probe` path, never an unsuppressed `ui tab map`. Hardware artifacts must include successful `map tiles status` rows before and after Map automation, prove that `network_requests` did not change, and report `network_tx=false`, `map_network_requests=false`, `background_download=false`, `area_download=false`, `visible_tile_limit=9`, and `zoom_batch_limit=1`; probes never request map tiles or mutate Wi-Fi/RF/storage.
-- First-boot onboarding contract: current settings must persist `onboarding_complete`, optional manual map center, and saved Wi-Fi profile metadata while migrating older settings without dropping identity. No provider URL, API key, attribution editor, or user-selected tile source is part of onboarding or settings.
+- Startup-readiness and first-start contract: every production boot creates a
+  full-screen 480x480 foreground overlay before Home. It reports determinate
+  progress and separate rows for Display, Identity, Radio, Storage & maps,
+  and UI; Home or the wizard may be uncovered only after those five essential
+  facts are green. Prepared FAT32 media and the authorized NRCan provider are
+  explicit truth indicators and must remain amber/not-ready unless the mounted
+  data root and actual configured provider prove readiness. A fresh user may
+  enter the wizard once the storage service itself is available, but step 5
+  blocks completion until the required prepared media is ready. A configured
+  user's later boot keeps Home covered while required media is missing.
+  `onboarding_complete=true` must bypass every wizard mutation after the
+  readiness screen. `onboarding_complete=false` must enter a six-step wizard
+  with 44px-or-larger controls: blank required explicit name with no generic
+  completion; optional manual decimal latitude/longitude with no baked
+  coordinates; masked Wi-Fi SSID/password with immediate password wipe and an
+  offline Skip path; explicit confirmation of 910.525 MHz/BW62.5/SF7/CR5;
+  truthful prepared-FAT32 and `map/offline-provider.json` NRCan instructions;
+  and a Public/#bot/#test review. The firmware exposes no format action.
+  Finish must use the canonical app-model APIs, and onboarding completion is
+  the final persisted transition. A fresh incomplete unit must not queue a
+  boot advert. Completing with the explicit valid name persists that exact
+  name, idempotently creates interoperable `#bot` and `#test` channels from the
+  first 16 SHA-256 bytes of each hashtag while leaving Public selected/default,
+  queues RX before the first signed flood advert, and leaves existing
+  configured names unchanged. Channel seeding failure must leave onboarding
+  incomplete. Current settings must also persist optional manual map center
+  and saved Wi-Fi profile metadata while migrating older settings without
+  dropping identity. No provider URL, API key, attribution editor, or
+  user-selected tile source is part of onboarding or settings. The host
+  simulator must render `startup_readiness` plus all six `first_start_*` pages
+  with zero overflow, zero undersized targets, no SD-format action, and a
+  complete Back/Next/Skip/Finish navigation flow.
 - Map location contract: normal Map entry opens the actual Map and never auto-opens an editor. `Options -> Set location` opens decimal latitude/longitude fields with an onscreen keyboard; Back makes no change, Save persists a valid center, and Clear is available only when a saved center exists. Serial `map center set|clear` commands share the same persistence path without Public RF, tile networking, SD writes, or formatting.
 - Map fetch, background-prefetch, and signed-location contract: canonical surfaces are `map|map_options|map_location|map_cache`. OpenStreetMap Standard remains the fixed interactive current-view source: the saved center opens at default zoom 10; direct `-`/`+` controls clamp to zooms 8 through 14, `Center` returns to the saved location, a one-finger drag commits only on release, and a visible generation requests at most one 3x3 at one zoom. The separate SD-authorized provider in `map/offline-provider.json` may prefetch only when the Map is hidden, configured Wi-Fi is connected, the persistent SD file/atomic-rename gate is ready, a saved device location exists, and the provider explicitly grants HTTPS network fetch, offline storage, and background prefetch. The deterministic plan bounds the device plus retained valid node adverts no farther than 200 km from the device, handles the antimeridian, completes every lower/mid zoom that fits, then spends the remaining card-safe `cache_budget_mb` (default 18432 MB; accepted range 256 through 24576 MB) through a gap-free zoom ladder of disjoint child tiles owned by the device, geographically spread retained-node clusters, and the most recent viewport. Changing device location, retained marker generation, provider policy/budget, storage generation, or retained viewport replans; opening Map pauses the background worker and gives the interactive view priority. Provider rate limits, HTTPS, attribution, and the built-in OSM no-bulk restriction remain fail closed.
 

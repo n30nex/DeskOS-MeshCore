@@ -16,6 +16,7 @@ def test_settings_model_defaults_and_nvs_contract():
     time_service = read("main/platform/time_service.c")
     time_migration = read("main/app/settings_protocol_migration.h")
     assert "D1L_SETTINGS_SCHEMA_VERSION 10U" in header
+    assert '#define D1L_NODE_NAME_FACTORY_DEFAULT "My Desk"' in header
     assert "D1L_WIFI_SSID_LEN 33U" in header
     assert "D1L_WIFI_PASSWORD_LEN 65U" in header
     assert "D1L_WIFI_PROFILE_CAPACITY 3U" in header
@@ -115,7 +116,10 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "d1l_time_service_next_protocol_timestamp(timestamp)" in time_service
     assert "mesh_timestamp_can_fallback" not in source
     assert "next_ram_mesh_timestamp" not in source
-    assert 'snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk")' in source
+    assert "D1L_NODE_NAME_FACTORY_DEFAULT" in source
+    assert '"D1L Desk"' not in source
+    assert "bool d1l_settings_node_name_valid" in header
+    assert "bool d1l_settings_node_name_valid" in source
     assert "settings->wifi_enabled = false" in source
     assert "settings->ble_companion_enabled = false" in source
     assert "settings->observer_enabled = false" in source
@@ -253,7 +257,12 @@ def test_console_exposes_phase2_foundation_commands():
     assert "arg_len >= D1L_NODE_NAME_LEN" in console
     assert "memcpy(settings.node_name, arg, arg_len + 1U)" in console
     assert '\\"onboarding_complete\\":%s' in console
-    assert "d1l_settings_complete_onboarding(arg, false, false, false)" in console
+    assert "d1l_app_model_complete_onboarding(arg)" in console
+    onboarding = console.split(
+        "static void cmd_settings_onboarding_complete", 1
+    )[1].split("static void cmd_settings_set_name", 1)[0]
+    assert 'arg = "D1L Desk"' not in onboarding
+    assert '"INVALID_NAME"' in onboarding
     assert "bool prompt_pending = true" in console
     assert "clearerr(stdin)" in console
     assert "vTaskDelay(pdMS_TO_TICKS(20))" in console

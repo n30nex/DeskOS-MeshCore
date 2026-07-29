@@ -88,7 +88,10 @@ def test_messages_states_keep_ram_history_readable_and_distinguish_empty_cases()
     )[0]
     assert "bool reply_available" in render_thread
     assert "Contact unavailable; retained history remains readable." in render_thread
-    assert 'sheet, "Reply", 16, 360, 448, 52' in render_thread
+    assert (
+        'sheet, "Message this contact                         >",\n'
+        "            16, 360, 448, 52"
+    ) in render_thread
     assert 'sheet, "Contact unavailable", 16, 360, 448, 52, NULL' in render_thread
     assert "lv_obj_add_state(reply, LV_STATE_DISABLED);" in render_thread
     assert 'sheet, "Search", 376, 6, 88, 44' in render_thread

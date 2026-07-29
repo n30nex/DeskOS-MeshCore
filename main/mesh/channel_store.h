@@ -109,6 +109,10 @@ esp_err_t d1l_channel_store_update(
 esp_err_t d1l_channel_store_select(
     uint64_t channel_id, d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_info);
+/* First-onboarding helper. Idempotently creates the interoperable #bot and
+ * #test channels from their standard 128-bit SHA-256-derived secrets, then
+ * leaves the protected Public channel selected/default. */
+esp_err_t d1l_channel_store_seed_onboarding_defaults(void);
 esp_err_t d1l_channel_store_remove(
     uint64_t channel_id, d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_info);

@@ -12,6 +12,7 @@
 
 #define D1L_SETTINGS_SCHEMA_VERSION 10U
 #define D1L_NODE_NAME_LEN 32U
+#define D1L_NODE_NAME_FACTORY_DEFAULT "My Desk"
 #define D1L_WIFI_SSID_LEN 33U
 #define D1L_WIFI_PASSWORD_LEN 65U
 #define D1L_WIFI_PROFILE_CAPACITY 3U
@@ -152,6 +153,7 @@ typedef struct {
 
 void d1l_settings_defaults(d1l_settings_t *settings);
 void d1l_settings_sanitize(d1l_settings_t *settings);
+bool d1l_settings_node_name_valid(const char *node_name);
 d1l_identity_state_t d1l_settings_identity_state(const d1l_settings_t *settings);
 esp_err_t d1l_settings_load(void);
 /* Public snapshots always zero password and private-key fields. */

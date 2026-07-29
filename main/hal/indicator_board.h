@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include "esp_err.h"
 
+#include "app/qualification_hooks.h"
+
 #define D1L_TOUCH_RAW_REG_BYTES 32U
 #define D1L_TOUCH_CONFIG_REG_BYTES 10U
 #define D1L_TOUCH_ID_REG_BYTES 9U
@@ -47,7 +49,9 @@ esp_err_t d1l_board_init(void);
 esp_err_t d1l_board_display_boot_splash(void);
 const d1l_board_status_t *d1l_board_status(void);
 esp_err_t d1l_board_i2c_scan(d1l_board_status_t *out_status);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_board_display_color_test(void);
+#endif
 esp_err_t d1l_board_touch_read(d1l_board_touch_state_t *out_state);
 esp_err_t d1l_board_touch_raw_read(d1l_board_touch_raw_state_t *out_state);
 esp_err_t d1l_board_touch_sample(uint8_t *touches, uint16_t *x, uint16_t *y);

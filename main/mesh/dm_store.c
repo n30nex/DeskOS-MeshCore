@@ -2657,6 +2657,7 @@ esp_err_t d1l_dm_store_append_rx_identity_deferred(
                            identity_digest, outcome);
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint,
                                        const char *contact_alias,
                                        const char *direction, const char *text,
@@ -2671,6 +2672,7 @@ esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint,
                            attempt, delivered, acked, ack_hash, false, false, NULL,
                            NULL);
 }
+#endif
 
 static d1l_dm_entry_t *find_rx_identity_locked(
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],

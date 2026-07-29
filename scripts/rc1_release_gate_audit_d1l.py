@@ -25,15 +25,6 @@ except ImportError:  # pragma: no cover
     )
 
 try:
-    from sd_remove_reinsert_acceptance_d1l import (
-        validate_report as validate_sd_remove_reinsert_report,
-    )
-except ImportError:  # pragma: no cover
-    from scripts.sd_remove_reinsert_acceptance_d1l import (
-        validate_report as validate_sd_remove_reinsert_report,
-    )
-
-try:
     from package_release_d1l import validate_production_package_surface
 except ImportError:  # pragma: no cover
     from scripts.package_release_d1l import validate_production_package_surface
@@ -120,7 +111,6 @@ PHYSICAL_SOURCE_KINDS = {
     "flash": "esp32_flash",
     "rf": "rf_full_acceptance",
     "protocol": "d1l_rc1_protocol_acceptance_transcript",
-    "sd_degraded": "d1l_sd_remove_reinsert_source",
     "map": "d1l_rc1_map_acceptance_transcript",
 }
 PHYSICAL_EVIDENCE_COVERAGE = {
@@ -133,7 +123,6 @@ PHYSICAL_EVIDENCE_COVERAGE = {
     "ping": "protocol",
     "repeater_login": "protocol",
     "repeater_query": "protocol",
-    "sd_degraded_notice": "sd_degraded",
     "authorized_map_download": "map",
     "map_cache_revisit": "map",
 }
@@ -188,7 +177,6 @@ OUTCOME_KEYS = frozenset(
         "ping",
         "repeater_login",
         "repeater_query",
-        "sd_degraded_notice",
         "authorized_map_download",
         "map_cache_revisit",
     }
@@ -805,29 +793,6 @@ def _machine_source_payload(
             and payload.get("simulated") is False
             and payload.get("manual_only") is False
         )
-    if role == "sd_degraded":
-        commit = exact_commit(candidate.get("firmware_commit"))
-        if commit is None or mode != "hardware":
-            return False
-        return (
-            payload.get("kind") == PHYSICAL_SOURCE_KINDS["sd_degraded"]
-            and payload.get("port") == PI_SERIAL_PATH
-            and exact_commit(payload.get("expected_firmware_commit"))
-            == commit
-            and validate_sd_remove_reinsert_report(payload)
-            and isinstance(payload.get("cycles"), list)
-            and bool(payload["cycles"])
-            and all(
-                isinstance(cycle, dict)
-                and cycle.get("absent", {}).get("mode")
-                == "live_only_no_card"
-                and cycle.get("absent", {}).get(
-                    "degraded_notice_visible"
-                )
-                is True
-                for cycle in payload["cycles"]
-            )
-        )
     return False
 
 
@@ -912,20 +877,20 @@ def physical_evidence_contract(
             source_payloads[role] = payload
 
         try:
-            from produce_rc1_bounded_physical_receipt_d1l import (
-                EvidenceError,
-                VALIDATORS,
-                validate_rf,
-            )
-        except ImportError:  # pragma: no cover - package import path used by pytest
-            try:
-                from scripts.produce_rc1_bounded_physical_receipt_d1l import (
+            if __package__:
+                from .produce_rc1_bounded_physical_receipt_d1l import (
                     EvidenceError,
                     VALIDATORS,
                     validate_rf,
                 )
-            except ImportError:
-                return False, None
+            else:  # pragma: no cover - direct script execution
+                from produce_rc1_bounded_physical_receipt_d1l import (
+                    EvidenceError,
+                    VALIDATORS,
+                    validate_rf,
+                )
+        except ImportError:
+            return False, None
         if (
             set(VALIDATORS) != set(PHYSICAL_SOURCE_KINDS)
             or not all(callable(validator) for validator in VALIDATORS.values())
@@ -1126,10 +1091,6 @@ def audit(
             isinstance(outcomes, dict)
             and outcomes.get("repeater_login") is True
             and outcomes.get("repeater_query") is True
-        ),
-        "sd_degraded_notice": (
-            isinstance(outcomes, dict)
-            and outcomes.get("sd_degraded_notice") is True
         ),
         "authorized_map_download_and_cache_revisit": (
             isinstance(outcomes, dict)

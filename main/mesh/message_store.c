@@ -1627,7 +1627,7 @@ static esp_err_t append_channel_internal(
     }
 
     if (!persist) {
-        /* The UI canary is a preview of the next durable row.  Keeping it
+        /* The volatile preview borrows the next durable row.  Keeping it
          * outside the ring means a full history cannot be evicted merely by
          * asking the UI to refresh. */
         s_volatile_entry = entry;
@@ -1639,7 +1639,7 @@ static esp_err_t append_channel_internal(
         return ESP_OK;
     }
 
-    /* A real append owns the borrowed sequence and supersedes the preview. */
+    /* A real append owns the borrowed sequence and supersedes the volatile preview. */
     if (s_next_seq == UINT32_MAX || s_total_written == UINT32_MAX ||
         (s_count == D1L_MESSAGE_STORE_CAPACITY &&
          s_dropped_oldest == UINT32_MAX)) {
@@ -1686,6 +1686,7 @@ esp_err_t d1l_message_store_append_public(const char *direction, const char *aut
         path_hash_bytes, path_hops, delivered, NULL);
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_message_store_append_public_volatile(const char *direction, const char *author,
                                                    const char *text, int rssi_dbm, int snr_tenths,
                                                    uint8_t path_hash_bytes, uint8_t path_hops,
@@ -1695,6 +1696,7 @@ esp_err_t d1l_message_store_append_public_volatile(const char *direction, const 
         D1L_CHANNEL_PUBLIC_ID, direction, author, text, rssi_dbm, snr_tenths,
         path_hash_bytes, path_hops, delivered);
 }
+#endif
 
 esp_err_t d1l_message_store_append_channel(
     uint64_t channel_id, const char *direction, const char *author,
@@ -1721,6 +1723,7 @@ esp_err_t d1l_message_store_append_channel_deferred(
         path_hash_bytes, path_hops, delivered, true, true, out_seq);
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_message_store_append_channel_volatile(
     uint64_t channel_id, const char *direction, const char *author,
     const char *text, int rssi_dbm, int snr_tenths,
@@ -1730,6 +1733,7 @@ esp_err_t d1l_message_store_append_channel_volatile(
         channel_id, direction, author, text, rssi_dbm, snr_tenths,
         path_hash_bytes, path_hops, delivered, false, false, NULL);
 }
+#endif
 
 static d1l_message_store_stats_t message_store_stats_locked(
     d1l_retained_blob_store_backend_state_t backend_state)

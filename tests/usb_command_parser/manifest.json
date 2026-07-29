@@ -23,9 +23,9 @@
     "main/comms/usb_command_parser.h"
   ],
   "source_pins": {
-    ".github/workflows/d1l-ci.yml": "fcfe9d61610bbb978f388ba0f37078d0919e3df542e4a36202797b47324beb8c",
-    "main/CMakeLists.txt": "2eb506426550bd7b99216c1f4ce08c20ec3c67e1dbde2ab543d164629914ce32",
-    "main/comms/usb_console.c": "446b7e35733501d3d05a5cbc825e007bff0955db9b8dc196ce9d76f484f34e9f",
+    ".github/workflows/d1l-ci.yml": "63c4e82fa4d878a65d02acb0efb39dbcfc035f44fb3c4d9306c8cc98c6594d10",
+    "main/CMakeLists.txt": "3a721189ecd11c2e46c2fbcfd6b2cf6579195bd431a70e2a72b32f8e29f12a55",
+    "main/comms/usb_console.c": "2fddd43e2d8c22f2d3ca0e8144560f742555dde84826c9636b907018088e0442",
     "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
     "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
     "scripts/usb_command_parser_fuzz_d1l.py": "0c138efd789d8e73ad126624f4491bfcd5924ec01c0fa18f1ff2c88197dfe85a",

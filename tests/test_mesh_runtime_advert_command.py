@@ -81,16 +81,65 @@ def test_advert_is_a_bounded_mesh_runtime_command():
         assert forbidden not in adapter
 
 
-def test_boot_announces_signed_identity_after_rx_is_queued():
+def test_boot_announces_only_retained_onboarded_identity_after_rx_is_queued():
     source = read("main/app_main.c")
     rx = source.index("d1l_meshcore_service_start_rx_async()")
     success = source.index("if (mesh_rx_ret != ESP_OK)", rx)
+    onboarding_guard = source.index("else if (onboarding_complete)", success)
     advert = source.index(
-        "d1l_meshcore_service_request_boot_advert(true)", success
+        "d1l_meshcore_service_request_boot_advert(true)", onboarding_guard
     )
 
-    assert rx < success < advert
+    assert "public_settings.onboarding_complete" in source[:rx]
+    assert rx < success < onboarding_guard < advert
     assert "MeshCore boot advert failed" in source[advert:]
+
+
+def test_first_onboarding_completion_queues_rx_before_signed_flood_advert():
+    source = read("main/app/app_model.c")
+    completion = body(
+        source,
+        "esp_err_t d1l_app_model_complete_onboarding",
+        "esp_err_t d1l_app_model_reset_onboarding",
+    )
+
+    snapshot = completion.index("d1l_settings_public_snapshot(&before)")
+    seed = completion.index("d1l_channel_store_seed_onboarding_defaults()")
+    seed_failure = completion.index("if (ret != ESP_OK)", seed)
+    identity = completion.index("d1l_meshcore_service_ensure_identity()")
+    persist = completion.index(
+        "d1l_settings_complete_onboarding(", identity
+    )
+    rx = completion.index("d1l_meshcore_service_start_rx_async()")
+    advert = completion.index("d1l_meshcore_service_request_boot_advert(true)")
+
+    assert "const bool first_completion = !before.onboarding_complete" in completion
+    assert "if (!first_completion)" in completion
+    assert snapshot < seed < seed_failure < identity < persist < rx < advert
+    assert completion.index("if (!first_completion)") < seed
+
+
+def test_onboarding_channel_seeds_are_standard_and_public_stays_default():
+    source = read("main/mesh/channel_store.c")
+    helper = body(
+        source,
+        "esp_err_t d1l_channel_store_seed_onboarding_defaults",
+        "esp_err_t d1l_channel_store_remove",
+    )
+
+    assert '.name = "#bot"' in helper
+    assert '.name = "#test"' in helper
+    assert (
+        "0xebU, 0x50U, 0xa1U, 0xbcU, 0xb3U, 0xe4U, 0xe5U, 0xd7U"
+        in helper
+    )
+    assert (
+        "0x9cU, 0xd8U, 0xfcU, 0xf2U, 0x2aU, 0x47U, 0x33U, 0x3bU"
+        in helper
+    )
+    assert "D1L_CHANNEL_SECRET_128_LEN, true, false" in helper
+    assert "D1L_CHANNEL_PUBLIC_ID" in helper
+    assert "!public_info.enabled || !public_info.is_default" in helper
 
 
 def test_boot_advert_status_is_machine_observable():

@@ -117,8 +117,8 @@ static lv_obj_t *messages_create_full_sheet(lv_obj_t *parent)
     if (!sheet) {
         return NULL;
     }
-    lv_obj_set_size(sheet, 480, 424);
-    lv_obj_set_pos(sheet, 0, 56);
+    lv_obj_set_size(sheet, 480, 480);
+    lv_obj_set_pos(sheet, 0, 0);
     lv_obj_set_style_radius(sheet, 0, 0);
     lv_obj_set_style_bg_color(sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_width(sheet, 0, 0);
@@ -450,7 +450,7 @@ static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
     const bool outgoing = entry->direction[0] == 't';
     const bool unread = !outgoing &&
         entry->seq > controller->rendered.last_channel_read_seq;
-    lv_obj_t *bubble = messages_create_panel(body, outgoing ? 76 : 8, y, 332, 82);
+    lv_obj_t *bubble = messages_create_panel(body, outgoing ? 76 : 8, y, 332, 68);
     if (!bubble) {
         return;
     }
@@ -469,20 +469,9 @@ static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
     messages_make_clickable(bubble, binding);
 
     char state_and_time[64];
-    char snr[16];
-    char technical[96];
     snprintf(state_and_time, sizeof(state_and_time), "%s | %s",
              messages_public_state(entry, unread),
              messages_public_time_label(entry));
-    messages_format_snr(snr, sizeof(snr), entry->snr_tenths);
-    if (outgoing) {
-        snprintf(technical, sizeof(technical), "path bytes %u | details >",
-                 entry->path_hash_bytes);
-    } else {
-        snprintf(technical, sizeof(technical),
-                 "rssi %d | snr %s | hops %u | details >",
-                 entry->rssi_dbm, snr, entry->path_hops);
-    }
 
     lv_obj_t *author = messages_create_label(
         bubble, outgoing ? "You" :
@@ -501,13 +490,8 @@ static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
         bubble, entry->text[0] ? entry->text : "No message text", 0xE5EDF5);
     if (text) {
         lv_obj_set_pos(text, 8, 26);
-        lv_obj_set_size(text, 308, 32);
+        lv_obj_set_size(text, 308, 28);
         lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-    }
-    lv_obj_t *details = messages_create_label(bubble, technical, 0x8EA0AE);
-    messages_set_dot_width(details, 308);
-    if (details) {
-        lv_obj_set_pos(details, 8, 60);
     }
 }
 
@@ -539,11 +523,8 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
     lv_obj_add_event_cb(row, messages_dispatch_event_cb, LV_EVENT_CLICKED, binding);
     lv_obj_set_style_pad_all(row, 8, 0);
 
-    char snr[16];
-    char meta[96];
-    messages_format_snr(snr, sizeof(snr), entry->snr_tenths);
     lv_obj_t *alias = messages_create_label(
-        row, entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint,
+        row, entry->contact_alias[0] ? entry->contact_alias : "Mesh contact",
         unread && !muted ? 0xFBBF24 :
         (muted ? 0x8EA0AE :
          (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0)));
@@ -617,110 +598,134 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
     if (text) {
         lv_obj_set_pos(text, 8, 28);
     }
-    snprintf(meta, sizeof(meta), "rssi %d  snr %s  hops %u",
-             entry->rssi_dbm, snr, entry->path_hops);
-    lv_obj_t *details = messages_create_label(row, meta, 0x8EA0AE);
-    messages_set_dot_width(details, 392);
-    if (details) {
-        lv_obj_set_pos(details, 8, 50);
-    }
 }
 
-static void messages_render_root_card(
+static void messages_render_channel_row(
     d1l_ui_messages_controller_t *controller,
     lv_obj_t *parent,
     int y,
-    const char *title_text,
-    const char *description,
-    const char *unit,
-    size_t total,
-    uint32_t unread,
-    uint32_t muted_unread,
-    d1l_ui_messages_store_state_t store_state,
-    size_t control_index,
-    d1l_ui_messages_action_t action,
-    uint32_t accent)
+    size_t index)
 {
-    lv_obj_t *card = messages_create_panel(parent, 18, y, 424, 118);
-    if (!card) {
+    if (!controller || !parent || index >= controller->rendered.channel_count) {
         return;
     }
-    messages_make_clickable(
-        card, messages_bind_control(controller, control_index, action));
-    lv_obj_t *title = messages_create_label(card, title_text, accent);
-    if (title) {
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        messages_set_dot_width(title, 300);
-        lv_obj_set_pos(title, 8, 4);
+    const d1l_channel_info_t *channel = &controller->rendered.channels[index];
+    const bool active =
+        channel->channel_id == controller->rendered.active_channel_id;
+    lv_obj_t *row = messages_create_panel(parent, 8, y, 408, 60);
+    if (!row) {
+        return;
     }
-    lv_obj_t *arrow = messages_create_label(card, ">", 0x8EA0AE);
-    if (arrow) {
-        lv_obj_set_pos(arrow, 382, 8);
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(active ? 0x122D2A : 0x111923), 0);
+    if (active) {
+        lv_obj_set_style_border_color(row, lv_color_hex(0x5EEAD4), 0);
     }
-    lv_obj_t *copy = messages_create_label(card, description, 0xC5D1DC);
-    messages_set_dot_width(copy, 376);
-    if (copy) {
-        lv_obj_set_pos(copy, 8, 38);
+    if (channel->enabled) {
+        d1l_ui_messages_action_binding_t *binding =
+            &controller->channel_rows[index];
+        *binding = (d1l_ui_messages_action_binding_t) {
+            .controller = controller,
+            .action = D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL,
+            .row_index = index,
+            .generation = controller->generation,
+        };
+        messages_make_clickable(row, binding);
     }
-    char status[112];
-    if (store_state == D1L_UI_MESSAGES_STORE_LOADING) {
-        snprintf(status, sizeof(status), "Loading retained history");
-    } else if (store_state == D1L_UI_MESSAGES_STORE_UNAVAILABLE) {
-        snprintf(status, sizeof(status), "%u readable in RAM | storage unavailable",
-                 (unsigned)total);
-    } else if (store_state == D1L_UI_MESSAGES_STORE_DEGRADED) {
-        snprintf(status, sizeof(status), "%u %s | storage degraded",
-                 (unsigned)total, unit ? unit : "retained");
-    } else if (muted_unread > 0U) {
-        snprintf(status, sizeof(status), "%u %s | %lu unread + %lu excluded",
-                 (unsigned)total, unit ? unit : "retained",
-                 (unsigned long)unread, (unsigned long)muted_unread);
+    char display_name[D1L_CHANNEL_NAME_LEN + 2U];
+    const char *name = channel->name[0] ? channel->name : "Unnamed";
+    if (name[0] == '#') {
+        snprintf(display_name, sizeof(display_name), "%s", name);
     } else {
-        snprintf(status, sizeof(status), "%u %s | %lu unread",
-                 (unsigned)total, unit ? unit : "retained",
-                 (unsigned long)unread);
+        snprintf(display_name, sizeof(display_name), "#%s", name);
     }
-    lv_obj_t *meta = messages_create_label(
-        card, status,
-        unread > 0U || store_state == D1L_UI_MESSAGES_STORE_DEGRADED ||
-                store_state == D1L_UI_MESSAGES_STORE_UNAVAILABLE ?
-            0xFBBF24 : 0x8EA0AE);
-    messages_set_dot_width(meta, 376);
+    lv_obj_t *title = messages_create_label(
+        row, display_name,
+        channel->enabled ? (active ? 0x5EEAD4 : 0xF4F7FB) : 0x8EA0AE);
+    messages_set_dot_width(title, 250);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+        lv_obj_set_pos(title, 8, 2);
+    }
+    char state[96];
+    snprintf(state, sizeof(state), "%s%s",
+             channel->enabled ? (active ? "Open now" : "Tap to open") :
+                 "Disabled - open settings to enable",
+             channel->channel_id == D1L_CHANNEL_PUBLIC_ID ? " | default" : "");
+    lv_obj_t *meta = messages_create_label(row, state, 0x8EA0AE);
+    messages_set_dot_width(meta, 310);
     if (meta) {
-        lv_obj_set_pos(meta, 8, 72);
+        lv_obj_set_pos(meta, 8, 32);
+    }
+    if (channel->unread_count > 0U) {
+        char unread[16];
+        snprintf(unread, sizeof(unread), "%lu",
+                 (unsigned long)channel->unread_count);
+        lv_obj_t *badge = messages_create_label(row, unread, 0xFBBF24);
+        if (badge) {
+            lv_obj_set_pos(badge, 350, 6);
+        }
+    }
+    lv_obj_t *arrow = messages_create_label(row, ">", 0x8EA0AE);
+    if (arrow) {
+        lv_obj_set_pos(arrow, 382, 28);
     }
 }
+
+static int messages_render_notice(lv_obj_t *parent,
+                                  int y,
+                                  const char *text,
+                                  uint32_t color);
+static int messages_render_store_notice(
+    lv_obj_t *parent,
+    int y,
+    d1l_ui_messages_store_state_t state);
 
 static void messages_render_root(d1l_ui_messages_controller_t *controller,
                                  lv_obj_t *parent)
 {
-    lv_obj_t *title = messages_create_label(parent, "Messages", 0xF4F7FB);
+    lv_obj_t *title = messages_create_label(parent, "Channels", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
         lv_obj_set_pos(title, 18, 10);
     }
-    lv_obj_t *copy = messages_create_label(
-        parent, "Choose a conversation type", 0x8EA0AE);
-    if (copy) {
-        lv_obj_set_pos(copy, 18, 40);
+    messages_create_button(
+        parent, "Direct", 342, 6, 100, 44,
+        messages_bind_control(controller, 1U,
+                              D1L_UI_MESSAGES_ACTION_SHOW_DIRECT));
+    lv_obj_t *subtitle = messages_create_label(
+        parent, "Group conversations", 0x8EA0AE);
+    if (subtitle) {
+        lv_obj_set_pos(subtitle, 18, 40);
     }
-    messages_render_root_card(
-        controller, parent, 70,
-        controller->rendered.active_channel_name[0] ?
-            controller->rendered.active_channel_name : "Channel unavailable",
-        controller->rendered.active_channel_id == D1L_CHANNEL_PUBLIC_ID ?
-            "Default channel conversation" : "Active group channel conversation",
-        "messages",
-        controller->rendered.public_total, controller->rendered.public_unread, 0U,
-        controller->rendered.public_store_state,
-        0U, D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC, 0x5EEAD4);
-    messages_render_root_card(
-        controller, parent, 200, "Direct messages", "Private contact conversations",
-        "conversations",
-        controller->rendered.dm_total, controller->rendered.dm_unread,
-        controller->rendered.muted_dm_unread,
-        controller->rendered.dm_store_state,
-        1U, D1L_UI_MESSAGES_ACTION_SHOW_DIRECT, 0xA7F3D0);
+    lv_obj_t *body = messages_create_scroll_body(parent, 18, 66, 424, 288);
+    if (!body) {
+        return;
+    }
+    int row_y = messages_render_store_notice(
+        body, 8, controller->rendered.public_store_state);
+    if (!controller->rendered.channel_store_loaded) {
+        (void)messages_render_notice(
+            body, row_y, "Loading channels...", 0x93C5FD);
+        return;
+    }
+    if (controller->rendered.channel_count == 0U) {
+        (void)messages_render_notice(
+            body, row_y, "No channels yet. Add or import a channel.",
+            0x8EA0AE);
+        if (d1l_ui_messages_action_available(
+                D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR)) {
+            messages_create_button(
+                body, "Add a channel", 8, row_y + 60, 408, 48,
+                messages_bind_control(
+                    controller, 4U,
+                    D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR));
+        }
+        return;
+    }
+    for (size_t i = 0U; i < controller->rendered.channel_count; ++i) {
+        messages_render_channel_row(controller, body, row_y + (int)i * 68, i);
+    }
 }
 
 static int messages_render_notice(lv_obj_t *parent,
@@ -786,39 +791,22 @@ static void messages_render_public(d1l_ui_messages_controller_t *controller,
         messages_set_dot_width(title, 226);
         lv_obj_set_pos(title, 104, 10);
     }
-    char summary[96];
-    snprintf(summary, sizeof(summary), "%u messages | %lu unread",
-             (unsigned)controller->rendered.public_total,
-             (unsigned long)controller->rendered.public_unread);
-    lv_obj_t *meta = messages_create_label(parent, summary, 0x8EA0AE);
-    messages_set_dot_width(meta, 250);
-    if (meta) {
-        lv_obj_set_pos(meta, 104, 36);
-    }
-    if (d1l_ui_messages_action_available(
-            D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR)) {
-        messages_create_button(
-            parent, "Channels", 350, 8, 92, 44,
-            messages_bind_control(
-                controller, 4U,
-                D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR));
-    }
     messages_create_button(
-        parent, "Mark read", 18, 60, 96, 44,
+        parent, "Read", 306, 8, 64, 44,
         messages_bind_control(controller, 1U,
                               D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ));
     messages_create_button(
-        parent, "History", 122, 60, 96, 44,
+        parent, "...", 378, 8, 64, 44,
         messages_bind_control(controller, 2U,
                               D1L_UI_MESSAGES_ACTION_OPEN_HISTORY));
-    lv_obj_t *body = messages_create_scroll_body(parent, 18, 112, 424, 184);
+    lv_obj_t *body = messages_create_scroll_body(parent, 18, 60, 424, 238);
     if (!body) {
         return;
     }
     int row_y = messages_render_store_notice(
         body, 8, controller->rendered.public_store_state);
     for (size_t i = 0; i < controller->rendered.public_row_count; ++i) {
-        messages_render_public_row(controller, body, row_y + (int)i * 90, i);
+        messages_render_public_row(controller, body, row_y + (int)i * 74, i);
     }
     if (controller->rendered.public_row_count > 0U) {
         lv_obj_update_layout(body);
@@ -848,8 +836,9 @@ static void messages_render_public(d1l_ui_messages_controller_t *controller,
     }
     lv_obj_t *compose = messages_create_button(
         parent, controller->rendered.active_channel_enabled ?
-            "Compose" : "Channel unavailable",
-        18, 304, 424, 50,
+            "Message this channel                         >" :
+            "Channel unavailable",
+        18, 306, 424, 48,
         controller->rendered.active_channel_enabled ?
             messages_bind_control(controller, 3U,
                                   D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC) :
@@ -873,22 +862,15 @@ static void messages_render_direct(d1l_ui_messages_controller_t *controller,
         messages_set_dot_width(title, 250);
         lv_obj_set_pos(title, 104, 10);
     }
-    char summary[96];
-    if (controller->rendered.muted_dm_unread > 0U) {
-        snprintf(summary, sizeof(summary),
-                 "%u conversations | %lu unread + %lu excluded",
-                 (unsigned)controller->rendered.dm_total,
-                 (unsigned long)controller->rendered.dm_unread,
-                 (unsigned long)controller->rendered.muted_dm_unread);
-    } else {
-        snprintf(summary, sizeof(summary), "%u conversations | %lu unread",
-                 (unsigned)controller->rendered.dm_total,
+    if (controller->rendered.dm_unread > 0U) {
+        char unread[48];
+        snprintf(unread, sizeof(unread), "%lu unread",
                  (unsigned long)controller->rendered.dm_unread);
-    }
-    lv_obj_t *meta = messages_create_label(parent, summary, 0x8EA0AE);
-    messages_set_dot_width(meta, 250);
-    if (meta) {
-        lv_obj_set_pos(meta, 104, 36);
+        lv_obj_t *meta = messages_create_label(parent, unread, 0xFBBF24);
+        messages_set_dot_width(meta, 100);
+        if (meta) {
+            lv_obj_set_pos(meta, 342, 18);
+        }
     }
     lv_obj_t *body = messages_create_scroll_body(parent, 18, 68, 424, 286);
     if (!body) {
@@ -1189,8 +1171,8 @@ static lv_obj_t *messages_create_thread_body(lv_obj_t *sheet)
     lv_obj_set_style_bg_color(body, lv_color_hex(0x071018), 0);
     lv_obj_set_style_border_color(body, lv_color_hex(0x263241), 0);
     lv_obj_set_style_border_width(body, 1, 0);
-    lv_obj_set_style_pad_all(body, 12, 0);
-    lv_obj_set_style_pad_row(body, 10, 0);
+    lv_obj_set_style_pad_all(body, 8, 0);
+    lv_obj_set_style_pad_row(body, 8, 0);
     lv_obj_add_flag(body, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(body, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
@@ -1270,7 +1252,7 @@ static bool messages_render_thread_bubble(
     if (!bubble) {
         return false;
     }
-    lv_obj_set_width(bubble, 352);
+    lv_obj_set_width(bubble, 344);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(bubble, 10, 0);
     lv_obj_set_style_bg_color(
@@ -1278,8 +1260,8 @@ static bool messages_render_thread_bubble(
     lv_obj_set_style_border_color(
         bubble, lv_color_hex(outgoing ? 0x3B5B86 : 0x28635A), 0);
     lv_obj_set_style_border_width(bubble, 1, 0);
-    lv_obj_set_style_pad_all(bubble, 10, 0);
-    lv_obj_set_style_pad_row(bubble, 6, 0);
+    lv_obj_set_style_pad_all(bubble, 9, 0);
+    lv_obj_set_style_pad_row(bubble, 4, 0);
     lv_obj_set_flex_flow(bubble, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
@@ -1298,7 +1280,7 @@ static bool messages_render_thread_bubble(
         (controller->thread_alias[0] ? controller->thread_alias :
          controller->thread_fingerprint);
     char heading[160];
-    snprintf(heading, sizeof(heading), "%s  |  %s  |  details %s",
+    snprintf(heading, sizeof(heading), "%s  |  %s  %s",
              who, d1l_ui_messages_delivery_label(entry, unread),
              expanded ? "v" : ">");
     if (!messages_create_wrapped_label(
@@ -1470,16 +1452,14 @@ bool d1l_ui_messages_render_thread(
                 "Contact unavailable; retained history remains readable.",
                 0xFBBF24);
         }
-        char meta_text[160];
+        char meta_text[96];
         if (controller->thread_search_text[0]) {
             snprintf(meta_text, sizeof(meta_text),
-                     "%.16s  showing %u/%u  search active",
-                     controller->thread_fingerprint,
+                     "Showing %u of %u | search active",
                      (unsigned)controller->thread_row_count,
                      (unsigned)controller->thread_total_matches);
         } else {
-            snprintf(meta_text, sizeof(meta_text), "%.16s  showing %u/%u",
-                     controller->thread_fingerprint,
+            snprintf(meta_text, sizeof(meta_text), "Showing %u of %u",
                      (unsigned)controller->thread_row_count,
                      (unsigned)controller->thread_total_matches);
         }
@@ -1531,7 +1511,8 @@ bool d1l_ui_messages_render_thread(
         complete;
     lv_obj_t *reply = reply_available ?
         messages_create_button(
-            sheet, "Reply", 16, 360, 448, 52,
+            sheet, "Message this contact                         >",
+            16, 360, 448, 52,
             messages_bind_thread_control(
                 controller, 2U, D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD)) :
         messages_create_button(

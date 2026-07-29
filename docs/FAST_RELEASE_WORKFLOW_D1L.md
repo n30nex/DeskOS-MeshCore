@@ -11,7 +11,7 @@ part of RC1.
 After the final change merges, stop using issue-sized examples and follow the
 [authoritative RC1 release execution](RC1_RELEASE_EXECUTION_D1L.md) exactly.
 It owns the exact-main Actions capture, one non-erasing retained-state flash,
-bounded five-source gate, final audit, `v1.0.0` tag and release assets.
+bounded four-source gate, final audit, `v1.0.0` tag and release assets.
 
 ## Current cycle
 
@@ -29,10 +29,12 @@ bounded five-source gate, final audit, `v1.0.0` tag and release assets.
 7. Run only the hardware proof that matches the changed slice. For the final
    candidate, use the reduced bounded gate covering the exact non-erasing
    retained-state flash, boot advert and one operator-authorized Public send,
-   DM/ACK, contact PATH/TRACE, repeater Ping, repeater login/authenticated
-   query, SD degraded notice/reinsert recovery, and authorized Map
-   download/offline revisit. Do not rerun the completed UI-navigation,
-   Wi-Fi-reconnect, or SD write/reboot/remount campaigns.
+   DM/ACK, contact PATH, repeater Ping, repeater login/authenticated query,
+   and authorized Map download/offline revisit. These are exactly four fresh
+   evidence sources: flash, RF, protocol and Map. Do not rerun the completed
+   UI-navigation, Wi-Fi-reconnect, SD write/reboot/remount, or prepared-card
+   remove/reinsert campaigns. Carry the prior operator-observed SD cycle
+   forward as context only; do not claim a fresh SD receipt or outcome.
 8. Confirm SD-primary behavior, built-in OSM visible-only behavior, provider
    authorization, and prefetch pause while the interactive Map is open.
 9. Record artifact paths and results against the issue/PR. Merge only after the

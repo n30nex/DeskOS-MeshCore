@@ -30,8 +30,10 @@ def test_dm_thread_controller_owns_bounded_search_state() -> None:
     )
     assert 'sheet, "Search", 376, 6, 88, 44' in render
     assert "D1L_UI_MESSAGES_ACTION_OPEN_DM_SEARCH" in render
-    assert '"%.16s  showing %u/%u  search active"' in render
-    assert "%.32s" not in render
+    assert '"Showing %u of %u | search active"' in render
+    assert "controller->thread_fingerprint" not in render.split(
+        "char meta_text[96];", 1
+    )[1].split("lv_obj_t *meta", 1)[0]
     assert "No retained messages match this search." in render
     assert "No retained messages in this conversation." in render
 

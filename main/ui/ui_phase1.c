@@ -37,6 +37,7 @@
 #include "ui_contact_sheets.h"
 #include "ui_device_sheets.h"
 #include "ui_dm_identity.h"
+#include "ui_first_start.h"
 #include "ui_home.h"
 #include "ui_font_symbols_14.h"
 #include "ui_keyboard.h"
@@ -67,15 +68,17 @@ static lv_disp_drv_t s_disp_drv;
 static lv_color_t *s_buf1;
 static lv_color_t *s_buf2;
 static esp_timer_handle_t s_lv_tick_timer;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static uint8_t *s_capture_shadow;
 static uint8_t *s_capture_snapshot;
 static SemaphoreHandle_t s_capture_lock;
 static bool s_capture_shadow_ready;
 static bool s_capture_active;
-static bool s_bsp_flush_ready_registered;
 static uint32_t s_capture_frame_seq;
 static uint32_t s_capture_flush_count;
 static uint32_t s_capture_crc32;
+#endif
+static bool s_bsp_flush_ready_registered;
 static TaskHandle_t s_ui_task_handle;
 static TaskHandle_t s_touch_task_handle;
 static SemaphoreHandle_t s_ui_start_done_sem;
@@ -124,16 +127,24 @@ static lv_obj_t *s_packet_search_textarea;
 static lv_obj_t *s_packet_search_keyboard;
 static lv_obj_t *s_mesh_roles_sheet;
 static lv_obj_t *s_lock_overlay;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static lv_obj_t *s_onboarding_sheet;
 static lv_obj_t *s_onboarding_name_textarea;
 static lv_obj_t *s_onboarding_keyboard;
+#else
+static d1l_ui_first_start_controller_t s_first_start_controller;
+#endif
 static bool s_lock_visible;
 static bool s_onboarding_visible;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool s_onboarding_probe_suppressed;
+#endif
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot EXT_RAM_BSS_ATTR;
 static bool s_compose_dm;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool s_compose_probe_send_suppressed;
+#endif
 static uint64_t s_compose_channel_id;
 static char s_compose_channel_name[D1L_CHANNEL_NAME_LEN];
 static d1l_ui_messages_mode_t s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
@@ -229,13 +240,14 @@ static char s_public_history_channel_name[D1L_CHANNEL_NAME_LEN];
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
 static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
+static const uint32_t D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS = 5000U;
+static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 /* A full retained Packet view can legitimately take longer than 1.5 s to rebuild
  * before a nested page opens. Keep the serial proof bounded without turning a
  * populated device into a false timeout. */
 static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 5000U;
-static const uint32_t D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS = 5000U;
 static const uint32_t D1L_UI_COMPOSE_PROBE_TIMEOUT_MS = 1500U;
-static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
 typedef struct {
     uint32_t next_id;
     uint32_t pending_id;
@@ -256,6 +268,7 @@ static portMUX_TYPE s_compose_probe_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_ui_probe_gate_t s_compose_probe_gate;
 static char s_compose_probe_target[16];
 static d1l_ui_compose_probe_result_t s_compose_probe_result;
+#endif
 
 #if CONFIG_FREERTOS_UNICORE
 #define D1L_UI_TASK_CORE 0
@@ -329,17 +342,17 @@ typedef struct {
 
 static const d1l_ui_dock_item_t k_dock_items[] = {
     {D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME},
-    {D1L_UI_TAB_MESSAGES, "Messages", LV_SYMBOL_ENVELOPE},
-    {D1L_UI_TAB_NODES, "Nodes", LV_SYMBOL_LIST},
+    {D1L_UI_TAB_MESSAGES, "Channels", LV_SYMBOL_ENVELOPE},
+    {D1L_UI_TAB_NODES, "Contacts", LV_SYMBOL_LIST},
     {D1L_UI_TAB_MAP, "Map", LV_SYMBOL_IMAGE},
-    {D1L_UI_TAB_SETTINGS, "Tools", LV_SYMBOL_SETTINGS},
+    {D1L_UI_TAB_SETTINGS, "Settings", LV_SYMBOL_SETTINGS},
 };
 
 static const d1l_ui_dock_item_t k_core_dock_items[] = {
     {D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME},
-    {D1L_UI_TAB_MESSAGES, "Messages", LV_SYMBOL_ENVELOPE},
-    {D1L_UI_TAB_NODES, "Nodes", LV_SYMBOL_LIST},
-    {D1L_UI_TAB_PACKETS, "Packets", LV_SYMBOL_LIST},
+    {D1L_UI_TAB_MESSAGES, "Channels", LV_SYMBOL_ENVELOPE},
+    {D1L_UI_TAB_NODES, "Contacts", LV_SYMBOL_LIST},
+    {D1L_UI_TAB_MAP, "Map", LV_SYMBOL_IMAGE},
     {D1L_UI_TAB_SETTINGS, "Settings", LV_SYMBOL_SETTINGS},
 };
 
@@ -714,6 +727,7 @@ static bool map_interactive_touch_authorized(void)
     return authorized;
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 /* Probe-gate helpers are called only while the matching probe lock is held. */
 static bool probe_gate_busy(const d1l_ui_probe_gate_t *gate)
 {
@@ -838,6 +852,7 @@ static bool compose_probe_pending(void)
     portEXIT_CRITICAL(&s_compose_probe_lock);
     return pending;
 }
+#endif
 
 static bool render_dm_thread_sheet(void);
 static void handle_messages_action(
@@ -870,10 +885,14 @@ static void close_map_options_sheet_event_cb(lv_event_t *event);
 static void message_detail_mode_event_cb(lv_event_t *event);
 static void map_location_keyboard_event_cb(lv_event_t *event);
 static void process_pending_content_refresh(void);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void process_pending_scroll_probe(void);
+#endif
 static const char *dm_row_state(const d1l_dm_entry_t *entry, bool unread);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void process_pending_compose_probe(void);
 static bool object_is_visible(lv_obj_t *obj);
+#endif
 
 static const d1l_ui_map_callbacks_t callbacks = {
     .open_options = open_map_options_sheet_event_cb,
@@ -899,6 +918,7 @@ static bool tab_from_name(const char *name, d1l_ui_tab_t *out_tab)
     return d1l_ui_screen_from_name(name, out_tab);
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool scroll_surface_from_name(const char *name, char *out_surface,
                                      size_t out_surface_len, d1l_ui_tab_t *out_tab)
 {
@@ -946,6 +966,7 @@ static bool compose_probe_target_available(const char *target)
     }
     return strcmp(target, "onboarding") == 0;
 }
+#endif
 
 static void request_full_screen_repaint(void)
 {
@@ -975,6 +996,7 @@ static void lv_tick_task(void *arg)
     lv_tick_inc(5);
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len)
 {
     crc = ~crc;
@@ -1072,6 +1094,7 @@ static void copy_rect_to_capture_shadow(int x1,
     s_capture_frame_seq++;
     xSemaphoreGive(s_capture_lock);
 }
+#endif
 
 static bool lcd_flush_ready_cb(void *data)
 {
@@ -1103,7 +1126,7 @@ static void lcd_direct_mode_copy_cb(void)
     }
     uint8_t *fb_from = buf_act;
     uint8_t *fb_to = (fb_from == buf1) ? buf2 : buf1;
-    const uint32_t bytes_per_line = (uint32_t)h_res * D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+    const uint32_t bytes_per_line = (uint32_t)h_res * sizeof(lv_color_t);
 
     for (int32_t i = 0; i < disp_refr->inv_p; ++i) {
         if (disp_refr->inv_area_joined[i] != 0) {
@@ -1112,17 +1135,19 @@ static void lcd_direct_mode_copy_cb(void)
         const lv_coord_t y_start = disp_refr->inv_areas[i].y1;
         const lv_coord_t y_end = disp_refr->inv_areas[i].y2 + 1;
         uint8_t *from = fb_from + ((uint32_t)y_start * (uint32_t)h_res) *
-                                  D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+                                  sizeof(lv_color_t);
         uint8_t *to = fb_to + ((uint32_t)y_start * (uint32_t)h_res) *
-                              D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+                              sizeof(lv_color_t);
         for (lv_coord_t y = y_start; y < y_end; ++y) {
             memcpy(to, from, bytes_per_line);
             from += bytes_per_line;
             to += bytes_per_line;
         }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
         copy_rect_to_capture_shadow(0, y_start, D1L_UI_CAPTURE_WIDTH, y_end,
                                     fb_to, 0, 0, h_res);
+#endif
         uint8_t *flush_ptr = fb_to + (uint32_t)y_start * bytes_per_line;
         const uint32_t bytes_to_flush = (uint32_t)(y_end - y_start) * bytes_per_line;
         Cache_WriteBack_Addr((uint32_t)flush_ptr, bytes_to_flush);
@@ -1133,7 +1158,7 @@ static void lcd_direct_mode_copy_cb(void)
 static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
     esp_err_t ret = bsp_lcd_flush(area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_map);
-#if !CONFIG_LCD_LVGL_DIRECT_MODE
+#if !CONFIG_LCD_LVGL_DIRECT_MODE && D1L_ENABLE_QUALIFICATION_HOOKS
     copy_rect_to_capture_shadow(area->x1, area->y1, area->x2 + 1, area->y2 + 1,
                                 (const uint8_t *)color_map, area->x1, area->y1,
                                 area->x2 - area->x1 + 1);
@@ -1561,8 +1586,10 @@ static void hide_sheet(void)
 static void hide_compose_sheet(void)
 {
     d1l_ui_modal_hide(s_compose_sheet);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     s_onboarding_probe_suppressed = false;
     s_compose_probe_send_suppressed = false;
+#endif
     restore_dock_for_active_tab();
     s_compose_dm = false;
     s_compose_channel_id = 0U;
@@ -1789,6 +1816,7 @@ static void hide_mesh_roles_sheet(void)
     restore_dock_for_active_tab();
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void hide_onboarding_sheet(void)
 {
     d1l_ui_modal_hide(s_onboarding_sheet);
@@ -1803,17 +1831,36 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
         return;
     }
     if (snapshot->onboarding_complete) {
+#if D1L_ENABLE_QUALIFICATION_HOOKS
         s_onboarding_probe_suppressed = false;
+#endif
         hide_onboarding_sheet();
         return;
     }
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     if (s_onboarding_probe_suppressed) {
         hide_onboarding_sheet();
         return;
     }
+#endif
     s_onboarding_visible = true;
     show_modal(s_onboarding_sheet);
     request_full_screen_repaint();
+}
+#endif
+
+static void update_startup_overlay(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return;
+    }
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+    update_onboarding_visibility(snapshot);
+#else
+    d1l_ui_first_start_update(&s_first_start_controller, snapshot);
+    s_onboarding_visible =
+        d1l_ui_first_start_visible(&s_first_start_controller);
+#endif
 }
 
 static void set_object_hidden(lv_obj_t *obj, bool hidden)
@@ -1997,6 +2044,7 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
         lv_obj_set_size(s_top_bar, 480, layout.content_y);
         lv_obj_set_style_pad_all(s_top_bar, layout.header_detail_visible ? 8 : 1, 0);
     }
+    set_object_hidden(s_title_label, layout.content_y == 0U);
     if (layout.header_detail_visible) {
         lv_obj_align(s_title_label, LV_ALIGN_LEFT_MID, 2, 0);
     } else {
@@ -2509,7 +2557,11 @@ static d1l_ui_compose_eligibility_t compose_eligibility_for_text(
     d1l_channel_info_t channel = {0};
     const bool channel_found = s_compose_dm || snapshot_find_channel(
         &s_snapshot, s_compose_channel_id, &channel);
-    const bool channel_sendable = !s_compose_probe_send_suppressed &&
+    bool qualification_send_suppressed = false;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+    qualification_send_suppressed = s_compose_probe_send_suppressed;
+#endif
+    const bool channel_sendable = !qualification_send_suppressed &&
         (s_compose_dm || (channel_found && channel.enabled));
     bool contact_found = !s_compose_dm;
     bool contact_sendable = !s_compose_dm;
@@ -2517,7 +2569,7 @@ static d1l_ui_compose_eligibility_t compose_eligibility_for_text(
         d1l_contact_entry_t current = {0};
         contact_found = d1l_app_model_find_contact(
             s_compose_contact.fingerprint, &current) == ESP_OK;
-        contact_sendable = !s_compose_probe_send_suppressed && contact_found &&
+        contact_sendable = !qualification_send_suppressed && contact_found &&
             d1l_contact_store_can_dm(&current);
         if (contact_sendable) {
             s_compose_contact = current;
@@ -2653,7 +2705,9 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     s_compose_probe_send_suppressed = false;
+#endif
     s_compose_dm = false;
     s_compose_channel_id = channel.channel_id;
     snprintf(s_compose_channel_name, sizeof(s_compose_channel_name), "%s",
@@ -2731,7 +2785,11 @@ static void present_dm_compose_sheet(const d1l_contact_entry_t *selected,
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     s_compose_probe_send_suppressed = probe_only;
+#else
+    (void)probe_only;
+#endif
     s_compose_dm = true;
     s_compose_channel_id = 0U;
     s_compose_channel_name[0] = '\0';
@@ -4578,10 +4636,12 @@ static void send_compose_text(void)
     if (!s_compose_textarea) {
         return;
     }
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     if (s_compose_probe_send_suppressed) {
         update_compose_counter();
         return;
     }
+#endif
     const char *text = lv_textarea_get_text(s_compose_textarea);
     const d1l_user_text_info_t info = d1l_user_text_validate(text);
     d1l_app_model_snapshot(&s_snapshot);
@@ -4646,6 +4706,7 @@ static void compose_textarea_event_cb(lv_event_t *event)
     }
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void complete_onboarding_from_ui(const char *fallback_name)
 {
     const char *name = fallback_name;
@@ -4656,7 +4717,7 @@ static void complete_onboarding_from_ui(const char *fallback_name)
         }
     }
     if (!name || name[0] == '\0') {
-        name = "D1L Desk";
+        name = D1L_NODE_NAME_FACTORY_DEFAULT;
     }
     esp_err_t ret = d1l_app_model_complete_onboarding(name);
     if (ret == ESP_OK) {
@@ -4669,24 +4730,26 @@ static void complete_onboarding_from_ui(const char *fallback_name)
 static void onboarding_start_event_cb(lv_event_t *event)
 {
     (void)event;
-    complete_onboarding_from_ui("D1L Desk");
+    complete_onboarding_from_ui(D1L_NODE_NAME_FACTORY_DEFAULT);
 }
 
 static void onboarding_defaults_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_onboarding_name_textarea) {
-        lv_textarea_set_text(s_onboarding_name_textarea, "D1L Desk");
+        lv_textarea_set_text(s_onboarding_name_textarea,
+                             D1L_NODE_NAME_FACTORY_DEFAULT);
     }
-    complete_onboarding_from_ui("D1L Desk");
+    complete_onboarding_from_ui(D1L_NODE_NAME_FACTORY_DEFAULT);
 }
 
 static void onboarding_keyboard_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_READY) {
-        complete_onboarding_from_ui("D1L Desk");
+        complete_onboarding_from_ui(D1L_NODE_NAME_FACTORY_DEFAULT);
     }
 }
+#endif
 
 static const char *public_row_state(const d1l_message_entry_t *entry)
 {
@@ -6012,7 +6075,7 @@ static void map_location_save_event_cb(lv_event_t *event)
         hide_map_options_sheet();
         set_map_interactive_touch_authorized(true);
         request_tab_switch(D1L_UI_TAB_MAP);
-        show_toast_text("D1L pin saved", true);
+        show_toast_text("Device PIN saved", true);
     } else {
         show_toast_text("Location rejected", false);
     }
@@ -6031,7 +6094,7 @@ static void map_location_clear_event_cb(lv_event_t *event)
         hide_map_location_sheet();
         hide_map_options_sheet();
         request_content_refresh();
-        show_toast_text("D1L pin cleared", true);
+        show_toast_text("Device PIN cleared", true);
     } else {
         show_toast_text("Clear location failed", false);
     }
@@ -7930,7 +7993,7 @@ static void render_active_tab(void)
     }
     (void)d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content,
                                renderers, sizeof(renderers) / sizeof(renderers[0]));
-    update_onboarding_visibility(&s_snapshot);
+    update_startup_overlay(&s_snapshot);
     remember_rendered_content_generation(&s_snapshot);
     remember_rendered_map_input(&s_snapshot);
     request_full_screen_repaint();
@@ -7959,6 +8022,7 @@ esp_err_t d1l_ui_phase1_request_tab(const char *name)
     return ESP_OK;
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_ui_phase1_request_map_acceptance(void)
 {
     if (!d1l_ui_screen_available(D1L_UI_TAB_MAP)) {
@@ -8106,6 +8170,7 @@ esp_err_t d1l_ui_phase1_compose_probe(const char *target,
     portEXIT_CRITICAL(&s_compose_probe_lock);
     return ESP_OK;
 }
+#endif
 
 const char *d1l_ui_phase1_active_tab_name(void)
 {
@@ -8128,6 +8193,7 @@ bool d1l_ui_phase1_tab_switch_pending(void)
     return d1l_ui_navigation_switch_pending();
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void fill_capture_status(d1l_ui_capture_status_t *status)
 {
     if (!status) {
@@ -8259,6 +8325,7 @@ esp_err_t d1l_ui_capture_end(d1l_ui_capture_status_t *out_status)
     }
     return ESP_OK;
 }
+#endif
 
 static void request_tab_event_cb(lv_event_t *event)
 {
@@ -8377,6 +8444,7 @@ static void process_pending_content_refresh(void)
     force_ui_layout_repaint();
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static lv_obj_t *find_scrollable_descendant(lv_obj_t *root, lv_obj_t **fallback)
 {
     if (!root) {
@@ -9134,6 +9202,7 @@ static void process_pending_compose_probe(void)
     run_compose_probe_on_ui_task(target, &result);
     finish_pending_compose_probe(&result, request_id);
 }
+#endif
 
 static void lock_event_cb(lv_event_t *event)
 {
@@ -9258,7 +9327,11 @@ static void refresh_timer_cb(lv_timer_t *timer)
     (void)timer;
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
-    update_onboarding_visibility(&s_snapshot);
+    update_startup_overlay(&s_snapshot);
+#if !D1L_ENABLE_QUALIFICATION_HOOKS
+    lv_timer_set_period(
+        timer, s_onboarding_visible ? 250U : 2000U);
+#endif
     if (d1l_ui_modal_visible(s_compose_sheet)) {
         update_compose_counter();
     }
@@ -9792,6 +9865,7 @@ static void create_mesh_roles_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_mesh_roles_sheet);
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void create_onboarding_sheet(lv_obj_t *screen)
 {
     s_onboarding_sheet = create_object(screen, "onboarding sheet");
@@ -9874,6 +9948,7 @@ static void create_onboarding_sheet(lv_obj_t *screen)
         s_onboarding_visible = true;
     }
 }
+#endif
 
 static void create_lock_overlay(lv_obj_t *screen)
 {
@@ -9931,8 +10006,10 @@ static void ui_task(void *arg)
         d1l_health_monitor_sample_lvgl();
         process_pending_tab_switch();
         process_pending_content_refresh();
+#if D1L_ENABLE_QUALIFICATION_HOOKS
         process_pending_scroll_probe();
         process_pending_compose_probe();
+#endif
         if (d1l_ui_phase1_tab_switch_pending()) {
             wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
         }
@@ -10049,7 +10126,15 @@ esp_err_t d1l_ui_phase1_show_home(void)
     }
     create_toast(s_screen);
     create_lock_overlay(s_screen);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     create_onboarding_sheet(s_screen);
+#else
+    if (!d1l_ui_first_start_create(
+            &s_first_start_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
+    s_onboarding_visible = true;
+#endif
 
     render_active_tab();
     const uint64_t initial_unread =
@@ -10061,7 +10146,13 @@ esp_err_t d1l_ui_phase1_show_home(void)
         lv_timer_create(map_viewport_timer_cb,
                         D1L_UI_MAP_VIEWPORT_REFRESH_MS, NULL);
     }
-    lv_timer_create(refresh_timer_cb, 2000, NULL);
+    lv_timer_create(refresh_timer_cb,
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+                    2000,
+#else
+                    250,
+#endif
+                    NULL);
     lv_timer_create(display_runtime_timer_cb, 100, NULL);
     lv_scr_load(s_screen);
     return ESP_OK;
@@ -10071,11 +10162,13 @@ static esp_err_t initialize_ui_runtime(void)
 {
     lv_init();
     d1l_ui_packets_init(&s_packets_controller);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     ESP_RETURN_ON_ERROR(init_capture_buffers(), TAG,
                         "capture buffer init failed");
+#endif
 
     const size_t buffer_pixels =
-        D1L_UI_CAPTURE_WIDTH * D1L_UI_CAPTURE_HEIGHT;
+        D1L_UI_DISPLAY_WIDTH * D1L_UI_DISPLAY_HEIGHT;
 #if CONFIG_LCD_LVGL_DIRECT_MODE
     void *fb1 = NULL;
     void *fb2 = NULL;
@@ -10097,8 +10190,8 @@ static esp_err_t initialize_ui_runtime(void)
     lv_disp_draw_buf_init(&s_draw_buf, s_buf1, s_buf2, buffer_pixels);
 
     lv_disp_drv_init(&s_disp_drv);
-    s_disp_drv.hor_res = D1L_UI_CAPTURE_WIDTH;
-    s_disp_drv.ver_res = D1L_UI_CAPTURE_HEIGHT;
+    s_disp_drv.hor_res = D1L_UI_DISPLAY_WIDTH;
+    s_disp_drv.ver_res = D1L_UI_DISPLAY_HEIGHT;
     s_disp_drv.flush_cb = flush_cb;
     s_disp_drv.draw_buf = &s_draw_buf;
 #if CONFIG_LCD_LVGL_DIRECT_MODE
@@ -10167,6 +10260,7 @@ esp_err_t d1l_ui_phase1_start(void)
     if (s_started) {
         return ESP_OK;
     }
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     if (!s_scroll_probe_done_sem) {
         s_scroll_probe_done_sem = xSemaphoreCreateBinary();
         if (!s_scroll_probe_done_sem) {
@@ -10179,6 +10273,7 @@ esp_err_t d1l_ui_phase1_start(void)
             return ESP_ERR_NO_MEM;
         }
     }
+#endif
     if (!s_ui_start_done_sem) {
         s_ui_start_done_sem = xSemaphoreCreateBinary();
         if (!s_ui_start_done_sem) {

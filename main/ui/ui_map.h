@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "app/app_model.h"
+#include "app/qualification_hooks.h"
 #include "lvgl.h"
 
 typedef enum {
@@ -91,9 +92,11 @@ void d1l_ui_map_render_location(lv_obj_t *parent,
 /* The UI owns the visible-map lease. Covers and probes must release it before
  * they obscure or inspect the Map screen. */
 void d1l_ui_map_viewport_release(void);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 /* Machine acceptance only: the next Map render resets pan/zoom to the saved
  * device center before acquiring a fresh service generation. */
 void d1l_ui_map_viewport_prepare_acceptance(void);
+#endif
 /* UI-task-only visual cover hook. Marker objects are hidden before a partial
  * modal or lock overlay exposes the Map around its edges. */
 void d1l_ui_map_viewport_prepare_cover(void);

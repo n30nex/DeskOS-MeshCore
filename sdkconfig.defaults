@@ -53,6 +53,13 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+# Customer firmware excludes controller qualification/debug modes. Runtime
+# field diagnostics, assertions, crash logs, and INFO logging remain enabled.
+# CONFIG_BT_NIMBLE_DTM_MODE_TEST is not set
+# CONFIG_BT_CTRL_DTM_ENABLE is not set
+# CONFIG_ESP_DEBUG_OCDAWARE is not set
+# CONFIG_FREERTOS_DEBUG_OCDAWARE is not set
+# CONFIG_ESP32S3_DEBUG_OCDAWARE is not set
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_TASK_WDT_EN=y
 CONFIG_ESP_TASK_WDT_INIT=y

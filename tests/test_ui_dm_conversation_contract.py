@@ -176,7 +176,10 @@ def test_dm_thread_marks_read_once_refreshes_on_transitions_and_stays_rf_silent(
     assert "request_content_refresh();" in reply_case
     assert "d1l_meshcore_service_send" not in actions
     assert "d1l_app_model_send_dm_text" not in actions
-    assert 'sheet, "Reply", 16, 360, 448, 52' in messages
+    assert (
+        'sheet, "Message this contact                         >",\n'
+        "            16, 360, 448, 52"
+    ) in messages
     assert 'sheet, "Read"' not in messages.split(
         "bool d1l_ui_messages_render_thread(", 1
     )[1].split("bool d1l_ui_messages_expand_thread", 1)[0]

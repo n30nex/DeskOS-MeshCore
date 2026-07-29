@@ -204,7 +204,7 @@ static lv_obj_t *create_textarea(d1l_ui_wifi_controller_t *controller,
     if (!textarea) {
         return NULL;
     }
-    lv_obj_set_size(textarea, 448, 36);
+    lv_obj_set_size(textarea, 448, 44);
     lv_obj_set_pos(textarea, 16, y);
     lv_textarea_set_one_line(textarea, true);
     lv_textarea_set_password_mode(textarea, password);
@@ -283,8 +283,8 @@ bool d1l_ui_wifi_create(d1l_ui_wifi_controller_t *controller, lv_obj_t *parent)
     if (!controller->sheet) {
         return false;
     }
-    lv_obj_set_size(controller->sheet, 480, 424);
-    lv_obj_set_pos(controller->sheet, 0, 56);
+    lv_obj_set_size(controller->sheet, 480, 480);
+    lv_obj_set_pos(controller->sheet, 0, 0);
     lv_obj_set_style_radius(controller->sheet, 0, 0);
     lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x334155), 0);
@@ -319,7 +319,7 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
     controller->password_textarea = NULL;
     controller->keyboard = NULL;
 
-    lv_obj_t *title = create_label(controller->sheet, "Wi-Fi Setup", 0xF4F7FB);
+    lv_obj_t *title = create_label(controller->sheet, "Wi-Fi", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
         label_set_dot_width(title, 180);
@@ -328,7 +328,7 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
     create_button(controller, "Close", 392, 10, 72, 40, BINDING_CLOSE,
                   D1L_UI_WIFI_ACTION_CLOSE);
     lv_obj_t *subtitle = create_label(controller->sheet,
-                                      "Profile and state", 0x8EA0AE);
+                                      "Connection and saved network", 0x8EA0AE);
     if (subtitle) {
         lv_obj_set_pos(subtitle, 16, 36);
     }
@@ -365,12 +365,12 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
     }
 
     lv_obj_t *ssid_label = create_label(controller->sheet,
-                                        "Network name", 0x5EEAD4);
+                                        "Network name (SSID)", 0x5EEAD4);
     if (ssid_label) {
         lv_obj_set_pos(ssid_label, 16, 130);
     }
     controller->ssid_textarea = create_textarea(
-        controller, false, 150, BINDING_SSID_FOCUS);
+        controller, false, 146, BINDING_SSID_FOCUS);
     if (controller->ssid_textarea) {
         lv_textarea_set_placeholder_text(controller->ssid_textarea, "SSID");
         lv_textarea_set_text(controller->ssid_textarea, controller->rendered.ssid);
@@ -379,10 +379,10 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
     lv_obj_t *password_label = create_label(controller->sheet,
                                             "Password", 0x5EEAD4);
     if (password_label) {
-        lv_obj_set_pos(password_label, 16, 192);
+        lv_obj_set_pos(password_label, 16, 198);
     }
     controller->password_textarea = create_textarea(
-        controller, true, 212, BINDING_PASSWORD_FOCUS);
+        controller, true, 218, BINDING_PASSWORD_FOCUS);
     if (controller->password_textarea) {
         lv_textarea_set_placeholder_text(
             controller->password_textarea,
@@ -390,33 +390,33 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
         lv_textarea_set_text(controller->password_textarea, "");
     }
 
-    create_button(controller, "Save", 16, 258, 62, 38, BINDING_SAVE,
+    create_button(controller, "Connect", 16, 270, 216, 44, BINDING_CONNECT,
+                  D1L_UI_WIFI_ACTION_CONNECT);
+    create_button(controller, "Save network", 240, 270, 224, 44, BINDING_SAVE,
                   D1L_UI_WIFI_ACTION_SAVE);
-    create_button(controller, "Delete", 86, 258, 68, 38, BINDING_CLEAR,
-                  D1L_UI_WIFI_ACTION_CLEAR);
-    create_button(controller, "Next", 162, 258, 62, 38,
+    create_button(controller, "Scan", 16, 322, 104, 44, BINDING_SCAN,
+                  D1L_UI_WIFI_ACTION_SCAN);
+    create_button(controller, "Next saved", 128, 322, 104, 44,
                   BINDING_NEXT_PROFILE,
                   D1L_UI_WIFI_ACTION_NEXT_PROFILE);
-    create_button(controller, "Scan", 232, 258, 60, 38, BINDING_SCAN,
-                  D1L_UI_WIFI_ACTION_SCAN);
-    create_button(controller, "Connect", 300, 258, 84, 38, BINDING_CONNECT,
-                  D1L_UI_WIFI_ACTION_CONNECT);
+    create_button(controller, "Delete", 240, 322, 104, 44, BINDING_CLEAR,
+                  D1L_UI_WIFI_ACTION_CLEAR);
     create_button(controller, controller->rendered.toggle_label,
-                  392, 258, 72, 38, BINDING_TOGGLE,
+                  352, 322, 112, 44, BINDING_TOGGLE,
                   D1L_UI_WIFI_ACTION_TOGGLE);
 
     lv_obj_t *scan = create_label(controller->sheet,
                                   controller->rendered.scan_line, 0x8EA0AE);
     label_set_dot_width(scan, 448);
     if (scan) {
-        lv_obj_set_pos(scan, 16, 304);
+        lv_obj_set_pos(scan, 16, 374);
     }
 
     controller->keyboard = lv_keyboard_create(controller->sheet);
     if (controller->keyboard) {
         d1l_ui_keyboard_configure_input(controller->keyboard,
                                         controller->ssid_textarea,
-                                        16, 330, 448, 82);
+                                        16, 398, 448, 70);
         d1l_ui_wifi_binding_t *binding = set_binding(
             controller, BINDING_KEYBOARD, D1L_UI_WIFI_ACTION_NONE);
         if (binding) {
