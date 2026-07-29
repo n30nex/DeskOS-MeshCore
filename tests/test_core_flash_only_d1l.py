@@ -426,6 +426,122 @@ class FakeSerialHandle:
         self.closed = False
 
 
+def test_bound_posix_postflash_reset_uses_safe_en_pulse(monkeypatch):
+    events = []
+
+    class ResetHandle:
+        def fileno(self):
+            events.append(("fileno",))
+            return 42
+
+        @property
+        def dtr(self):
+            return None
+
+        @dtr.setter
+        def dtr(self, value):
+            events.append(("dtr", value))
+
+        @property
+        def rts(self):
+            return None
+
+        @rts.setter
+        def rts(self, value):
+            events.append(("rts", value))
+
+    monkeypatch.setattr(
+        flash.os,
+        "fstat",
+        lambda fd: events.append(("fstat", fd)),
+    )
+    monkeypatch.setattr(
+        flash.time,
+        "sleep",
+        lambda seconds: events.append(("sleep", seconds)),
+    )
+
+    result = flash.reset_bound_posix_target_after_flash(
+        ResetHandle(),
+        "1" * 64,
+    )
+
+    assert events == [
+        ("fileno",),
+        ("fstat", 42),
+        ("dtr", False),
+        ("rts", True),
+        ("sleep", flash.POST_FLASH_RESET_ASSERT_SECONDS),
+        ("dtr", False),
+        ("rts", False),
+        ("dtr", False),
+        ("sleep", flash.POST_FLASH_RESET_RELEASE_SECONDS),
+    ]
+    assert result == {
+        "schema": 1,
+        "kind": "d1l_post_flash_reset",
+        "ok": True,
+        "method": "bound_posix_rts_en_pulse",
+        "same_admitted_handle": True,
+        "dtr_deasserted": True,
+        "dtr_reaffirmed_after_release": True,
+        "line_sequence": list(flash.POST_FLASH_RESET_LINE_SEQUENCE),
+        "reset_assert_seconds": (
+            flash.POST_FLASH_RESET_ASSERT_SECONDS
+        ),
+        "post_release_seconds": (
+            flash.POST_FLASH_RESET_RELEASE_SECONDS
+        ),
+        "admitted_target_stable_identity_sha256": "1" * 64,
+    }
+
+
+def test_bound_posix_postflash_reset_cleans_up_after_early_line_failure(
+    monkeypatch,
+):
+    events = []
+
+    class ResetHandle:
+        dtr_calls = 0
+
+        def fileno(self):
+            return 42
+
+        @property
+        def dtr(self):
+            return None
+
+        @dtr.setter
+        def dtr(self, value):
+            self.dtr_calls += 1
+            events.append(("dtr", value))
+            if self.dtr_calls == 1:
+                raise OSError("injected initial DTR failure")
+
+        @property
+        def rts(self):
+            return None
+
+        @rts.setter
+        def rts(self, value):
+            events.append(("rts", value))
+
+    monkeypatch.setattr(flash.os, "fstat", lambda _fd: None)
+
+    with pytest.raises(OSError, match="injected initial DTR failure"):
+        flash.reset_bound_posix_target_after_flash(
+            ResetHandle(),
+            "1" * 64,
+        )
+
+    assert events == [
+        ("dtr", False),
+        ("dtr", False),
+        ("rts", False),
+        ("dtr", False),
+    ]
+
+
 def posix_run_kwargs(
     *,
     handle: FakeSerialHandle,
@@ -457,10 +573,38 @@ def posix_run_kwargs(
             "role": "desk_companion",
         }
 
+    def resetter(selected_handle, admitted_identity):
+        assert selected_handle is handle
+        assert handle.closed is False
+        assert admitted_identity == "1" * 64
+        observed.append(("reset", selected_handle))
+        return {
+            "schema": 1,
+            "kind": "d1l_post_flash_reset",
+            "ok": True,
+            "method": "bound_posix_rts_en_pulse",
+            "same_admitted_handle": True,
+            "dtr_deasserted": True,
+            "dtr_reaffirmed_after_release": True,
+            "line_sequence": list(
+                flash.POST_FLASH_RESET_LINE_SEQUENCE
+            ),
+            "reset_assert_seconds": (
+                flash.POST_FLASH_RESET_ASSERT_SECONDS
+            ),
+            "post_release_seconds": (
+                flash.POST_FLASH_RESET_RELEASE_SECONDS
+            ),
+            "admitted_target_stable_identity_sha256": (
+                admitted_identity
+            ),
+        }
+
     return {
         "platform_name": "posix",
         "port_lister": lambda: [],
         "posix_serial_opener": opener,
+        "post_flash_resetter": resetter,
         "serial_command_sender": sender,
     }
 
@@ -966,11 +1110,15 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
         "posix_fork_inherited_open_serial"
     )
     assert report["flash_serial_binding_ok"] is True
+    assert report["post_flash_reset_required"] is True
+    assert report["post_flash_reset_ok"] is True
+    assert report["post_flash_reset"]["same_admitted_handle"] is True
     assert report["pre_flash_target_after_open"] == posix_target()
     assert [row[0] for row in calls] == [
         "open",
         "command",
         "flash",
+        "reset",
         "close",
         "post",
     ]
@@ -1148,8 +1296,93 @@ def test_posix_postflash_path_drift_cannot_redirect_admitted_flash(
         "open",
         "command",
         "flash",
+        "reset",
         "close",
     ]
+
+
+def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    handle = FakeSerialHandle()
+    calls = []
+    snapshots = iter((posix_target(), posix_target()))
+    monkeypatch.setattr(
+        flash,
+        "resolve_core_target",
+        lambda *_args, **_kwargs: next(snapshots),
+    )
+
+    def bound_runner(command, _cwd, _timeout, selected_handle):
+        assert selected_handle is handle
+        calls.append(("flash", selected_handle))
+        return (
+            {
+                "name": "esp32_flash",
+                "ok": True,
+                "returncode": 0,
+                "args": command,
+                "serial_handoff": "fork_inherited_open_serial",
+            },
+            b"bound flash log\n",
+        )
+
+    kwargs = posix_run_kwargs(handle=handle, calls=calls)
+
+    def failed_reset(selected_handle, admitted_identity):
+        assert selected_handle is handle
+        assert admitted_identity == "1" * 64
+        calls.append(("reset", selected_handle))
+        return {
+            "schema": 1,
+            "kind": "d1l_post_flash_reset",
+            "ok": False,
+            "method": "bound_posix_rts_en_pulse",
+            "same_admitted_handle": True,
+            "dtr_deasserted": True,
+            "dtr_reaffirmed_after_release": True,
+        }
+
+    kwargs["post_flash_resetter"] = failed_reset
+    report = flash.run_core_flash_only(
+        root=tmp_path,
+        github_run_dir=run_dir,
+        package_dir=package,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        actions_capture_receipt=capture_receipt,
+        port=POSIX_PORT,
+        expected_d1l_public_key=PUBLIC_KEY,
+        serial_baud=115200,
+        flash_baud=460800,
+        serial_timeout=5.0,
+        flash_timeout=60,
+        settle_sec=0.0,
+        raw_log_path=raw_log,
+        flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+        posix_flash_runner=bound_runner,
+        retained_state_reader=(
+            lambda *_args: calls.append(("post", None))
+        ),
+        **kwargs,
+    )
+
+    assert report["ok"] is False
+    assert report["closure_eligible"] is False
+    assert report["post_flash_reset_required"] is True
+    assert report["post_flash_reset_ok"] is False
+    assert report["post_flash_version"] == {}
+    assert [row[0] for row in calls] == [
+        "open",
+        "command",
+        "flash",
+        "reset",
+        "close",
+    ]
+    assert raw_log.is_file()
 
 
 def test_bound_esptool_api_receives_connected_handle_without_path_reopen(

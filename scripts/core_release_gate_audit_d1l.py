@@ -63,6 +63,7 @@ try:
     from core_flash_only_d1l import (
         FLASH_PHASE_RETAINED_REFLASH,
         RETAINED_STATE_COMMANDS,
+        post_flash_reset_contract_ok,
         projection_sha256,
         retained_state_preserved,
         retained_state_projection,
@@ -153,6 +154,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.core_flash_only_d1l import (
         FLASH_PHASE_RETAINED_REFLASH,
         RETAINED_STATE_COMMANDS,
+        post_flash_reset_contract_ok,
         projection_sha256,
         retained_state_preserved,
         retained_state_projection,
@@ -1449,6 +1451,11 @@ def core_flash_receipt_gate(
         if expected_target == POSIX_D1L_TARGET
         else True
     )
+    post_flash_reset_ok = (
+        post_flash_reset_contract_ok(data)
+        if expected_target == POSIX_D1L_TARGET
+        else True
+    )
     scope_ok = (
         real_evidence(data)
         and data.get("schema") == 2
@@ -1461,6 +1468,7 @@ def core_flash_receipt_gate(
         and target_ok
         and public_key_ok
         and serial_binding_ok
+        and post_flash_reset_ok
         and exact_candidate_fields(data, commit)
         and str(data.get("github_actions_run")) == str(run_id)
         and str(data.get("workflow_run_attempt")) == str(run_attempt)
@@ -1526,6 +1534,7 @@ def core_flash_receipt_gate(
             "non_erasing_retained_state_ok": retained_ok,
             "actions_archive_binding_ok": capture_ok,
             "flash_serial_binding_ok": serial_binding_ok,
+            "post_flash_reset_contract_ok": post_flash_reset_ok,
             "d1l_target_binding": target_details,
             "d1l_public_key_binding": public_key_details,
             "legacy_details": legacy.to_dict().get("details", {}),

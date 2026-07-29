@@ -23,6 +23,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 try:
+    from core_flash_only_d1l import post_flash_reset_contract_ok
     from d1l_serial_target import POSIX_D1L_TARGET, validate_snapshot
     from rc1_release_gate_audit_d1l import (
         APP_NAME,
@@ -40,6 +41,7 @@ try:
     from release_gate_audit_d1l import full_rf_acceptance_ok
     from scroll_probe_d1l import crashlog_has_crash_like_entries
 except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.core_flash_only_d1l import post_flash_reset_contract_ok
     from scripts.d1l_serial_target import POSIX_D1L_TARGET, validate_snapshot
     from scripts.rc1_release_gate_audit_d1l import (
         APP_NAME,
@@ -366,6 +368,7 @@ def validate_flash(
         and data.get("erase_flash") is False
         and data.get("formats_sd") is False
         and data.get("retained_state_preserved") is True
+        and post_flash_reset_contract_ok(data)
         and isinstance(result, dict)
         and result.get("name") == "esp32_flash"
         and result.get("ok") is True
