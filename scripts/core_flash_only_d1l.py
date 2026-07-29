@@ -154,6 +154,30 @@ FLASH_PHASES = (
     FLASH_PHASE_BOOTSTRAP,
     FLASH_PHASE_RETAINED_REFLASH,
 )
+POST_FLASH_RESET_ASSERT_SECONDS = 0.2
+POST_FLASH_RESET_RELEASE_SECONDS = 0.1
+POST_FLASH_RESET_LINE_SEQUENCE = (
+    "dtr_deassert_before_reset",
+    "rts_assert_reset",
+    "dtr_reaffirm_while_reset_asserted",
+    "rts_release_reset",
+    "dtr_reaffirm_after_release",
+)
+POST_FLASH_RESET_RESULT_KEYS = frozenset(
+    {
+        "schema",
+        "kind",
+        "ok",
+        "method",
+        "same_admitted_handle",
+        "dtr_deasserted",
+        "dtr_reaffirmed_after_release",
+        "line_sequence",
+        "reset_assert_seconds",
+        "post_release_seconds",
+        "admitted_target_stable_identity_sha256",
+    }
+)
 
 
 def utc_now() -> str:
@@ -630,6 +654,101 @@ def _kill_and_reap_child(pid: int) -> int | None:
         return status if waited_pid == pid else None
 
 
+def reset_bound_posix_target_after_flash(
+    serial_handle: Any,
+    admitted_target_stable_identity_sha256: str,
+) -> dict:
+    """Release the exact admitted ESP32 through one explicit EN pulse."""
+    os.fstat(serial_handle.fileno())
+    operation_error: BaseException | None = None
+    try:
+        serial_handle.dtr = False
+        serial_handle.rts = True
+        time.sleep(POST_FLASH_RESET_ASSERT_SECONDS)
+    except BaseException as exc:
+        operation_error = exc
+
+    cleanup_errors: list[BaseException] = []
+    for line, value in (
+        ("dtr", False),
+        ("rts", False),
+        ("dtr", False),
+    ):
+        try:
+            setattr(serial_handle, line, value)
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+
+    if operation_error is not None:
+        raise operation_error
+    if cleanup_errors:
+        raise RuntimeError(
+            "post-flash reset cleanup failed: "
+            + "; ".join(
+                f"{type(exc).__name__}: {exc}" for exc in cleanup_errors
+            )
+        )
+    time.sleep(POST_FLASH_RESET_RELEASE_SECONDS)
+    return {
+        "schema": 1,
+        "kind": "d1l_post_flash_reset",
+        "ok": True,
+        "method": "bound_posix_rts_en_pulse",
+        "same_admitted_handle": True,
+        "dtr_deasserted": True,
+        "dtr_reaffirmed_after_release": True,
+        "line_sequence": list(POST_FLASH_RESET_LINE_SEQUENCE),
+        "reset_assert_seconds": POST_FLASH_RESET_ASSERT_SECONDS,
+        "post_release_seconds": POST_FLASH_RESET_RELEASE_SECONDS,
+        "admitted_target_stable_identity_sha256": (
+            admitted_target_stable_identity_sha256
+        ),
+    }
+
+
+def post_flash_reset_result_ok(
+    reset: object,
+    admitted_target: object,
+) -> bool:
+    if not isinstance(reset, dict) or not isinstance(admitted_target, dict):
+        return False
+    admitted_identity = admitted_target.get("stable_identity_sha256")
+    return (
+        set(reset) == POST_FLASH_RESET_RESULT_KEYS
+        and reset.get("schema") == 1
+        and reset.get("kind") == "d1l_post_flash_reset"
+        and reset.get("ok") is True
+        and reset.get("method") == "bound_posix_rts_en_pulse"
+        and reset.get("same_admitted_handle") is True
+        and reset.get("dtr_deasserted") is True
+        and reset.get("dtr_reaffirmed_after_release") is True
+        and reset.get("line_sequence")
+        == list(POST_FLASH_RESET_LINE_SEQUENCE)
+        and reset.get("reset_assert_seconds")
+        == POST_FLASH_RESET_ASSERT_SECONDS
+        and reset.get("post_release_seconds")
+        == POST_FLASH_RESET_RELEASE_SECONDS
+        and isinstance(admitted_identity, str)
+        and re.fullmatch(r"[0-9a-f]{64}", admitted_identity) is not None
+        and reset.get("admitted_target_stable_identity_sha256")
+        == admitted_identity
+    )
+
+
+def post_flash_reset_contract_ok(receipt: object) -> bool:
+    if not isinstance(receipt, dict):
+        return False
+    return (
+        receipt.get("post_flash_reset_required") is True
+        and receipt.get("post_flash_reset_ok") is True
+        and receipt.get("post_flash_reset_error") is None
+        and post_flash_reset_result_ok(
+            receipt.get("post_flash_reset"),
+            receipt.get("pre_flash_target_after_open"),
+        )
+    )
+
+
 def default_posix_flash_runner(
     command: list[str],
     cwd: Path,
@@ -1081,6 +1200,9 @@ def run_core_flash_only(
     posix_flash_runner: Callable[
         [list[str], Path, int, Any], tuple[dict, bytes]
     ] = default_posix_flash_runner,
+    post_flash_resetter: Callable[
+        [Any, str], dict
+    ] = reset_bound_posix_target_after_flash,
     serial_command_sender: Callable[
         [Any, str, float], dict
     ] = send_console_command,
@@ -1215,6 +1337,8 @@ def run_core_flash_only(
     before_projection: dict | None = None
     before_snapshot_row: dict | None = None
     before_build_commit: str | None = None
+    post_flash_reset: dict[str, Any] = {}
+    post_flash_reset_error: str | None = None
     with admission_context as admitted_handle:
         if posix_binding:
             if admitted_handle is None:
@@ -1333,6 +1457,32 @@ def run_core_flash_only(
                 flash_timeout,
                 admitted_handle,
             )
+            if (
+                result.get("name") == "esp32_flash"
+                and result.get("ok") is True
+                and result.get("returncode") == 0
+                and result.get("args") == command
+                and result.get("serial_handoff")
+                == "fork_inherited_open_serial"
+            ):
+                try:
+                    reset_value = post_flash_resetter(
+                        admitted_handle,
+                        pre_flash_target_after_open[
+                            "stable_identity_sha256"
+                        ],
+                    )
+                    if isinstance(reset_value, dict):
+                        post_flash_reset = reset_value
+                    else:
+                        post_flash_reset_error = (
+                            "TypeError: post-flash resetter returned "
+                            f"{type(reset_value).__name__}, expected dict"
+                        )
+                except Exception as exc:
+                    post_flash_reset_error = (
+                        f"{type(exc).__name__}: {exc}"
+                    )
         else:
             result, raw_log = flash_runner(command, root, flash_timeout)
     raw_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1347,11 +1497,20 @@ def run_core_flash_only(
     target_continuity_ok = False
     target_post_error: str | None = None
     post_flash_identity: dict = {}
+    post_flash_reset_required = posix_binding
+    post_flash_reset_ok = (
+        not post_flash_reset_required
+        or post_flash_reset_result_ok(
+            post_flash_reset,
+            pre_flash_target_after_open,
+        )
+    )
     if (
         result.get("name") == "esp32_flash"
         and result.get("ok") is True
         and result.get("returncode") == 0
         and result.get("args") == command
+        and post_flash_reset_ok
     ):
         if settle_sec > 0:
             time.sleep(settle_sec)
@@ -1440,6 +1599,7 @@ def run_core_flash_only(
         result.get("ok") is True
         and identity_ok
         and flash_serial_binding_ok
+        and post_flash_reset_ok
     )
     retained_preserved = (
         bool(
@@ -1490,6 +1650,10 @@ def run_core_flash_only(
         "target_post_error": target_post_error,
         "flash_serial_binding": flash_serial_binding,
         "flash_serial_binding_ok": flash_serial_binding_ok,
+        "post_flash_reset_required": post_flash_reset_required,
+        "post_flash_reset_ok": post_flash_reset_ok,
+        "post_flash_reset": post_flash_reset,
+        "post_flash_reset_error": post_flash_reset_error,
         "commit": normalized_commit,
         "github_actions_run": str(run_id),
         "workflow_run_attempt": str(run_attempt),

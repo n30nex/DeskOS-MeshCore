@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import core_flash_only_d1l as core_flash
 from scripts import produce_rc1_bounded_physical_receipt_d1l as producer
 
 
@@ -56,6 +57,31 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
         "erase_flash": False,
         "formats_sd": False,
         "retained_state_preserved": True,
+        "pre_flash_target_after_open": {
+            "stable_identity_sha256": "f" * 64,
+        },
+        "post_flash_reset_required": True,
+        "post_flash_reset_ok": True,
+        "post_flash_reset": {
+            "schema": 1,
+            "kind": "d1l_post_flash_reset",
+            "ok": True,
+            "method": "bound_posix_rts_en_pulse",
+            "same_admitted_handle": True,
+            "dtr_deasserted": True,
+            "dtr_reaffirmed_after_release": True,
+            "line_sequence": list(
+                core_flash.POST_FLASH_RESET_LINE_SEQUENCE
+            ),
+            "reset_assert_seconds": (
+                core_flash.POST_FLASH_RESET_ASSERT_SECONDS
+            ),
+            "post_release_seconds": (
+                core_flash.POST_FLASH_RESET_RELEASE_SECONDS
+            ),
+            "admitted_target_stable_identity_sha256": "f" * 64,
+        },
+        "post_flash_reset_error": None,
         "result": {"name": "esp32_flash", "ok": True},
     }
     monkeypatch.setattr(producer, "_machine_physical", lambda *_args, **_kwargs: True)
@@ -66,6 +92,11 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
     assert producer.validate_flash(data, CANDIDATE) == {}
 
     data["pre_flash_build_commit"] = "not-a-commit"
+    with pytest.raises(producer.EvidenceError):
+        producer.validate_flash(data, CANDIDATE)
+
+    data["pre_flash_build_commit"] = "e" * 40
+    data["post_flash_reset"]["method"] = "unbound-reset"
     with pytest.raises(producer.EvidenceError):
         producer.validate_flash(data, CANDIDATE)
 

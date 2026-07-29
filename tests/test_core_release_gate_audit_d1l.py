@@ -238,6 +238,30 @@ def core_flash_gate_fixture(
         "target_identity_continuity_ok": True,
         "flash_serial_binding": "posix_fork_inherited_open_serial",
         "flash_serial_binding_ok": True,
+        "post_flash_reset_required": True,
+        "post_flash_reset_ok": True,
+        "post_flash_reset": {
+            "schema": 1,
+            "kind": "d1l_post_flash_reset",
+            "ok": True,
+            "method": "bound_posix_rts_en_pulse",
+            "same_admitted_handle": True,
+            "dtr_deasserted": True,
+            "dtr_reaffirmed_after_release": True,
+            "line_sequence": list(
+                core_flash.POST_FLASH_RESET_LINE_SEQUENCE
+            ),
+            "reset_assert_seconds": (
+                core_flash.POST_FLASH_RESET_ASSERT_SECONDS
+            ),
+            "post_release_seconds": (
+                core_flash.POST_FLASH_RESET_RELEASE_SECONDS
+            ),
+            "admitted_target_stable_identity_sha256": (
+                target["stable_identity_sha256"]
+            ),
+        },
+        "post_flash_reset_error": None,
         "expected_firmware_commit": COMMIT,
         "device_build_commit": COMMIT,
         "firmware_identity_required": True,
@@ -346,6 +370,52 @@ def test_core_flash_gate_accepts_one_key_bound_retained_snapshot_pair(
     assert gate.details["retained_before_ok"] is True
     assert gate.details["retained_after_ok"] is True
     assert gate.details["retained_identity_binding_ok"] is True
+    assert gate.details["post_flash_reset_contract_ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("post_flash_reset_required",), False),
+        (("post_flash_reset_ok",), False),
+        (("post_flash_reset", "method"), "unbound-reset"),
+        (("post_flash_reset", "reset_assert_seconds"), 0.3),
+        (
+            (
+                "post_flash_reset",
+                "admitted_target_stable_identity_sha256",
+            ),
+            "f" * 64,
+        ),
+    ],
+)
+def test_core_flash_gate_rejects_tampered_post_flash_reset_contract(
+    tmp_path,
+    monkeypatch,
+    path,
+    value,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(tmp_path)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    target = receipt
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is False
+    assert gate.details["post_flash_reset_contract_ok"] is False
 
 
 def test_core_flash_gate_rejects_two_foreign_key_retained_snapshots(
