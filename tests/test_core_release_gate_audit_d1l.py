@@ -234,9 +234,9 @@ def core_flash_gate_fixture(
         "d1l_target": target,
         "d1l_target_before": target,
         "pre_flash_target_after_open": target,
+        "post_flash_reset_target_before_open": target,
+        "post_flash_reset_target_after_open": target,
         "post_flash_target_after_settle": target,
-        "post_flash_capture_target_before_open": target,
-        "post_flash_capture_target_after_open": target,
         "d1l_target_after": target,
         "target_identity_continuity_ok": True,
         "flash_serial_binding": "posix_fork_inherited_open_serial",
@@ -265,12 +265,16 @@ def core_flash_gate_fixture(
             ),
         },
         "post_flash_reset_error": None,
+        "post_flash_reset_binding": core_flash.POST_FLASH_RESET_BINDING,
+        "post_flash_reset_binding_ok": True,
         "post_flash_boot_settle": {
             "schema": 1,
             "kind": "d1l_post_flash_boot_settle",
             "ok": True,
-            "method": "same_admitted_handle_hold_no_console_io",
+            "method": "fresh_reset_handle_hold_no_console_io",
             "same_admitted_handle": True,
+            "separate_from_flash_handle": True,
+            "flash_handle_closed": True,
             "console_io_attempted": False,
             "settle_seconds": (
                 core_flash.MIN_POSIX_POST_FLASH_BOOT_SETTLE_SECONDS
@@ -286,21 +290,16 @@ def core_flash_gate_fixture(
             "schema": 1,
             "kind": "d1l_post_flash_capture",
             "ok": True,
-            "method": "fresh_posix_exclusive_reopen",
-            "separate_admitted_handle": True,
-            "original_handle_closed": True,
+            "method": "same_fresh_reset_settle_handle",
+            "separate_from_flash_handle": True,
+            "same_as_reset_settle_handle": True,
+            "flash_handle_closed": True,
             "baudrate": core_flash.POST_FLASH_CAPTURE_BAUD,
             "commands": list(core_flash.RETAINED_STATE_COMMANDS),
-            "admitted_target_stable_identity_sha256": (
+            "recovery_target_stable_identity_sha256": (
                 target["stable_identity_sha256"]
             ),
             "settled_target_stable_identity_sha256": (
-                target["stable_identity_sha256"]
-            ),
-            "capture_target_before_open_stable_identity_sha256": (
-                target["stable_identity_sha256"]
-            ),
-            "capture_target_after_open_stable_identity_sha256": (
                 target["stable_identity_sha256"]
             ),
         },
@@ -433,6 +432,16 @@ def test_core_flash_gate_accepts_one_key_bound_retained_snapshot_pair(
             "post_flash_reset_contract_ok",
         ),
         (
+            ("post_flash_reset_binding",),
+            "same_admitted_handle",
+            "post_flash_reset_contract_ok",
+        ),
+        (
+            ("post_flash_reset_binding_ok",),
+            False,
+            "post_flash_reset_contract_ok",
+        ),
+        (
             ("post_flash_capture_binding",),
             "same_admitted_handle",
             "post_flash_capture_contract_ok",
@@ -458,6 +467,21 @@ def test_core_flash_gate_accepts_one_key_bound_retained_snapshot_pair(
             "post_flash_reset_contract_ok",
         ),
         (
+            ("post_flash_boot_settle", "method"),
+            "same_admitted_handle_hold_no_console_io",
+            "post_flash_capture_contract_ok",
+        ),
+        (
+            ("post_flash_boot_settle", "separate_from_flash_handle"),
+            False,
+            "post_flash_capture_contract_ok",
+        ),
+        (
+            ("post_flash_boot_settle", "flash_handle_closed"),
+            False,
+            "post_flash_capture_contract_ok",
+        ),
+        (
             ("post_flash_boot_settle", "console_io_attempted"),
             True,
             "post_flash_capture_contract_ok",
@@ -468,12 +492,22 @@ def test_core_flash_gate_accepts_one_key_bound_retained_snapshot_pair(
             "post_flash_capture_contract_ok",
         ),
         (
-            ("post_flash_capture", "separate_admitted_handle"),
+            ("post_flash_capture", "method"),
+            "fresh_posix_exclusive_reopen",
+            "post_flash_capture_contract_ok",
+        ),
+        (
+            ("post_flash_capture", "separate_from_flash_handle"),
             False,
             "post_flash_capture_contract_ok",
         ),
         (
-            ("post_flash_capture", "original_handle_closed"),
+            ("post_flash_capture", "same_as_reset_settle_handle"),
+            False,
+            "post_flash_capture_contract_ok",
+        ),
+        (
+            ("post_flash_capture", "flash_handle_closed"),
             False,
             "post_flash_capture_contract_ok",
         ),
@@ -523,9 +557,9 @@ def test_core_flash_gate_rejects_tampered_post_flash_reset_contract(
         "d1l_target",
         "d1l_target_before",
         "pre_flash_target_after_open",
+        "post_flash_reset_target_before_open",
+        "post_flash_reset_target_after_open",
         "post_flash_target_after_settle",
-        "post_flash_capture_target_before_open",
-        "post_flash_capture_target_after_open",
         "d1l_target_after",
     ),
 )

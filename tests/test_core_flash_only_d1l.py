@@ -553,6 +553,10 @@ def valid_posix_postflash_contract_receipt() -> dict:
         "post_flash_reset_ok": True,
         "post_flash_reset_error": None,
         "pre_flash_target_after_open": posix_target(),
+        "post_flash_reset_target_before_open": posix_target(),
+        "post_flash_reset_target_after_open": posix_target(),
+        "post_flash_reset_binding": flash.POST_FLASH_RESET_BINDING,
+        "post_flash_reset_binding_ok": True,
         "post_flash_reset": {
             "schema": 1,
             "kind": "d1l_post_flash_reset",
@@ -577,63 +581,89 @@ def valid_posix_postflash_contract_receipt() -> dict:
             "schema": 1,
             "kind": "d1l_post_flash_boot_settle",
             "ok": True,
-            "method": "same_admitted_handle_hold_no_console_io",
+            "method": "fresh_reset_handle_hold_no_console_io",
             "same_admitted_handle": True,
+            "separate_from_flash_handle": True,
+            "flash_handle_closed": True,
             "console_io_attempted": False,
             "settle_seconds": 90.0,
             "admitted_target_stable_identity_sha256": "1" * 64,
             "settled_target_stable_identity_sha256": "1" * 64,
         },
-        "post_flash_capture_target_before_open": posix_target(),
-        "post_flash_capture_target_after_open": posix_target(),
         "post_flash_capture": {
             "schema": 1,
             "kind": "d1l_post_flash_capture",
             "ok": True,
-            "method": "fresh_posix_exclusive_reopen",
-            "separate_admitted_handle": True,
-            "original_handle_closed": True,
+            "method": "same_fresh_reset_settle_handle",
+            "separate_from_flash_handle": True,
+            "same_as_reset_settle_handle": True,
+            "flash_handle_closed": True,
             "baudrate": 115200,
             "commands": list(flash.RETAINED_STATE_COMMANDS),
-            "admitted_target_stable_identity_sha256": "1" * 64,
+            "recovery_target_stable_identity_sha256": "1" * 64,
             "settled_target_stable_identity_sha256": "1" * 64,
-            (
-                "capture_target_before_open_"
-                "stable_identity_sha256"
-            ): "1" * 64,
-            (
-                "capture_target_after_open_"
-                "stable_identity_sha256"
-            ): "1" * 64,
         },
         "d1l_target_after": posix_target(),
         "target_identity_continuity_ok": True,
-        "post_flash_capture_binding": (
-            "posix_exclusive_reopen_after_bound_settle"
-        ),
+        "post_flash_capture_binding": flash.POST_FLASH_CAPTURE_BINDING,
         "post_flash_capture_binding_ok": True,
         "post_flash_capture_error": None,
     }
 
 
 @pytest.mark.parametrize(
-    ("path", "tampered"),
+    ("path", "tampered", "reset_ok"),
     [
-        (("post_flash_capture_binding",), "same_admitted_handle"),
-        (("post_flash_capture_binding_ok",), False),
-        (("post_flash_capture_error",), "injected"),
         (
-            ("post_flash_capture", "separate_admitted_handle"),
+            ("post_flash_reset_binding",),
+            "same_admitted_handle",
+            False,
+        ),
+        (("post_flash_reset_binding_ok",), False, False),
+        (("post_flash_reset_error",), "injected", False),
+        (
+            (
+                "post_flash_reset_target_before_open",
+                "stable_identity_sha256",
+            ),
+            "2" * 64,
             False,
         ),
         (
-            ("post_flash_capture", "original_handle_closed"),
+            (
+                "post_flash_reset_target_after_open",
+                "stable_identity_sha256",
+            ),
+            "2" * 64,
             False,
         ),
-        (("post_flash_capture", "baudrate"), 460800),
+        (
+            ("post_flash_capture_binding",),
+            "posix_exclusive_reopen_after_bound_settle",
+            True,
+        ),
+        (("post_flash_capture_binding_ok",), False, True),
+        (("post_flash_capture_error",), "injected", True),
+        (
+            ("post_flash_capture", "separate_from_flash_handle"),
+            False,
+            True,
+        ),
+        (
+            ("post_flash_capture", "same_as_reset_settle_handle"),
+            False,
+            True,
+        ),
+        (
+            ("post_flash_capture", "flash_handle_closed"),
+            False,
+            True,
+        ),
+        (("post_flash_capture", "baudrate"), 460800, True),
         (
             ("post_flash_capture", "commands"),
             list(flash.RETAINED_STATE_COMMANDS[:-1]),
+            True,
         ),
         (
             (
@@ -641,40 +671,42 @@ def valid_posix_postflash_contract_receipt() -> dict:
                 "stable_identity_sha256",
             ),
             "2" * 64,
-        ),
-        (
-            (
-                "post_flash_capture_target_before_open",
-                "stable_identity_sha256",
-            ),
-            "2" * 64,
-        ),
-        (
-            (
-                "post_flash_capture_target_after_open",
-                "stable_identity_sha256",
-            ),
-            "2" * 64,
+            True,
         ),
         (
             ("d1l_target_after", "stable_identity_sha256"),
             "2" * 64,
+            True,
         ),
         (
             ("post_flash_boot_settle", "console_io_attempted"),
+            True,
             True,
         ),
         (
             ("post_flash_boot_settle", "same_admitted_handle"),
             False,
+            True,
+        ),
+        (
+            ("post_flash_boot_settle", "separate_from_flash_handle"),
+            False,
+            True,
+        ),
+        (
+            ("post_flash_boot_settle", "flash_handle_closed"),
+            False,
+            True,
         ),
         (
             ("post_flash_boot_settle", "settle_seconds"),
             89.999,
+            True,
         ),
         (
             ("post_flash_boot_settle", "settle_seconds"),
             float("nan"),
+            True,
         ),
         (
             (
@@ -682,11 +714,12 @@ def valid_posix_postflash_contract_receipt() -> dict:
                 "settled_target_stable_identity_sha256",
             ),
             "2" * 64,
+            True,
         ),
     ],
 )
 def test_posix_postflash_capture_contract_rejects_tampering(
-    path, tampered
+    path, tampered, reset_ok
 ):
     receipt = valid_posix_postflash_contract_receipt()
     assert flash.post_flash_reset_contract_ok(receipt) is True
@@ -697,7 +730,7 @@ def test_posix_postflash_capture_contract_rejects_tampering(
         selected = selected[key]
     selected[path[-1]] = tampered
 
-    assert flash.post_flash_reset_contract_ok(receipt) is True
+    assert flash.post_flash_reset_contract_ok(receipt) is reset_ok
     assert flash.post_flash_capture_contract_ok(receipt) is False
 
 
@@ -716,6 +749,11 @@ def posix_run_kwargs(
     assert all(item is not None for item in admitted_handles)
     handle_iter = iter(admitted_handles)
     flash_handle = admitted_handles[0]
+    recovery_handle = (
+        admitted_handles[1]
+        if len(admitted_handles) > 1
+        else None
+    )
 
     @contextlib.contextmanager
     def opener(_port, _baud, _timeout):
@@ -743,8 +781,10 @@ def posix_run_kwargs(
         }
 
     def resetter(selected_handle, admitted_identity):
-        assert selected_handle is flash_handle
-        assert flash_handle.closed is False
+        assert recovery_handle is not None
+        assert selected_handle is recovery_handle
+        assert flash_handle.closed is True
+        assert recovery_handle.closed is False
         assert admitted_identity == "1" * 64
         observed.append(("reset", selected_handle))
         return {
@@ -1270,7 +1310,7 @@ def test_postflash_target_drift_blocks_serial_reopen_and_closure(
     assert raw_log.is_file()
 
 
-def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
+def test_posix_flash_closes_then_fresh_handle_resets_settles_and_captures(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
@@ -1290,7 +1330,6 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
         @baudrate.setter
         def baudrate(self, value):
             self._baudrate = value
-            calls.append(("baudrate", value))
 
         @property
         def timeout(self):
@@ -1299,7 +1338,6 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
         @timeout.setter
         def timeout(self, value):
             self._timeout = value
-            calls.append(("timeout", value))
 
         def reset_input_buffer(self):
             assert self.closed is False
@@ -1307,7 +1345,7 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
             assert self.timeout == 5.0
             calls.append(("drain", self))
 
-    class CaptureSerialHandle(FakeSerialHandle):
+    class RecoverySerialHandle(FakeSerialHandle):
         def reset_input_buffer(self):
             assert self.closed is False
             assert self.baudrate == 115200
@@ -1315,7 +1353,7 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
             calls.append(("drain", self))
 
     flash_handle = TrackingSerialHandle()
-    capture_handle = CaptureSerialHandle()
+    recovery_handle = RecoverySerialHandle()
     snapshots = iter(
         (
             posix_target(),
@@ -1332,7 +1370,7 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
             (
                 "resolve",
                 flash_handle.closed,
-                capture_handle.closed,
+                recovery_handle.closed,
             )
         )
         return snapshot
@@ -1369,19 +1407,19 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
     }
 
     def sender(selected_handle, command, _timeout):
-        assert selected_handle in {flash_handle, capture_handle}
+        assert selected_handle in {flash_handle, recovery_handle}
         assert selected_handle.closed is False
         calls.append(("command", command, selected_handle))
         if selected_handle is flash_handle:
             assert command == "identity status"
             return after_by_command[command]
-        assert selected_handle is capture_handle
-        assert capture_handle.baudrate == 115200
-        assert capture_handle.timeout == 5.0
+        assert selected_handle is recovery_handle
+        assert recovery_handle.baudrate == 115200
+        assert recovery_handle.timeout == 5.0
         return after_by_command[command]
 
     kwargs = posix_run_kwargs(
-        handles=(flash_handle, capture_handle),
+        handles=(flash_handle, recovery_handle),
         calls=calls,
     )
     kwargs["serial_command_sender"] = sender
@@ -1420,29 +1458,46 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
     assert report["post_flash_reset_required"] is True
     assert report["post_flash_reset_ok"] is True
     assert report["post_flash_reset"]["same_admitted_handle"] is True
+    assert report["post_flash_reset_target_before_open"] == posix_target()
+    assert report["post_flash_reset_target_after_open"] == posix_target()
+    assert (
+        report["post_flash_reset_binding"]
+        == flash.POST_FLASH_RESET_BINDING
+    )
+    assert report["post_flash_reset_binding_ok"] is True
     assert report["post_flash_boot_settle"] == {
         "schema": 1,
         "kind": "d1l_post_flash_boot_settle",
         "ok": True,
-        "method": "same_admitted_handle_hold_no_console_io",
+        "method": "fresh_reset_handle_hold_no_console_io",
         "same_admitted_handle": True,
+        "separate_from_flash_handle": True,
+        "flash_handle_closed": True,
         "console_io_attempted": False,
         "settle_seconds": 90.0,
         "admitted_target_stable_identity_sha256": "1" * 64,
         "settled_target_stable_identity_sha256": "1" * 64,
     }
     assert report["post_flash_target_after_settle"] == posix_target()
-    assert (
-        report["post_flash_capture_target_before_open"]
-        == posix_target()
-    )
-    assert (
-        report["post_flash_capture_target_after_open"]
-        == posix_target()
-    )
+    assert "post_flash_capture_target_before_open" not in report
+    assert "post_flash_capture_target_after_open" not in report
     assert report["d1l_target_after"] == posix_target()
-    assert report["post_flash_capture_binding"] == (
-        "posix_exclusive_reopen_after_bound_settle"
+    assert report["post_flash_capture"] == {
+        "schema": 1,
+        "kind": "d1l_post_flash_capture",
+        "ok": True,
+        "method": "same_fresh_reset_settle_handle",
+        "separate_from_flash_handle": True,
+        "same_as_reset_settle_handle": True,
+        "flash_handle_closed": True,
+        "baudrate": 115200,
+        "commands": list(flash.RETAINED_STATE_COMMANDS),
+        "recovery_target_stable_identity_sha256": "1" * 64,
+        "settled_target_stable_identity_sha256": "1" * 64,
+    }
+    assert (
+        report["post_flash_capture_binding"]
+        == flash.POST_FLASH_CAPTURE_BINDING
     )
     assert report["post_flash_capture_binding_ok"] is True
     assert report["post_flash_capture_error"] is None
@@ -1455,14 +1510,12 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
         "resolve",
         "command",
         "flash",
-        "baudrate",
-        "timeout",
-        "reset",
-        "sleep",
-        "resolve",
         "close",
         "resolve",
         "open",
+        "resolve",
+        "reset",
+        "sleep",
         "resolve",
         "drain",
         "command",
@@ -1474,20 +1527,19 @@ def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
         "command",
         "close",
     ]
-    assert calls[7] == ("reset", flash_handle)
-    assert calls[8] == ("sleep", 90.0)
+    assert calls[9] == ("reset", recovery_handle)
+    assert calls[10] == ("sleep", 90.0)
     assert all(
         not (row[0] == "command" and row[-1] is flash_handle)
-        for row in calls[8:]
+        for row in calls[5:]
     )
     assert not any(
         row[0] == "drain" and row[1] is flash_handle
         for row in calls
     )
     assert flash_handle.closed is True
-    assert capture_handle.closed is True
-    assert flash_handle.baudrate == 115200
-    assert flash_handle.timeout == 5.0
+    assert recovery_handle.closed is True
+    assert flash_handle.baudrate == 460800
 
 
 def test_posix_capture_failure_persists_log_and_blocks_second_flash(
@@ -1498,7 +1550,7 @@ def test_posix_capture_failure_persists_log_and_blocks_second_flash(
     calls = []
 
     flash_handle = FakeSerialHandle()
-    capture_handle = FakeSerialHandle()
+    recovery_handle = FakeSerialHandle()
     snapshots = iter(
         (
             posix_target(),
@@ -1521,6 +1573,7 @@ def test_posix_capture_failure_persists_log_and_blocks_second_flash(
         flash_count += 1
         assert selected_handle is flash_handle
         assert flash_handle.closed is False
+        calls.append(("flash", selected_handle))
         return (
             {
                 "name": "esp32_flash",
@@ -1533,13 +1586,13 @@ def test_posix_capture_failure_persists_log_and_blocks_second_flash(
         )
 
     run_kwargs = posix_run_kwargs(
-        handles=(flash_handle, capture_handle),
+        handles=(flash_handle, recovery_handle),
         calls=calls,
     )
 
     def sender(selected_handle, command, _timeout):
         calls.append(("command", command, selected_handle))
-        if selected_handle is capture_handle:
+        if selected_handle is recovery_handle:
             raise OSError("injected post-flash capture failure")
         assert selected_handle is flash_handle
         assert command == "identity status"
@@ -1591,7 +1644,18 @@ def test_posix_capture_failure_persists_log_and_blocks_second_flash(
     assert flash.post_flash_reset_contract_ok(report) is True
     assert flash.post_flash_capture_contract_ok(report) is False
     assert flash_handle.closed is True
-    assert capture_handle.closed is True
+    assert recovery_handle.closed is True
+    assert [row[0] for row in calls] == [
+        "open",
+        "command",
+        "flash",
+        "close",
+        "open",
+        "reset",
+        "command",
+        "close",
+    ]
+    assert calls[5] == ("reset", recovery_handle)
     assert raw_log.read_bytes() == b"persisted before capture\n"
     assert flash_count == 1
 
@@ -1712,15 +1776,22 @@ def test_posix_wrong_full_key_on_admitted_handle_never_flashes(
     assert not raw_log.exists()
 
 
-def test_posix_settle_target_drift_blocks_capture_readmission(
+def test_posix_settle_target_drift_blocks_same_handle_capture(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
     run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
-    handle = FakeSerialHandle()
+    flash_handle = FakeSerialHandle()
+    recovery_handle = FakeSerialHandle()
     calls = []
     snapshots = iter(
-        (posix_target("1"), posix_target("1"), posix_target("2"))
+        (
+            posix_target("1"),
+            posix_target("1"),
+            posix_target("1"),
+            posix_target("1"),
+            posix_target("2"),
+        )
     )
     monkeypatch.setattr(
         flash,
@@ -1730,8 +1801,8 @@ def test_posix_settle_target_drift_blocks_capture_readmission(
     monkeypatch.setattr(flash.time, "sleep", lambda _seconds: None)
 
     def bound_runner(command, _cwd, _timeout, selected_handle):
-        assert selected_handle is handle
-        assert handle.closed is False
+        assert selected_handle is flash_handle
+        assert flash_handle.closed is False
         calls.append(("flash", selected_handle))
         return (
             {
@@ -1767,10 +1838,14 @@ def test_posix_settle_target_drift_blocks_capture_readmission(
                 "settle drift must block all path-based capture"
             )
         ),
-        **posix_run_kwargs(handle=handle, calls=calls),
+        **posix_run_kwargs(
+            handles=(flash_handle, recovery_handle),
+            calls=calls,
+        ),
     )
 
-    assert handle.closed is True
+    assert flash_handle.closed is True
+    assert recovery_handle.closed is True
     assert report["ok"] is False
     assert report["target_identity_continuity_ok"] is False
     assert report["post_flash_target_after_settle"] == posix_target("2")
@@ -1781,32 +1856,34 @@ def test_posix_settle_target_drift_blocks_capture_readmission(
         ]
         == "2" * 64
     )
-    assert report["post_flash_capture_target_before_open"] is None
-    assert report["post_flash_capture_target_after_open"] is None
-    assert report["d1l_target_after"] is None
+    assert "post_flash_capture_target_before_open" not in report
+    assert "post_flash_capture_target_after_open" not in report
+    assert report["d1l_target_after"] == posix_target("2")
+    assert report["post_flash_reset_binding_ok"] is False
     assert report["post_flash_capture_binding_ok"] is False
-    assert flash.post_flash_reset_contract_ok(report) is True
+    assert flash.post_flash_reset_contract_ok(report) is False
     assert flash.post_flash_capture_contract_ok(report) is False
     assert [row[0] for row in calls] == [
         "open",
         "command",
         "flash",
+        "close",
+        "open",
         "reset",
         "close",
     ]
 
 
-def test_posix_capture_target_drift_before_open_blocks_readmission(
+def test_posix_recovery_target_drift_before_open_blocks_reset(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
     run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
     flash_handle = FakeSerialHandle()
-    capture_handle = FakeSerialHandle()
+    recovery_handle = FakeSerialHandle()
     calls = []
     snapshots = iter(
         (
-            posix_target("1"),
             posix_target("1"),
             posix_target("1"),
             posix_target("2"),
@@ -1853,49 +1930,50 @@ def test_posix_capture_target_drift_before_open_blocks_readmission(
         posix_flash_runner=bound_runner,
         retained_state_reader=(
             lambda *_args: pytest.fail(
-                "capture target drift must block path-based capture"
+                "recovery target drift must block path-based capture"
             )
         ),
         **posix_run_kwargs(
-            handles=(flash_handle, capture_handle),
+            handles=(flash_handle, recovery_handle),
             calls=calls,
         ),
     )
 
     assert report["ok"] is False
-    assert report["post_flash_boot_settle"]["ok"] is True
-    assert report["post_flash_target_after_settle"] == posix_target("1")
+    assert report["post_flash_boot_settle"] == {}
+    assert report["post_flash_target_after_settle"] is None
     assert (
-        report["post_flash_capture_target_before_open"]
+        report["post_flash_reset_target_before_open"]
         == posix_target("2")
     )
-    assert report["post_flash_capture_target_after_open"] is None
+    assert report["post_flash_reset_target_after_open"] is None
+    assert "post_flash_capture_target_before_open" not in report
+    assert "post_flash_capture_target_after_open" not in report
     assert report["d1l_target_after"] is None
+    assert report["post_flash_reset_binding_ok"] is False
     assert report["post_flash_capture_binding_ok"] is False
-    assert flash.post_flash_reset_contract_ok(report) is True
+    assert flash.post_flash_reset_contract_ok(report) is False
     assert flash.post_flash_capture_contract_ok(report) is False
     assert flash_handle.closed is True
-    assert capture_handle.closed is False
+    assert recovery_handle.closed is False
     assert [row[0] for row in calls] == [
         "open",
         "command",
         "flash",
-        "reset",
         "close",
     ]
 
 
-def test_posix_capture_target_drift_after_open_closes_without_commands(
+def test_posix_recovery_target_drift_after_open_closes_without_reset(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
     run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
     flash_handle = FakeSerialHandle()
-    capture_handle = FakeSerialHandle()
+    recovery_handle = FakeSerialHandle()
     calls = []
     snapshots = iter(
         (
-            posix_target("1"),
             posix_target("1"),
             posix_target("1"),
             posix_target("1"),
@@ -1943,52 +2021,61 @@ def test_posix_capture_target_drift_after_open_closes_without_commands(
         posix_flash_runner=bound_runner,
         retained_state_reader=(
             lambda *_args: pytest.fail(
-                "capture target drift must block path-based capture"
+                "recovery target drift must block path-based capture"
             )
         ),
         **posix_run_kwargs(
-            handles=(flash_handle, capture_handle),
+            handles=(flash_handle, recovery_handle),
             calls=calls,
         ),
     )
 
     assert report["ok"] is False
-    assert report["post_flash_boot_settle"]["ok"] is True
+    assert report["post_flash_boot_settle"] == {}
     assert (
-        report["post_flash_capture_target_before_open"]
+        report["post_flash_reset_target_before_open"]
         == posix_target("1")
     )
     assert (
-        report["post_flash_capture_target_after_open"]
+        report["post_flash_reset_target_after_open"]
         == posix_target("2")
     )
-    assert report["d1l_target_after"] == posix_target("2")
+    assert "post_flash_capture_target_before_open" not in report
+    assert "post_flash_capture_target_after_open" not in report
+    assert report["d1l_target_after"] is None
     assert report["target_identity_continuity_ok"] is False
+    assert report["post_flash_reset_binding_ok"] is False
     assert report["post_flash_capture_binding_ok"] is False
-    assert flash.post_flash_reset_contract_ok(report) is True
+    assert flash.post_flash_reset_contract_ok(report) is False
     assert flash.post_flash_capture_contract_ok(report) is False
     assert flash_handle.closed is True
-    assert capture_handle.closed is True
+    assert recovery_handle.closed is True
     assert [row[0] for row in calls] == [
         "open",
         "command",
         "flash",
-        "reset",
         "close",
         "open",
         "close",
     ]
 
 
-def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
+def test_posix_postflash_reset_failure_blocks_settle_and_capture(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
     run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
     flash_handle = FakeSerialHandle()
-    capture_handle = FakeSerialHandle()
+    recovery_handle = FakeSerialHandle()
     calls = []
-    snapshots = iter((posix_target(), posix_target()))
+    snapshots = iter(
+        (
+            posix_target(),
+            posix_target(),
+            posix_target(),
+            posix_target(),
+        )
+    )
     monkeypatch.setattr(
         flash,
         "resolve_core_target",
@@ -2010,12 +2097,14 @@ def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
         )
 
     kwargs = posix_run_kwargs(
-        handles=(flash_handle, capture_handle),
+        handles=(flash_handle, recovery_handle),
         calls=calls,
     )
 
     def failed_reset(selected_handle, admitted_identity):
-        assert selected_handle is flash_handle
+        assert selected_handle is recovery_handle
+        assert flash_handle.closed is True
+        assert recovery_handle.closed is False
         assert admitted_identity == "1" * 64
         calls.append(("reset", selected_handle))
         return {
@@ -2060,8 +2149,11 @@ def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
     assert report["post_flash_reset_required"] is True
     assert report["post_flash_reset_ok"] is False
     assert report["post_flash_target_after_settle"] is None
-    assert report["post_flash_capture_target_before_open"] is None
-    assert report["post_flash_capture_target_after_open"] is None
+    assert report["post_flash_reset_target_before_open"] == posix_target()
+    assert report["post_flash_reset_target_after_open"] == posix_target()
+    assert "post_flash_capture_target_before_open" not in report
+    assert "post_flash_capture_target_after_open" not in report
+    assert report["post_flash_reset_binding_ok"] is False
     assert report["post_flash_capture_binding_ok"] is False
     assert flash.post_flash_reset_contract_ok(report) is False
     assert flash.post_flash_capture_contract_ok(report) is False
@@ -2070,11 +2162,13 @@ def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
         "open",
         "command",
         "flash",
+        "close",
+        "open",
         "reset",
         "close",
     ]
     assert flash_handle.closed is True
-    assert capture_handle.closed is False
+    assert recovery_handle.closed is True
     assert raw_log.is_file()
 
 

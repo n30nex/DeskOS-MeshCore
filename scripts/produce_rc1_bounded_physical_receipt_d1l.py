@@ -111,9 +111,9 @@ FLASH_TARGET_FIELDS = (
     "d1l_target",
     "d1l_target_before",
     "pre_flash_target_after_open",
+    "post_flash_reset_target_before_open",
+    "post_flash_reset_target_after_open",
     "post_flash_target_after_settle",
-    "post_flash_capture_target_before_open",
-    "post_flash_capture_target_after_open",
     "d1l_target_after",
 )
 
