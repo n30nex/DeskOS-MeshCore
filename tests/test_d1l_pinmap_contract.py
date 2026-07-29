@@ -90,6 +90,24 @@ def test_phase1_lvgl_uses_seeed_direct_anti_tear_path():
     assert "# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1 is not set" in defaults
 
 
+def test_board_boot_defers_full_i2c_scan_to_explicit_console_diagnostic():
+    board_source = (ROOT / "main" / "hal" / "indicator_board.c").read_text(
+        encoding="utf-8"
+    )
+    console_source = (ROOT / "main" / "comms" / "usb_console.c").read_text(
+        encoding="utf-8"
+    )
+    board_init = board_source.split("esp_err_t d1l_board_init(void)", 1)[1].split(
+        "esp_err_t d1l_board_display_boot_splash(void)", 1
+    )[0]
+    i2c_command = console_source.split("static void cmd_i2c(void)", 1)[1].split(
+        "static void cmd_button(void)", 1
+    )[0]
+
+    assert "d1l_board_i2c_scan(&s_status)" not in board_init
+    assert "d1l_board_i2c_scan(&scan)" in i2c_command
+
+
 def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
     ui_source = (ROOT / "main" / "ui" / "ui_phase1.c").read_text(encoding="utf-8")
     board_source = (ROOT / "main" / "hal" / "indicator_board.c").read_text(encoding="utf-8")
