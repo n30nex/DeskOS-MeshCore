@@ -3427,14 +3427,24 @@ static void cmd_map_provider_status(void)
     d1l_connectivity_status_t connectivity = {0};
     d1l_storage_status_t storage = {0};
     d1l_map_prefetch_status_t prefetch = {0};
-    d1l_map_tile_provider_t provider = {0};
+    d1l_map_tile_provider_status_t provider_status = {0};
     (void)d1l_settings_public_snapshot(&settings);
     d1l_connectivity_status(&connectivity);
     d1l_storage_status(&storage);
     const bool sd_ready = d1l_map_tile_store_sd_ready(&storage);
-    const esp_err_t provider_refresh = sd_ready ?
-        d1l_map_tile_provider_refresh(&storage) : ESP_ERR_NOT_SUPPORTED;
-    d1l_map_tile_provider_snapshot(&provider);
+    /*
+     * This read-only control-plane command must stay independent of the SD
+     * bridge. Provider refresh producers publish their last completed result;
+     * taking that atomic snapshot prevents background tile persistence from
+     * delaying the USB response.
+     */
+    d1l_map_tile_provider_status_snapshot(&provider_status);
+    const d1l_map_tile_provider_t provider =
+        provider_status.provider;
+    const bool provider_refresh_ok =
+        provider_status.refresh_generation > 0U &&
+        provider_status.last_refresh_result == ESP_OK &&
+        provider.configured;
     d1l_map_prefetch_service_status(&prefetch);
 
     const bool provider_https =
@@ -3442,7 +3452,7 @@ static void cmd_map_provider_status(void)
     const bool osm_standard =
         d1l_map_tile_provider_uses_osm_standard(&provider);
     const bool authorized_provider =
-        provider_refresh == ESP_OK && provider.configured &&
+        provider_refresh_ok &&
         provider.network_fetch_allowed && provider_https &&
         provider.offline_storage_permitted &&
         provider.background_prefetch_permitted && !osm_standard;
@@ -3452,11 +3462,15 @@ static void cmd_map_provider_status(void)
 
     ok_begin("map provider status");
     printf(",\"configured\":%s,\"authorized_provider\":%s,"
-           "\"provider_refresh_ok\":%s,\"provider_refresh_code\":",
+           "\"provider_refresh_ok\":%s,"
+           "\"provider_refresh_generation\":%lu,"
+           "\"provider_refresh_code\":",
            bool_json(provider.configured),
            bool_json(authorized_provider),
-           bool_json(provider_refresh == ESP_OK));
-    print_json_string(esp_err_to_name(provider_refresh));
+           bool_json(provider_refresh_ok),
+           (unsigned long)provider_status.refresh_generation);
+    print_json_string(
+        esp_err_to_name(provider_status.last_refresh_result));
     printf(",\"source_id\":");
     print_json_string(provider.source_id);
     printf(",\"network_url_redacted\":true,"

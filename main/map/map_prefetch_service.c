@@ -23,6 +23,7 @@
 #define D1L_MAP_PREFETCH_WORKER_PRIORITY (tskIDLE_PRIORITY + 1U)
 #define D1L_MAP_VISIBLE_WORKER_PRIORITY 2U
 #define D1L_MAP_PREFETCH_POLL_MS 5000U
+#define D1L_MAP_PREFETCH_INTER_TILE_PAUSE_MS 25U
 #define D1L_MAP_PREFETCH_ERROR_BACKOFF_SEC 30U
 #define D1L_MAP_PREFETCH_DEFAULT_RATE_BACKOFF_SEC 300U
 
@@ -122,6 +123,13 @@ static void task_pause(void)
 {
     (void)ulTaskNotifyTake(
         pdTRUE, pdMS_TO_TICKS(D1L_MAP_PREFETCH_POLL_MS));
+}
+
+static void task_pause_after_network_tile(void)
+{
+    (void)ulTaskNotifyTake(
+        pdTRUE,
+        pdMS_TO_TICKS(D1L_MAP_PREFETCH_INTER_TILE_PAUSE_MS));
 }
 
 static bool visible_map_active(void)
@@ -277,6 +285,7 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
             ++status->cached_tiles;
             ++status->visited_tiles;
             publish_status(status);
+            taskYIELD();
             continue;
         }
         if (ret != ESP_ERR_NOT_FOUND) {
@@ -342,6 +351,7 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
             status->downloaded_bytes += downloaded_len;
             publish_status(status);
             memset(&result, 0, sizeof(result));
+            task_pause_after_network_tile();
             continue;
         }
         if (result.cancelled ||

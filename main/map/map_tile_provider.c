@@ -36,6 +36,8 @@ _Static_assert(sizeof(s_default_provider_manifest) - 1U <=
 static portMUX_TYPE s_provider_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_map_tile_provider_t s_provider;
 static bool s_provider_initialized;
+static esp_err_t s_provider_last_refresh_result = ESP_ERR_INVALID_STATE;
+static uint32_t s_provider_refresh_generation;
 
 static bool source_id_valid(const char *value)
 {
@@ -289,6 +291,38 @@ void d1l_map_tile_provider_snapshot(d1l_map_tile_provider_t *out_provider)
     portEXIT_CRITICAL(&s_provider_lock);
 }
 
+void d1l_map_tile_provider_status_snapshot(
+    d1l_map_tile_provider_status_t *out_status)
+{
+    if (!out_status) {
+        return;
+    }
+    ensure_initialized();
+    portENTER_CRITICAL(&s_provider_lock);
+    out_status->provider = s_provider;
+    out_status->last_refresh_result =
+        s_provider_last_refresh_result;
+    out_status->refresh_generation =
+        s_provider_refresh_generation;
+    portEXIT_CRITICAL(&s_provider_lock);
+}
+
+static void publish_refresh_result(
+    esp_err_t result,
+    const d1l_map_tile_provider_t *provider)
+{
+    portENTER_CRITICAL(&s_provider_lock);
+    if (result == ESP_OK && provider) {
+        s_provider = *provider;
+        s_provider_initialized = true;
+    }
+    s_provider_last_refresh_result = result;
+    if (s_provider_refresh_generation < UINT32_MAX) {
+        ++s_provider_refresh_generation;
+    }
+    portEXIT_CRITICAL(&s_provider_lock);
+}
+
 static esp_err_t seed_default_provider_config(void)
 {
     const size_t payload_size = sizeof(s_default_provider_manifest) - 1U;
@@ -463,6 +497,7 @@ esp_err_t d1l_map_tile_provider_refresh(
 {
     ensure_initialized();
     if (!storage || !d1l_map_tile_store_sd_ready(storage)) {
+        publish_refresh_result(ESP_ERR_NOT_SUPPORTED, NULL);
         return ESP_ERR_NOT_SUPPORTED;
     }
     char json[D1L_MAP_PROVIDER_CONFIG_MAX_BYTES + 1U];
@@ -480,12 +515,8 @@ esp_err_t d1l_map_tile_provider_refresh(
         d1l_map_tile_provider_builtin(&provider);
         ret = ESP_OK;
     }
-    if (ret == ESP_OK) {
-        portENTER_CRITICAL(&s_provider_lock);
-        s_provider = provider;
-        s_provider_initialized = true;
-        portEXIT_CRITICAL(&s_provider_lock);
-    }
+    publish_refresh_result(
+        ret, ret == ESP_OK ? &provider : NULL);
     memset(json, 0, sizeof(json));
     return ret;
 }
