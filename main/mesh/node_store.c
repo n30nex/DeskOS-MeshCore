@@ -258,7 +258,6 @@ static bool marker_material_changed(const d1l_node_entry_t *before,
         return false;
     }
     return before->lat_e6 != after->lat_e6 || before->lon_e6 != after->lon_e6 ||
-           before->location_seq != after->location_seq ||
            strncmp(before->fingerprint, after->fingerprint, D1L_NODE_FINGERPRINT_LEN) != 0 ||
            strncmp(before->name, after->name, D1L_HEARD_NODE_NAME_LEN) != 0 ||
            strncmp(before->type, after->type, D1L_NODE_TYPE_LEN) != 0;
