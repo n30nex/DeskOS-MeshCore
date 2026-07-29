@@ -38,9 +38,9 @@ Required sequence:
    attributed and visible-current-view-only and that authorized background
    download pauses while interactive Map is open. The bounded physical Map
    receipt proves only authorized download plus offline SD-cache revisit.
-8. Retain the completed physical display/touch/keyboard/scroll, automated
-   12-surface navigation, Wi-Fi reconnect, and SD write/reboot/remount
-   acceptance without rerunning those campaigns.
+8. Retain the completed physical display/touch/keyboard/scroll, the completed
+   automated 12-surface navigation, and Wi-Fi reconnect. Retain
+   SD write/reboot/remount acceptance without rerunning those campaigns.
 
 Pass requires every receipt to bind the same exact commit, GitHub Actions run,
 downloaded package and flashed image. Predecessor artifacts, local builds,
