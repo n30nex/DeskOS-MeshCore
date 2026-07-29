@@ -498,8 +498,8 @@ def test_map_ui_releases_before_covers_and_automation_is_fail_closed():
     assert "d1l_ui_map_viewport_set_suppressed(false);" in capture_end
 
     request_tab = function_body(source, "esp_err_t d1l_ui_phase1_request_tab", "esp_err_t d1l_ui_phase1_scroll_probe")
-    assert "set_map_interactive_touch_authorized(false);" in request_tab
-    assert "d1l_ui_map_viewport_suppress_next_acquire();" in request_tab
+    assert "set_map_interactive_touch_authorized(tab == D1L_UI_TAB_MAP);" in request_tab
+    assert "d1l_ui_map_viewport_suppress_next_acquire();" not in request_tab
 
     touch_tab = function_body(source, "static void request_tab_event_cb", "static void dock_event_cb")
     assert "set_map_interactive_touch_authorized(*tab == D1L_UI_TAB_MAP);" in touch_tab
@@ -531,7 +531,6 @@ def test_map_ui_releases_before_covers_and_automation_is_fail_closed():
         "request_tab_switch(D1L_UI_TAB_MAP);"
     )
     assert "request_content_refresh();" not in save_location
-    assert "set_map_interactive_touch_authorized(false);" in request_tab
 
 
 def test_removed_provider_and_offline_map_ui_cannot_reappear():

@@ -8011,10 +8011,14 @@ esp_err_t d1l_ui_phase1_request_tab(const char *name)
     if (!s_started || !s_content) {
         return ESP_ERR_INVALID_STATE;
     }
-    set_map_interactive_touch_authorized(false);
-    if (tab == D1L_UI_TAB_MAP) {
-        d1l_ui_map_viewport_suppress_next_acquire();
-    }
+    /*
+     * `ui tab` is a supported product navigation command. Opening Map through
+     * it must behave like the corresponding Home/dock action so the configured
+     * current view can render from SD and, when available, refresh over Wi-Fi.
+     * Qualification automation uses its separate suppressed scroll path and
+     * never calls this product Map navigation.
+     */
+    set_map_interactive_touch_authorized(tab == D1L_UI_TAB_MAP);
     if (tab == D1L_UI_TAB_MESSAGES) {
         s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
     }
@@ -8039,7 +8043,7 @@ esp_err_t d1l_ui_phase1_request_map_acceptance(void)
     /*
      * This narrow machine-acceptance path opens only the configured current
      * Map view. It accepts no URL or coordinates and does not transmit RF.
-     * Ordinary serial tab switching remains network-suppressed.
+     * Read-only scroll-probe automation remains network-suppressed.
      */
     d1l_ui_map_viewport_prepare_acceptance();
     d1l_map_view_service_force_reload_next_acquire();
