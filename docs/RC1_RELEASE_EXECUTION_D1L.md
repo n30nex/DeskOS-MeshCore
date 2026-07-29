@@ -137,14 +137,12 @@ The final gate also requires all of the following before it starts:
   background prefetch, plus configured device location;
 - the pinned local controlled peer and its current status/socket;
 - a controlled repeater/admin contact fingerprint and password;
-- an explicit canonical repeater/room contact fingerprint for TRACE.
 
 Keep the admin password in a bounded regular file outside the repository. Do
 not place credentials in command arguments, evidence, shell history or Git:
 
 ```bash
 ADMIN_FINGERPRINT=9880BF9B9B1DD605
-TRACE_FINGERPRINT=9880BF9B9B1DD605
 ADMIN_PASSWORD_FILE=<absolute-path-outside-repository>
 test -f "$ADMIN_PASSWORD_FILE"
 ```
@@ -228,15 +226,21 @@ env \
   --out "$RF"
 ```
 
-### Source 3: boot advert, targeted protocol/Admin gates, then one Public send
+### Source 3: boot advert, Admin/PATH/Ping gates, then one Public send
 
 This is the sole authorized Public send in the closing sequence. Omitting
 `--authorize-public-tx` must fail before opening serial. This source covers
-Public, contacts, Admin login/query/logout, PATH, split TRACE, Ping and
-health/crash only; DM remains exclusively covered by Source 2. Targeted
-TRACE, Admin login/query/logout, Admin PATH, and Ping must all complete before
-the controlled-peer baseline is captured and the sole Public send is
-authorized.
+Public, contacts, Admin login/query/logout, Admin PATH, Ping and health/crash
+only; DM remains exclusively covered by Source 2. Admin login/query/logout,
+Admin PATH, and Ping must all complete before the controlled-peer baseline is
+captured and the sole Public send is authorized.
+
+Per operator direction, Source 3 does not rerun TRACE. A prior controlled TRACE
+was operator-observed on `d26a8cdc2e54a44ebb6c5a182f0e6057d566fb3b`;
+no TRACE, routing, radio, contact, or pinned build input changed between that
+predecessor and this candidate. That observation is carried forward as release
+context only: it is not a fresh Source 3 outcome and is not required by the
+final audit.
 
 ```bash
 PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"
@@ -253,7 +257,6 @@ PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"
   --peer-service meshcorebot \
   --peer-status-schema meshcorebot_v1 \
   --admin-fingerprint "$ADMIN_FINGERPRINT" \
-  --trace-fingerprint "$TRACE_FINGERPRINT" \
   --admin-password-file "$ADMIN_PASSWORD_FILE" \
   --boot-timeout 75 \
   --command-timeout 60 \
@@ -266,10 +269,6 @@ status path, control socket and status layout. Public and DM counters must
 advance under one stable Meshcorebot process session. `ADMIN_FINGERPRINT`
 must still resolve to a separate canonical repeater contact with Admin
 capability; never substitute the COM11 chat fingerprint for it.
-`TRACE_FINGERPRINT` must independently resolve to exactly one canonical,
-signed repeater or room contact. It may equal `ADMIN_FINGERPRINT` when that
-contact is suitable; the current closing run binds Admin/PATH/Ping and TRACE
-to the canonical YKF Hespeler repeater.
 Before the single Public send, the runner queues one signed D1L flood advert
 and requires COM11 to resolve exactly one signed `D1L` contact to the current
 D1L key. The subsequent Public receive must reference that exact advert.

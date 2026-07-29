@@ -130,7 +130,6 @@ PHYSICAL_EVIDENCE_COVERAGE = {
     "public_send_count": "protocol",
     "dm_ack": "rf",
     "path": "protocol",
-    "trace": "protocol",
     "ping": "protocol",
     "repeater_login": "protocol",
     "repeater_query": "protocol",
@@ -186,7 +185,6 @@ OUTCOME_KEYS = frozenset(
         "public_send_count",
         "dm_ack",
         "path",
-        "trace",
         "ping",
         "repeater_login",
         "repeater_query",
@@ -1119,10 +1117,9 @@ def audit(
         "dm_ack": (
             isinstance(outcomes, dict) and outcomes.get("dm_ack") is True
         ),
-        "path_trace_and_ping": (
+        "path_and_ping": (
             isinstance(outcomes, dict)
             and outcomes.get("path") is True
-            and outcomes.get("trace") is True
             and outcomes.get("ping") is True
         ),
         "repeater_login_and_query": (

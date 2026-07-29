@@ -17,10 +17,8 @@ PEER_KEY = gate.PEER_PROFILE_BINDINGS[
     gate.RADIO_LISTENER_STATUS_SCHEMA
 ]["public_key"]
 ADMIN_KEY = "d" * 64
-TRACE_KEY = "e" * 64
 PEER_FP = PEER_KEY[:16].upper()
 ADMIN_FP = ADMIN_KEY[:16].upper()
-TRACE_FP = TRACE_KEY[:16].upper()
 NONCE = "123456789abc"
 PUBLIC_OUT = f"rc1-public-out-{COMMIT[:8]}-{NONCE}"
 PUBLIC_IN = f"rc1-public-in-{COMMIT[:8]}-{NONCE}"
@@ -36,10 +34,6 @@ OPERATIONS = (
     "mesh_status",
     "peer_advert",
     "contacts",
-    "trace_path_request",
-    "trace_path_result",
-    "trace_request",
-    "trace_result",
     "admin_login_request",
     "admin_login_status",
     "admin_query_request",
@@ -248,53 +242,8 @@ def protocol_transcript() -> dict:
                     "can_admin": True,
                     "verification_source": "signed_advert",
                 },
-                {
-                    "fingerprint": TRACE_FP,
-                    "public_key": TRACE_KEY,
-                    "type": "repeater",
-                    "canonical": True,
-                    "can_dm": False,
-                    "can_admin": True,
-                    "verification_source": "signed_advert",
-                },
             ],
         },
-        "trace_path_request": {
-            "schema": 1,
-            "ok": True,
-            "cmd": "routes probe",
-            "fingerprint": TRACE_FP,
-            "queued": True,
-            "token": "path_00000029",
-            "dm_rf_tx": True,
-            "public_rf_tx": False,
-            "telemetry_requested": True,
-        },
-        "trace_path_result": {
-            "schema": 1,
-            "ok": True,
-            "cmd": "routes telemetry",
-            "fingerprint": TRACE_FP,
-            "state": "received",
-            "pending": False,
-            "pending_tag": 0,
-            "history_count": 1,
-            "entries": [{"sequence": 1, "tag": 41}],
-        },
-        "trace_request": {
-            "schema": 1,
-            "ok": True,
-            "cmd": "routes trace contact",
-            "fingerprint": TRACE_FP,
-            "queued": True,
-            "pending": True,
-            "tag": 101,
-            "targeted_trace_rf_tx": True,
-            "public_rf_tx": False,
-        },
-        "trace_result": matched_trace(
-            "routes trace status", TRACE_FP, 101, False
-        ),
         "peer_before": peer_capture(channel=10, dm=5),
         "public_tx_authorization": {
             "schema": 1,
@@ -412,10 +361,6 @@ def protocol_transcript() -> dict:
         "mesh_status": "mesh status",
         "peer_advert": "controlled-peer radio.advert",
         "contacts": "contacts",
-        "trace_path_request": f"routes probe {TRACE_FP}",
-        "trace_path_result": f"routes telemetry {TRACE_FP}",
-        "trace_request": f"routes trace contact {TRACE_FP}",
-        "trace_result": "routes trace status",
         "peer_before": "controlled-peer status capture",
         "public_tx_authorization": "operator flag --authorize-public-tx",
         "public_send": f"mesh send public {PUBLIC_OUT}",
@@ -458,7 +403,6 @@ def protocol_transcript() -> dict:
         ),
         "protocol_targets": {
             "admin_fingerprint": ADMIN_FP,
-            "trace_fingerprint": TRACE_FP,
         },
         "steps": [
             {
@@ -488,48 +432,13 @@ def test_machine_transcript_closes_the_protocol_gate(
         "boot_advert": True,
         "public_send_count": 1,
         "path": True,
-        "trace": True,
         "ping": True,
         "repeater_login": True,
         "repeater_query": True,
     }
 
 
-def test_protocol_targets_are_explicit_and_trace_can_reuse_admin(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    transcript = protocol_transcript()
-    transcript["protocol_targets"]["trace_fingerprint"] = ADMIN_FP
-    for step in transcript["steps"]:
-        if step["operation"] == "trace_path_request":
-            step["command"] = f"routes probe {ADMIN_FP}"
-            step["response"]["fingerprint"] = ADMIN_FP
-        elif step["operation"] == "trace_path_result":
-            step["command"] = f"routes telemetry {ADMIN_FP}"
-            step["response"]["fingerprint"] = ADMIN_FP
-        elif step["operation"] == "trace_request":
-            step["command"] = f"routes trace contact {ADMIN_FP}"
-            step["response"]["fingerprint"] = ADMIN_FP
-        elif step["operation"] == "trace_result":
-            step["response"]["fingerprint"] = ADMIN_FP
-
-    assert validate(transcript, monkeypatch)["trace"] is True
-
-
-@pytest.mark.parametrize("trace_type", ["chat", "unknown"])
-def test_protocol_rejects_non_repeater_or_room_trace_contact(
-    trace_type: str,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    transcript = protocol_transcript()
-    contacts = _operation_response(transcript, "contacts")["entries"]
-    contacts[2]["type"] = trace_type
-
-    with pytest.raises(gate.EvidenceError):
-        validate(transcript, monkeypatch)
-
-
-def test_targeted_and_admin_gates_all_precede_public_send():
+def test_admin_path_and_ping_all_precede_public_send():
     transcript = protocol_transcript()
     steps = {
         row["operation"]: row
@@ -538,10 +447,6 @@ def test_targeted_and_admin_gates_all_precede_public_send():
 
     assert (
         steps["contacts"]["sequence"]
-        < steps["trace_path_request"]["sequence"]
-        < steps["trace_path_result"]["sequence"]
-        < steps["trace_request"]["sequence"]
-        < steps["trace_result"]["sequence"]
         < steps["admin_login_request"]["sequence"]
         < steps["admin_login_status"]["sequence"]
         < steps["admin_query_request"]["sequence"]
@@ -555,22 +460,6 @@ def test_targeted_and_admin_gates_all_precede_public_send():
         < steps["public_tx_authorization"]["sequence"]
         < steps["public_send"]["sequence"]
     )
-    assert (
-        steps["trace_path_request"]["command"]
-        == f"routes probe {TRACE_FP}"
-    )
-    assert (
-        steps["trace_path_request"]["response"]["fingerprint"]
-        == TRACE_FP
-    )
-    assert (
-        steps["trace_path_result"]["command"]
-        == f"routes telemetry {TRACE_FP}"
-    )
-    assert (
-        steps["trace_path_result"]["response"]["fingerprint"]
-        == TRACE_FP
-    )
     assert steps["path_request"]["command"] == f"routes probe {ADMIN_FP}"
     assert steps["path_request"]["response"]["fingerprint"] == ADMIN_FP
     assert (
@@ -578,12 +467,6 @@ def test_targeted_and_admin_gates_all_precede_public_send():
         == f"routes telemetry {ADMIN_FP}"
     )
     assert steps["path_result"]["response"]["fingerprint"] == ADMIN_FP
-    assert (
-        steps["trace_request"]["command"]
-        == f"routes trace contact {TRACE_FP}"
-    )
-    assert steps["trace_request"]["response"]["fingerprint"] == TRACE_FP
-    assert steps["trace_result"]["response"]["fingerprint"] == TRACE_FP
     assert steps["ping_request"]["command"] == f"repeater ping {ADMIN_FP}"
     assert steps["ping_request"]["response"]["fingerprint"] == ADMIN_FP
 
@@ -775,7 +658,6 @@ def test_meshcorebot_profile_closes_chat_gate_with_distinct_admin(
         "boot_advert": True,
         "public_send_count": 1,
         "path": True,
-        "trace": True,
         "ping": True,
         "repeater_login": True,
         "repeater_query": True,
@@ -825,7 +707,6 @@ def _rehash_peer_capture(capture: dict) -> None:
         "resolve_after_public",
         "chat_peer_admin_capable",
         "admin_not_admin_capable",
-        "trace_not_admin_capable",
         "chat_peer_not_signed",
         "admin_not_signed",
     ],
@@ -911,8 +792,6 @@ def test_meshcorebot_profile_rejects_identity_or_correlation_drift(
             contacts[0]["can_admin"] = True
         elif mutation == "admin_not_admin_capable":
             contacts[1]["can_admin"] = False
-        elif mutation == "trace_not_admin_capable":
-            contacts[2]["can_admin"] = False
         elif mutation == "chat_peer_not_signed":
             contacts[0]["verification_source"] = "imported"
         else:
@@ -1008,12 +887,6 @@ def test_peer_status_json_array_fails_closed(
         (
             "health_after",
             lambda response: response.update({"boot_nonce": 78}),
-        ),
-        (
-            "trace_path_result",
-            lambda response: response["entries"][0].update(
-                {"tag": "path_00000029"}
-            ),
         ),
         (
             "path_result",
@@ -1349,7 +1222,7 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     assert "port=POSIX_D1L_TARGET" in source
     assert '"manual_only": False' in source
     assert "--authorize-public-tx" in source
-    assert 'parser.add_argument("--trace-fingerprint", required=True)' in source
+    assert "--trace-fingerprint" not in source
     assert "validate_protocol(transcript, candidate)" in source
     assert "--dry-run" not in source
     assert 'parser.add_argument("--boot-timeout", type=float, default=75.0)' in source
@@ -1361,10 +1234,7 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
         'version = _step(steps, "version"'
     )
     assert (
-        source.index('trace_path_request = _step(')
-        < source.index('label="current-boot TRACE target PATH response"')
-        < source.index('trace_request = _step(')
-        < source.index('admin_logout = _step(')
+        source.index('admin_logout = _step(')
         < source.index('\n        path_request = _step(')
         < source.index('label="PATH/base telemetry response"')
         < source.index('ping_request = _step(')
