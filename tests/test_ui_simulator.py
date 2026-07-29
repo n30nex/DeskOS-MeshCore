@@ -2324,7 +2324,7 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     assert "simulator images" in active_test_plan
     assert "alone do not pass" in active_test_plan
     assert "automated 12-surface navigation receipt" in active_roadmap
-    assert "boot/five-root UI" in active_checklist
+    assert "operator accepted the physical display/touch/keyboard/scroll" in active_checklist
     assert "automated 12-surface navigation receipt" in active_checklist
     assert "one consolidated physical" not in active_roadmap
     assert "one consolidated physical" not in active_checklist

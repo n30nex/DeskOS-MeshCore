@@ -1,8 +1,9 @@
 # MeshCore DeskOS D1L 1.0 User Guide
 
-This guide covers the production `core_1_0` firmware for the Seeed SenseCAP
-Indicator D1L. DeskOS is a non-forwarding MeshCore client: it sends and
-receives user-requested traffic but does not repeat other devices' traffic.
+This guide covers the production `core_1_0` firmware with `conditional` SD
+history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
+MeshCore client: it sends and receives user-requested traffic but does not
+repeat other devices' traffic.
 
 ## First start
 

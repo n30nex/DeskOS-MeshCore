@@ -32,8 +32,9 @@ The remaining RC1 work is one release-evidence path:
    download/offline-revisit gate without rerunning the completed UI,
    Wi-Fi-reconnect, or SD write/reboot/remount campaigns;
 5. retain the operator-completed physical display/touch/keyboard/scroll
-   acceptance and publish only when the fail-closed audit binds every
-   remaining receipt to the exact artifact.
+   acceptance and the automated 12-surface navigation receipt without
+   rerunning either campaign; publish only when the fail-closed audit binds
+   every remaining receipt to the exact artifact.
 
 No soak is required. Built-in OSM remains attributed and
 visible-current-view-only; authorized-provider prefetch pauses while

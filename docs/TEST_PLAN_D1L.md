@@ -27,10 +27,10 @@ Required sequence:
 5. Run the reduced bounded gate on that exact artifact: one non-erasing
    retained-state-preserving flash, boot advert plus one operator-authorized
    Public send, one DM/ACK through the authoritative RF receipt, contact
-   PATH/TRACE, repeater Ping, repeater login plus authenticated query, SD
-   degraded notice/reinsert recovery, and one authorized-provider Map download
-   followed by offline cache revisit. The protocol receipt must not repeat the
-   RF receipt's outbound/inbound DM exchange.
+   PATH/TRACE, repeater Ping, and repeater login plus authenticated query.
+   Require SD degraded notice/reinsert recovery and one authorized-provider
+   Map download followed by offline cache revisit. The protocol receipt must
+   not repeat the RF receipt's outbound/inbound DM exchange.
 6. Confirm SD is primary for retained history and that missing/unusable SD
    enters visible live-only RF chat without redirecting history to default
    NVS. Never format or repair media from firmware or validation.
@@ -38,9 +38,9 @@ Required sequence:
    attributed and visible-current-view-only and that authorized background
    download pauses while interactive Map is open. The bounded physical Map
    receipt proves only authorized download plus offline SD-cache revisit.
-8. Retain the completed physical display/touch/keyboard/scroll,
-   automated 12-surface navigation, Wi-Fi reconnect, and SD
-   write/reboot/remount acceptance without rerunning those campaigns.
+8. Retain the completed physical display/touch/keyboard/scroll, automated
+   12-surface navigation, Wi-Fi reconnect, and SD write/reboot/remount
+   acceptance without rerunning those campaigns.
 
 Pass requires every receipt to bind the same exact commit, GitHub Actions run,
 downloaded package and flashed image. Predecessor artifacts, local builds,
