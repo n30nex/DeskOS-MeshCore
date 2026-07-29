@@ -754,10 +754,10 @@ EXPECTED_ORACLE_CAPABILITIES = [
             ],
             "scope": (
                 "fingerprint_only_exact_canonical_contact_current_boot_proven_"
-                "one_or_two_byte_route_loop_runtime_dispatch_width_aware_"
-                "correlation_generic_one_two_four_eight_byte_wire_helpers_no_"
-                "operator_path_three_byte_contact_route_ui_rf_evidence_"
-                "hardware_evidence_or_closure"
+                "one_two_or_three_byte_route_loop_three_to_two_prefix_"
+                "normalization_runtime_dispatch_width_aware_correlation_"
+                "generic_one_two_four_eight_byte_wire_helpers_no_operator_path_"
+                "ui_rf_evidence_hardware_evidence_or_closure"
             ),
         },
     },

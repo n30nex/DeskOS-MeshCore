@@ -102,6 +102,28 @@ static int test_contact_plan(void)
     CHECK(memcmp(plan.path_hashes, two_byte_expected,
                  sizeof(two_byte_expected)) == 0);
 
+    const uint8_t three_byte_path[] = {
+        0x11U, 0x12U, 0x13U, 0x21U, 0x22U, 0x23U,
+    };
+    const uint8_t three_byte_expected[] = {
+        0x11U, 0x12U, 0x21U, 0x22U, 0x44U,
+        0x45U, 0x21U, 0x22U, 0x11U, 0x12U,
+    };
+    memset(&plan, 0, sizeof(plan));
+    CHECK(d1l_meshcore_trace_plan_contact(
+              three_byte_path, (uint8_t)(0x80U | 2U), true, contact_hash,
+              &plan) == D1L_MESHCORE_CONTACT_TRACE_PLAN_OK);
+    CHECK(plan.includes_contact);
+    CHECK(plan.path_hash_bytes == 2U);
+    CHECK(plan.path_hops == 5U);
+    CHECK(memcmp(plan.path_hashes, three_byte_expected,
+                 sizeof(three_byte_expected)) == 0);
+    CHECK(d1l_meshcore_trace_contact_hash_width(1U) == 1U);
+    CHECK(d1l_meshcore_trace_contact_hash_width(2U) == 2U);
+    CHECK(d1l_meshcore_trace_contact_hash_width(3U) == 2U);
+    CHECK(d1l_meshcore_trace_contact_hash_width(0U) == 0U);
+    CHECK(d1l_meshcore_trace_contact_hash_width(4U) == 0U);
+
     d1l_meshcore_contact_trace_plan_t unchanged;
     memset(&unchanged, 0xA5, sizeof(unchanged));
     const d1l_meshcore_contact_trace_plan_t before = unchanged;
@@ -110,9 +132,9 @@ static int test_contact_plan(void)
           D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY);
     CHECK(memcmp(&unchanged, &before, sizeof(unchanged)) == 0);
     CHECK(d1l_meshcore_trace_plan_contact(
-              direct_path, (uint8_t)(0x80U | 3U), true, contact_hash,
+              direct_path, (uint8_t)(0xC0U | 3U), true, contact_hash,
               &unchanged) ==
-          D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH);
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID);
     CHECK(memcmp(&unchanged, &before, sizeof(unchanged)) == 0);
     CHECK(d1l_meshcore_trace_plan_contact(
               direct_path, 3U, true, contact_hash, NULL) ==

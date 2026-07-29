@@ -198,6 +198,8 @@ PROTOCOL_OPERATIONS = frozenset(
         "mesh_status",
         "peer_advert",
         "contacts",
+        "trace_path_request",
+        "trace_path_result",
         "trace_request",
         "trace_result",
         "peer_before",
@@ -847,6 +849,8 @@ def validate_protocol(
     mesh_status = _response(steps, "mesh_status")
     peer_advert = _response(steps, "peer_advert")
     contacts = _response(steps, "contacts")
+    trace_path_request = _response(steps, "trace_path_request")
+    trace_path_result = _response(steps, "trace_path_result")
     trace_request = _response(steps, "trace_request")
     trace_result = _response(steps, "trace_result")
     before = _response(steps, "peer_before")
@@ -1001,6 +1005,26 @@ def validate_protocol(
         and _integer(row.get("sequence"), minimum=1) is not None
     ]
 
+    trace_path_token = trace_path_request.get("token")
+    trace_path_tag = (
+        int(trace_path_token[5:], 16)
+        if isinstance(trace_path_token, str)
+        and re.fullmatch(r"path_[0-9A-F]{8}", trace_path_token)
+        else None
+    )
+    trace_path_entries = (
+        trace_path_result.get("entries")
+        if isinstance(trace_path_result.get("entries"), list)
+        else []
+    )
+    trace_path_matches = [
+        row
+        for row in trace_path_entries
+        if isinstance(row, dict)
+        and row.get("tag") == trace_path_tag
+        and _integer(row.get("sequence"), minimum=1) is not None
+    ]
+
     trace_tag = _integer(trace_request.get("tag"), minimum=1)
     ping_tag = _integer(ping_request.get("tag"), minimum=1)
     advert_status = mesh_status.get("advert_tx")
@@ -1101,6 +1125,7 @@ def validate_protocol(
         and trace_public_key[:16].upper() == trace_fingerprint
         and trace_contact.get("canonical") is True
         and trace_contact.get("can_dm") is False
+        and trace_contact.get("can_admin") is True
         and trace_contact.get("type") in {"repeater", "room"}
         and trace_contact.get("verification_source") == "signed_advert"
         and (
@@ -1149,6 +1174,29 @@ def validate_protocol(
                 < steps["public_send"]["sequence"]
             )
         )
+        and trace_path_request.get("ok") is True
+        and trace_path_request.get("cmd") == "routes probe"
+        and _fingerprint(trace_path_request.get("fingerprint"))
+        == trace_fingerprint
+        and trace_path_request.get("queued") is True
+        and trace_path_request.get("dm_rf_tx") is True
+        and trace_path_request.get("public_rf_tx") is False
+        and trace_path_request.get("telemetry_requested") is True
+        and trace_path_tag is not None
+        and steps["trace_path_request"]["command"]
+        == f"routes probe {trace_fingerprint}"
+        and trace_path_result.get("ok") is True
+        and trace_path_result.get("cmd") == "routes telemetry"
+        and _fingerprint(trace_path_result.get("fingerprint"))
+        == trace_fingerprint
+        and trace_path_result.get("state") == "received"
+        and trace_path_result.get("pending") is False
+        and trace_path_result.get("pending_tag") == 0
+        and _integer(trace_path_result.get("history_count"), minimum=1)
+        == len(trace_path_entries)
+        and len(trace_path_matches) == 1
+        and steps["trace_path_result"]["command"]
+        == f"routes telemetry {trace_fingerprint}"
         and trace_request.get("ok") is True
         and trace_request.get("cmd") == "routes trace contact"
         and _fingerprint(trace_request.get("fingerprint"))
@@ -1173,11 +1221,17 @@ def validate_protocol(
         and isinstance(trace_result.get("last_result"), dict)
         and trace_result["last_result"].get("valid") is True
         and trace_result["last_result"].get("tag") == trace_tag
+        and steps["contacts"]["sequence"]
+        < steps["trace_path_request"]["sequence"]
+        < steps["trace_path_result"]["sequence"]
+        < steps["trace_request"]["sequence"]
+        < steps["trace_result"]["sequence"]
+        < steps["peer_before"]["sequence"]
+        < steps["public_tx_authorization"]["sequence"]
+        < steps["public_send"]["sequence"]
         and steps["admin_logout"]["sequence"]
         < steps["path_request"]["sequence"]
         < steps["path_result"]["sequence"]
-        < steps["trace_request"]["sequence"]
-        < steps["trace_result"]["sequence"]
         < steps["ping_request"]["sequence"]
         < steps["ping_result"]["sequence"]
         and steps["public_tx_authorization"]["command"]

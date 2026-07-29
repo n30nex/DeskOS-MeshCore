@@ -48,13 +48,15 @@ def test_trace_helper_supports_bounded_widths_and_direct_terminal_only() -> None
     assert "*out_source = source" in trace
     assert "*out_terminal = terminal" in trace
     assert "d1l_meshcore_trace_plan_contact" in trace
+    assert "d1l_meshcore_trace_contact_hash_width" in trace
     assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH" in trace
     assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY" in trace
     assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG" in trace
     assert "(size_t)path_hops * 2U + 1U" in trace
     assert "(size_t)path_hops * 2U - 1U" in trace
-    assert "contact_hash, hash_bytes" in trace
-    assert "&out_path[(i - 1U) * hash_bytes]" in trace
+    assert "contact_hash, trace_hash_bytes" in trace
+    assert "&out_path[(i - 1U) * route_hash_bytes]" in trace
+    assert "route_hash_bytes == 2U || route_hash_bytes == 3U ? 2U" in trace
 
 
 def test_trace_tracker_correlates_immutable_tag_auth_path_and_bounds_age() -> None:
@@ -265,7 +267,9 @@ def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     assert '"one_byte_hash_only\\":false' in console
     assert '"trace_wire_hash_bytes_supported\\":[1,2,4,8]' in console
     assert '"contact_trace_path_hash_bytes_supported\\":[1,2]' in console
-    assert '"contact_route_hash_bytes_rejected\\":[3]' in console
+    assert '"contact_route_hash_bytes_accepted\\":[1,2,3]' in console
+    assert '"contact_route_hash_bytes_normalized_to_two\\":[3]' in console
+    assert '"contact_route_hash_bytes_rejected\\":[]' in console
     assert '"trace_flags_supported\\":[0,1,2,3]' in console
     assert "hardware_verified" in console
     assert "per_hop_complete" in console
@@ -332,7 +336,7 @@ def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
         "flags 0 through 3, representing 1-, 2-, 4-, and 8-byte hashes"
         in physical
     )
-    assert "three-byte contact route must fail closed" in physical
+    assert "three-byte contact route must normalize to two-byte prefixes" in physical
     assert "opaque correlation code" in physical
     assert "opaque authentication" not in physical
     assert "controlled multi-hop official-peer RF" in physical

@@ -138,13 +138,29 @@ static inline uint8_t d1l_meshcore_trace_flags_for_hash_width(
 }
 
 /*
+ * MeshCore route packets encode one-, two-, or three-byte public-key
+ * prefixes, while TRACE v1.11 encodes only power-of-two prefix widths.
+ * A three-byte route can therefore be represented without changing its hops
+ * by using each hash's first two bytes. Identity::isHashMatch compares exactly
+ * that public-key prefix.
+ */
+static inline uint8_t d1l_meshcore_trace_contact_hash_width(
+    uint8_t route_hash_bytes)
+{
+    return route_hash_bytes == 1U ? 1U :
+           route_hash_bytes == 2U || route_hash_bytes == 3U ? 2U : 0U;
+}
+
+/*
  * Derive the only contact TRACE loop accepted by DeskOS. The caller must
- * first authorize one immutable, current-boot direct route. One- or two-byte
- * route hashes are copied in transmit order. Repeater and room contacts can
- * forward TRACE, so their exact public-key hash prefix is the pivot; chat and
- * sensor contacts cannot, so the farthest proven repeater is the pivot. The
- * return leg omits that pivot and reverses only whole hashes from the already
- * authorized route. No caller-supplied arbitrary loop can enter this helper.
+ * first authorize one immutable, current-boot direct route. One- and two-byte
+ * route hashes are copied in transmit order; three-byte route hashes are
+ * normalized to their exact two-byte public-key prefixes. Repeater and room
+ * contacts can forward TRACE, so their exact public-key hash prefix is the
+ * pivot; chat and sensor contacts cannot, so the farthest proven repeater is
+ * the pivot. The return leg omits that pivot and reverses only whole hashes
+ * from the already authorized route. No caller-supplied arbitrary loop can
+ * enter this helper.
  */
 static inline d1l_meshcore_contact_trace_plan_result_t
 d1l_meshcore_trace_plan_contact(
@@ -157,14 +173,16 @@ d1l_meshcore_trace_plan_contact(
     if (!out_plan || !d1l_meshcore_wire_path_len_valid(out_path_len)) {
         return D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
     }
-    const uint8_t hash_bytes =
+    const uint8_t route_hash_bytes =
         d1l_meshcore_wire_path_hash_size(out_path_len);
+    const uint8_t trace_hash_bytes =
+        d1l_meshcore_trace_contact_hash_width(route_hash_bytes);
     const uint8_t path_hops =
         d1l_meshcore_wire_path_hash_count(out_path_len);
     const uint8_t path_bytes =
         d1l_meshcore_wire_path_byte_len(out_path_len);
-    if (hash_bytes == 0U ||
-        hash_bytes > D1L_MESHCORE_TRACE_MAX_CONTACT_HASH_BYTES) {
+    if (trace_hash_bytes == 0U ||
+        trace_hash_bytes > D1L_MESHCORE_TRACE_MAX_CONTACT_HASH_BYTES) {
         return D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH;
     }
     if (path_bytes > 0U && !out_path) {
@@ -186,30 +204,33 @@ d1l_meshcore_trace_plan_contact(
 
     d1l_meshcore_contact_trace_plan_t plan = {
         .includes_contact = contact_forwards_trace,
-        .path_hash_bytes = hash_bytes,
+        .path_hash_bytes = trace_hash_bytes,
         .path_hops = (uint8_t)loop_hops,
     };
-    const size_t loop_bytes = loop_hops * hash_bytes;
+    const size_t loop_bytes = loop_hops * trace_hash_bytes;
     if (loop_bytes > sizeof(plan.path_hashes)) {
         return D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG;
     }
-    if (path_bytes > 0U) {
-        memcpy(plan.path_hashes, out_path, path_bytes);
+    for (size_t i = 0U; i < path_hops; ++i) {
+        memcpy(&plan.path_hashes[i * trace_hash_bytes],
+               &out_path[i * route_hash_bytes], trace_hash_bytes);
     }
     size_t write_hop = path_hops;
     if (contact_forwards_trace) {
-        memcpy(&plan.path_hashes[write_hop * hash_bytes],
-               contact_hash, hash_bytes);
+        memcpy(&plan.path_hashes[write_hop * trace_hash_bytes],
+               contact_hash, trace_hash_bytes);
         write_hop++;
         for (size_t i = path_hops; i > 0U; --i) {
-            memcpy(&plan.path_hashes[write_hop * hash_bytes],
-                   &out_path[(i - 1U) * hash_bytes], hash_bytes);
+            memcpy(&plan.path_hashes[write_hop * trace_hash_bytes],
+                   &out_path[(i - 1U) * route_hash_bytes],
+                   trace_hash_bytes);
             write_hop++;
         }
     } else {
         for (size_t i = path_hops - 1U; i > 0U; --i) {
-            memcpy(&plan.path_hashes[write_hop * hash_bytes],
-                   &out_path[(i - 1U) * hash_bytes], hash_bytes);
+            memcpy(&plan.path_hashes[write_hop * trace_hash_bytes],
+                   &out_path[(i - 1U) * route_hash_bytes],
+                   trace_hash_bytes);
             write_hop++;
         }
     }

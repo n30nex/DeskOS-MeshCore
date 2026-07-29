@@ -2514,6 +2514,8 @@ static void cmd_mesh_status(void)
            "\"contact_trace_supported\":%s,"
            "\"operator_path_accepted\":false,\"one_byte_hash_only\":false,"
            "\"contact_trace_path_hash_bytes_supported\":%s,"
+           "\"contact_route_hash_bytes_accepted\":[1,2,3],"
+           "\"contact_route_hash_bytes_normalized_to_two\":[3],"
            "\"contact_route_hash_bytes_rejected\":%s,"
            "\"hardware_verified\":false},\"note\":\"%s\"}\n",
            bool_json(user_trace_available),
@@ -2538,7 +2540,7 @@ static void cmd_mesh_status(void)
            bool_json(user_trace_available),
            bool_json(user_trace_available),
            user_trace_available ? "[1,2]" : "[]",
-           user_trace_available ? "[3]" : "[]",
+           "[]",
            user_trace_available ?
                "Public group text TX/RX and signed advert TX/RX enabled; "
                "inbound DM ACK dispatch and route selection enabled; TRACE is "
@@ -6948,10 +6950,10 @@ static void cmd_routes_trace_contact(const char *line)
     if (ret != ESP_OK) {
         const char *code = esp_err_to_name(ret);
         const char *detail =
-            ret == ESP_ERR_NOT_FOUND ?
+           ret == ESP_ERR_NOT_FOUND ?
                 "exact canonical contact not found" :
             ret == ESP_ERR_NOT_SUPPORTED ?
-                "contact route has no traceable loop or uses an unsupported hash width" :
+                "contact route has no traceable loop" :
             ret == ESP_ERR_INVALID_SIZE ?
                 "derived contact route loop is too long" :
             ret == ESP_ERR_NOT_FINISHED ?
@@ -7075,7 +7077,9 @@ static void cmd_trace_status(const char *command)
            "\"contact_trace_supported\":true,"
            "\"operator_path_accepted\":false,\"one_byte_hash_only\":false,"
            "\"contact_trace_path_hash_bytes_supported\":[1,2],"
-           "\"contact_route_hash_bytes_rejected\":[3],"
+           "\"contact_route_hash_bytes_accepted\":[1,2,3],"
+           "\"contact_route_hash_bytes_normalized_to_two\":[3],"
+           "\"contact_route_hash_bytes_rejected\":[],"
            "\"hardware_verified\":false,"
            "\"note\":\"%s; timeout transitions to no_response under owner "
            "maintenance; cooldown is bounded after matched or no_response; "
@@ -7185,6 +7189,12 @@ static void cmd_routes_trace(const char *line)
 
     d1l_contact_entry_t contact = {0};
     const bool known_contact = d1l_contact_store_find_by_fingerprint(fingerprint, &contact);
+    const uint8_t out_path_hash_bytes =
+        known_contact && contact.out_path_valid ?
+        d1l_meshcore_wire_path_hash_size(contact.out_path_len) : 0U;
+    const uint8_t out_path_hops =
+        known_contact && contact.out_path_valid ?
+        d1l_meshcore_wire_path_hash_count(contact.out_path_len) : 0U;
     static d1l_route_entry_t entries[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_app_model_copy_route_trace(fingerprint, entries, D1L_ROUTE_STORE_CAPACITY);
     const size_t best = copied ? route_trace_best_index(entries, copied) : 0;
@@ -7193,10 +7203,13 @@ static void cmd_routes_trace(const char *line)
     printf(",\"fingerprint\":\"%s\",\"known_contact\":%s,\"alias\":",
            fingerprint, bool_json(known_contact));
     print_json_string(known_contact && contact.alias[0] ? contact.alias : "");
-    printf(",\"public_key_ready\":%s,\"contact_route\":{\"out_path_known\":%s,\"path_hops\":%u,\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d}",
+    printf(",\"public_key_ready\":%s,\"contact_route\":{\"out_path_known\":%s,\"path_hash_bytes\":%u,\"path_hops\":%u,\"trace_hash_bytes\":%u,\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d}",
            bool_json(known_contact && contact.public_key_hex[0]),
            bool_json(known_contact && contact.out_path_valid),
-           known_contact && contact.out_path_valid ? contact.path_hops : 0,
+           (unsigned)out_path_hash_bytes,
+           (unsigned)out_path_hops,
+           (unsigned)d1l_meshcore_trace_contact_hash_width(
+               out_path_hash_bytes),
            known_contact ? contact.last_rssi_dbm : 0,
            known_contact ? contact.last_snr_tenths : 0);
     printf(",\"route_count\":%u,\"best_route\":\"%s\",\"best_seq\":%lu,\"best_confidence\":%u,\"best_hops\":%u,\"entries\":[",
@@ -7215,7 +7228,9 @@ static void cmd_routes_trace(const char *line)
                "\"real_trace_contact_supported\":true,"
                "\"contact_trace_command\":\"routes trace contact <fingerprint>\","
                "\"contact_trace_requires_current_boot_proven_path\":true,"
-               "\"contact_trace_hash_bytes\":1,"
+               "\"contact_trace_path_hash_bytes_supported\":[1,2],"
+               "\"contact_route_hash_bytes_accepted\":[1,2,3],"
+               "\"contact_route_hash_bytes_normalized_to_two\":[3],"
                "\"operator_trace_path_accepted\":false,"
                "\"hardware_verified\":false,"
                "\"note\":\"This view combines retained route/contact evidence; "

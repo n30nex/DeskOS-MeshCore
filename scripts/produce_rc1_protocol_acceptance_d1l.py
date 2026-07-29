@@ -600,6 +600,7 @@ def exact_trace_contact(result: object, fingerprint: str) -> bool:
         and contact.get("type") in {"repeater", "room"}
         and contact.get("canonical") is True
         and contact.get("can_dm") is False
+        and contact.get("can_admin") is True
         and contact.get("verification_source") == "signed_advert"
     )
 
@@ -832,7 +833,7 @@ def execute(
     admin_password_path: Path,
     authorize_public_tx: bool,
     baud: int = 115200,
-    boot_timeout: float = 45.0,
+    boot_timeout: float = 75.0,
     command_timeout: float = 8.0,
     rf_timeout: float = 75.0,
     poll_interval: float = 0.5,
@@ -985,6 +986,86 @@ def execute(
             label="controlled peer, admin, and TRACE contacts",
         )
         _step(steps, "contacts", "contacts", contacts)
+
+        # Prove the exact TRACE target has a current-boot PATH before any
+        # Public transmission. A signed advert identifies the contact but does
+        # not establish the immutable direct route required by real TRACE.
+        trace_path_request = _step(
+            steps,
+            "trace_path_request",
+            f"routes probe {trace_fingerprint}",
+            command(f"routes probe {trace_fingerprint}"),
+        )
+        trace_path_token = trace_path_request.get("token")
+        if (
+            not isinstance(trace_path_token, str)
+            or re.fullmatch(r"path_[0-9A-F]{8}", trace_path_token) is None
+        ):
+            raise ProtocolAcceptanceError(
+                "TRACE PATH preflight did not return its exact correlation "
+                "token"
+            )
+        trace_path_tag = int(trace_path_token[5:], 16)
+        trace_path_result = poll(
+            lambda: command(f"routes telemetry {trace_fingerprint}"),
+            lambda result: (
+                result.get("state") == "received"
+                and result.get("pending") is False
+                and result.get("pending_tag") == 0
+                and integer(result.get("history_count"), minimum=1) is not None
+                and isinstance(result.get("entries"), list)
+                and any(
+                    isinstance(row, dict)
+                    and row.get("tag") == trace_path_tag
+                    and integer(row.get("sequence"), minimum=1) is not None
+                    for row in result["entries"]
+                )
+            ),
+            timeout=rf_timeout,
+            interval=poll_interval,
+            label="current-boot TRACE target PATH response",
+        )
+        _step(
+            steps,
+            "trace_path_result",
+            f"routes telemetry {trace_fingerprint}",
+            trace_path_result,
+        )
+
+        # Run and correlate the real TRACE before authorizing the sole Public
+        # token. A route-width or current-boot-path failure therefore cannot
+        # consume the candidate's one allowed Public transmission.
+        trace_request = _step(
+            steps,
+            "trace_request",
+            f"routes trace contact {trace_fingerprint}",
+            command(f"routes trace contact {trace_fingerprint}"),
+        )
+        trace_tag = integer(trace_request.get("tag"), minimum=1)
+        if trace_tag is None:
+            raise ProtocolAcceptanceError(
+                "TRACE request did not return its exact correlation tag"
+            )
+        trace_result = poll(
+            lambda: command("routes trace status"),
+            lambda result: (
+                result.get("matched") is True
+                and result.get("zero_hop") is False
+                and str(result.get("fingerprint") or "").upper()
+                == trace_fingerprint
+                and nested(result, "last_result", "tag") == trace_tag
+            ),
+            timeout=rf_timeout,
+            interval=poll_interval,
+            label="matched repeater TRACE",
+        )
+        _step(steps, "trace_result", "routes trace status", trace_result)
+
+        cooldown_ms = integer(
+            nested(trace_result, "cooldown", "remaining_ms")
+        )
+        if cooldown_ms is not None and cooldown_ms > 0:
+            time.sleep(min((cooldown_ms / 1000.0) + 0.25, 31.0))
 
         before = _step(
             steps,
@@ -1262,36 +1343,6 @@ def execute(
             path_result,
         )
 
-        # The Admin repeater remains bound to login, telemetry, PATH, and
-        # zero-hop Ping. TRACE is independently bound to an explicit canonical
-        # repeater/room contact.
-        trace_request = _step(
-            steps,
-            "trace_request",
-            f"routes trace contact {trace_fingerprint}",
-            command(f"routes trace contact {trace_fingerprint}"),
-        )
-        trace_tag = integer(trace_request.get("tag"), minimum=1)
-        trace_result = poll(
-            lambda: command("routes trace status"),
-            lambda result: (
-                result.get("matched") is True
-                and result.get("zero_hop") is False
-                and str(result.get("fingerprint") or "").upper()
-                == trace_fingerprint
-                and nested(result, "last_result", "tag") == trace_tag
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="matched repeater TRACE",
-        )
-        _step(steps, "trace_result", "routes trace status", trace_result)
-
-        cooldown_ms = integer(
-            nested(trace_result, "cooldown", "remaining_ms")
-        )
-        if cooldown_ms is not None and cooldown_ms > 0:
-            time.sleep(min((cooldown_ms / 1000.0) + 0.25, 31.0))
         ping_request = _step(
             steps,
             "ping_request",
@@ -1401,7 +1452,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicitly authorize the one tokenized RC1 Public acceptance send",
     )
     parser.add_argument("--baud", type=int, default=115200)
-    parser.add_argument("--boot-timeout", type=float, default=45.0)
+    parser.add_argument("--boot-timeout", type=float, default=75.0)
     parser.add_argument("--command-timeout", type=float, default=8.0)
     parser.add_argument("--rf-timeout", type=float, default=75.0)
     parser.add_argument("--poll-interval", type=float, default=0.5)
