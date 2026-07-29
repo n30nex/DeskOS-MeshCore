@@ -162,10 +162,14 @@ the retained projection survived. The baseline may be a predecessor
 `core_1_0` commit; the post-flash version must be the exact release commit.
 This phase does not erase flash, erase NVS, format SD, or touch another serial
 target.
-On Linux, the admitted stable-identity handle remains open from esptool
-through the explicit EN reset, boot settle, and post-flash retained-state
-capture. The runner restores console termios on that inherited handle and
-does not reopen the serial path during this evidence boundary.
+On Linux, the first admitted stable-identity handle remains open from esptool
+through the explicit EN reset and at least 90 seconds of boot settle. No
+console command is sent through that inherited esptool handle. The runner
+revalidates the stable target while the first handle is still open, closes it,
+revalidates again, and opens a fresh exclusive 115200-baud handle for the
+post-flash retained-state capture. The receipt binds every target snapshot,
+the no-console settle, and the separate readmission to the same stable
+identity. A shorter or non-finite `--settle-sec` is rejected before flashing.
 
 ```bash
 EVIDENCE_DIR="$ROOT/artifacts/rc1-final/$SHA"
@@ -189,8 +193,9 @@ FLASH="$EVIDENCE_DIR/flash-retained-reflash.json"
 ```
 
 The receipt is evidence source one and must report `closure_eligible=true`,
-the ready baseline commit, the exact post-flash candidate commit, and
-preserved retained state.
+the ready baseline commit, the exact post-flash candidate commit, preserved
+retained state, a passing bound reset/settle contract, and a passing exclusive
+readmission capture contract.
 
 ## 6. Produce the other three bounded sources
 
