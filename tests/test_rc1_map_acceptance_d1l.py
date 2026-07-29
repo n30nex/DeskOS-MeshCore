@@ -381,6 +381,20 @@ def test_offline_revisit_requires_new_generation_complete_cache_and_zero_network
     )
 
 
+def test_online_foreground_transition_has_a_fixed_physical_deadline():
+    acceptance = (
+        ROOT / "scripts/rc1_map_acceptance_d1l.py"
+    ).read_text(encoding="utf-8")
+
+    assert runner.FOREGROUND_TRANSITION_TIMEOUT_SECONDS == 120.0
+    assert (
+        "timeout=min(\n"
+        "                    offline_timeout,\n"
+        "                    FOREGROUND_TRANSITION_TIMEOUT_SECONDS,\n"
+        "                ),"
+    ) in acceptance
+
+
 def test_firmware_exposes_product_map_status_and_blocks_osm_bulk_prefetch():
     console = (ROOT / "main/comms/usb_console.c").read_text(encoding="utf-8")
     provider_c = (ROOT / "main/map/map_tile_provider.c").read_text(
@@ -414,7 +428,7 @@ def test_firmware_exposes_product_map_status_and_blocks_osm_bulk_prefetch():
     assert "uint64_t network_requests;" in prefetch_h
     assert "++s_network_requests_total;" in prefetch_c
     assert prefetch_c.index("++s_network_requests_total;") < prefetch_c.index(
-        "ret = d1l_map_tile_store_fetch("
+        "ret = d1l_map_tile_store_fetch_background("
     )
     assert "D1L_ENABLE_QUALIFICATION_HOOKS" in qualification
     assert "map provider status" in runner.COMMANDS

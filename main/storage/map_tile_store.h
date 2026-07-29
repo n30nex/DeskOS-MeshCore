@@ -131,6 +131,21 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
                                    d1l_map_tile_continue_cb_t should_continue,
                                    void *continue_context,
                                    d1l_map_tile_download_result_t *out_result);
+
+/* Uses a shorter connect/phase budget so foreground Map work can preempt it. */
+esp_err_t d1l_map_tile_store_fetch_background(
+    uint8_t z,
+    uint32_t x,
+    uint32_t y,
+    const d1l_storage_status_t *status,
+    bool wifi_connected,
+    uint8_t *buffer,
+    size_t buffer_size,
+    size_t *out_len,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context,
+    d1l_map_tile_download_result_t *out_result);
+void d1l_map_tile_store_cancel_background_fetch(void);
 #if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_map_tile_store_write_canary(const char *token,
                                           const d1l_storage_status_t *status,

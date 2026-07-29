@@ -53,7 +53,8 @@ def test_store_serializes_transactions_and_evicts_only_validated_actual_size():
 
     assert "D1L_MAP_TILE_STORE_TRANSACTION_TIMEOUT_MS" in store
     assert "xSemaphoreCreateMutexStatic" in store
-    assert store.count("cache_transaction_take()") >= 3
+    assert store.count("cache_transaction_take()") >= 2
+    assert "cache_transaction_take_cancelable(" in store
     assert store.count("cache_transaction_give()") >= 3
 
     fetch = store[

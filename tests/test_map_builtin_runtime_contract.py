@@ -151,7 +151,7 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
     assert ".user_agent = D1L_MAP_TILE_USER_AGENT" in fetch
     assert ".crt_bundle_attach = esp_crt_bundle_attach" in fetch
     assert "result.status_code == 429" in fetch
-    assert "png_content_type(headers.content_type)" in fetch
+    assert "png_content_type(http_context.content_type)" in fetch
     assert "d1l_map_tile_png_valid(buffer, result.bytes)" in fetch
 
 
@@ -273,14 +273,14 @@ def test_http_header_length_contract_handles_errors_chunking_and_hard_bounds():
         "\nesp_err_t d1l_map_tile_store_fetch",
     )
 
-    header_fetch = fetch.split("esp_http_client_fetch_headers(client)", 1)[1].split(
-        "result.status_code =", 1
-    )[0]
+    header_fetch = fetch.split(
+        "esp_http_client_fetch_headers(client)", 1
+    )[1].split("const bool chunked", 1)[0]
     assert "if (content_length < 0)" in header_fetch
     assert 'download_step(&result, "fetch_headers", ESP_FAIL' in header_fetch
-    assert "esp_http_client_is_chunked_response(client)" in header_fetch
-    assert "content_length_known = !chunked && content_length > 0" in header_fetch
-    assert "buffer_size < D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in header_fetch
+    assert "esp_http_client_is_chunked_response(client)" in fetch
+    assert "content_length_known = !chunked && content_length > 0" in fetch
+    assert "buffer_size < D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in fetch
 
     assert "content_length_known && content_length > (int64_t)download_limit" in fetch
     assert "const size_t remaining = download_limit - result.bytes" in fetch
@@ -323,6 +323,15 @@ def test_https_download_waits_for_valid_sntp_time_and_remains_cancelable():
     assert "esp_netif_sntp" not in store
     assert "time(NULL)" not in store
     assert 'download_step(&result, "time_sync"' in fetch
+    assert "D1L_MAP_TILE_HTTP_IO_SLICE_MS 250" in store
+    assert ".timeout_ms = D1L_MAP_TILE_HTTP_IO_SLICE_MS" in fetch
+    assert ".is_async = true" in fetch
+    assert "} while (ret == ESP_ERR_HTTP_EAGAIN);" in fetch
+    assert "while (content_length == -ESP_ERR_HTTP_EAGAIN)" in fetch
+    assert "if (read_len == -ESP_ERR_HTTP_EAGAIN)" in fetch
+    assert fetch.count("map_network_continue(&continuation)") >= 7
+    assert "esp_timer_get_time() >= header_deadline_us" in fetch
+    assert "esp_timer_get_time() >= read_deadline_us" in fetch
     assert 'strcmp(tile_result.step, "time_sync") == 0' in run
     assert 'strcmp(status->phase, "time_sync") == 0' in ui
     assert 'title = "Secure time needed"' in ui
@@ -359,10 +368,10 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
     assert "result.content_crc32 == metadata.content_crc32" in read_cache
     assert "d1l_map_tile_png_valid(buffer, result.bytes)" in fetch
     assert persist.index(
-        "verify_tile_file(result->tmp_path, &verify_record)"
+        "verify_tile_file_continue("
     ) < persist.index(
-        "write_attribution_metadata(provider, result)"
-    ) < persist.index("commit_cache_tile(provider, storage, result)")
+        "write_attribution_metadata("
+    ) < persist.index("commit_cache_tile(")
     commit = body(
         source,
         "static esp_err_t commit_cache_tile",
@@ -375,6 +384,71 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
     ) < commit.index("rename_cache_metadata(result)")
     assert "write_cache_state(&paths, state)" in commit
     assert "!result->cache_intent_recorded" in persist
+
+
+def test_background_persistence_is_cancelable_until_journal_intent():
+    source = read("main/storage/map_tile_store.c")
+    persist = body(
+        source,
+        "static esp_err_t persist_validated_tile",
+        "static esp_err_t map_tile_store_fetch_network",
+    )
+    commit = body(
+        source,
+        "static esp_err_t commit_cache_tile",
+        "static bool attribution_metadata_present",
+    )
+    prepare = body(
+        source,
+        "static esp_err_t prepare_cache_room",
+        "static esp_err_t reconcile_cache_intent",
+    )
+    verify = body(
+        source,
+        "static esp_err_t verify_tile_file_continue",
+        "static esp_err_t verify_tile_file(",
+    )
+    cancellable_take = body(
+        source,
+        "static esp_err_t cache_transaction_take_cancelable",
+        "static bool cache_control_paths",
+    )
+
+    assert "cache_transaction_take_cancelable(" in persist
+    assert "D1L_MAP_TILE_REQUEST_GATE_SLICE_MS" in cancellable_take
+    assert "persistence_continue(" in cancellable_take
+    tile_write_loop = persist.split(
+        "for (size_t offset = 0U; offset < result->bytes;)", 1
+    )[1].split("d1l_map_tile_cache_record_t verify_record", 1)[0]
+    assert tile_write_loop.index("persistence_continue(") < tile_write_loop.index(
+        "d1l_rp2040_bridge_file_write("
+    )
+    verify_loop = verify.split("while (offset < record->size)", 1)[1]
+    assert verify_loop.index("persistence_continue(") < verify_loop.index(
+        "d1l_rp2040_bridge_file_read("
+    )
+    eviction = prepare.split(
+        "while (!d1l_map_tile_cache_state_has_room", 1
+    )[1]
+    assert eviction.index("persistence_continue(") < eviction.index(
+        "d1l_rp2040_bridge_file_delete("
+    )
+    assert commit.index("write_cache_metadata_tmp(") < commit.index(
+        "persistence_continue("
+        , commit.index("write_cache_metadata_tmp(")
+    ) < commit.index("result->cache_intent_recorded = true")
+    irreversible = commit.split(
+        "result->cache_intent_recorded = true", 1
+    )[1]
+    assert "persistence_continue(" not in irreversible
+    assert (
+        irreversible.index("append_cache_intent(")
+        < irreversible.index("d1l_rp2040_bridge_file_rename(")
+        < irreversible.index("rename_cache_metadata(")
+        < irreversible.index("d1l_map_tile_cache_state_note_commit(")
+        < irreversible.index("write_cache_state(")
+    )
+    assert "!result->cancelled" in persist
 
 
 def test_worker_publishes_immutable_psram_frames_without_lvgl_calls_or_replay():

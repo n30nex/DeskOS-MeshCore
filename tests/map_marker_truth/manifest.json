@@ -61,6 +61,16 @@
       "symbol": "d1l_map_view_service_acquire_visible"
     },
     {
+      "id": "map_background_foreground_preemption",
+      "source": "main/map/map_prefetch_service.c",
+      "symbol": "d1l_map_prefetch_service_wake"
+    },
+    {
+      "id": "map_background_fetch_cancellation",
+      "source": "main/storage/map_tile_store.c",
+      "symbol": "d1l_map_tile_store_fetch_background"
+    },
+    {
       "id": "stateful_viewport_truth_transition",
       "source": "main/map/map_viewport_truth_transition.c",
       "symbol": "d1l_map_viewport_truth_apply"
@@ -117,6 +127,8 @@
     "main/map/map_math.h": "acaf12a2f2f66b08926b5cc191d058e093678d218449951cea2957fc055df4a5",
     "main/map/map_point_projection.c": "77cc6064eefb1ef2b74822468f629c6f98de921475db6e90e11de7127c317431",
     "main/map/map_point_projection.h": "4865c182004b8d4ba655b1c9d12a8b592f18c28faf523cd367431dc19e169c19",
+    "main/map/map_prefetch_service.c": "92275f067f61ee1ef11814dce823fc205a1820016e0091b25847acbd413aa3e9",
+    "main/map/map_prefetch_service.h": "66a55eac73f640c552a95ee56e03b96cc51657bfa778737b62f7e0db4c9deb25",
     "main/map/map_view_service.c": "aef59a2bb91508f3b61c7ec0804867e110d6eab1f874c7461be1c2890b16b833",
     "main/map/map_view_service.h": "2722f842291cc06a2b238930f4a2fa58595fe0264c65ac577242284eabe46745",
     "main/map/map_viewport_truth_transition.c": "99d0b57a4902a4e3a78c4f9a096eb7627e2aaaf102b9a552944aa70fa862ec60",
@@ -130,6 +142,8 @@
     "main/platform/time_service.h": "07d19b51dda5c0c18bd61b87b577fa402ce5c8befc5b6f421a15019d5e01b0b0",
     "main/platform/time_service_core.c": "005c5b75126104f410584e81396e573ee48553564bc94d4b45628192a26c94e3",
     "main/platform/time_service_core.h": "f3af332807f433d49344eaf45cee29473940a988c47e3c02c44fd44cd0306d75",
+    "main/storage/map_tile_store.c": "4d70f6388dd1c306ed4647c67d5db22f52fd8c52719c199d4d7dfe00f0c95d32",
+    "main/storage/map_tile_store.h": "d7b7e078ed1309a7dc1e7278de04562c3fa64a4c62edd0815f489a79da0eeab6",
     "main/ui/ui_map.c": "8646a73fd9bae857c0d0a1d8eafec18bbe22bcc42532ad45110d8db35df54520",
     "main/ui/ui_map.h": "1e18d81b50dd1c4a22e73afb8d295b96c57171fbb601adebf931f1c8e75e7949",
     "main/ui/ui_node_detail.c": "2ca7489a5fc29bf9cfc884bda382cf5d40ea98bc867de41d11496711e6293a16",
