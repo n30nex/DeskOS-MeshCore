@@ -1,4 +1,5 @@
 import contextlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -660,13 +661,55 @@ def test_flash_rejects_every_non_com12_port(tmp_path, monkeypatch, port):
         )
 
 
-def test_closing_reflash_requires_exact_ready_candidate_baseline(
+def test_closing_reflash_accepts_ready_predecessor_candidate_baseline(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
     run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    predecessor = "b" * 40
+    states = iter((retained_state(predecessor), retained_state(COMMIT)))
+
+    report = flash.run_core_flash_only(
+        root=tmp_path,
+        github_run_dir=run_dir,
+        package_dir=package,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        actions_capture_receipt=capture_receipt,
+        port="COM12",
+        serial_baud=115200,
+        flash_baud=460800,
+        serial_timeout=5.0,
+        flash_timeout=60,
+        settle_sec=0.0,
+        raw_log_path=raw_log,
+        flash_phase=flash.FLASH_PHASE_RETAINED_REFLASH,
+        **target_kwargs(),
+        flash_runner=success_runner,
+        retained_state_reader=lambda *_args: next(states),
+    )
+
+    assert report["ok"] is True
+    assert report["closure_eligible"] is True
+    assert report["pre_flash_build_commit"] == predecessor
+    assert report["device_build_commit"] == COMMIT
+    assert report["retained_state_preserved"] is True
+    before_path = tmp_path / report["retained_state_before"]["path"]
+    before = json.loads(before_path.read_text(encoding="ascii"))
+    assert before["expected_firmware_commit"] == predecessor
+
+
+def test_closing_reflash_rejects_incompatible_predecessor_baseline(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    incompatible = retained_state("b" * 40)
+    incompatible[0]["release_profile"] = "full"
     calls = []
-    with pytest.raises(ValueError, match="exact ready candidate"):
+
+    with pytest.raises(ValueError, match="ready compatible Core"):
         flash.run_core_flash_only(
             root=tmp_path,
             github_run_dir=run_dir,
@@ -685,8 +728,9 @@ def test_closing_reflash_requires_exact_ready_candidate_baseline(
             flash_phase=flash.FLASH_PHASE_RETAINED_REFLASH,
             **target_kwargs(),
             flash_runner=lambda *_args: calls.append("flash"),
-            retained_state_reader=lambda *_args: retained_state("b" * 40),
+            retained_state_reader=lambda *_args: incompatible,
         )
+
     assert calls == []
 
 

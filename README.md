@@ -1,20 +1,18 @@
 # MeshCore DeskOS for SenseCAP Indicator D1L
 
 MeshCore DeskOS is a touch-first, non-forwarding MeshCore desk client for the
-Seeed SenseCAP Indicator D1L. The production 1.0 / RC1 candidate builds the
-`core_1_0` profile with conditional SD history:
+Seeed SenseCAP Indicator D1L. Production 1.0 builds the `core_1_0` profile with
+conditional SD history:
 
 ```text
 D1L_RELEASE_PROFILE=core_1_0
 D1L_SD_HISTORY_MODE=conditional
 ```
 
-The agreed RC1 firmware surface is implemented in source. Public release
-remains fail-closed until the exact commit is built by GitHub Actions, the
-downloaded package and provenance are checksum-verified, that exact artifact
-is flashed to the qualified D1L, and the bounded device acceptance receipt
-passes. Source tests, simulator images, predecessor binaries, local firmware
-builds, and dry runs are not release evidence.
+For device installation, use the production ZIP from the
+[v1.0.0 release](https://github.com/n30nex/SIGUI/releases/tag/v1.0.0), extract
+it completely, and follow its `START_HERE.md`. The source-code archives are for
+developers and are not device installers.
 
 The current D1L is attached to Raspberry Pi 5 host `neopi5`
 (`192.168.0.24`). Its only authorized release identity is:
@@ -28,18 +26,18 @@ Do not substitute a raw `/dev/ttyUSB*` name or a stale Windows COM assignment.
 
 ## Production feature set
 
-| Area | DeskOS 1.0 / RC1 production surface |
+| Area | DeskOS 1.0 production surface |
 |---|---|
 | Hardware | 480×480 display, touch, button, SX1262 radio, backlight and power/status truth |
 | Messaging | Public and multi-channel messaging, DMs, unread state, delivery/retry truth and retained history |
 | Contacts and nodes | Verified contacts, USB MeshCore URI import, rename/favorite/mute/delete, up to 512 retained heard nodes, role detail and signed advert-location markers |
 | Network tools | Finder, repeater Ping, contact PATH/TRACE, packet terminal, filters/search/raw detail, signal and route evidence |
 | Map | Built-in attributed OpenStreetMap visible-view cache plus authorized-provider background prefetch around the device and signed nodes within 200 km |
-| Connectivity | User-controlled multiple saved Wi-Fi profiles; BLE companion transport is deferred to RC2 |
+| Connectivity | User-controlled multiple saved Wi-Fi profiles; BLE companion transport is not included in 1.0 |
 | Server administration | Authenticated repeater/room login, status, telemetry, neighbours, ACL, bounded CLI, room posts, logout and locally confirmed mutations |
 | Observer | Opt-in `mqtts://` TLS observer, QoS 1/PUBACK accounting, bounded queue and optional center location |
 | Storage | Externally prepared FAT32 SD/RP2040 primary history, exports and map cache, with visible degraded operation when SD is unavailable |
-| Deferred to 1.5 / RC2 | BLE companion transport, contact/channel QR sharing, and signed OTA/update/recovery product workflows |
+| Not included in 1.0 | BLE companion transport, contact/channel QR sharing, and signed OTA/update/recovery product workflows |
 | Device UX | Brightness, timeout, night/high-contrast modes, notification pulse/quiet modes, curated glyph palette and service sheets |
 | Support | Structured event terminal, diagnostics, crashlog, health, guarded reboot/factory reset and normal non-erasing USB flashing |
 
@@ -56,7 +54,7 @@ is open.
 
 ## Navigation
 
-The RC1 dock contains:
+The 1.0 dock contains:
 
 1. Home
 2. Messages
@@ -71,10 +69,7 @@ Mesh advertise. Lists and detail sheets scroll on the device.
 ## Safety and privacy
 
 - DeskOS is a client and does not forward MeshCore packets.
-- Read, navigation, search, refresh and automated UI acceptance are RF-silent.
-- Release automation transmits on the default Public channel only for the
-  single tokenized RC1 hardware gate when the operator explicitly supplies
-  `--authorize-public-tx`; all other automated validation remains Public-silent.
+- Read, navigation, search and refresh are RF-silent.
 - Observer is off until configured and enabled; it never publishes message
   text, contacts, keys, or forwarding traffic.
 - Server mutations require the exact authenticated target/session and a second
@@ -86,7 +81,7 @@ Mesh advertise. Lists and detail sheets scroll on the device.
 - Default NVS remains a bounded configuration, identity, boot/recovery and
   diagnostic store, not the retained-history authority.
 - Normal project flashing is non-erasing. OTA/update/recovery product
-  workflows are deferred to 1.5 / RC2.
+  workflows are not included in 1.0.
 
 Prepare an already-formatted 32GB-or-larger FAT32 card without formatting,
 deleting, or overwriting files:
@@ -149,8 +144,8 @@ Never flash another Pi serial device. Never format SD.
 That package helper is for an ordinary post-release install. It is not the
 closing path for `v1.0.0`; the production candidate must follow the
 [authoritative RC1 release execution](docs/RC1_RELEASE_EXECUTION_D1L.md),
-including its bootstrap and retained-reflash receipts, bounded eight-source
-gate, final audit, exact tag and checksummed release assets.
+including its single retained-state-preserving flash receipt, bounded
+five-source gate, final audit, exact tag and checksummed release assets.
 
 ## Documentation
 

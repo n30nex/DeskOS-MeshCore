@@ -155,6 +155,9 @@ def write_fake_notices(root: Path) -> None:
         "scripts/test_rc1.py": (
             ROOT / "scripts" / "test_rc1.py"
         ).read_text(encoding="ascii"),
+        "scripts/verify_checksums.py": (
+            ROOT / "scripts" / "verify_checksums.py"
+        ).read_text(encoding="ascii"),
         "scripts/verify_arduino_build_inputs.py": "# Arduino input verifier fixture\n",
         "scripts/verify_ci_tool_inputs.py": "# CI tool input verifier fixture\n",
         "scripts/validate_ed25519_defined_overlay.py": "# overlay validator fixture\n",

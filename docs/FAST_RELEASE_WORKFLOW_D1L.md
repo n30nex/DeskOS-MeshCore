@@ -10,8 +10,8 @@ part of RC1.
 
 After the final change merges, stop using issue-sized examples and follow the
 [authoritative RC1 release execution](RC1_RELEASE_EXECUTION_D1L.md) exactly.
-It owns the exact-main Actions capture, two non-erasing flash phases, bounded
-eight-source gate, final audit, `v1.0.0` tag and release assets.
+It owns the exact-main Actions capture, one non-erasing retained-state flash,
+bounded five-source gate, final audit, `v1.0.0` tag and release assets.
 
 ## Current cycle
 
@@ -27,10 +27,12 @@ eight-source gate, final audit, `v1.0.0` tag and release assets.
 6. Flash the verified Actions artifact non-erasing. Do not use a local build,
    raw `/dev/ttyUSB*` name or stale Windows COM assignment.
 7. Run only the hardware proof that matches the changed slice. For the final
-   candidate, use one bounded gate covering boot/five-root UI, boot advert and
-   one operator-authorized Public send, DM/ACK, contact PATH/TRACE, repeater
-   Ping, repeater login/authenticated query, Wi-Fi reconnect, SD
-   write/remount/degraded notice, and authorized Map download/offline revisit.
+   candidate, use the reduced bounded gate covering the exact non-erasing
+   retained-state flash, boot advert and one operator-authorized Public send,
+   DM/ACK, contact PATH/TRACE, repeater Ping, repeater login/authenticated
+   query, SD degraded notice/reinsert recovery, and authorized Map
+   download/offline revisit. Do not rerun the completed UI-navigation,
+   Wi-Fi-reconnect, or SD write/reboot/remount campaigns.
 8. Confirm SD-primary behavior, built-in OSM visible-only behavior, provider
    authorization, and prefetch pause while the interactive Map is open.
 9. Record artifact paths and results against the issue/PR. Merge only after the

@@ -737,7 +737,7 @@ def test_scroll_probe_ignores_normal_power_on_history_but_rejects_crash_like_res
     assert scroll_probe_d1l.event_failed(event) is True
 
 
-def test_active_release_docs_require_one_bounded_gate_without_soak():
+def test_active_release_docs_require_reduced_bounded_gate_without_soak():
     release_docs = [
         (ROOT / rel).read_text(encoding="utf-8").split("## Historical", 1)[0]
         for rel in (
@@ -749,7 +749,8 @@ def test_active_release_docs_require_one_bounded_gate_without_soak():
     ]
     active = "\n".join(release_docs)
 
-    assert "one bounded" in active
+    assert "reduced bounded same-artifact gate" in active
+    assert "commands and five evidence roles" in active
     assert "No soak" in active
     assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active
     assert "VID:PID 1a86:7523" in active
@@ -758,7 +759,7 @@ def test_active_release_docs_require_one_bounded_gate_without_soak():
     assert "500-cycle tab abuse" not in active
 
 
-def test_active_release_docs_keep_ui_acceptance_on_exact_candidate():
+def test_active_release_docs_retain_completed_ui_acceptance_without_rerun():
     roadmap = (ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8").split(
         "## Historical", 1
     )[0]
@@ -769,20 +770,18 @@ def test_active_release_docs_keep_ui_acceptance_on_exact_candidate():
         encoding="utf-8"
     ).split("## Historical", 1)[0]
 
-    assert "boot/UI" in roadmap
     assert "operator-completed physical display/touch/keyboard/scroll" in roadmap
-    assert "automated 12-surface navigation receipt" in roadmap
-    assert "boot/five-root UI" in checklist
+    assert "completed UI" in roadmap
+    assert "without rerunning" in roadmap
+    assert "completed UI-navigation" in checklist
+    assert "not rerun" in checklist
     assert (
         "operator accepted the physical display/touch/keyboard/scroll"
         in checklist
     )
-    assert "boot and five-root navigation" in test_plan
-    assert (
-        "operator's completed physical display/touch/keyboard/scroll"
-        in test_plan
-    )
-    assert "automated 12-surface navigation receipt" in test_plan
+    assert "completed physical display/touch/keyboard/scroll" in test_plan
+    assert "automated 12-surface navigation" in test_plan
+    assert "without rerunning" in test_plan
     assert "same exact commit" in test_plan
     assert "No soak" in test_plan
 

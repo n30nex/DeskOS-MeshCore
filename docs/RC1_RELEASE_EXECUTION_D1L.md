@@ -2,14 +2,20 @@
 
 This is the authoritative closing procedure for tag `v1.0.0`. It starts only
 after the final RC1 change is merged. It uses one exact successful `main`
-push, one clean Pi checkout, one downloaded Actions package, two non-erasing
-flashes, eight machine-generated evidence sources, one aggregate, and one
+push, one clean Pi checkout, one downloaded Actions package, one non-erasing
+flash, five machine-generated evidence sources, one aggregate, and one
 final audit.
 
 Do not add a soak, run another broad test campaign, erase NVS, format SD, use
 a local firmware build, or use the package's older `flash_project.sh` helper
 as closing evidence. The only Public transmission permitted here is the one
 tokenized send enabled by `--authorize-public-tx`.
+
+The completed UI-navigation, saved-profile Wi-Fi reconnect, and SD
+write/reboot/remount gates are not rerun during closing. They are also not
+represented as fresh outcomes in the final receipt. The remaining sources
+still prove the exact candidate flash, controlled RF/protocol behavior, SD
+remove/reinsert recovery, and authorized Map download/cache behavior.
 
 ## 1. Freeze the merged candidate
 
@@ -125,7 +131,8 @@ test "${#D1L_PUBLIC_KEY}" -eq 64
 The final gate also requires all of the following before it starts:
 
 - a prepared 32GB-or-larger FAT32 card already mounted by DeskOS;
-- the saved Wi-Fi profile `Toddmas2.4` (the Wi-Fi runner accepts no password);
+- a working configured Wi-Fi connection for the retained Map gate (the
+  completed Wi-Fi reconnect campaign is not rerun);
 - an installed HTTPS Map provider manifest that permits offline storage and
   background prefetch, plus configured device location;
 - the pinned local controlled peer and its current status/socket;
@@ -136,45 +143,31 @@ Keep the admin password in a bounded regular file outside the repository. Do
 not place credentials in command arguments, evidence, shell history or Git:
 
 ```bash
-TARGET_SSID=Toddmas2.4
 ADMIN_FINGERPRINT=9880BF9B9B1DD605
 TRACE_FINGERPRINT=024999DEDFD26763
 ADMIN_PASSWORD_FILE=<absolute-path-outside-repository>
 test -f "$ADMIN_PASSWORD_FILE"
 ```
 
-If the Wi-Fi profile is absent, stop and request the password ephemerally,
-configure it through the device workflow, then resume. If the controlled
-admin credentials or authorized provider manifest are unavailable, stop; do
-not substitute an unknown peer or use OpenStreetMap Standard for bulk/offline
-download.
+If the controlled admin credentials or authorized provider manifest are
+unavailable, stop; do not substitute an unknown peer or use OpenStreetMap
+Standard for bulk/offline download.
 
-## 5. Bootstrap, then prove retained reflash
+## 5. Perform one retained-state-preserving flash
 
-Both phases use `core_flash_only_d1l.py`. This is the closing flash path; do
-not run `flash_project.sh`. Neither phase erases flash, erases NVS, formats SD
-or touches another serial target.
+Use `core_flash_only_d1l.py`. This is the closing flash path; do not run
+`flash_project.sh`. The retained-reflash phase captures the ready compatible
+Core baseline already on the D1L, flashes the exact candidate once, and proves
+the retained projection survived. The baseline may be a predecessor
+`core_1_0` commit; the post-flash version must be the exact release commit.
+This phase does not erase flash, erase NVS, format SD, or touch another serial
+target.
 
 ```bash
 EVIDENCE_DIR="$ROOT/artifacts/rc1-final/$SHA"
 mkdir -p "$EVIDENCE_DIR"
 
-FLASH_BOOTSTRAP="$EVIDENCE_DIR/flash-bootstrap.json"
-"$PY" scripts/core_flash_only_d1l.py \
-  --root "$ROOT" \
-  --github-run-id "$RUN" \
-  --github-run-attempt "$ATTEMPT" \
-  --github-run-dir "$RUN_DIR" \
-  --package-dir "$PACKAGE" \
-  --actions-capture-receipt "$CAPTURE" \
-  --commit "$SHA" \
-  --port "$PORT" \
-  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
-  --serial-timeout 60 \
-  --phase bootstrap \
-  --out "$FLASH_BOOTSTRAP"
-
-FLASH_RETAINED="$EVIDENCE_DIR/flash-retained-reflash.json"
+FLASH="$EVIDENCE_DIR/flash-retained-reflash.json"
 "$PY" scripts/core_flash_only_d1l.py \
   --root "$ROOT" \
   --github-run-id "$RUN" \
@@ -187,34 +180,18 @@ FLASH_RETAINED="$EVIDENCE_DIR/flash-retained-reflash.json"
   --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
   --serial-timeout 60 \
   --phase retained-reflash \
-  --out "$FLASH_RETAINED"
+  --out "$FLASH"
 ```
 
-The retained-reflash receipt, not the bootstrap receipt, is evidence source
-one and must report `closure_eligible=true` and preserved retained state.
+The receipt is evidence source one and must report `closure_eligible=true`,
+the ready baseline commit, the exact post-flash candidate commit, and
+preserved retained state.
 
-## 6. Produce the other seven bounded sources
+## 6. Produce the other four bounded sources
 
-Run these serially against the retained-reflash image. Do not add a soak or
-repeat the completed manual display/touch/keyboard/scroll campaign.
+Run these serially against the retained-reflash image.
 
-### Source 2: automated 12-surface UI navigation
-
-```bash
-UI="$EVIDENCE_DIR/ui-navigation.json"
-"$PY" scripts/scroll_probe_d1l.py \
-  --port "$PORT" \
-  --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map,map_options,map_location,map_cache \
-  --release-profile core_1_0 \
-  --expected-firmware-commit "$SHA" \
-  --github-actions-run "$RUN" \
-  --workflow-run-attempt "$ATTEMPT" \
-  --expected-sd-history-mode conditional \
-  --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
-  --out "$UI"
-```
-
-### Source 3: controlled-peer DM/ACK
+### Source 2: controlled-peer DM/ACK
 
 Run as `neonx`. This exact COM11 identity makes the runner capture the generic
 Meshcorebot status itself, send the inbound DM through the pinned local Unix
@@ -251,12 +228,12 @@ env \
   --out "$RF"
 ```
 
-### Source 4: boot advert, one Public send, PATH/TRACE/Ping and Admin
+### Source 3: boot advert, one Public send, PATH/TRACE/Ping and Admin
 
 This is the sole authorized Public send in the closing sequence. Omitting
 `--authorize-public-tx` must fail before opening serial. This source covers
 Public, contacts, Admin login/query/logout, PATH, split TRACE, Ping and
-health/crash only; DM remains exclusively covered by Source 3.
+health/crash only; DM remains exclusively covered by Source 2.
 
 ```bash
 PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"
@@ -294,29 +271,7 @@ Before the single Public send, the runner queues one signed D1L flood advert
 and requires COM11 to resolve exactly one signed `D1L` contact to the current
 D1L key. The subsequent Public receive must reference that exact advert.
 
-### Source 5: one saved-profile Wi-Fi reconnect cycle
-
-```bash
-WIFI="$EVIDENCE_DIR/wifi-reconnect.json"
-"$PY" scripts/wifi_resilience_d1l.py \
-  --port "$PORT" \
-  --target-ssid "$TARGET_SSID" \
-  --expected-firmware-commit "$SHA" \
-  --cycles 1 \
-  --out "$WIFI"
-```
-
-### Source 6: SD write, reboot and remount
-
-```bash
-SD="$EVIDENCE_DIR/sd-reboot-remount.json"
-"$PY" scripts/sd_reboot_remount_acceptance_d1l.py \
-  --port "$PORT" \
-  --expected-firmware-commit "$SHA" \
-  --out "$SD"
-```
-
-### Source 7: SD degraded notice and reinsert recovery
+### Source 4: SD degraded notice and reinsert recovery
 
 This runner prompts for one physical remove/reinsert cycle. It is the only
 physical intervention in this evidence set. Remove only the prepared DeskOS
@@ -331,7 +286,7 @@ SD_DEGRADED="$EVIDENCE_DIR/sd-remove-reinsert.json"
   --out "$SD_DEGRADED"
 ```
 
-### Source 8: authorized Map download and offline cache revisit
+### Source 5: authorized Map download and offline cache revisit
 
 The runner reads the provider authorization already installed on the device.
 `--root` binds the transcript to this exact clean source checkout.
@@ -347,7 +302,7 @@ MAP="$EVIDENCE_DIR/map-acceptance.json"
   --output "$MAP"
 ```
 
-## 7. Aggregate the eight sources
+## 7. Aggregate the five sources
 
 ```bash
 PHYSICAL="$EVIDENCE_DIR/rc1-bounded-physical-${SHA}.json"
@@ -356,19 +311,16 @@ PHYSICAL_EVIDENCE="$EVIDENCE_DIR/rc1-bounded-physical-${SHA}.evidence.json"
 "$PY" scripts/produce_rc1_bounded_physical_receipt_d1l.py \
   --package-dir "$PACKAGE" \
   --evidence-root "$ROOT" \
-  --flash-receipt "$FLASH_RETAINED" \
-  --ui-receipt "$UI" \
+  --flash-receipt "$FLASH" \
   --rf-receipt "$RF" \
   --protocol-receipt "$PROTOCOL" \
-  --wifi-receipt "$WIFI" \
-  --sd-receipt "$SD" \
   --sd-degraded-receipt "$SD_DEGRADED" \
   --map-receipt "$MAP" \
   --output "$PHYSICAL" \
   --evidence-output "$PHYSICAL_EVIDENCE"
 ```
 
-The producer must copy eight unique source JSON files into
+The producer must copy five unique source JSON files into
 `rc1-bounded-physical-${SHA}.sources/` and fail on missing, duplicate,
 simulated, dry-run, manual-only, stale-source or candidate-mismatched evidence.
 
@@ -390,13 +342,15 @@ test "$(jq -r .ready_for_public_release "$AUDIT")" = true
 Do not tag if the audit exits nonzero or `ready_for_public_release` is not
 exactly `true`.
 
-## 9. Stage checksummed release assets
+## 9. Stage the production download
 
-Publish the API-verified release-package archive, its internal package checksum
-manifest, the Actions capture, the physical receipt and complete source bundle,
-and the final audit. The package audit must have verified its checksum-bound
-`START_HERE_RC1.md` plus the Windows/Linux SD, RP2040, ESP32, and read-only test
-helpers. A second checksum manifest binds the uploaded asset files.
+The public release contains only the production package ZIP and one outer
+checksum manifest. Keep the Actions capture, physical sources, aggregate
+receipt, sidecar, and final audit in the internal release workspace; they prove
+publication readiness but are not customer downloads. The package audit must
+have verified `START_HERE.md`, the Windows/Linux installers, the production
+ESP32 and RP2040 firmware, recovery files, licenses, SBOM, provenance, and both
+checksum layers.
 
 ```bash
 RELEASE_DIR="$ROOT/artifacts/release/v1.0.0"
@@ -410,37 +364,14 @@ mapfile -t PACKAGE_ARCHIVES < <(
 test "${#PACKAGE_ARCHIVES[@]}" -eq 1
 PACKAGE_ARCHIVE="${PACKAGE_ARCHIVES[0]}"
 
-PACKAGE_ASSET="$RELEASE_DIR/d1l-release-${SHA}.zip"
-PACKAGE_TREE_SUMS="$RELEASE_DIR/d1l-release-${SHA}-package-SHA256SUMS.txt"
-CAPTURE_ASSET="$RELEASE_DIR/core-actions-run-${RUN}.json"
-PHYSICAL_ASSET="$RELEASE_DIR/rc1-bounded-physical-${SHA}.json"
-PHYSICAL_SIDECAR_ASSET="$RELEASE_DIR/rc1-bounded-physical-${SHA}.evidence.json"
-PHYSICAL_BUNDLE="$RELEASE_DIR/rc1-bounded-physical-${SHA}.tar.gz"
-AUDIT_ASSET="$RELEASE_DIR/rc1-release-audit-${SHA}.json"
+PACKAGE_ASSET="$RELEASE_DIR/MeshCore-DeskOS-D1L-v1.0.0.zip"
 ASSET_SUMS="$RELEASE_DIR/SHA256SUMS.txt"
 
 cp "$PACKAGE_ARCHIVE" "$PACKAGE_ASSET"
-cp "$PACKAGE/SHA256SUMS.txt" "$PACKAGE_TREE_SUMS"
-cp "$CAPTURE" "$CAPTURE_ASSET"
-cp "$PHYSICAL" "$PHYSICAL_ASSET"
-cp "$PHYSICAL_EVIDENCE" "$PHYSICAL_SIDECAR_ASSET"
-cp "$AUDIT" "$AUDIT_ASSET"
-tar -C "$EVIDENCE_DIR" -czf "$PHYSICAL_BUNDLE" \
-  "$(basename "$PHYSICAL")" \
-  "$(basename "$PHYSICAL_EVIDENCE")" \
-  "$(basename "${PHYSICAL%.json}.sources")"
 
 (
   cd "$RELEASE_DIR"
-  sha256sum \
-    "$(basename "$PACKAGE_ASSET")" \
-    "$(basename "$PACKAGE_TREE_SUMS")" \
-    "$(basename "$CAPTURE_ASSET")" \
-    "$(basename "$PHYSICAL_ASSET")" \
-    "$(basename "$PHYSICAL_SIDECAR_ASSET")" \
-    "$(basename "$PHYSICAL_BUNDLE")" \
-    "$(basename "$AUDIT_ASSET")" \
-    > "$(basename "$ASSET_SUMS")"
+  sha256sum "$(basename "$PACKAGE_ASSET")" > "$(basename "$ASSET_SUMS")"
   sha256sum --check "$(basename "$ASSET_SUMS")"
 )
 ```
@@ -474,12 +405,6 @@ test "$(git ls-remote origin 'refs/tags/v1.0.0^{}' | cut -f1)" = "$SHA"
 
 RELEASE_ASSETS=(
   "$PACKAGE_ASSET"
-  "$PACKAGE_TREE_SUMS"
-  "$CAPTURE_ASSET"
-  "$PHYSICAL_ASSET"
-  "$PHYSICAL_SIDECAR_ASSET"
-  "$PHYSICAL_BUNDLE"
-  "$AUDIT_ASSET"
   "$ASSET_SUMS"
 )
 
@@ -488,8 +413,7 @@ gh release create v1.0.0 "${RELEASE_ASSETS[@]}" \
   --verify-tag \
   --target "$SHA" \
   --title "MeshCore DeskOS D1L 1.0.0" \
-  --generate-notes \
-  --notes "Production Core 1.0 release from exact source ${SHA} and Actions run ${RUN}. Download d1l-release-${SHA}.zip, extract it completely, and start with START_HERE_RC1.md for Windows/Linux microSD setup, RP2040 UF2 flashing, ESP32 GUI flashing, and the read-only RC1 test. See the attached audit and checksummed physical evidence."
+  --notes "Production DeskOS D1L 1.0.0 for actual device use. Download MeshCore-DeskOS-D1L-v1.0.0.zip, extract it completely, and start with START_HERE.md for Windows or Linux installation. The download includes production ESP32 and RP2040 firmware, safe recovery, package verification, licenses, SBOM, and provenance."
 
 test "$(gh release view v1.0.0 --repo n30nex/SIGUI --json tagName --jq .tagName)" = v1.0.0
 test "$(gh release view v1.0.0 --repo n30nex/SIGUI --json isDraft --jq .isDraft)" = false
@@ -502,8 +426,13 @@ gh release download v1.0.0 \
   --repo n30nex/SIGUI \
   --dir "$VERIFY_DIR"
 (cd "$VERIFY_DIR" && sha256sum --check SHA256SUMS.txt)
+unzip -q "$VERIFY_DIR/MeshCore-DeskOS-D1L-v1.0.0.zip" \
+  -d "$VERIFY_DIR/unpacked"
+FRESH_PACKAGE="$VERIFY_DIR/unpacked/d1l-release-${SHA}"
+"$PY" "$FRESH_PACKAGE/scripts/verify_package.py" "$FRESH_PACKAGE"
 ```
 
 Release completion means the remote annotated tag resolves to `$SHA`, the
 GitHub release is published (not draft or prerelease), every expected asset is
-present, and the attached `SHA256SUMS.txt` verifies after a fresh download.
+present, the attached `SHA256SUMS.txt` verifies after a fresh download, and the
+freshly extracted package passes its complete internal checksum inventory.

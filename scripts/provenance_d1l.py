@@ -40,6 +40,7 @@ from urllib.parse import quote
 if __package__:
     from .sbom_d1l import (
         PROJECT_REPOSITORY,
+        PRODUCTION_SOURCE_INPUTS,
         REQUIRED_SOURCE_INPUTS,
         SHA256_RE,
         discover_source_identity,
@@ -54,6 +55,7 @@ if __package__:
 else:
     from sbom_d1l import (  # type: ignore[no-redef]
         PROJECT_REPOSITORY,
+        PRODUCTION_SOURCE_INPUTS,
         REQUIRED_SOURCE_INPUTS,
         SHA256_RE,
         discover_source_identity,
@@ -226,13 +228,20 @@ def file_material(root: Path, relative: str, source_commit: str) -> dict[str, An
 
 
 def collect_materials(
-    root: Path, source_identity: dict, source_reference: str
+    root: Path,
+    source_identity: dict,
+    source_reference: str,
+    *,
+    production_only: bool = False,
 ) -> list[dict[str, Any]]:
     materials = [source_material(source_identity, source_reference)]
     materials.extend(submodule_material(module) for module in source_identity["submodules"])
+    source_inputs = (
+        PRODUCTION_SOURCE_INPUTS if production_only else REQUIRED_SOURCE_INPUTS
+    )
     materials.extend(
         file_material(root, relative, source_identity["commit"])
-        for relative in sorted(REQUIRED_SOURCE_INPUTS)
+        for relative in sorted(source_inputs)
     )
     return sorted(materials, key=lambda item: (item["uri"], item["name"]))
 
@@ -342,7 +351,14 @@ def build_statement(
     reference, builder_id, external_parameters = workflow_context(
         package_manifest, source_commit
     )
-    materials = collect_materials(root.resolve(), identity, reference)
+    materials = collect_materials(
+        root.resolve(),
+        identity,
+        reference,
+        production_only=(
+            package_manifest.get("release_profile") == CORE_RELEASE_PROFILE
+        ),
+    )
     statement = {
         "_type": STATEMENT_TYPE,
         "subject": subjects,

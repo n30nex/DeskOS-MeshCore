@@ -27,13 +27,13 @@ The remaining RC1 work is one release-evidence path:
 3. flash that exact artifact on Pi 5 `neopi5` using only
    `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0` after verifying
    `VID:PID 1a86:7523`;
-4. run the bounded boot/UI, advert/Public, DM/ACK, PATH/TRACE/Ping, Admin,
-   Wi-Fi reconnect, SD write/remount/degraded, and Map
-   download/offline-revisit gate;
+4. run the reduced bounded non-erasing flash, advert/Public, DM/ACK,
+   PATH/TRACE/Ping, Admin, SD degraded/reinsert, and Map
+   download/offline-revisit gate without rerunning the completed UI,
+   Wi-Fi-reconnect, or SD write/reboot/remount campaigns;
 5. retain the operator-completed physical display/touch/keyboard/scroll
-   acceptance, collect the automated 12-surface navigation receipt on the
-   final exact artifact, and publish only when the fail-closed audit binds
-   every receipt to that artifact.
+   acceptance and publish only when the fail-closed audit binds every
+   remaining receipt to the exact artifact.
 
 No soak is required. Built-in OSM remains attributed and
 visible-current-view-only; authorized-provider prefetch pauses while

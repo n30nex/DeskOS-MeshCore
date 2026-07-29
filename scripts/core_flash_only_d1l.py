@@ -103,8 +103,6 @@ EXPECTED_SD_HISTORY_STATE = "runtime_conditional_sd_primary"
 EXPECTED_STORAGE_AUTHORITY = "sd_primary_live_only_without_sd"
 EXPECTED_RP2040_ARTIFACT_NAMES = (
     "rp2040-sd-bridge-firmware",
-    "rp2040-sd-smoke-firmware",
-    "rp2040-seeed-official-sd-smoke-firmware",
 )
 EXPECTED_REPOSITORY = "n30nex/SIGUI"
 EXPECTED_FLASH_ROLES = {
@@ -1216,6 +1214,7 @@ def run_core_flash_only(
     pre_flash_target_after_open: dict[str, Any] | None = None
     before_projection: dict | None = None
     before_snapshot_row: dict | None = None
+    before_build_commit: str | None = None
     with admission_context as admitted_handle:
         if posix_binding:
             if admitted_handle is None:
@@ -1288,16 +1287,20 @@ def run_core_flash_only(
                 ),
                 {},
             )
+            before_build_commit = exact_commit(
+                before_version.get("build_commit")
+            )
             if not (
                 before_projection is not None
+                and before_build_commit is not None
                 and exact_version_identity(
                     before_version,
-                    normalized_commit,
+                    before_build_commit,
                     EXPECTED_SD_HISTORY_MODE,
                 )
                 and exact_identity(
                     before_health,
-                    normalized_commit,
+                    before_build_commit,
                     EXPECTED_SD_HISTORY_MODE,
                 )
                 and before_health.get("board_ready") is True
@@ -1308,14 +1311,14 @@ def run_core_flash_only(
                 )
             ):
                 raise ValueError(
-                    "Closing reflash baseline must be the exact ready candidate; "
-                    "use --phase bootstrap for the initial candidate install"
+                    "Closing reflash baseline must be a ready compatible Core "
+                    "candidate with the pinned D1L identity"
                 )
             _, before_snapshot_row = write_state_snapshot(
                 path=before_snapshot_path,
                 root=root,
                 phase="pre_flash",
-                commit=normalized_commit,
+                commit=before_build_commit,
                 results=before_results,
                 d1l_target=(
                     pre_flash_target_after_open
@@ -1493,6 +1496,7 @@ def run_core_flash_only(
         "release_profile": CORE_RELEASE_PROFILE,
         "sd_history_mode": EXPECTED_SD_HISTORY_MODE,
         "expected_firmware_commit": normalized_commit,
+        "pre_flash_build_commit": before_build_commit,
         "device_build_commit": version.get("build_commit"),
         "device_idf_version": version.get("idf"),
         "firmware_identity_required": True,

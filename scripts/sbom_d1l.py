@@ -48,6 +48,11 @@ REQUIRED_NOTICE_SOURCES = (
     "docs/SOURCE_AUDIT_AND_ATTRIBUTION.md",
     "overlays/meshcore_ed25519_defined/license.txt",
 )
+PRODUCTION_REQUIRED_NOTICE_SOURCES = (
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "overlays/meshcore_ed25519_defined/license.txt",
+)
 
 REQUIRED_SOURCE_INPUTS = (
     ".gitmodules",
@@ -84,6 +89,28 @@ REQUIRED_SOURCE_INPUTS = (
     "tests/meshcore_oracle/manifest.json",
     "tests/meshcore_signed_advert_runtime/manifest.json",
     "requirements/ci-host-windows.txt",
+    "sdkconfig.defaults",
+)
+PRODUCTION_SOURCE_INPUTS = (
+    ".gitmodules",
+    "CMakeLists.txt",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "dependencies.lock",
+    "docs/ATTRIBUTIONS.md",
+    "main/CMakeLists.txt",
+    "overlays/meshcore_ed25519_defined/README.md",
+    "overlays/meshcore_ed25519_defined/fe.c",
+    "overlays/meshcore_ed25519_defined/ge.c",
+    "overlays/meshcore_ed25519_defined/license.txt",
+    "overlays/meshcore_ed25519_defined/sc.c",
+    "partitions_d1l.csv",
+    "patches/sensecap_indicator_idf55_compat.patch",
+    "patches/sensecap_indicator_touch_fix.patch",
+    "patches/sensecap_indicator_tx_origin.patch",
+    "scripts/package_release_d1l.py",
+    "scripts/provenance_d1l.py",
+    "scripts/sbom_d1l.py",
     "sdkconfig.defaults",
 )
 
@@ -314,9 +341,19 @@ def file_record(path: Path, name: str, category: str) -> dict[str, Any]:
     }
 
 
-def collect_source_files(root: Path) -> list[dict[str, Any]]:
+def collect_source_files(
+    root: Path,
+    *,
+    production_only: bool = False,
+) -> list[dict[str, Any]]:
     root = root.resolve()
-    return [file_record(root / relative, relative, "Source") for relative in REQUIRED_SOURCE_INPUTS]
+    source_inputs = (
+        PRODUCTION_SOURCE_INPUTS if production_only else REQUIRED_SOURCE_INPUTS
+    )
+    return [
+        file_record(root / relative, relative, "Source")
+        for relative in source_inputs
+    ]
 
 
 def manifest_claims(manifest: dict) -> dict[str, tuple[str, int | None]]:
@@ -386,7 +423,12 @@ def validate_manifest_inputs(manifest: dict, package_dir: Path, source_commit: s
         for item in manifest.get("notice_files", [])
         if isinstance(item, dict)
     }
-    if not set(REQUIRED_NOTICE_SOURCES).issubset(notice_sources):
+    required_notice_sources = (
+        PRODUCTION_REQUIRED_NOTICE_SOURCES
+        if manifest.get("release_profile") == "core_1_0"
+        else REQUIRED_NOTICE_SOURCES
+    )
+    if not set(required_notice_sources).issubset(notice_sources):
         raise ValueError("Package manifest is missing required licenses or notices")
 
     for relative, (digest, size) in manifest_claims(manifest).items():
@@ -479,7 +521,13 @@ def build_spdx_document(
     package_manifest: dict | None = None,
 ) -> dict[str, Any]:
     identity = normalize_source_identity(source_identity)
-    source_files = collect_source_files(root)
+    source_files = collect_source_files(
+        root,
+        production_only=(
+            isinstance(package_manifest, dict)
+            and package_manifest.get("release_profile") == "core_1_0"
+        ),
+    )
     package_files: list[dict[str, Any]] = []
     if (package_dir is None) != (package_manifest is None):
         raise ValueError("package_dir and package_manifest must be supplied together")
@@ -569,11 +617,19 @@ def build_spdx_document(
                 f"./provenance_{identity['commit']}.json",
             ],
         )
-        release["attributionTexts"] = [
-            "See notices/LICENSE, notices/THIRD_PARTY_NOTICES.md, "
-            "notices/ATTRIBUTIONS.md, notices/SOURCE_AUDIT_AND_ATTRIBUTION.md, "
-            "and notices/ORLP_ED25519_ZLIB_LICENSE.txt."
-        ]
+        if package_manifest.get("release_profile") == "core_1_0":
+            release["attributionTexts"] = [
+                "See notices/LICENSE, notices/THIRD_PARTY_NOTICES.md, "
+                "notices/ORLP_ED25519_ZLIB_LICENSE.txt, and "
+                "docs/ATTRIBUTIONS.md."
+            ]
+        else:
+            release["attributionTexts"] = [
+                "See notices/LICENSE, notices/THIRD_PARTY_NOTICES.md, "
+                "notices/ATTRIBUTIONS.md, "
+                "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md, and "
+                "notices/ORLP_ED25519_ZLIB_LICENSE.txt."
+            ]
         packages.append(release)
         described.append(RELEASE_PACKAGE_ID)
 
