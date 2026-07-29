@@ -84,6 +84,65 @@ def test_store_serializes_transactions_and_evicts_only_validated_actual_size():
     assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" not in commit
 
 
+def test_cache_identity_uses_stable_sd_backend_generation():
+    store = read("main/storage/map_tile_store.c")
+    load = store[
+        store.index("static esp_err_t load_cache_state_for_generation") :
+        store.index("static esp_err_t prepare_cache_room")
+    ]
+
+    assert "s_cache_state_manager_attempt" not in store
+    assert "storage->manager_attempt" not in load
+    assert "cache_backend_generation_matches(backend_generation)" in load
+    assert (
+        "s_cache_state_backend_generation == backend_generation"
+        in load
+    )
+    assert (
+        "s_cache_state_backend_generation = backend_generation"
+        in load
+    )
+    wrapper = load.split("static esp_err_t load_cache_state(", 1)[1]
+    assert "cache_backend_generation(&backend_generation)" in wrapper
+    assert "load_cache_state_for_generation(" in wrapper
+
+
+def test_fresh_tile_miss_precedes_global_cache_recovery():
+    store = read("main/storage/map_tile_store.c")
+    cached = store[
+        store.index("static esp_err_t map_tile_store_cached_locked") :
+        store.index("esp_err_t d1l_map_tile_store_cached")
+    ]
+    cached_metadata = cached.index("read_cache_metadata(")
+    assert cached.index("cache_backend_generation(") < cached_metadata
+    assert cached_metadata < cached.index(
+        "load_cache_state_for_generation("
+    )
+    assert cached.index("d1l_rp2040_bridge_file_stat(") < cached.index(
+        "cache_backend_generation_matches("
+    )
+    assert (
+        "return metadata_ret == ESP_OK ?\n"
+        "            ESP_ERR_INVALID_CRC : metadata_ret;"
+        in cached
+    )
+
+    cached_read = store[
+        store.index("static esp_err_t map_tile_store_read_locked") :
+        store.index("esp_err_t d1l_map_tile_store_read")
+    ]
+    assert cached_read.index("cache_backend_generation(") < cached_read.index(
+        "read_cache_metadata("
+    )
+    assert cached_read.index("read_cache_metadata(") < cached_read.index(
+        "load_cache_state_for_generation("
+    )
+    assert cached_read.index("result.checksum_verified =") < cached_read.index(
+        "cache_backend_generation_matches("
+    )
+    assert "ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret" in cached_read
+
+
 def test_cache_policy_native_vectors(tmp_path):
     compiler = shutil.which("gcc") or shutil.which("clang")
     if compiler is None:

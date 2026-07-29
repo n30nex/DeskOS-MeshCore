@@ -72,7 +72,7 @@
     "main/app/qualification_hooks.h": "fc6c4e1c9e3663d6fc7fc7e41aaf028f9689138dec6341d3b59b5ae4e930954d",
     "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
     "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
-    "main/comms/usb_console.c": "f362392018dae7b66a63e99b75d2791bb0a3ee44ead0d23cd02426acbe868b5c",
+    "main/comms/usb_console.c": "73acbc8ae54a45b9fe81149bd4484b6949b1d22f286fe76c721c1212e61b8d9f",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "1691ab1aafaaf15877181b9ae2ec52ce42feab8d73256acc1b7ab7f2f8e515aa",
     "main/mesh/contact_store.h": "6905b929875069fe64e4a1709c0936451a05026a322f16cf7d9ab00116cd1b20",

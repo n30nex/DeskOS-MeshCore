@@ -17,6 +17,7 @@
 #include "map/map_tile_cache_policy.h"
 #include "map/map_tile_provider.h"
 #include "platform/time_service.h"
+#include "storage/retained_blob_store.h"
 #include "storage/storage_status_policy.h"
 
 #if D1L_ENABLE_QUALIFICATION_HOOKS
@@ -742,7 +743,29 @@ static d1l_map_tile_cache_state_t s_cache_state;
 static bool s_cache_state_loaded;
 static char s_cache_state_source[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
 static uint32_t s_cache_state_capacity_kb;
-static uint32_t s_cache_state_manager_attempt;
+static uint32_t s_cache_state_backend_generation;
+
+static esp_err_t cache_backend_generation(uint32_t *generation)
+{
+    if (!generation) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_retained_blob_store_backend_state_t backend = {0};
+    if (!d1l_retained_blob_store_backend_state(
+            D1L_RETAINED_BLOB_STORE_ROUTES, &backend) ||
+        !backend.enabled) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    *generation = backend.generation;
+    return ESP_OK;
+}
+
+static bool cache_backend_generation_matches(uint32_t expected)
+{
+    uint32_t current = 0U;
+    return cache_backend_generation(&current) == ESP_OK &&
+           current == expected;
+}
 
 static esp_err_t cache_transaction_take(void)
 {
@@ -1526,20 +1549,30 @@ static esp_err_t recover_cache_tail(
     return ESP_OK;
 }
 
-static esp_err_t load_cache_state(
+static esp_err_t load_cache_state_for_generation(
     const d1l_map_tile_provider_t *provider,
     const d1l_storage_status_t *storage,
     d1l_map_tile_cache_paths_t *paths,
-    d1l_map_tile_cache_state_t **state)
+    d1l_map_tile_cache_state_t **state,
+    uint32_t backend_generation)
 {
     if (!provider || !storage || !paths || !state ||
         !cache_control_paths(provider, paths)) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!cache_backend_generation_matches(backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /*
+     * manager_attempt counts routine health polls, not mounted media changes.
+     * The retained backend generation changes only across an SD availability
+     * transition, so it invalidates this verified cache without forcing a
+     * journal recovery scan for every tile.
+     */
     if (s_cache_state_loaded &&
         strcmp(s_cache_state_source, provider->source_id) == 0 &&
         s_cache_state_capacity_kb == storage->capacity_kb &&
-        s_cache_state_manager_attempt == storage->manager_attempt) {
+        s_cache_state_backend_generation == backend_generation) {
         *state = &s_cache_state;
         return ESP_OK;
     }
@@ -1583,15 +1616,33 @@ static esp_err_t load_cache_state(
     if (ret != ESP_OK) {
         return ret;
     }
+    if (!cache_backend_generation_matches(backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     s_cache_state = loaded;
     snprintf(s_cache_state_source,
              sizeof(s_cache_state_source), "%s",
              provider->source_id);
     s_cache_state_capacity_kb = storage->capacity_kb;
-    s_cache_state_manager_attempt = storage->manager_attempt;
+    s_cache_state_backend_generation = backend_generation;
     s_cache_state_loaded = true;
     *state = &s_cache_state;
     return ESP_OK;
+}
+
+static esp_err_t load_cache_state(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_storage_status_t *storage,
+    d1l_map_tile_cache_paths_t *paths,
+    d1l_map_tile_cache_state_t **state)
+{
+    uint32_t backend_generation = 0U;
+    const esp_err_t ret =
+        cache_backend_generation(&backend_generation);
+    return ret == ESP_OK ?
+        load_cache_state_for_generation(
+            provider, storage, paths, state, backend_generation) :
+        ret;
 }
 
 static esp_err_t prepare_cache_room(
@@ -1870,13 +1921,11 @@ static esp_err_t map_tile_store_cached_locked(
     if (!result.path[0]) {
         return ESP_ERR_INVALID_ARG;
     }
-    d1l_map_tile_cache_paths_t cache_paths = {0};
-    d1l_map_tile_cache_state_t *cache_state = NULL;
-    const esp_err_t cache_ret = load_cache_state(
-        &provider, status, &cache_paths, &cache_state);
-    if (cache_ret != ESP_OK || !cache_state) {
-        return cache_ret == ESP_OK ?
-            ESP_ERR_INVALID_STATE : cache_ret;
+    uint32_t backend_generation = 0U;
+    const esp_err_t backend_ret =
+        cache_backend_generation(&backend_generation);
+    if (backend_ret != ESP_OK) {
+        return backend_ret;
     }
     d1l_map_tile_cache_record_t metadata = {0};
     const esp_err_t metadata_ret = read_cache_metadata(
@@ -1885,6 +1934,15 @@ static esp_err_t map_tile_store_cached_locked(
         !cache_record_matches_tile(&metadata, z, x, y)) {
         return metadata_ret == ESP_OK ?
             ESP_ERR_INVALID_CRC : metadata_ret;
+    }
+    d1l_map_tile_cache_paths_t cache_paths = {0};
+    d1l_map_tile_cache_state_t *cache_state = NULL;
+    const esp_err_t cache_ret = load_cache_state_for_generation(
+        &provider, status, &cache_paths, &cache_state,
+        backend_generation);
+    if (cache_ret != ESP_OK || !cache_state) {
+        return cache_ret == ESP_OK ?
+            ESP_ERR_INVALID_STATE : cache_ret;
     }
     d1l_rp2040_file_result_t file = {0};
     const esp_err_t ret = d1l_rp2040_bridge_file_stat(
@@ -1899,6 +1957,9 @@ static esp_err_t map_tile_store_cached_locked(
     }
     if (!provider.configured && !attribution_metadata_present(&result)) {
         return ESP_ERR_NOT_FOUND;
+    }
+    if (!cache_backend_generation_matches(backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
     }
     *out_cached = true;
     return ESP_OK;
@@ -1956,19 +2017,15 @@ static esp_err_t map_tile_store_read_locked(
         *out_result = result;
         return result.last_error;
     }
-    if (!provider.configured && !attribution_metadata_present(&result)) {
-        download_step(&result, "metadata_missing", ESP_ERR_NOT_FOUND, NULL);
+    uint32_t backend_generation = 0U;
+    esp_err_t ret = cache_backend_generation(&backend_generation);
+    if (ret != ESP_OK) {
+        download_step(&result, "cache_backend", ret, NULL);
         *out_result = result;
         return result.last_error;
     }
-    d1l_map_tile_cache_paths_t cache_paths = {0};
-    d1l_map_tile_cache_state_t *cache_state = NULL;
-    esp_err_t ret = load_cache_state(
-        &provider, status, &cache_paths, &cache_state);
-    if (ret != ESP_OK || !cache_state) {
-        download_step(
-            &result, "cache_state",
-            ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret, NULL);
+    if (!provider.configured && !attribution_metadata_present(&result)) {
+        download_step(&result, "metadata_missing", ESP_ERR_NOT_FOUND, NULL);
         *out_result = result;
         return result.last_error;
     }
@@ -1980,6 +2037,18 @@ static esp_err_t map_tile_store_read_locked(
         download_step(
             &result, "cache_metadata",
             ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret, NULL);
+        *out_result = result;
+        return result.last_error;
+    }
+    d1l_map_tile_cache_paths_t cache_paths = {0};
+    d1l_map_tile_cache_state_t *cache_state = NULL;
+    ret = load_cache_state_for_generation(
+        &provider, status, &cache_paths, &cache_state,
+        backend_generation);
+    if (ret != ESP_OK || !cache_state) {
+        download_step(
+            &result, "cache_state",
+            ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret, NULL);
         *out_result = result;
         return result.last_error;
     }
@@ -2044,6 +2113,13 @@ static esp_err_t map_tile_store_read_locked(
         download_step(
             &result, "cache_checksum",
             ESP_ERR_INVALID_CRC, &file);
+        *out_result = result;
+        return result.last_error;
+    }
+    if (!cache_backend_generation_matches(backend_generation)) {
+        download_step(
+            &result, "cache_backend",
+            ESP_ERR_INVALID_STATE, &file);
         *out_result = result;
         return result.last_error;
     }
