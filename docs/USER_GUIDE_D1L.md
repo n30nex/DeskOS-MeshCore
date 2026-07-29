@@ -226,6 +226,10 @@ crashlog
 
 `help` lists the active allowlist. RF transmission, remote mutation, evidence
 clearing, reboot and factory reset require explicit actions or confirmation.
+The supported `ui tab <name>` product-navigation command is equivalent to a
+local screen navigation: it wakes the display and clears the ordinary
+tap-to-unlock idle cover before showing the requested page. It does not bypass
+first-start setup, protected actions, or confirmation prompts.
 
 ## Installation
 

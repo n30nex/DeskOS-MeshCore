@@ -352,7 +352,7 @@ The numbered carryover notes below retain detailed acceptance constraints; they 
 
 - The active UI boundary includes `ui_navigation.c`, `ui_chrome.c`, `ui_home.c`, `ui_settings.c`, `ui_keyboard.c`, `ui_screen.c`, and `ui_modal.c`; remaining refactors must close an ownership or runtime-safety boundary.
 - `tools/ui_simulator.py` provides deterministic 480x480 schema/pixel checks and must retain large-mesh coverage.
-- Hardware Map automation remains network-suppressed. Only an explicit product Map entry, through touch or `ui tab map`, authorizes the bounded current-view fetch; probe counters must remain unchanged.
+- Hardware Map automation remains network-suppressed. Only an explicit product Map entry, through touch or `ui tab map`, wakes the ordinary tap-to-unlock idle cover and authorizes the bounded current-view fetch; probe counters must remain unchanged.
 - Each physical pan or zoom may create only one visible 3x3 generation at its selected zoom. Drag motion itself must remain network-silent, and returning from Home to an already completed exact view must reuse the retained frame without replaying SD reads.
 - `ui_capture_d1l.py` reconstructs the firmware-maintained RGB565 shadow for exact pixel evidence, but final release also requires manual physical photos/touch review.
 - Serial route diagnostics remain `routes`, `routes detail <seq>`, `routes trace <fingerprint>`, `routes probe <fingerprint>`, and `routes clear`.
