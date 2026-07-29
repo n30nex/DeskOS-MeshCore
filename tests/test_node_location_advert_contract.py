@@ -236,7 +236,6 @@ def test_stale_guard_location_preservation_and_material_marker_generation():
         "location_valid",
         "lat_e6",
         "lon_e6",
-        "location_seq",
         "fingerprint",
         "name",
         "type",
@@ -247,6 +246,7 @@ def test_stale_guard_location_preservation_and_material_marker_generation():
         "rssi_dbm",
         "snr_tenths",
         "path_hops",
+        "location_seq",
     ):
         assert non_material_field not in material
     assert "before->advert_timestamp" not in material

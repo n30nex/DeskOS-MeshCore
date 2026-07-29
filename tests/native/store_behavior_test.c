@@ -1169,17 +1169,28 @@ static void test_stale_advert_and_location_preservation(void)
     assert(d1l_node_store_marker_generation() == original_generation);
 
     stale = true;
-    assert(upsert_node(102U, "Cambridge", true, 43675000, -79440000,
+    assert(upsert_node(102U, "Cambridge", true, original.lat_e6,
+                       original.lon_e6, &stale) == ESP_OK);
+    assert(!stale);
+    assert(d1l_node_store_find_by_fingerprint("abcdef0123456789", &after));
+    assert(after.lat_e6 == original.lat_e6);
+    assert(after.lon_e6 == original.lon_e6);
+    assert(after.location_advert_timestamp == 102U);
+    assert(after.location_seq > original.location_seq);
+    assert(d1l_node_store_marker_generation() == original_generation);
+
+    stale = true;
+    assert(upsert_node(103U, "Cambridge", true, 43675000, -79440000,
                        &stale) == ESP_OK);
     assert(!stale);
     assert(d1l_node_store_find_by_fingerprint("abcdef0123456789", &after));
     assert(after.lat_e6 == 43675000);
     assert(after.lon_e6 == -79440000);
-    assert(after.location_advert_timestamp == 102U);
+    assert(after.location_advert_timestamp == 103U);
     assert(after.location_seq == after.seq);
     assert(d1l_node_store_marker_generation() == original_generation + 1U);
 
-    assert(upsert_node(103U, "Cambridge", false, 0, 0, NULL) ==
+    assert(upsert_node(104U, "Cambridge", false, 0, 0, NULL) ==
            ESP_ERR_INVALID_ARG);
 }
 
