@@ -6185,16 +6185,17 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
     d1l_meshcore_contact_trace_plan_result_t plan_result =
         D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
     if (cmd->trace_zero_hop_ping) {
+        const uint8_t trace_hash_bytes =
+            d1l_meshcore_trace_contact_hash_width(
+                settings_snapshot.path_hash_bytes);
         if (strcmp(contact.type, "repeater") != 0 ||
-            settings_snapshot.path_hash_bytes == 0U ||
-            settings_snapshot.path_hash_bytes >
-                D1L_MESHCORE_TRACE_MAX_CONTACT_HASH_BYTES) {
+            trace_hash_bytes == 0U) {
             secure_zero_bytes(contact_public_key,
                               sizeof(contact_public_key));
             return ESP_ERR_NOT_SUPPORTED;
         }
         plan.includes_contact = true;
-        plan.path_hash_bytes = settings_snapshot.path_hash_bytes;
+        plan.path_hash_bytes = trace_hash_bytes;
         plan.path_hops = 1U;
         memcpy(plan.path_hashes, contact_public_key,
                plan.path_hash_bytes);

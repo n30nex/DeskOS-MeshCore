@@ -71,7 +71,7 @@
     "main/CMakeLists.txt": "2eb506426550bd7b99216c1f4ce08c20ec3c67e1dbde2ab543d164629914ce32",
     "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
     "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
-    "main/comms/usb_console.c": "841c0e1877cb74f77df51248a9785067a42a1cbcccf105b09c8b427168d8bb56",
+    "main/comms/usb_console.c": "446b7e35733501d3d05a5cbc825e007bff0955db9b8dc196ce9d76f484f34e9f",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "1691ab1aafaaf15877181b9ae2ec52ce42feab8d73256acc1b7ab7f2f8e515aa",
     "main/mesh/contact_store.h": "6905b929875069fe64e4a1709c0936451a05026a322f16cf7d9ab00116cd1b20",
@@ -102,11 +102,11 @@
     "main/mesh/meshcore_packet_semantics.h": "50d120e98513cfa1c40792df3f4e423381be6e1841eedd6cd1b90d1f861c0365",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
     "main/mesh/meshcore_runtime_guard.h": "5b3630e4a27b15d65a10f7b7524ee646123680b89efb9586f7b02ba33c899708",
-    "main/mesh/meshcore_service.c": "0a1b390bd5d66befbc3279743875a32371c8fc80de00b7f9d843cd85c89bbf72",
+    "main/mesh/meshcore_service.c": "d7fd0fe942c76fc665da942dd1b5a864ccdd0255a7f69ab97721691e88350b71",
     "main/mesh/meshcore_service.h": "4d63fd345555631b7d9a741274029b5dead5344207a550f76f8094e979695fc7",
     "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
-    "main/mesh/meshcore_trace.h": "776b5a2d69997e9d5400f3ca575acc2e5fb617dbb14fbe8fcfd6c6322d7ba51a",
+    "main/mesh/meshcore_trace.h": "61e60d68ef2913b2ba81fb610afb97d7448e9f04db774fe665ecc30f25f2dc2e",
     "main/mesh/meshcore_wire.h": "fe42a573ec801a7bef1ce7bf3a4e3243b2382d0a816ed6f93c91b1f4992542e8",
     "main/mesh/node_store.c": "7fd1d51496f47311e5d64439fb1eb917d7cdf8d308e54a26d3fc4c7d288d118e",
     "main/mesh/node_store.h": "4182df086de1b0b925a3f84f6d41dd4bf582ea5ecbaa23e46183d119461d70a1",
@@ -128,7 +128,7 @@
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "f871dd0e6932d595ce6344b6704f8bc31cb132ad0979842c904e9d5656f34e07",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "9ae15cc250301a8c1113030ab054085bddf5b636f90bcca86a308952ca338aa3",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -806,7 +806,7 @@
           "main/mesh/meshcore_trace.h",
           "main/comms/usb_console.c"
         ],
-        "scope": "fingerprint_only_exact_canonical_contact_current_boot_proven_one_or_two_byte_route_loop_runtime_dispatch_width_aware_correlation_generic_one_two_four_eight_byte_wire_helpers_no_operator_path_three_byte_contact_route_ui_rf_evidence_hardware_evidence_or_closure"
+        "scope": "fingerprint_only_exact_canonical_contact_current_boot_proven_one_two_or_three_byte_route_loop_three_to_two_prefix_normalization_runtime_dispatch_width_aware_correlation_generic_one_two_four_eight_byte_wire_helpers_no_operator_path_ui_rf_evidence_hardware_evidence_or_closure"
       }
     },
     {

@@ -6101,7 +6101,9 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
             "route_trace_contact_path_hash_bytes_supported": [1, 2],
             "route_trace_wire_hash_bytes_supported": [1, 2, 4, 8],
             "route_trace_flags_supported": [0, 1, 2, 3],
-            "route_trace_contact_route_hash_bytes_rejected": [3],
+            "route_trace_contact_route_hash_bytes_accepted": [1, 2, 3],
+            "route_trace_contact_route_hash_bytes_normalized_to_two": [3],
+            "route_trace_contact_route_hash_bytes_rejected": [],
             "route_trace_hardware_verified": False,
             "route_trace_public_rf_tx": False,
         }

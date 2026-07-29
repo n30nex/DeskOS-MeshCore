@@ -36,6 +36,10 @@ OPERATIONS = (
     "mesh_status",
     "peer_advert",
     "contacts",
+    "trace_path_request",
+    "trace_path_result",
+    "trace_request",
+    "trace_result",
     "peer_before",
     "public_tx_authorization",
     "public_send",
@@ -50,8 +54,6 @@ OPERATIONS = (
     "admin_logout",
     "path_request",
     "path_result",
-    "trace_request",
-    "trace_result",
     "ping_request",
     "ping_result",
     "health_after",
@@ -257,6 +259,28 @@ def protocol_transcript() -> dict:
                 },
             ],
         },
+        "trace_path_request": {
+            "schema": 1,
+            "ok": True,
+            "cmd": "routes probe",
+            "fingerprint": TRACE_FP,
+            "queued": True,
+            "token": "path_00000029",
+            "dm_rf_tx": True,
+            "public_rf_tx": False,
+            "telemetry_requested": True,
+        },
+        "trace_path_result": {
+            "schema": 1,
+            "ok": True,
+            "cmd": "routes telemetry",
+            "fingerprint": TRACE_FP,
+            "state": "received",
+            "pending": False,
+            "pending_tag": 0,
+            "history_count": 1,
+            "entries": [{"sequence": 1, "tag": 41}],
+        },
         "trace_request": {
             "schema": 1,
             "ok": True,
@@ -388,6 +412,8 @@ def protocol_transcript() -> dict:
         "mesh_status": "mesh status",
         "peer_advert": "controlled-peer radio.advert",
         "contacts": "contacts",
+        "trace_path_request": f"routes probe {TRACE_FP}",
+        "trace_path_result": f"routes telemetry {TRACE_FP}",
         "trace_request": f"routes trace contact {TRACE_FP}",
         "trace_result": "routes trace status",
         "peer_before": "controlled-peer status capture",
@@ -475,7 +501,13 @@ def test_protocol_targets_are_explicit_and_trace_can_reuse_admin(
     transcript = protocol_transcript()
     transcript["protocol_targets"]["trace_fingerprint"] = ADMIN_FP
     for step in transcript["steps"]:
-        if step["operation"] == "trace_request":
+        if step["operation"] == "trace_path_request":
+            step["command"] = f"routes probe {ADMIN_FP}"
+            step["response"]["fingerprint"] = ADMIN_FP
+        elif step["operation"] == "trace_path_result":
+            step["command"] = f"routes telemetry {ADMIN_FP}"
+            step["response"]["fingerprint"] = ADMIN_FP
+        elif step["operation"] == "trace_request":
             step["command"] = f"routes trace contact {ADMIN_FP}"
             step["response"]["fingerprint"] = ADMIN_FP
         elif step["operation"] == "trace_result":
@@ -497,7 +529,7 @@ def test_protocol_rejects_non_repeater_or_room_trace_contact(
         validate(transcript, monkeypatch)
 
 
-def test_path_uses_repeater_after_logout_before_trace_and_ping():
+def test_trace_path_and_trace_precede_public_then_admin_path_precedes_ping():
     transcript = protocol_transcript()
     steps = {
         row["operation"]: row
@@ -505,13 +537,35 @@ def test_path_uses_repeater_after_logout_before_trace_and_ping():
     }
 
     assert (
-        steps["admin_logout"]["sequence"]
-        < steps["path_request"]["sequence"]
-        < steps["path_result"]["sequence"]
+        steps["contacts"]["sequence"]
+        < steps["trace_path_request"]["sequence"]
+        < steps["trace_path_result"]["sequence"]
         < steps["trace_request"]["sequence"]
         < steps["trace_result"]["sequence"]
+        < steps["peer_before"]["sequence"]
+        < steps["public_tx_authorization"]["sequence"]
+        < steps["public_send"]["sequence"]
+        < steps["admin_logout"]["sequence"]
+        < steps["path_request"]["sequence"]
+        < steps["path_result"]["sequence"]
         < steps["ping_request"]["sequence"]
         < steps["ping_result"]["sequence"]
+    )
+    assert (
+        steps["trace_path_request"]["command"]
+        == f"routes probe {TRACE_FP}"
+    )
+    assert (
+        steps["trace_path_request"]["response"]["fingerprint"]
+        == TRACE_FP
+    )
+    assert (
+        steps["trace_path_result"]["command"]
+        == f"routes telemetry {TRACE_FP}"
+    )
+    assert (
+        steps["trace_path_result"]["response"]["fingerprint"]
+        == TRACE_FP
     )
     assert steps["path_request"]["command"] == f"routes probe {ADMIN_FP}"
     assert steps["path_request"]["response"]["fingerprint"] == ADMIN_FP
@@ -732,6 +786,7 @@ def _rehash_peer_capture(capture: dict) -> None:
         "resolve_after_public",
         "chat_peer_admin_capable",
         "admin_not_admin_capable",
+        "trace_not_admin_capable",
         "chat_peer_not_signed",
         "admin_not_signed",
     ],
@@ -817,6 +872,8 @@ def test_meshcorebot_profile_rejects_identity_or_correlation_drift(
             contacts[0]["can_admin"] = True
         elif mutation == "admin_not_admin_capable":
             contacts[1]["can_admin"] = False
+        elif mutation == "trace_not_admin_capable":
+            contacts[2]["can_admin"] = False
         elif mutation == "chat_peer_not_signed":
             contacts[0]["verification_source"] = "imported"
         else:
@@ -912,6 +969,12 @@ def test_peer_status_json_array_fails_closed(
         (
             "health_after",
             lambda response: response.update({"boot_nonce": 78}),
+        ),
+        (
+            "trace_path_result",
+            lambda response: response["entries"][0].update(
+                {"tag": "path_00000029"}
+            ),
         ),
         (
             "path_result",
@@ -1250,7 +1313,7 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
     assert 'parser.add_argument("--trace-fingerprint", required=True)' in source
     assert "validate_protocol(transcript, candidate)" in source
     assert "--dry-run" not in source
-    assert 'parser.add_argument("--boot-timeout", type=float, default=45.0)' in source
+    assert 'parser.add_argument("--boot-timeout", type=float, default=75.0)' in source
     assert '"dm_send"' not in source
     assert "mesh send dm" not in source
     assert "messages dm" not in source
@@ -1259,9 +1322,13 @@ def test_runner_is_pi_only_stable_by_id_and_self_validating():
         'version = _step(steps, "version"'
     )
     assert (
-        source.index('admin_logout = _step(')
-        < source.index('path_request = _step(')
-        < source.index('label="PATH/base telemetry response"')
+        source.index('trace_path_request = _step(')
+        < source.index('label="current-boot TRACE target PATH response"')
         < source.index('trace_request = _step(')
+        < source.index('\n        before = _step(')
+        < source.index('\n            "public_tx_authorization",')
+        < source.index('admin_logout = _step(')
+        < source.index('\n        path_request = _step(')
+        < source.index('label="PATH/base telemetry response"')
         < source.index('ping_request = _step(')
     )
