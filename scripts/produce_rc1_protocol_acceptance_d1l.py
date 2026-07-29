@@ -1067,6 +1067,140 @@ def execute(
         if cooldown_ms is not None and cooldown_ms > 0:
             time.sleep(min((cooldown_ms / 1000.0) + 0.25, 31.0))
 
+        # Finish every fallible targeted/admin RF gate before capturing the
+        # controlled-peer baseline and authorizing the sole Public transmit.
+        password_argument = admin_password or "<empty>"
+        login_wire_command = (
+            f"admin login {admin_fingerprint} {password_argument}"
+        )
+        redacted_login_command = (
+            f"admin login {admin_fingerprint} <redacted>"
+        )
+        login_request, admin_login_status = authenticate_admin_session(
+            command,
+            login_wire_command=login_wire_command,
+            redacted_login_command=redacted_login_command,
+            admin_fingerprint=admin_fingerprint,
+            timeout=rf_timeout,
+            interval=poll_interval,
+        )
+        _step(
+            steps,
+            "admin_login_request",
+            redacted_login_command,
+            login_request,
+        )
+        _step(
+            steps,
+            "admin_login_status",
+            "admin status",
+            admin_login_status,
+        )
+        query_request = _step(
+            steps,
+            "admin_query_request",
+            "admin telemetry",
+            command("admin telemetry"),
+        )
+        admin_query_status = poll(
+            lambda: command("admin status"),
+            lambda result: (
+                result.get("state") == "authenticated"
+                and str(result.get("fingerprint") or "").upper()
+                == admin_fingerprint
+                and nested(result, "query_result", "valid") is True
+                and nested(result, "query_result", "kind") == "telemetry"
+                and result.get("credential_exposed") is False
+            ),
+            timeout=rf_timeout,
+            interval=poll_interval,
+            label="authenticated repeater telemetry",
+        )
+        _step(
+            steps,
+            "admin_query_status",
+            "admin status",
+            admin_query_status,
+        )
+        if query_request.get("cmd") != "admin telemetry":
+            raise ProtocolAcceptanceError("admin query response command changed")
+        admin_logout = _step(
+            steps,
+            "admin_logout",
+            "admin logout",
+            command("admin logout"),
+        )
+        if admin_logout.get("state") != "idle":
+            raise ProtocolAcceptanceError("admin authority did not clear")
+
+        path_request = _step(
+            steps,
+            "path_request",
+            f"routes probe {admin_fingerprint}",
+            command(f"routes probe {admin_fingerprint}"),
+        )
+        path_token = path_request.get("token")
+        if (
+            not isinstance(path_token, str)
+            or re.fullmatch(r"path_[0-9A-F]{8}", path_token) is None
+        ):
+            raise ProtocolAcceptanceError(
+                "PATH request did not return its exact correlation token"
+            )
+        path_tag = int(path_token[5:], 16)
+        path_result = poll(
+            lambda: command(f"routes telemetry {admin_fingerprint}"),
+            lambda result: (
+                result.get("state") == "received"
+                and result.get("pending") is False
+                and result.get("pending_tag") == 0
+                and integer(result.get("history_count"), minimum=1) is not None
+                and isinstance(result.get("entries"), list)
+                and any(
+                    isinstance(row, dict)
+                    and row.get("tag") == path_tag
+                    and integer(row.get("sequence"), minimum=1) is not None
+                    for row in result["entries"]
+                )
+            ),
+            timeout=rf_timeout,
+            interval=poll_interval,
+            label="PATH/base telemetry response",
+        )
+        _step(
+            steps,
+            "path_result",
+            f"routes telemetry {admin_fingerprint}",
+            path_result,
+        )
+
+        ping_request = _step(
+            steps,
+            "ping_request",
+            f"repeater ping {admin_fingerprint}",
+            command(f"repeater ping {admin_fingerprint}"),
+        )
+        ping_tag = integer(ping_request.get("tag"), minimum=1)
+        ping_result = poll(
+            lambda: command("repeater ping status"),
+            lambda result: (
+                result.get("matched") is True
+                and result.get("zero_hop") is True
+                and str(result.get("fingerprint") or "").upper()
+                == admin_fingerprint
+                and nested(result, "last_result", "tag") == ping_tag
+            ),
+            timeout=rf_timeout,
+            interval=poll_interval,
+            label="matched zero-hop repeater Ping",
+        )
+        _step(
+            steps,
+            "ping_result",
+            "repeater ping status",
+            ping_result,
+        )
+
         before = _step(
             steps,
             "peer_before",
@@ -1236,138 +1370,6 @@ def execute(
             "public_receive",
             f"messages public search {public_in_token}",
             public_receive,
-        )
-
-        password_argument = admin_password or "<empty>"
-        login_wire_command = (
-            f"admin login {admin_fingerprint} {password_argument}"
-        )
-        redacted_login_command = (
-            f"admin login {admin_fingerprint} <redacted>"
-        )
-        login_request, admin_login_status = authenticate_admin_session(
-            command,
-            login_wire_command=login_wire_command,
-            redacted_login_command=redacted_login_command,
-            admin_fingerprint=admin_fingerprint,
-            timeout=rf_timeout,
-            interval=poll_interval,
-        )
-        _step(
-            steps,
-            "admin_login_request",
-            redacted_login_command,
-            login_request,
-        )
-        _step(
-            steps,
-            "admin_login_status",
-            "admin status",
-            admin_login_status,
-        )
-        query_request = _step(
-            steps,
-            "admin_query_request",
-            "admin telemetry",
-            command("admin telemetry"),
-        )
-        admin_query_status = poll(
-            lambda: command("admin status"),
-            lambda result: (
-                result.get("state") == "authenticated"
-                and str(result.get("fingerprint") or "").upper()
-                == admin_fingerprint
-                and nested(result, "query_result", "valid") is True
-                and nested(result, "query_result", "kind") == "telemetry"
-                and result.get("credential_exposed") is False
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="authenticated repeater telemetry",
-        )
-        _step(
-            steps,
-            "admin_query_status",
-            "admin status",
-            admin_query_status,
-        )
-        if query_request.get("cmd") != "admin telemetry":
-            raise ProtocolAcceptanceError("admin query response command changed")
-        admin_logout = _step(
-            steps,
-            "admin_logout",
-            "admin logout",
-            command("admin logout"),
-        )
-        if admin_logout.get("state") != "idle":
-            raise ProtocolAcceptanceError("admin authority did not clear")
-
-        path_request = _step(
-            steps,
-            "path_request",
-            f"routes probe {admin_fingerprint}",
-            command(f"routes probe {admin_fingerprint}"),
-        )
-        path_token = path_request.get("token")
-        if (
-            not isinstance(path_token, str)
-            or re.fullmatch(r"path_[0-9A-F]{8}", path_token) is None
-        ):
-            raise ProtocolAcceptanceError(
-                "PATH request did not return its exact correlation token"
-            )
-        path_tag = int(path_token[5:], 16)
-        path_result = poll(
-            lambda: command(f"routes telemetry {admin_fingerprint}"),
-            lambda result: (
-                result.get("state") == "received"
-                and result.get("pending") is False
-                and result.get("pending_tag") == 0
-                and integer(result.get("history_count"), minimum=1) is not None
-                and isinstance(result.get("entries"), list)
-                and any(
-                    isinstance(row, dict)
-                    and row.get("tag") == path_tag
-                    and integer(row.get("sequence"), minimum=1) is not None
-                    for row in result["entries"]
-                )
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="PATH/base telemetry response",
-        )
-        _step(
-            steps,
-            "path_result",
-            f"routes telemetry {admin_fingerprint}",
-            path_result,
-        )
-
-        ping_request = _step(
-            steps,
-            "ping_request",
-            f"repeater ping {admin_fingerprint}",
-            command(f"repeater ping {admin_fingerprint}"),
-        )
-        ping_tag = integer(ping_request.get("tag"), minimum=1)
-        ping_result = poll(
-            lambda: command("repeater ping status"),
-            lambda result: (
-                result.get("matched") is True
-                and result.get("zero_hop") is True
-                and str(result.get("fingerprint") or "").upper()
-                == admin_fingerprint
-                and nested(result, "last_result", "tag") == ping_tag
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="matched zero-hop repeater Ping",
-        )
-        _step(
-            steps,
-            "ping_result",
-            "repeater ping status",
-            ping_result,
         )
 
         health_after = _step(
