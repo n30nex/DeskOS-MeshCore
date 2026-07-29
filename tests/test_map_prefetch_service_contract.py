@@ -77,9 +77,11 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     assert "d1l_node_store_copy_markers(" in service
     assert "D1L_NODE_SD_HISTORY_CAPACITY" in service
     assert "d1l_map_tile_store_cached(" in service
-    assert "d1l_map_tile_store_fetch(" in service
+    assert "d1l_map_tile_store_fetch_background(" in service
     assert "plan->reserve_bytes + D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in service
-    assert "provider->minimum_request_interval_ms" in service
+    assert "provider.minimum_request_interval_ms" in read(
+        "main/storage/map_tile_store.c"
+    )
     assert "cache_budget_mb = provider.cache_budget_mb" in service
     assert "status->evicted_tiles += result.evicted_tiles" in service
     assert "status->cache_used_bytes = result.cache_used_bytes" in service
@@ -168,10 +170,11 @@ def test_visible_map_wake_preempts_background_worker_before_dispatch():
     assert "xSemaphoreTake(wake_lock, portMAX_DELAY)" in wake
     assert (
         wake.index("xSemaphoreTake(wake_lock, portMAX_DELAY)")
+        < wake.index("const bool visible = visible_map_active()")
         < wake.index("vTaskPrioritySet(")
-        < wake.index("visible_map_active() ?")
         < wake.index("xTaskNotifyGive(worker)")
         < wake.index("xSemaphoreGive(wake_lock)")
+        < wake.index("d1l_map_tile_store_cancel_background_fetch()")
     )
     assert "D1L_MAP_VISIBLE_WORKER_PRIORITY" in wake
     assert "D1L_MAP_PREFETCH_WORKER_PRIORITY" in wake
@@ -184,6 +187,200 @@ def test_visible_map_wake_preempts_background_worker_before_dispatch():
         "d1l_map_view_service_run_pending()", 1
     )[1]
     assert "D1L_MAP_PREFETCH_WORKER_PRIORITY" not in after_dispatch
+
+
+def test_background_https_wait_is_bounded_and_wake_cancelable():
+    prefetch = read("main/map/map_prefetch_service.c")
+    store = read("main/storage/map_tile_store.c")
+    store_header = read("main/storage/map_tile_store.h")
+    fetch = store.split(
+        "static esp_err_t map_tile_store_fetch_network", 1
+    )[1].split("\nesp_err_t d1l_map_tile_store_fetch", 1)[0]
+    foreground = store.split(
+        "esp_err_t d1l_map_tile_store_fetch(uint8_t z", 1
+    )[1].split(
+        "esp_err_t d1l_map_tile_store_fetch_background", 1
+    )[0]
+    background = store.split(
+        "esp_err_t d1l_map_tile_store_fetch_background", 1
+    )[1]
+    event = store.split(
+        "static esp_err_t map_http_event", 1
+    )[1].split("static bool png_content_type", 1)[0]
+    publish_socket = store.split(
+        "static void background_fetch_publish_socket", 1
+    )[1].split("static void background_fetch_clear_socket", 1)[0]
+    clear_socket = store.split(
+        "static void background_fetch_clear_socket", 1
+    )[1].split("static void background_fetch_detach_socket", 1)[0]
+    cancel = store.split(
+        "void d1l_map_tile_store_cancel_background_fetch", 1
+    )[1].split("static esp_err_t request_gate_wait", 1)[0]
+    gate = store.split(
+        "static esp_err_t request_gate_wait", 1
+    )[1].split("bool d1l_map_tile_store_coord_valid", 1)[0]
+    network_done = fetch.split("network_done:", 1)[1]
+
+    assert "d1l_map_tile_store_fetch_background(" in store_header
+    assert "d1l_map_tile_store_fetch_background(" in prefetch
+    assert "D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000" in store
+    assert "D1L_MAP_TILE_BACKGROUND_HTTP_TIMEOUT_MS 5000" in store
+    assert "D1L_MAP_TILE_HTTP_IO_SLICE_MS 250" in store
+    assert "D1L_MAP_TILE_HTTP_TIMEOUT_MS" in foreground
+    assert "D1L_MAP_TILE_BACKGROUND_HTTP_TIMEOUT_MS" in background
+    assert "false, buffer, buffer_size" in foreground
+    assert "D1L_MAP_TILE_BACKGROUND_HTTP_TIMEOUT_MS, true" in background
+    assert ".timeout_ms = D1L_MAP_TILE_HTTP_IO_SLICE_MS" in fetch
+    assert ".is_async = true" in fetch
+    assert "} while (ret == ESP_ERR_HTTP_EAGAIN);" in fetch
+    open_wait = fetch.split(
+        "ret = esp_http_client_open(client, 0)", 1
+    )[1].split("if (ret != ESP_OK)", 1)[0]
+    assert "esp_timer_get_time() >= open_deadline_us" in open_wait
+    assert "while (content_length == -ESP_ERR_HTTP_EAGAIN)" in fetch
+    header_wait = fetch.split(
+        "while (content_length == -ESP_ERR_HTTP_EAGAIN)", 1
+    )[1].split("result.status_code =", 1)[0]
+    assert "map_network_continue(&continuation)" in header_wait
+    assert "esp_timer_get_time() >= header_deadline_us" in header_wait
+    read_wait = fetch.split(
+        "if (read_len == -ESP_ERR_HTTP_EAGAIN)", 1
+    )[1].split("if (read_len < 0)", 1)[0]
+    assert "map_network_continue(&continuation)" in read_wait
+    assert "esp_timer_get_time() >= read_deadline_us" in read_wait
+
+    assert "esp_http_client_cancel_request" not in store
+    assert "esp_http_client_close" not in cancel
+    assert "esp_http_client_cleanup" not in cancel
+    assert cancel.index("cancel_requested = true") < cancel.index(
+        "shutdown("
+    )
+    assert "s_background_socket.token == token" in publish_socket
+    assert publish_socket.index(
+        "s_background_socket.cancel_requested"
+    ) < publish_socket.index("shutdown(")
+    assert "s_background_socket.token == token" in clear_socket
+    assert "s_background_socket.socket_fd == socket_fd" in clear_socket
+    assert "HTTP_EVENT_ON_CONNECTED" in event
+    assert "esp_http_client_get_socket(event->client)" in event
+    assert "background_fetch_publish_socket(" in event
+    assert "HTTP_EVENT_DISCONNECTED" in event
+    assert "background_fetch_clear_socket(" in event
+    assert "HTTP_EVENT_HEADERS_SENT" in event
+    assert "context->minimum_request_interval_ms" in event
+    assert "request_gate_extend_minimum(" in event
+    assert "D1L_MAP_TILE_REQUEST_GATE_SLICE_MS 25U" in store
+    assert "request_gate_wait(" in fetch
+    assert fetch.index("request_gate_wait(") < fetch.index(
+        "esp_http_client_init(&config)"
+    )
+    assert "result.status_code == 429" in fetch
+    assert "result.status_code == 503" in fetch
+    assert "D1L_MAP_TILE_DEFAULT_RETRY_AFTER_SEC" in fetch
+    assert "request_gate_extend_retry(" in fetch
+    assert gate.index(
+        "retry_remaining_us > 0"
+    ) < gate.index(
+        "*out_retry_status = retry_status"
+    ) < gate.index(
+        "return ESP_ERR_TIMEOUT"
+    ) < gate.index(
+        "minimum_until_us - now_us"
+    ) < gate.index("vTaskDelay(")
+    gated_fetch = fetch.split("ret = request_gate_wait(", 1)[1].split(
+        "map_http_context_t http_context", 1
+    )[0]
+    assert "result.status_code = gate_retry_status" in gated_fetch
+    assert 'download_step(\n                &result, "rate_limited"' in gated_fetch
+    post_headers = fetch.split("if (content_length >= 0)", 1)[1]
+    assert post_headers.index(
+        "result.status_code ="
+    ) < post_headers.index(
+        "result.status_code == 429"
+    ) < post_headers.index(
+        "goto network_done;"
+    ) < post_headers.index(
+        "if (!map_network_continue(&continuation))"
+    )
+    assert network_done.index(
+        "background_fetch_detach_socket("
+    ) < network_done.index(
+        "esp_http_client_close(client)"
+    ) < network_done.index(
+        "esp_http_client_cleanup(client)"
+    ) < network_done.index(
+        "persist_validated_tile("
+    ) < network_done.index(
+        "background_fetch_finish("
+    )
+    assert "d1l_map_tile_store_cancel_background_fetch(" in store_header
+    request_tail = prefetch.split(
+        "ret = d1l_map_tile_store_fetch_background(", 1
+    )[1].split("set_phase(status, \"ready\"", 1)[0]
+    assert request_tail.index(
+        "result.status_code == 429"
+    ) < request_tail.index(
+        "if (result.cancelled ||"
+    )
+    assert "wait_minimum_request_interval" not in prefetch
+
+
+def test_token_and_source_gate_models_preserve_cancellation_and_backoff():
+    socket = {
+        "token": 1,
+        "fd": -1,
+        "active": True,
+        "cancelled": False,
+    }
+
+    def cancel(state):
+        state["cancelled"] = state["active"]
+        return state["fd"] if state["active"] and state["fd"] >= 0 else None
+
+    def publish(state, token, fd):
+        if not state["active"] or state["token"] != token:
+            return None
+        state["fd"] = fd
+        return fd if state["cancelled"] else None
+
+    assert cancel(socket) is None
+    assert publish(socket, 1, 7) == 7
+    socket["active"] = False
+    socket = {
+        "token": 2,
+        "fd": -1,
+        "active": True,
+        "cancelled": False,
+    }
+    assert publish(socket, 1, 7) is None
+    assert publish(socket, 2, 7) is None
+
+    minimum_gate = {}
+    retry_gate = {}
+
+    def extend_minimum(source, deadline):
+        minimum_gate[source] = max(
+            minimum_gate.get(source, 0), deadline
+        )
+
+    def extend_retry(source, status, deadline):
+        retry_gate[source] = (
+            status,
+            max(retry_gate.get(source, (0, 0))[1], deadline),
+        )
+
+    extend_minimum("provider-a", 1000)
+    extend_minimum("provider-a", 500)
+    extend_retry("provider-a", 429, 300000)
+    extend_minimum("provider-b", 1200)
+    assert minimum_gate == {
+        "provider-a": 1000,
+        "provider-b": 1200,
+    }
+    assert retry_gate == {
+        "provider-a": (429, 300000),
+    }
+    assert retry_gate["provider-a"][1] > minimum_gate["provider-a"]
 
 
 def test_map_ui_exposes_provider_and_background_state():

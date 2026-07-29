@@ -63,6 +63,7 @@ BOOT_TIMEOUT_SECONDS = 45.0
 POLL_INTERVAL_SECONDS = 1.0
 PREFETCH_TIMEOUT_SECONDS = 180.0
 OFFLINE_VIEW_TIMEOUT_SECONDS = 120.0
+FOREGROUND_TRANSITION_TIMEOUT_SECONDS = 120.0
 WIFI_TIMEOUT_SECONDS = 45.0
 UI_TIMEOUT_SECONDS = 20.0
 
@@ -989,7 +990,10 @@ def run_acceptance(
             online_view = poll_command(
                 ser,
                 "map tiles status",
-                timeout=offline_timeout,
+                timeout=min(
+                    offline_timeout,
+                    FOREGROUND_TRANSITION_TIMEOUT_SECONDS,
+                ),
                 command_timeout=command_timeout,
                 interval=poll_interval,
                 predicate=lambda row: online_view_ready(

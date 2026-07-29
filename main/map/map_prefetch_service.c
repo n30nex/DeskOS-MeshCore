@@ -310,21 +310,38 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
          * of real provider fetch attempts, not planned or cache-hit tiles.
          */
         publish_status(status);
-        ret = d1l_map_tile_store_fetch(
+        ret = d1l_map_tile_store_fetch_background(
             zoom, x, y, &storage, true,
             s_tile_buffer, D1L_MAP_TILE_DOWNLOAD_MAX_BYTES,
             &downloaded_len, prefetch_continue,
             &mutable_continuation, &result);
         status->evicted_tiles += result.evicted_tiles;
         status->cache_used_bytes = result.cache_used_bytes;
+        if (result.status_code == 429 ||
+            result.status_code == 503) {
+            const uint32_t retry =
+                result.retry_after_sec > 0U ?
+                    result.retry_after_sec :
+                    D1L_MAP_PREFETCH_DEFAULT_RATE_BACKOFF_SEC;
+            status->last_error = ret;
+            ++status->failed_tiles;
+            ++status->visited_tiles;
+            status->running = false;
+            status->retry_after_sec = retry;
+            set_phase(status, "rate_limited",
+                      "Map provider asked the background download to wait");
+            s_backoff_until_us = esp_timer_get_time() +
+                (int64_t)retry * 1000000LL;
+            memset(&result, 0, sizeof(result));
+            publish_status(status);
+            return;
+        }
         if (ret == ESP_OK) {
             ++status->downloaded_tiles;
             ++status->visited_tiles;
             status->downloaded_bytes += downloaded_len;
             publish_status(status);
             memset(&result, 0, sizeof(result));
-            vTaskDelay(pdMS_TO_TICKS(
-                provider->minimum_request_interval_ms));
             continue;
         }
         if (result.cancelled ||
@@ -338,23 +355,10 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
         ++status->failed_tiles;
         ++status->visited_tiles;
         status->running = false;
-        if (result.status_code == 429 ||
-            result.status_code == 503) {
-            const uint32_t retry =
-                result.retry_after_sec > 0U ?
-                    result.retry_after_sec :
-                    D1L_MAP_PREFETCH_DEFAULT_RATE_BACKOFF_SEC;
-            status->retry_after_sec = retry;
-            set_phase(status, "rate_limited",
-                      "Map provider asked the background download to wait");
-            s_backoff_until_us = esp_timer_get_time() +
-                (int64_t)retry * 1000000LL;
-        } else {
-            set_phase(status, result.step[0] ? result.step : "download_error",
-                      "A background map tile could not be downloaded");
-            s_backoff_until_us = esp_timer_get_time() +
-                (int64_t)D1L_MAP_PREFETCH_ERROR_BACKOFF_SEC * 1000000LL;
-        }
+        set_phase(status, result.step[0] ? result.step : "download_error",
+                  "A background map tile could not be downloaded");
+        s_backoff_until_us = esp_timer_get_time() +
+            (int64_t)D1L_MAP_PREFETCH_ERROR_BACKOFF_SEC * 1000000LL;
         memset(&result, 0, sizeof(result));
         publish_status(status);
         return;
@@ -713,12 +717,21 @@ esp_err_t d1l_map_prefetch_service_wake(void)
     if (xSemaphoreTake(wake_lock, portMAX_DELAY) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
+    const bool visible = visible_map_active();
     vTaskPrioritySet(
         worker,
-        visible_map_active() ?
+        visible ?
             D1L_MAP_VISIBLE_WORKER_PRIORITY :
             D1L_MAP_PREFETCH_WORKER_PRIORITY);
     xTaskNotifyGive(worker);
     xSemaphoreGive(wake_lock);
+    if (visible) {
+        /*
+         * Socket shutdown may wake the worker immediately. Keep it outside
+         * both the visibility and wake locks so the worker can unwind without
+         * a lock-order dependency.
+         */
+        d1l_map_tile_store_cancel_background_fetch();
+    }
     return ESP_OK;
 }

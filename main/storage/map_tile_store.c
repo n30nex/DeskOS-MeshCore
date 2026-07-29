@@ -5,11 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/socket.h>
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "comms/connectivity_manager.h"
 #include "map/map_tile_cache_policy.h"
 #include "map/map_tile_provider.h"
@@ -22,6 +25,10 @@
 #define D1L_MAP_TILE_CANARY_Y 2U
 #endif
 #define D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000
+#define D1L_MAP_TILE_BACKGROUND_HTTP_TIMEOUT_MS 5000
+#define D1L_MAP_TILE_HTTP_IO_SLICE_MS 250
+#define D1L_MAP_TILE_REQUEST_GATE_SLICE_MS 25U
+#define D1L_MAP_TILE_DEFAULT_RETRY_AFTER_SEC 300U
 #define D1L_MAP_TILE_NETWORK_LEASE_TIMEOUT_MS 1000U
 #define D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U
 #define D1L_MAP_TILE_CACHE_JOURNAL_NAME "cache-journal.v1"
@@ -29,6 +36,287 @@
 #define D1L_MAP_TILE_CACHE_STATE_NAME "cache-state.v1"
 #define D1L_MAP_TILE_CACHE_STATE_TMP_NAME "cache-state.tmp"
 #define D1L_MAP_TILE_STORE_TRANSACTION_TIMEOUT_MS 30000U
+
+typedef struct {
+    uint32_t token;
+    int socket_fd;
+    bool active;
+    bool cancel_requested;
+} d1l_map_background_socket_state_t;
+
+static StaticSemaphore_t s_map_network_mutex_storage;
+static SemaphoreHandle_t s_map_network_mutex;
+static portMUX_TYPE s_map_network_init_lock =
+    portMUX_INITIALIZER_UNLOCKED;
+static d1l_map_background_socket_state_t s_background_socket = {
+    .socket_fd = -1,
+};
+static uint32_t s_background_next_token;
+static char s_request_gate_source[
+    D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
+static int64_t s_request_gate_minimum_until_us;
+static int64_t s_request_gate_retry_until_us;
+static int s_request_gate_retry_status;
+
+static SemaphoreHandle_t map_network_mutex(void)
+{
+    if (!s_map_network_mutex) {
+        portENTER_CRITICAL(&s_map_network_init_lock);
+        if (!s_map_network_mutex) {
+            s_map_network_mutex = xSemaphoreCreateMutexStatic(
+                &s_map_network_mutex_storage);
+        }
+        portEXIT_CRITICAL(&s_map_network_init_lock);
+    }
+    return s_map_network_mutex;
+}
+
+static uint32_t background_fetch_begin(void)
+{
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return 0U;
+    }
+    uint32_t token = ++s_background_next_token;
+    if (token == 0U) {
+        token = ++s_background_next_token;
+    }
+    s_background_socket = (d1l_map_background_socket_state_t) {
+        .token = token,
+        .socket_fd = -1,
+        .active = true,
+        .cancel_requested = false,
+    };
+    xSemaphoreGive(mutex);
+    return token;
+}
+
+static bool background_fetch_cancel_requested(uint32_t token)
+{
+    if (token == 0U) {
+        return false;
+    }
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return true;
+    }
+    const bool cancelled =
+        s_background_socket.active &&
+        s_background_socket.token == token &&
+        s_background_socket.cancel_requested;
+    xSemaphoreGive(mutex);
+    return cancelled;
+}
+
+static void background_fetch_publish_socket(
+    uint32_t token,
+    int socket_fd)
+{
+    if (token == 0U || socket_fd < 0) {
+        return;
+    }
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (s_background_socket.active &&
+        s_background_socket.token == token) {
+        s_background_socket.socket_fd = socket_fd;
+        if (s_background_socket.cancel_requested) {
+            (void)shutdown(socket_fd, SHUT_RDWR);
+        }
+    }
+    xSemaphoreGive(mutex);
+}
+
+static void background_fetch_clear_socket(
+    uint32_t token,
+    int socket_fd)
+{
+    if (token == 0U || socket_fd < 0) {
+        return;
+    }
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (s_background_socket.active &&
+        s_background_socket.token == token &&
+        s_background_socket.socket_fd == socket_fd) {
+        s_background_socket.socket_fd = -1;
+    }
+    xSemaphoreGive(mutex);
+}
+
+static void background_fetch_detach_socket(uint32_t token)
+{
+    if (token == 0U) {
+        return;
+    }
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (s_background_socket.active &&
+        s_background_socket.token == token) {
+        s_background_socket.socket_fd = -1;
+    }
+    xSemaphoreGive(mutex);
+}
+
+static void background_fetch_finish(uint32_t token)
+{
+    if (token == 0U) {
+        return;
+    }
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (s_background_socket.active &&
+        s_background_socket.token == token) {
+        s_background_socket =
+            (d1l_map_background_socket_state_t) {
+                .socket_fd = -1,
+            };
+    }
+    xSemaphoreGive(mutex);
+}
+
+void d1l_map_tile_store_cancel_background_fetch(void)
+{
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (s_background_socket.active) {
+        s_background_socket.cancel_requested = true;
+        if (s_background_socket.socket_fd >= 0) {
+            (void)shutdown(
+                s_background_socket.socket_fd, SHUT_RDWR);
+        }
+    }
+    xSemaphoreGive(mutex);
+}
+
+static esp_err_t request_gate_wait(
+    const char *source_id,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context,
+    int *out_retry_status,
+    uint32_t *out_retry_after_sec)
+{
+    if (!source_id || source_id[0] == '\0' ||
+        !out_retry_status || !out_retry_after_sec) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_retry_status = 0;
+    *out_retry_after_sec = 0U;
+    for (;;) {
+        if (should_continue &&
+            !should_continue(continue_context)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        SemaphoreHandle_t mutex = map_network_mutex();
+        if (!mutex ||
+            xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+            return ESP_ERR_NO_MEM;
+        }
+        const bool source_matches =
+            strcmp(s_request_gate_source, source_id) == 0;
+        const int64_t minimum_until_us = source_matches ?
+            s_request_gate_minimum_until_us : 0;
+        const int64_t retry_until_us = source_matches ?
+            s_request_gate_retry_until_us : 0;
+        const int retry_status = source_matches ?
+            s_request_gate_retry_status : 0;
+        xSemaphoreGive(mutex);
+        const int64_t now_us = esp_timer_get_time();
+        const int64_t retry_remaining_us =
+            retry_until_us - now_us;
+        if (retry_remaining_us > 0 &&
+            (retry_status == 429 || retry_status == 503)) {
+            *out_retry_status = retry_status;
+            *out_retry_after_sec = (uint32_t)(
+                (retry_remaining_us + 999999LL) / 1000000LL);
+            return ESP_ERR_TIMEOUT;
+        }
+        const int64_t remaining_us =
+            minimum_until_us - now_us;
+        if (remaining_us <= 0) {
+            return ESP_OK;
+        }
+        uint32_t wait_ms =
+            (uint32_t)((remaining_us + 999LL) / 1000LL);
+        if (wait_ms > D1L_MAP_TILE_REQUEST_GATE_SLICE_MS) {
+            wait_ms = D1L_MAP_TILE_REQUEST_GATE_SLICE_MS;
+        }
+        TickType_t wait_ticks = pdMS_TO_TICKS(wait_ms);
+        vTaskDelay(wait_ticks > 0U ? wait_ticks : 1U);
+    }
+}
+
+static void request_gate_extend_minimum(
+    const char *source_id,
+    int64_t deadline_us)
+{
+    if (!source_id || source_id[0] == '\0') {
+        return;
+    }
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (strcmp(s_request_gate_source, source_id) != 0) {
+        snprintf(
+            s_request_gate_source,
+            sizeof(s_request_gate_source), "%s", source_id);
+        s_request_gate_minimum_until_us = 0;
+        s_request_gate_retry_until_us = 0;
+        s_request_gate_retry_status = 0;
+    }
+    if (deadline_us > s_request_gate_minimum_until_us) {
+        s_request_gate_minimum_until_us = deadline_us;
+    }
+    xSemaphoreGive(mutex);
+}
+
+static void request_gate_extend_retry(
+    const char *source_id,
+    int status_code,
+    int64_t deadline_us)
+{
+    if (!source_id || source_id[0] == '\0' ||
+        (status_code != 429 && status_code != 503)) {
+        return;
+    }
+    SemaphoreHandle_t mutex = map_network_mutex();
+    if (!mutex ||
+        xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    if (strcmp(s_request_gate_source, source_id) != 0) {
+        snprintf(
+            s_request_gate_source,
+            sizeof(s_request_gate_source), "%s", source_id);
+        s_request_gate_minimum_until_us = 0;
+        s_request_gate_retry_until_us = 0;
+        s_request_gate_retry_status = 0;
+    }
+    if (deadline_us > s_request_gate_retry_until_us) {
+        s_request_gate_retry_until_us = deadline_us;
+        s_request_gate_retry_status = status_code;
+    }
+    xSemaphoreGive(mutex);
+}
 
 bool d1l_map_tile_store_coord_valid(uint8_t z, uint32_t x, uint32_t y)
 {
@@ -272,7 +560,9 @@ bool d1l_map_tile_store_sd_ready(const d1l_storage_status_t *status)
 
 static esp_err_t write_attribution_metadata(
     const d1l_map_tile_provider_t *provider,
-    d1l_map_tile_download_result_t *result)
+    d1l_map_tile_download_result_t *result,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context)
 {
     if (!provider || !result) {
         return ESP_ERR_INVALID_ARG;
@@ -298,11 +588,21 @@ static esp_err_t write_attribution_metadata(
     if (len <= 0 || (size_t)len >= sizeof(payload)) {
         return ESP_ERR_INVALID_SIZE;
     }
+    if (should_continue &&
+        !should_continue(continue_context)) {
+        result->cancelled = true;
+        return ESP_ERR_INVALID_STATE;
+    }
     d1l_rp2040_file_result_t file = {0};
     (void)d1l_rp2040_bridge_file_delete(result->attribution_tmp_path, &file,
                                         D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     size_t offset = 0U;
     while (offset < (size_t)len) {
+        if (should_continue &&
+            !should_continue(continue_context)) {
+            result->cancelled = true;
+            return ESP_ERR_INVALID_STATE;
+        }
         const size_t remaining = (size_t)len - offset;
         const size_t chunk = remaining < D1L_RP2040_FILE_CHUNK_MAX ?
                              remaining : D1L_RP2040_FILE_CHUNK_MAX;
@@ -317,6 +617,11 @@ static esp_err_t write_attribution_metadata(
             return result->last_error;
         }
         offset += chunk;
+    }
+    if (should_continue &&
+        !should_continue(continue_context)) {
+        result->cancelled = true;
+        return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = d1l_rp2040_bridge_file_rename(result->attribution_tmp_path,
                                                   result->attribution_path, true,
@@ -357,6 +662,7 @@ static bool continue_allowed(d1l_map_tile_continue_cb_t should_continue, void *c
 typedef struct {
     d1l_map_tile_continue_cb_t caller;
     void *caller_context;
+    uint32_t background_token;
 } d1l_map_network_continue_t;
 
 static bool map_network_continue(void *context)
@@ -364,6 +670,8 @@ static bool map_network_continue(void *context)
     const d1l_map_network_continue_t *continuation =
         (const d1l_map_network_continue_t *)context;
     return continuation &&
+           !background_fetch_cancel_requested(
+               continuation->background_token) &&
            !d1l_connectivity_network_cancel_requested() &&
            continue_allowed(
                continuation->caller, continuation->caller_context);
@@ -462,6 +770,70 @@ static void cache_transaction_give(void)
 {
     if (s_cache_transaction_mutex) {
         xSemaphoreGive(s_cache_transaction_mutex);
+    }
+}
+
+static bool persistence_continue(
+    d1l_map_tile_download_result_t *result,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context)
+{
+    if (!result || result->cache_intent_recorded) {
+        return true;
+    }
+    if (continue_allowed(
+            should_continue, continue_context)) {
+        return true;
+    }
+    result->cancelled = true;
+    return false;
+}
+
+static esp_err_t cache_transaction_take_cancelable(
+    d1l_map_tile_download_result_t *result,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context)
+{
+    if (!persistence_continue(
+            result, should_continue, continue_context)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_cache_transaction_mutex) {
+        portENTER_CRITICAL(&s_cache_transaction_init_lock);
+        if (!s_cache_transaction_mutex) {
+            s_cache_transaction_mutex =
+                xSemaphoreCreateMutexStatic(
+                    &s_cache_transaction_mutex_storage);
+        }
+        portEXIT_CRITICAL(&s_cache_transaction_init_lock);
+    }
+    if (!s_cache_transaction_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+    const int64_t deadline_us = esp_timer_get_time() +
+        (int64_t)D1L_MAP_TILE_STORE_TRANSACTION_TIMEOUT_MS *
+            1000LL;
+    for (;;) {
+        if (!persistence_continue(
+                result, should_continue, continue_context)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        const int64_t remaining_us =
+            deadline_us - esp_timer_get_time();
+        if (remaining_us <= 0) {
+            return ESP_ERR_TIMEOUT;
+        }
+        uint32_t wait_ms =
+            (uint32_t)((remaining_us + 999LL) / 1000LL);
+        if (wait_ms > D1L_MAP_TILE_REQUEST_GATE_SLICE_MS) {
+            wait_ms = D1L_MAP_TILE_REQUEST_GATE_SLICE_MS;
+        }
+        TickType_t wait_ticks = pdMS_TO_TICKS(wait_ms);
+        if (xSemaphoreTake(
+                s_cache_transaction_mutex,
+                wait_ticks > 0U ? wait_ticks : 1U) == pdTRUE) {
+            return ESP_OK;
+        }
     }
 }
 
@@ -761,12 +1133,20 @@ static esp_err_t rename_cache_metadata(
         &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
 }
 
-static esp_err_t verify_tile_file(
+static esp_err_t verify_tile_file_continue(
     const char *path,
-    const d1l_map_tile_cache_record_t *record)
+    const d1l_map_tile_cache_record_t *record,
+    d1l_map_tile_download_result_t *result,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context)
 {
     if (!path || !record) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (result &&
+        !persistence_continue(
+            result, should_continue, continue_context)) {
+        return ESP_ERR_INVALID_STATE;
     }
     d1l_rp2040_file_result_t file = {0};
     esp_err_t ret = d1l_rp2040_bridge_file_stat(
@@ -785,6 +1165,12 @@ static esp_err_t verify_tile_file(
     uint32_t crc = 0U;
     uint32_t offset = 0U;
     while (offset < record->size) {
+        if (result &&
+            !persistence_continue(
+                result, should_continue, continue_context)) {
+            memset(chunk, 0, sizeof(chunk));
+            return ESP_ERR_INVALID_STATE;
+        }
         const size_t remaining = (size_t)record->size - offset;
         const size_t wanted = remaining < sizeof(chunk) ?
             remaining : sizeof(chunk);
@@ -815,6 +1201,14 @@ static esp_err_t verify_tile_file(
            d1l_map_tile_png_valid(header, sizeof(header)) &&
            crc == record->content_crc32 ?
         ESP_OK : ESP_ERR_INVALID_CRC;
+}
+
+static esp_err_t verify_tile_file(
+    const char *path,
+    const d1l_map_tile_cache_record_t *record)
+{
+    return verify_tile_file_continue(
+        path, record, NULL, NULL, NULL);
 }
 
 static esp_err_t recover_interrupted_record(
@@ -1204,7 +1598,9 @@ static esp_err_t prepare_cache_room(
     const d1l_map_tile_provider_t *provider,
     const d1l_storage_status_t *storage,
     uint64_t required_bytes,
-    d1l_map_tile_download_result_t *result)
+    d1l_map_tile_download_result_t *result,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context)
 {
     if (!provider || !storage || !result ||
         provider->cache_budget_mb == 0U) {
@@ -1226,6 +1622,14 @@ static esp_err_t prepare_cache_room(
     }
     while (!d1l_map_tile_cache_state_has_room(
                state, budget_bytes, required_bytes)) {
+        /*
+         * An eviction becomes one integrity unit at the first delete. Only
+         * stop between fully committed eviction units.
+         */
+        if (!persistence_continue(
+                result, should_continue, continue_context)) {
+            return ESP_ERR_INVALID_STATE;
+        }
         if (state->head_offset >= state->tail_offset) {
             return ESP_ERR_NO_MEM;
         }
@@ -1333,17 +1737,28 @@ static esp_err_t reconcile_cache_intent(
 static esp_err_t commit_cache_tile(
     const d1l_map_tile_provider_t *provider,
     const d1l_storage_status_t *storage,
-    d1l_map_tile_download_result_t *result)
+    d1l_map_tile_download_result_t *result,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context)
 {
     if (!provider || !storage || !result ||
         result->bytes == 0U ||
         result->bytes > UINT32_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!persistence_continue(
+            result, should_continue, continue_context)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_err_t ret = prepare_cache_room(
-        provider, storage, result->bytes, result);
+        provider, storage, result->bytes, result,
+        should_continue, continue_context);
     if (ret != ESP_OK) {
         return ret;
+    }
+    if (!persistence_continue(
+            result, should_continue, continue_context)) {
+        return ESP_ERR_INVALID_STATE;
     }
     d1l_map_tile_cache_paths_t paths = {0};
     d1l_map_tile_cache_state_t *state = NULL;
@@ -1373,6 +1788,10 @@ static esp_err_t commit_cache_tile(
     ret = write_cache_metadata_tmp(result, &record);
     if (ret != ESP_OK) {
         return ret;
+    }
+    if (!persistence_continue(
+            result, should_continue, continue_context)) {
+        return ESP_ERR_INVALID_STATE;
     }
     /*
      * Once append is attempted, preserve both validated temporary files on
@@ -1668,23 +2087,52 @@ esp_err_t d1l_map_tile_store_read(uint8_t z,
 typedef struct {
     char content_type[32];
     uint32_t retry_after_sec;
-} map_http_headers_t;
+    uint32_t minimum_request_interval_ms;
+    uint32_t background_token;
+    int socket_fd;
+    char source_id[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
+} map_http_context_t;
 
 static esp_err_t map_http_event(esp_http_client_event_t *event)
 {
-    if (!event || event->event_id != HTTP_EVENT_ON_HEADER || !event->user_data ||
+    if (!event || !event->user_data) {
+        return ESP_OK;
+    }
+    map_http_context_t *context =
+        (map_http_context_t *)event->user_data;
+    if (event->event_id == HTTP_EVENT_ON_CONNECTED) {
+        context->socket_fd =
+            esp_http_client_get_socket(event->client);
+        background_fetch_publish_socket(
+            context->background_token, context->socket_fd);
+        return ESP_OK;
+    }
+    if (event->event_id == HTTP_EVENT_HEADERS_SENT) {
+        request_gate_extend_minimum(
+            context->source_id,
+            esp_timer_get_time() +
+                (int64_t)context->minimum_request_interval_ms *
+                    1000LL);
+        return ESP_OK;
+    }
+    if (event->event_id == HTTP_EVENT_DISCONNECTED) {
+        background_fetch_clear_socket(
+            context->background_token, context->socket_fd);
+        context->socket_fd = -1;
+        return ESP_OK;
+    }
+    if (event->event_id != HTTP_EVENT_ON_HEADER ||
         !event->header_key || !event->header_value) {
         return ESP_OK;
     }
-    map_http_headers_t *headers = (map_http_headers_t *)event->user_data;
     if (strcasecmp(event->header_key, "Content-Type") == 0) {
-        snprintf(headers->content_type, sizeof(headers->content_type), "%s",
+        snprintf(context->content_type, sizeof(context->content_type), "%s",
                  event->header_value);
     } else if (strcasecmp(event->header_key, "Retry-After") == 0) {
         char *end = NULL;
         const unsigned long value = strtoul(event->header_value, &end, 10);
         if (end != event->header_value && value <= 86400UL) {
-            headers->retry_after_sec = (uint32_t)value;
+            context->retry_after_sec = (uint32_t)value;
         }
     }
     return ESP_OK;
@@ -1714,13 +2162,16 @@ static esp_err_t persist_validated_tile(
     const d1l_map_tile_provider_t *provider,
     const d1l_storage_status_t *storage,
     const uint8_t *buffer,
-    d1l_map_tile_download_result_t *result)
+    d1l_map_tile_download_result_t *result,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context)
 {
     if (!provider || !storage || !buffer || !result ||
         result->bytes == 0U || !result->png_valid) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = cache_transaction_take();
+    esp_err_t ret = cache_transaction_take_cancelable(
+        result, should_continue, continue_context);
     if (ret != ESP_OK) {
         return ret;
     }
@@ -1731,6 +2182,11 @@ static esp_err_t persist_validated_tile(
         provider, storage, &paths, &state);
     if (ret != ESP_OK || !state) {
         ret = ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+        goto persist_done;
+    }
+    if (!persistence_continue(
+            result, should_continue, continue_context)) {
+        ret = ESP_ERR_INVALID_STATE;
         goto persist_done;
     }
     result->cache_budget_bytes =
@@ -1745,9 +2201,21 @@ static esp_err_t persist_validated_tile(
     d1l_map_tile_cache_record_t metadata = {0};
     const esp_err_t metadata_ret = read_cache_metadata(
         result->metadata_path, &metadata);
+    const esp_err_t existing_tile_ret =
+        metadata_ret == ESP_OK &&
+        cache_metadata_matches_candidate(
+            &metadata, result) ?
+            verify_tile_file_continue(
+                result->path, &metadata, result,
+                should_continue, continue_context) :
+            ESP_ERR_NOT_FOUND;
+    if (result->cancelled) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto persist_done;
+    }
     if (metadata_ret == ESP_OK &&
         cache_metadata_matches_candidate(&metadata, result) &&
-        verify_tile_file(result->path, &metadata) == ESP_OK) {
+        existing_tile_ret == ESP_OK) {
         result->cache_hit = true;
         result->checksum_verified = true;
         result->attribution_saved = true;
@@ -1755,11 +2223,21 @@ static esp_err_t persist_validated_tile(
         goto persist_done;
     }
 
+    if (!persistence_continue(
+            result, should_continue, continue_context)) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto persist_done;
+    }
     cleanup_partial(result);
     candidate_tmp_owned = true;
     result->checksum_verified = false;
     d1l_rp2040_file_result_t file = {0};
     for (size_t offset = 0U; offset < result->bytes;) {
+        if (!persistence_continue(
+                result, should_continue, continue_context)) {
+            ret = ESP_ERR_INVALID_STATE;
+            goto persist_done;
+        }
         const size_t remaining = result->bytes - offset;
         const size_t chunk =
             remaining < D1L_RP2040_FILE_CHUNK_MAX ?
@@ -1778,6 +2256,11 @@ static esp_err_t persist_validated_tile(
         result->write_tmp = true;
         offset += chunk;
     }
+    if (!persistence_continue(
+            result, should_continue, continue_context)) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto persist_done;
+    }
     d1l_map_tile_cache_record_t verify_record = {0};
     if (!d1l_map_tile_cache_record_init(
             1U, result->z, result->x, result->y,
@@ -1786,19 +2269,35 @@ static esp_err_t persist_validated_tile(
         ret = ESP_ERR_INVALID_STATE;
         goto persist_done;
     }
-    ret = verify_tile_file(result->tmp_path, &verify_record);
+    ret = verify_tile_file_continue(
+        result->tmp_path, &verify_record, result,
+        should_continue, continue_context);
     if (ret != ESP_OK) {
         goto persist_done;
     }
     result->checksum_verified = true;
-    ret = write_attribution_metadata(provider, result);
-    if (ret == ESP_OK) {
-        ret = commit_cache_tile(provider, storage, result);
+    if (!persistence_continue(
+            result, should_continue, continue_context)) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto persist_done;
+    }
+    ret = write_attribution_metadata(
+        provider, result,
+        should_continue, continue_context);
+    if (ret == ESP_OK &&
+        persistence_continue(
+            result, should_continue, continue_context)) {
+        ret = commit_cache_tile(
+            provider, storage, result,
+            should_continue, continue_context);
+    } else if (ret == ESP_OK) {
+        ret = ESP_ERR_INVALID_STATE;
     }
 
 persist_done:
     if (ret != ESP_OK && candidate_tmp_owned &&
-        !result->cache_intent_recorded) {
+        !result->cache_intent_recorded &&
+        !result->cancelled) {
         cleanup_partial(result);
     }
     cache_transaction_give();
@@ -1811,6 +2310,8 @@ static esp_err_t map_tile_store_fetch_network(
                                    uint32_t y,
                                    const d1l_storage_status_t *status,
                                    bool wifi_connected,
+                                   uint32_t request_timeout_ms,
+                                   bool background_fetch,
                                    uint8_t *buffer,
                                    size_t buffer_size,
                                    size_t *out_len,
@@ -1818,7 +2319,8 @@ static esp_err_t map_tile_store_fetch_network(
                                    void *continue_context,
                                    d1l_map_tile_download_result_t *out_result)
 {
-    if (!buffer || !out_len || !out_result || buffer_size < D1L_MAP_TILE_DOWNLOAD_MAX_BYTES) {
+    if (!buffer || !out_len || !out_result || request_timeout_ms == 0U ||
+        buffer_size < D1L_MAP_TILE_DOWNLOAD_MAX_BYTES) {
         return ESP_ERR_INVALID_ARG;
     }
     *out_len = 0U;
@@ -1858,12 +2360,32 @@ static esp_err_t map_tile_store_fetch_network(
     d1l_map_network_continue_t continuation = {
         .caller = should_continue,
         .caller_context = continue_context,
+        .background_token = 0U,
     };
     if (!map_network_continue(&continuation)) {
         result.cancelled = true;
         download_step(&result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
         *out_result = result;
         return result.last_error;
+    }
+    if (background_fetch) {
+        continuation.background_token =
+            background_fetch_begin();
+        if (continuation.background_token == 0U) {
+            download_step(
+                &result, "cancel_registry", ESP_ERR_NO_MEM, NULL);
+            *out_result = result;
+            return result.last_error;
+        }
+        if (!map_network_continue(&continuation)) {
+            result.cancelled = true;
+            download_step(
+                &result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
+            background_fetch_finish(
+                continuation.background_token);
+            *out_result = result;
+            return result.last_error;
+        }
     }
     esp_err_t ret = d1l_connectivity_network_lease_begin(
         D1L_MAP_TILE_NETWORK_LEASE_TIMEOUT_MS);
@@ -1872,6 +2394,8 @@ static esp_err_t map_tile_store_fetch_network(
         download_step(
             &result, result.cancelled ? "cancelled" : "network_lease",
             ret, NULL);
+        background_fetch_finish(
+            continuation.background_token);
         *out_result = result;
         return result.last_error;
     }
@@ -1891,17 +2415,60 @@ static esp_err_t map_tile_store_fetch_network(
         goto network_done;
     }
 
-    map_http_headers_t headers = {0};
+    int gate_retry_status = 0;
+    uint32_t gate_retry_after_sec = 0U;
+    ret = request_gate_wait(
+        provider.source_id,
+        map_network_continue, &continuation,
+        &gate_retry_status, &gate_retry_after_sec);
+    if (ret != ESP_OK) {
+        if (gate_retry_status == 429 ||
+            gate_retry_status == 503) {
+            result.status_code = gate_retry_status;
+            result.retry_after_sec =
+                gate_retry_after_sec;
+            download_step(
+                &result, "rate_limited",
+                ESP_ERR_TIMEOUT, NULL);
+        } else if (!map_network_continue(&continuation)) {
+            result.cancelled = true;
+            download_step(
+                &result, "cancelled",
+                ESP_ERR_INVALID_STATE, NULL);
+        } else {
+            download_step(
+                &result, "request_gate", ret, NULL);
+        }
+        goto network_done;
+    }
+
+    map_http_context_t http_context = {
+        .minimum_request_interval_ms =
+            provider.minimum_request_interval_ms,
+        .background_token =
+            continuation.background_token,
+        .socket_fd = -1,
+    };
+    snprintf(
+        http_context.source_id,
+        sizeof(http_context.source_id), "%s",
+        provider.source_id);
     esp_http_client_config_t config = {
         .url = result.url,
         .method = HTTP_METHOD_GET,
-        .timeout_ms = D1L_MAP_TILE_HTTP_TIMEOUT_MS,
+        /*
+         * The provider contract requires HTTPS, so IDF's async transport is
+         * available. Keep each socket/TLS wait on this owning task short; the
+         * phase deadlines below supply the foreground/background budget.
+         */
+        .timeout_ms = D1L_MAP_TILE_HTTP_IO_SLICE_MS,
+        .is_async = true,
         .user_agent = D1L_MAP_TILE_USER_AGENT,
         .buffer_size = D1L_RP2040_FILE_CHUNK_MAX,
         .buffer_size_tx = 512,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = map_http_event,
-        .user_data = &headers,
+        .user_data = &http_context,
     };
     client = esp_http_client_init(&config);
     if (!client) {
@@ -1909,7 +2476,26 @@ static esp_err_t map_tile_store_fetch_network(
         goto network_done;
     }
 
-    ret = esp_http_client_open(client, 0);
+    const int64_t open_deadline_us = esp_timer_get_time() +
+        (int64_t)request_timeout_ms * 1000LL;
+    do {
+        if (!map_network_continue(&continuation)) {
+            result.cancelled = true;
+            download_step(
+                &result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
+            goto network_done;
+        }
+        ret = esp_http_client_open(client, 0);
+        if (ret == ESP_ERR_HTTP_EAGAIN &&
+            esp_timer_get_time() >= open_deadline_us) {
+            download_step(&result, "http_open", ESP_ERR_TIMEOUT, NULL);
+            ret = result.last_error;
+            goto network_done;
+        }
+        if (ret == ESP_ERR_HTTP_EAGAIN) {
+            vTaskDelay(1U);
+        }
+    } while (ret == ESP_ERR_HTTP_EAGAIN);
     if (ret != ESP_OK) {
         download_step(&result, "http_open", ret, NULL);
         goto network_done;
@@ -1919,7 +2505,54 @@ static esp_err_t map_tile_store_fetch_network(
         download_step(&result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
         goto network_done;
     }
-    const int64_t content_length = esp_http_client_fetch_headers(client);
+    const int64_t header_deadline_us = esp_timer_get_time() +
+        (int64_t)request_timeout_ms * 1000LL;
+    int64_t content_length = -ESP_ERR_HTTP_EAGAIN;
+    while (content_length == -ESP_ERR_HTTP_EAGAIN) {
+        if (!map_network_continue(&continuation)) {
+            result.cancelled = true;
+            download_step(
+                &result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
+            goto network_done;
+        }
+        content_length = esp_http_client_fetch_headers(client);
+        if (content_length == -ESP_ERR_HTTP_EAGAIN &&
+            esp_timer_get_time() >= header_deadline_us) {
+            download_step(
+                &result, "fetch_headers", ESP_ERR_TIMEOUT, NULL);
+            ret = result.last_error;
+            goto network_done;
+        }
+        if (content_length == -ESP_ERR_HTTP_EAGAIN) {
+            vTaskDelay(1U);
+        }
+    }
+    if (content_length >= 0) {
+        result.status_code =
+            esp_http_client_get_status_code(client);
+        result.retry_after_sec =
+            http_context.retry_after_sec;
+        result.content_type_valid =
+            png_content_type(http_context.content_type);
+        if (result.status_code == 429 ||
+            result.status_code == 503) {
+            if (result.retry_after_sec == 0U) {
+                result.retry_after_sec =
+                    D1L_MAP_TILE_DEFAULT_RETRY_AFTER_SEC;
+            }
+            request_gate_extend_retry(
+                provider.source_id,
+                result.status_code,
+                esp_timer_get_time() +
+                    (int64_t)result.retry_after_sec *
+                        1000000LL);
+            download_step(
+                &result, "rate_limited",
+                ESP_ERR_TIMEOUT, NULL);
+            ret = result.last_error;
+            goto network_done;
+        }
+    }
     if (!map_network_continue(&continuation)) {
         result.cancelled = true;
         download_step(&result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
@@ -1936,14 +2569,6 @@ static esp_err_t map_tile_store_fetch_network(
     const bool content_length_known = !chunked && content_length > 0;
     const size_t download_limit = buffer_size < D1L_MAP_TILE_DOWNLOAD_MAX_BYTES ?
                                   buffer_size : D1L_MAP_TILE_DOWNLOAD_MAX_BYTES;
-    result.status_code = esp_http_client_get_status_code(client);
-    result.retry_after_sec = headers.retry_after_sec;
-    result.content_type_valid = png_content_type(headers.content_type);
-    if (result.status_code == 429) {
-        download_step(&result, "rate_limited", ESP_ERR_TIMEOUT, NULL);
-        ret = result.last_error;
-        goto network_done;
-    }
     if (result.status_code != 200) {
         download_step(&result, "http_status", ESP_FAIL, NULL);
         ret = result.last_error;
@@ -1961,6 +2586,8 @@ static esp_err_t map_tile_store_fetch_network(
     }
 
     int idle_reads = 0;
+    int64_t read_deadline_us = esp_timer_get_time() +
+        (int64_t)request_timeout_ms * 1000LL;
     while (!esp_http_client_is_complete_data_received(client)) {
         if (!map_network_continue(&continuation)) {
             result.cancelled = true;
@@ -1977,6 +2604,23 @@ static esp_err_t map_tile_store_fetch_network(
             goto network_done;
         }
         const int read_len = esp_http_client_read(client, (char *)&buffer[result.bytes], want);
+        if (read_len == -ESP_ERR_HTTP_EAGAIN) {
+            if (!map_network_continue(&continuation)) {
+                result.cancelled = true;
+                download_step(
+                    &result, "cancelled", ESP_ERR_INVALID_STATE, NULL);
+                ret = result.last_error;
+                goto network_done;
+            }
+            if (esp_timer_get_time() >= read_deadline_us) {
+                download_step(
+                    &result, "http_read", ESP_ERR_TIMEOUT, NULL);
+                ret = result.last_error;
+                goto network_done;
+            }
+            vTaskDelay(1U);
+            continue;
+        }
         if (read_len < 0) {
             download_step(&result, "http_read", ESP_FAIL, NULL);
             ret = result.last_error;
@@ -1995,6 +2639,8 @@ static esp_err_t map_tile_store_fetch_network(
         }
         idle_reads = 0;
         result.bytes += (size_t)read_len;
+        read_deadline_us = esp_timer_get_time() +
+            (int64_t)request_timeout_ms * 1000LL;
     }
     if (!esp_http_client_is_complete_data_received(client) || result.bytes == 0U ||
         (content_length_known && result.bytes != (size_t)content_length)) {
@@ -2021,6 +2667,25 @@ static esp_err_t map_tile_store_fetch_network(
     persist_tile = true;
 
 network_done:
+    const bool rate_response =
+        result.status_code == 429 ||
+        result.status_code == 503;
+    if (!persist_tile && !rate_response &&
+        (!map_network_continue(&continuation) ||
+         background_fetch_cancel_requested(
+             continuation.background_token))) {
+        result.cancelled = true;
+        download_step(
+            &result, "cancelled",
+            ESP_ERR_INVALID_STATE, NULL);
+        ret = result.last_error;
+    }
+    /*
+     * Detach the descriptor under the token mutex before the owner closes it.
+     * Keep only the cancellation latch active through reversible persistence.
+     */
+    background_fetch_detach_socket(
+        continuation.background_token);
     if (client) {
         (void)esp_http_client_close(client);
         (void)esp_http_client_cleanup(client);
@@ -2028,14 +2693,23 @@ network_done:
     d1l_connectivity_network_lease_end();
     if (persist_tile) {
         ret = persist_validated_tile(
-            &provider, status, buffer, &result);
+            &provider, status, buffer, &result,
+            map_network_continue, &continuation);
         if (ret != ESP_OK) {
-            download_step(&result, "cache_persist", ret, &result.file);
+            download_step(
+                &result,
+                result.cancelled ?
+                    "cancelled" : "cache_persist",
+                result.cancelled ?
+                    ESP_ERR_INVALID_STATE : ret,
+                &result.file);
         } else {
             download_step(&result, "ok", ESP_OK, &result.file);
             *out_len = result.bytes;
         }
     }
+    background_fetch_finish(
+        continuation.background_token);
     *out_result = result;
     return result.last_error;
 }
@@ -2053,7 +2727,28 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
                                    d1l_map_tile_download_result_t *out_result)
 {
     return map_tile_store_fetch_network(
-        z, x, y, status, wifi_connected, buffer, buffer_size,
+        z, x, y, status, wifi_connected, D1L_MAP_TILE_HTTP_TIMEOUT_MS,
+        false, buffer, buffer_size,
+        out_len, should_continue, continue_context, out_result);
+}
+
+esp_err_t d1l_map_tile_store_fetch_background(
+    uint8_t z,
+    uint32_t x,
+    uint32_t y,
+    const d1l_storage_status_t *status,
+    bool wifi_connected,
+    uint8_t *buffer,
+    size_t buffer_size,
+    size_t *out_len,
+    d1l_map_tile_continue_cb_t should_continue,
+    void *continue_context,
+    d1l_map_tile_download_result_t *out_result)
+{
+    return map_tile_store_fetch_network(
+        z, x, y, status, wifi_connected,
+        D1L_MAP_TILE_BACKGROUND_HTTP_TIMEOUT_MS, true,
+        buffer, buffer_size,
         out_len, should_continue, continue_context, out_result);
 }
 
