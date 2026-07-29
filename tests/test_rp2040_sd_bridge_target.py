@@ -46,7 +46,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "Serial1.setTX(RP2040_ESP32_TX_PIN)" in sketch
     assert "constexpr uint8_t RP2040_ESP32_RX_PIN = 17;" in sketch
     assert "constexpr uint8_t RP2040_ESP32_TX_PIN = 16;" in sketch
-    assert "constexpr uint32_t ESP32_BRIDGE_BAUD = 115200;" in sketch
+    assert "constexpr uint32_t ESP32_BRIDGE_BAUD = 460800;" in sketch
     assert "constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;" in sketch
     assert "constexpr uint8_t SD_CS_PIN = 13;" in sketch
     assert "constexpr uint8_t SD_DET_PIN = 7;" in sketch

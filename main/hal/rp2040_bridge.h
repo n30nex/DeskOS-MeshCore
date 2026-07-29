@@ -33,6 +33,7 @@ typedef struct {
     bool bridge_ready;
     bool protocol_supported;
     bool atomic_rename_supported;
+    bool stream_write_supported;
     bool response_truncated;
     bool sd_touched;
     uint32_t protocol_version;
@@ -109,16 +110,22 @@ typedef struct {
     bool exists;
     bool is_directory;
     bool eof;
+    bool removed;
+    bool removed_known;
+    bool cancelled;
     uint16_t request_id;
     uint32_t size;
     uint32_t offset;
     uint32_t length;
+    uint32_t next_offset;
     uint32_t crc32;
     esp_err_t last_error;
     char op[12];
     char err[24];
     char note[48];
 } d1l_rp2040_file_result_t;
+
+typedef bool (*d1l_rp2040_file_continue_cb_t)(void *context);
 
 typedef struct {
     bool bridge_ready;
@@ -185,6 +192,20 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path,
                                        bool truncate,
                                        d1l_rp2040_file_result_t *out_result,
                                        uint32_t timeout_ms);
+/*
+ * Streams one complete file through the RP2040-owned verified put session.
+ * The operation is all-or-abort, holds sole bridge ownership across the
+ * session, and never falls back to legacy chunk writes when unsupported.
+ */
+esp_err_t d1l_rp2040_bridge_file_write_verified(
+    const char *path,
+    const uint8_t *data,
+    size_t len,
+    uint32_t expected_crc32,
+    d1l_rp2040_file_continue_cb_t should_continue,
+    void *continue_context,
+    d1l_rp2040_file_result_t *out_result,
+    uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_file_append(const char *path,
                                         const uint8_t *data,
                                         size_t len,

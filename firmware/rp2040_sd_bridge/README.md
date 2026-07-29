@@ -36,7 +36,7 @@ It speaks the newline-delimited protocol documented in
   RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
   so a floating or open card-response line does not read as a false all-zero
   response.
-- UART baud: 115200 for reliable bounded ESP32/RP2040 command exchange.
+- UART baud: 460800 for bounded ESP32/RP2040 file transfer and command exchange.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
 This bridge code is original project code and intentionally keeps the protocol
@@ -57,7 +57,7 @@ maintainer's SPI1 pin method names used by Seeed's sample: `setCS`, `setRX`,
 `setTX`, and `setSCK`.
 
 The production bridge deliberately selects Arduino-Pico's `No USB` stack. Its
-only production control/data path is the 115200-baud ESP32 UART, including the
+only production control/data path is the 460800-baud ESP32 UART, including the
 explicit `DESKOS_SD_BOOTLOADER` command. This prevents an unrelated Windows
 serial poll from using Arduino-Pico's standard 1200-baud/DTR USB-CDC trigger to
 put the RP2040 into UF2 mode and mount an Explorer drive while the bridge is
@@ -187,8 +187,10 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   detect signature returns, so an empty-slot remount cannot erase reinsertion
   monitoring.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`
-  without probing, mounting, formatting, or writing SD. ESP32 exposes this as
-  `rp2040 ping` for bridge-app validation before any SD-specific request.
+  without probing, mounting, formatting, or writing SD. It advertises
+  `stream_write=1` when the fail-closed streaming put operations are available.
+  ESP32 exposes this as `rp2040 ping` for bridge-app validation before any
+  SD-specific request.
 - `DESKOS_SD_BOOTLOADER` replies with `ok=1`, `sd_touch=0`,
   `public_rf_tx=0`, and `formats_sd=0`, then calls the Arduino-Pico
   `rp2040.rebootToBootloader()` API so autonomous validation can copy a UF2
@@ -235,6 +237,18 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   existing final file so ordinary rename failures do not erase the old final.
   The full-path buffer is sized for a maximum 96-byte relative path plus the
   internal `.bak` suffix used by that rollback step.
+- The same v1 file protocol provides `put_begin`, `put_chunk`, `put_end`, and
+  `put_abort` for files up to 256 KiB. A streaming put opens and truncates its
+  target once, requires exact sequential offsets and a CRC32 on every chunk,
+  then flushes, closes, and verifies the complete size and CRC32 by reading the
+  file locally on the RP2040. Only that fully verified `put_end` returns
+  success. One session may be active; other file operations fail with `busy`,
+  and session operations without one fail with `no_session`. Abort closes and
+  removes the uncommitted partial target when present. Terminal write and
+  verification failures do the same and report whether removal was confirmed.
+  A failed removal retains cleanup-only ownership so `put_abort` can retry;
+  no ordinary file operation can observe or commit that partial target through
+  the bridge session.
 - No formatting happens at boot, ping, status, mount, diagnostics, or file
   checks.
 - Retained Public message history, DM history, route history, and packet history

@@ -25,7 +25,7 @@ constexpr uint32_t FILE_PROTOCOL_VERSION = 1;
 
 constexpr uint8_t RP2040_ESP32_RX_PIN = 17;
 constexpr uint8_t RP2040_ESP32_TX_PIN = 16;
-constexpr uint32_t ESP32_BRIDGE_BAUD = 115200;
+constexpr uint32_t ESP32_BRIDGE_BAUD = 460800;
 
 constexpr uint8_t SD_CS_PIN = 13;
 constexpr uint8_t SD_DET_PIN = 7;
@@ -74,6 +74,8 @@ constexpr size_t FILE_LINE_MAX = 512;
 constexpr size_t RX_LINE_MAX = FILE_LINE_MAX + 1;
 constexpr size_t FILE_PATH_MAX = 96;
 constexpr size_t FILE_CHUNK_MAX = 192;
+constexpr uint32_t FILE_STREAM_MAX_BYTES = 256U * 1024U;
+constexpr size_t FILE_VERIFY_CHUNK_BYTES = 512;
 constexpr size_t FILE_PATH64_MAX = 128;
 constexpr size_t FILE_DATA64_MAX = 256;
 constexpr char REPLACE_BACKUP_SUFFIX[] = ".bak";
@@ -176,6 +178,16 @@ struct LineRx {
     bool drop_until_newline;
 };
 
+struct FilePutSession {
+    volatile bool active;
+    bool cleanup_required;
+    File file;
+    char full_path[FILE_FULL_PATH_MAX];
+    uint32_t expected_size;
+    uint32_t expected_crc;
+    uint32_t next_offset;
+};
+
 enum SdWorkerRequest : uint8_t {
     SD_WORKER_NONE = 0,
     SD_WORKER_MOUNT = 1,
@@ -205,6 +217,7 @@ bool s_sd_pin_cs_ok = false;
 volatile uint8_t s_worker_request = SD_WORKER_NONE;
 volatile bool s_worker_busy = false;
 volatile bool s_file_command_active = false;
+FilePutSession s_file_put = {};
 volatile bool s_mount_worker_completed = false;
 volatile uint32_t s_worker_snapshot_revision = 0;
 volatile uint32_t s_worker_diag_revision = 0;
@@ -1434,7 +1447,8 @@ SdSnapshot current_status() {
 
     const bool removal_check_safe = !s_worker_busy &&
                                     s_worker_request == SD_WORKER_NONE &&
-                                    !s_file_command_active;
+                                    !s_file_command_active &&
+                                    !s_file_put.active;
     if (removal_check_safe && snapshot_ready_for_file_ops(s_cached_snapshot) &&
         s_sd_detect_inserted_signature_proven) {
         const DetectSample detect = sample_sd_detect();
@@ -1540,7 +1554,8 @@ void refresh_worker_results() {
 
 bool start_sd_worker(SdWorkerRequest request) {
     refresh_worker_results();
-    if (request == SD_WORKER_NONE || s_worker_busy || s_worker_request != SD_WORKER_NONE) {
+    if (request == SD_WORKER_NONE || s_worker_busy ||
+        s_worker_request != SD_WORKER_NONE || s_file_put.active) {
         return false;
     }
     if (request == SD_WORKER_MOUNT) {
@@ -1909,7 +1924,7 @@ SdSnapshot request_mount_status() {
             return status;
         }
         if (s_worker_busy || s_worker_request != SD_WORKER_NONE ||
-            s_file_command_active) {
+            s_file_command_active || s_file_put.active) {
             return pending_snapshot("sd_worker_busy");
         }
         (void)recover_file_ops_mount();
@@ -2016,8 +2031,7 @@ String bool_token(bool value) {
     return value ? "1" : "0";
 }
 
-uint32_t crc32_bytes(const uint8_t *data, size_t len) {
-    uint32_t crc = 0xFFFFFFFFUL;
+uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
     for (size_t i = 0; i < len; ++i) {
         crc ^= data[i];
         for (int bit = 0; bit < 8; ++bit) {
@@ -2025,13 +2039,21 @@ uint32_t crc32_bytes(const uint8_t *data, size_t len) {
             crc = (crc >> 1) ^ (0xEDB88320UL & mask);
         }
     }
-    return ~crc;
+    return crc;
+}
+
+uint32_t crc32_bytes(const uint8_t *data, size_t len) {
+    return ~crc32_update(0xFFFFFFFFUL, data, len);
+}
+
+String crc32_value_token(uint32_t crc) {
+    char token[9];
+    snprintf(token, sizeof(token), "%08lX", static_cast<unsigned long>(crc));
+    return String(token);
 }
 
 String crc32_token(const uint8_t *data, size_t len) {
-    char token[9];
-    snprintf(token, sizeof(token), "%08lX", static_cast<unsigned long>(crc32_bytes(data, len)));
-    return String(token);
+    return crc32_value_token(crc32_bytes(data, len));
 }
 
 int base64url_value(char c) {
@@ -2170,6 +2192,29 @@ bool parse_bool_token(const char *line, const char *key, bool *out_value) {
         return true;
     }
     return false;
+}
+
+bool parse_crc32_token(const char *line, const char *key, uint32_t *out_value) {
+    char value[9];
+    if (!copy_token_value(line, key, value, sizeof(value)) ||
+        strlen(value) != 8U) {
+        return false;
+    }
+
+    uint32_t parsed = 0;
+    for (size_t i = 0; i < 8U; ++i) {
+        uint8_t digit = 0;
+        if (value[i] >= '0' && value[i] <= '9') {
+            digit = static_cast<uint8_t>(value[i] - '0');
+        } else if (value[i] >= 'A' && value[i] <= 'F') {
+            digit = static_cast<uint8_t>(value[i] - 'A' + 10U);
+        } else {
+            return false;
+        }
+        parsed = (parsed << 4U) | digit;
+    }
+    *out_value = parsed;
+    return true;
 }
 
 bool is_path_char(char c) {
@@ -2475,6 +2520,7 @@ void send_ping() {
     line += String(static_cast<unsigned long>(FILE_PATH_MAX));
     line += " atomic_rename=";
     line += bool_token(REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE);
+    line += " stream_write=1";
     line += " sd_touch=0";
     reply_stream->println(line);
 }
@@ -2550,6 +2596,253 @@ bool decode_file_data(const char *line, uint8_t *data, size_t data_size, size_t 
         return false;
     }
     return true;
+}
+
+void close_file_put_session() {
+    s_file_put.file.close();
+    s_file_put.active = false;
+    s_file_put.cleanup_required = false;
+    s_file_put.full_path[0] = '\0';
+    s_file_put.expected_size = 0;
+    s_file_put.expected_crc = 0;
+    s_file_put.next_offset = 0;
+}
+
+bool remove_file_put_target_and_release() {
+    s_file_put.file.close();
+    bool removed = !SD.exists(s_file_put.full_path);
+    if (!removed) {
+        removed = SD.remove(s_file_put.full_path) &&
+                  !SD.exists(s_file_put.full_path);
+    }
+    if (removed) {
+        close_file_put_session();
+    } else {
+        s_file_put.cleanup_required = true;
+        s_file_put.active = true;
+    }
+    return removed;
+}
+
+void send_file_terminal_error(uint32_t request_id, const char *op,
+                              const char *err, bool removed) {
+    String line(FILE_REPLY);
+    line += " v=1 id=";
+    line += String(static_cast<unsigned long>(request_id));
+    line += " ok=0 op=";
+    line += op;
+    line += " err=";
+    line += err;
+    line += " removed=";
+    line += bool_token(removed);
+    line += " note=";
+    line += err;
+    reply_stream->println(line);
+    reply_stream->flush();
+}
+
+bool prepare_file_put_target(const char *full_path, const char **err) {
+    if (!ensure_parent_dirs(full_path)) {
+        *err = "open_failed";
+        return false;
+    }
+    if (SD.exists(full_path) && !SD.remove(full_path)) {
+        *err = "delete_failed";
+        return false;
+    }
+    return true;
+}
+
+void handle_file_put_begin(uint32_t request_id, const char *line) {
+    char relative[FILE_PATH_MAX + 1U];
+    char full_path[FILE_FULL_PATH_MAX];
+    uint32_t expected_size = 0;
+    uint32_t expected_crc = 0;
+    if (!decode_path_token(line, "path", relative, sizeof(relative)) ||
+        !make_full_path(relative, full_path, sizeof(full_path))) {
+        send_file_error(request_id, "put_begin", "bad_path");
+        return;
+    }
+    if (!parse_u32_token(line, "size", &expected_size) ||
+        !parse_crc32_token(line, "crc", &expected_crc)) {
+        send_file_error(request_id, "put_begin", "bad_value");
+        return;
+    }
+    if (expected_size > FILE_STREAM_MAX_BYTES) {
+        send_file_error(request_id, "put_begin", "too_large");
+        return;
+    }
+
+    const char *err = nullptr;
+    if (!prepare_file_put_target(full_path, &err)) {
+        if (!recover_file_ops_mount() ||
+            !prepare_file_put_target(full_path, &err)) {
+            close_file_put_session();
+            send_file_error(request_id, "put_begin", err ? err : "open_failed");
+            return;
+        }
+    }
+
+    s_file_put.file = SD.open(full_path, "w");
+    if (!s_file_put.file) {
+        close_file_put_session();
+        send_file_error(request_id, "put_begin", "open_failed");
+        return;
+    }
+
+    snprintf(s_file_put.full_path, sizeof(s_file_put.full_path), "%s", full_path);
+    s_file_put.expected_size = expected_size;
+    s_file_put.expected_crc = expected_crc;
+    s_file_put.next_offset = 0;
+    s_file_put.cleanup_required = false;
+    s_file_put.active = true;
+
+    String out(FILE_REPLY);
+    out += " v=1 id=";
+    out += String(static_cast<unsigned long>(request_id));
+    out += " ok=1 op=put_begin off=0 size=";
+    out += String(static_cast<unsigned long>(expected_size));
+    out += " crc=";
+    out += crc32_value_token(expected_crc);
+    out += " note=ok";
+    reply_stream->println(out);
+    reply_stream->flush();
+}
+
+void handle_file_put_chunk(uint32_t request_id, const char *line) {
+    uint32_t offset = 0;
+    uint8_t data[FILE_CHUNK_MAX];
+    size_t data_len = 0;
+    const char *err = "bad_request";
+    if (!parse_u32_token(line, "off", &offset)) {
+        send_file_error(request_id, "put_chunk", "range");
+        return;
+    }
+    if (!decode_file_data(line, data, sizeof(data), &data_len, &err)) {
+        send_file_error(request_id, "put_chunk", err);
+        return;
+    }
+    if (data_len == 0U) {
+        send_file_error(request_id, "put_chunk", "bad_value");
+        return;
+    }
+    if (offset != s_file_put.next_offset ||
+        s_file_put.next_offset > s_file_put.expected_size ||
+        data_len > s_file_put.expected_size - s_file_put.next_offset) {
+        send_file_error(request_id, "put_chunk", "range");
+        return;
+    }
+    if (!s_file_put.file) {
+        const bool removed = remove_file_put_target_and_release();
+        send_file_terminal_error(request_id, "put_chunk", "write_failed", removed);
+        return;
+    }
+
+    const size_t written = s_file_put.file.write(data, data_len);
+    if (written != data_len) {
+        const bool removed = remove_file_put_target_and_release();
+        send_file_terminal_error(request_id, "put_chunk", "write_failed", removed);
+        return;
+    }
+    s_file_put.next_offset += static_cast<uint32_t>(written);
+
+    String out(FILE_REPLY);
+    out += " v=1 id=";
+    out += String(static_cast<unsigned long>(request_id));
+    out += " ok=1 op=put_chunk off=";
+    out += String(static_cast<unsigned long>(offset));
+    out += " len=";
+    out += String(static_cast<unsigned long>(written));
+    out += " next=";
+    out += String(static_cast<unsigned long>(s_file_put.next_offset));
+    out += " note=ok";
+    reply_stream->println(out);
+    reply_stream->flush();
+}
+
+void handle_file_put_end(uint32_t request_id) {
+    char full_path[FILE_FULL_PATH_MAX];
+    snprintf(full_path, sizeof(full_path), "%s", s_file_put.full_path);
+    const uint32_t expected_size = s_file_put.expected_size;
+    const uint32_t expected_crc = s_file_put.expected_crc;
+
+    if (s_file_put.file) {
+        s_file_put.file.flush();
+    }
+    s_file_put.file.close();
+
+    File verify = SD.open(full_path, FILE_READ);
+    if (!verify || verify.isDirectory()) {
+        const bool is_directory = verify && verify.isDirectory();
+        if (verify) {
+            verify.close();
+        }
+        const bool removed = remove_file_put_target_and_release();
+        send_file_terminal_error(request_id, "put_end",
+                                 is_directory ? "is_dir" : "open_failed", removed);
+        return;
+    }
+
+    const uint32_t actual_size = static_cast<uint32_t>(verify.size());
+    if (actual_size != expected_size) {
+        verify.close();
+        const bool removed = remove_file_put_target_and_release();
+        send_file_terminal_error(request_id, "put_end", "size_mismatch", removed);
+        return;
+    }
+
+    uint8_t buffer[FILE_VERIFY_CHUNK_BYTES];
+    uint32_t crc_state = 0xFFFFFFFFUL;
+    uint32_t verified_size = 0;
+    while (verified_size < actual_size) {
+        const uint32_t remaining = actual_size - verified_size;
+        const size_t requested = remaining < sizeof(buffer) ?
+                                     static_cast<size_t>(remaining) :
+                                     sizeof(buffer);
+        const int read_len = verify.read(buffer, requested);
+        if (read_len <= 0) {
+            verify.close();
+            const bool removed = remove_file_put_target_and_release();
+            send_file_terminal_error(request_id, "put_end", "read_failed", removed);
+            return;
+        }
+        crc_state = crc32_update(crc_state, buffer, static_cast<size_t>(read_len));
+        verified_size += static_cast<uint32_t>(read_len);
+    }
+    verify.close();
+    const uint32_t actual_crc = ~crc_state;
+    if (actual_crc != expected_crc) {
+        const bool removed = remove_file_put_target_and_release();
+        send_file_terminal_error(request_id, "put_end", "crc_mismatch", removed);
+        return;
+    }
+
+    close_file_put_session();
+    String out(FILE_REPLY);
+    out += " v=1 id=";
+    out += String(static_cast<unsigned long>(request_id));
+    out += " ok=1 op=put_end size=";
+    out += String(static_cast<unsigned long>(verified_size));
+    out += " crc=";
+    out += crc32_value_token(actual_crc);
+    out += " note=ok";
+    reply_stream->println(out);
+    reply_stream->flush();
+}
+
+void handle_file_put_abort(uint32_t request_id) {
+    const bool removed = remove_file_put_target_and_release();
+    if (!removed) {
+        send_file_terminal_error(request_id, "put_abort", "delete_failed", false);
+        return;
+    }
+
+    String out(FILE_REPLY);
+    out += " v=1 id=";
+    out += String(static_cast<unsigned long>(request_id));
+    out += " ok=1 op=put_abort removed=1 note=ok";
+    reply_stream->println(out);
+    reply_stream->flush();
 }
 
 void handle_file_stat(uint32_t request_id, const char *line) {
@@ -2830,6 +3123,30 @@ void handle_file_line(const char *line) {
     }
 
     s_file_command_active = true;
+    const bool put_chunk = strcmp(op, "put_chunk") == 0;
+    const bool put_end = strcmp(op, "put_end") == 0;
+    const bool put_abort = strcmp(op, "put_abort") == 0;
+    if (s_file_put.active) {
+        if (s_file_put.cleanup_required && !put_abort) {
+            send_file_error(request_id, op, "abort_required");
+        } else if (put_chunk) {
+            handle_file_put_chunk(request_id, line);
+        } else if (put_end) {
+            handle_file_put_end(request_id);
+        } else if (put_abort) {
+            handle_file_put_abort(request_id);
+        } else {
+            send_file_error(request_id, op, "busy");
+        }
+        s_file_command_active = false;
+        return;
+    }
+    if (put_chunk || put_end || put_abort) {
+        send_file_error(request_id, op, "no_session");
+        s_file_command_active = false;
+        return;
+    }
+
     if (!wait_for_sd_worker_idle(FILE_WORKER_IDLE_WAIT_MS)) {
         s_file_command_active = false;
         send_file_error(request_id, op, "busy");
@@ -2866,6 +3183,8 @@ void handle_file_line(const char *line) {
         handle_file_delete(request_id, line);
     } else if (strcmp(op, "rename") == 0) {
         handle_file_rename(request_id, line);
+    } else if (strcmp(op, "put_begin") == 0) {
+        handle_file_put_begin(request_id, line);
     } else {
         send_file_error(request_id, op, "unsupported_op");
     }
@@ -2974,7 +3293,8 @@ void poll_stream(Stream &in, Stream &out, LineRx &rx) {
 
 void sd_worker_loop_once() {
     const uint8_t request = s_worker_request;
-    if (request == SD_WORKER_NONE || s_worker_busy || s_file_command_active) {
+    if (request == SD_WORKER_NONE || s_worker_busy ||
+        s_file_command_active || s_file_put.active) {
         delay(2);
         return;
     }

@@ -288,6 +288,17 @@ esp_err_t d1l_rp2040_file_reply_parse(
         return ESP_FAIL;
     }
     if (!result->ok) {
+        const char *removed_value = NULL;
+        size_t removed_len = 0U;
+        if (token_value_span(
+                line, "removed",
+                &removed_value, &removed_len)) {
+            if (!parse_bool_token(
+                    line, "removed", &result->removed)) {
+                return bad_response(result);
+            }
+            result->removed_known = true;
+        }
         result->last_error = map_file_error(result->err);
         return result->last_error;
     }
@@ -336,6 +347,28 @@ esp_err_t d1l_rp2040_file_reply_parse(
             !parse_u32_token(line, "size", &result->size)) {
             return bad_response(result);
         }
+    } else if (strcmp(expected_op, "put_begin") == 0) {
+        if (!parse_u32_token(line, "off", &result->offset) ||
+            !parse_u32_token(line, "size", &result->size) ||
+            !parse_hex_u32_token(line, "crc", &result->crc32)) {
+            return bad_response(result);
+        }
+    } else if (strcmp(expected_op, "put_chunk") == 0) {
+        if (!parse_u32_token(line, "off", &result->offset) ||
+            !parse_u32_token(line, "len", &result->length) ||
+            !parse_u32_token(line, "next", &result->next_offset)) {
+            return bad_response(result);
+        }
+    } else if (strcmp(expected_op, "put_end") == 0) {
+        if (!parse_u32_token(line, "size", &result->size) ||
+            !parse_hex_u32_token(line, "crc", &result->crc32)) {
+            return bad_response(result);
+        }
+    } else if (strcmp(expected_op, "put_abort") == 0) {
+        if (!parse_bool_token(line, "removed", &result->removed)) {
+            return bad_response(result);
+        }
+        result->removed_known = true;
     }
 
     result->last_error = ESP_OK;
@@ -378,4 +411,55 @@ esp_err_t d1l_rp2040_file_reply_bind_append(
            result->size >= result->length &&
            result->offset == result->size - result->length ?
            ESP_OK : response_mismatch(result);
+}
+
+esp_err_t d1l_rp2040_file_reply_bind_put_begin(
+    d1l_rp2040_file_result_t *result, uint32_t expected_size,
+    uint32_t expected_crc32)
+{
+    if (!result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return result->offset == 0U &&
+           result->size == expected_size &&
+           result->crc32 == expected_crc32 ?
+           ESP_OK : response_mismatch(result);
+}
+
+esp_err_t d1l_rp2040_file_reply_bind_put_chunk(
+    d1l_rp2040_file_result_t *result, uint32_t requested_offset,
+    size_t requested_len)
+{
+    if (!result || requested_len == 0U ||
+        requested_len > D1L_RP2040_FILE_CHUNK_MAX ||
+        requested_offset > UINT32_MAX - (uint32_t)requested_len) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return result->offset == requested_offset &&
+           result->length == (uint32_t)requested_len &&
+           result->next_offset ==
+               requested_offset + (uint32_t)requested_len ?
+           ESP_OK : response_mismatch(result);
+}
+
+esp_err_t d1l_rp2040_file_reply_bind_put_end(
+    d1l_rp2040_file_result_t *result, uint32_t expected_size,
+    uint32_t expected_crc32)
+{
+    if (!result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return result->size == expected_size &&
+           result->crc32 == expected_crc32 ?
+           ESP_OK : response_mismatch(result);
+}
+
+esp_err_t d1l_rp2040_file_reply_bind_put_abort(
+    d1l_rp2040_file_result_t *result)
+{
+    if (!result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return result->removed_known && result->removed ?
+        ESP_OK : response_mismatch(result);
 }

@@ -490,7 +490,7 @@
     "main/app/settings_protocol_migration.h": "8955e2e503fe4919ef7fdb354afd97f573dc954d8ceb05173fb64f767b820cb9",
     "main/app/settings_time_checkpoint.c": "0d27c2bd30e045025751ac1a79bb0ad01bbbf04f1b547b5b5f492d8bee0e6dbf",
     "main/app/settings_time_checkpoint.h": "4721f99c3542bdcaea4b0ad513c23e819792fb2dcd7657aba8d90c9e1be08225",
-    "main/hal/rp2040_bridge.h": "57af77842713ec9f2c2eeb6cf6bd856ccc5a75c79ca9540e82cd4b5d9cff099c",
+    "main/hal/rp2040_bridge.h": "ecbde6acc53df6c6d012a7f0b14eeaa196ecf7e1217f1e4f77ac18934f5dd6c6",
     "main/mesh/dm_delivery_state.c": "a3ff6903299b70ed68727284de8c2b6e81b2f9db69a80902db75983ee91aee94",
     "main/mesh/dm_delivery_state.h": "d27b3666f03d27e74cb30efb2e77c47bd50f0273d7991e29315e55d5a2fd4185",
     "main/mesh/meshcore_admin_dispatch.c": "81dd6ba5384765896a29f4571f85b7c571a04cce558c5e570ebe2381ed097eb8",

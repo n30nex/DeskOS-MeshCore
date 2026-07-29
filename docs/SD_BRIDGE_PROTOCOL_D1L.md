@@ -9,7 +9,7 @@
 
 This is the DeskOS line protocol expected on the ESP32-S3 to RP2040 UART for optional D1L SD-card data storage.
 
-The ESP32 side uses raw newline-delimited ASCII at the board UART pin contract documented in `boards/seeed_indicator_d1l/pinmap.json`: ESP32 UART2 TX GPIO19, ESP32 UART2 RX GPIO20, 115200 baud. The RP2040-side Arduino target lives at `firmware/rp2040_sd_bridge/deskos_sd_bridge`, and `tools/rp2040_sd_protocol.py` is the host reference simulator for this contract.
+The ESP32 side uses raw newline-delimited ASCII at the board UART pin contract documented in `boards/seeed_indicator_d1l/pinmap.json`: ESP32 UART2 TX GPIO19, ESP32 UART2 RX GPIO20, 460800 baud. The RP2040-side Arduino target lives at `firmware/rp2040_sd_bridge/deskos_sd_bridge`, and `tools/rp2040_sd_protocol.py` is the host reference simulator for this contract.
 
 ## Status Request
 
@@ -141,7 +141,7 @@ DESKOS_SD_PING
 RP2040 replies with one line and must not probe, mount, format, or write SD:
 
 ```text
-DESKOS_SD_PING v=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1 sd_touch=0
+DESKOS_SD_PING v=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1 stream_write=1 sd_touch=0
 ```
 
 `sd_touch=0` is the important safety contract. The ESP32 exposes this as
@@ -262,6 +262,10 @@ DESKOS_SD_FILE v=1 id=9 op=write path=bG9ncy9wYWNrZXQudG1w off=0 len=5 trunc=1 d
 DESKOS_SD_FILE v=1 id=10 op=append path=bG9ncy9wYWNrZXQudG1w len=17 data=cGFja2V0LWxvZy1jYW5hcnk crc=63072227
 DESKOS_SD_FILE v=1 id=11 op=delete path=bG9ncy9wYWNrZXQuYmlu
 DESKOS_SD_FILE v=1 id=12 op=rename path=bG9ncy9wYWNrZXQudG1w to=bG9ncy9wYWNrZXQuYmlu replace=1
+DESKOS_SD_FILE v=1 id=13 op=put_begin path=bG9ncy9wYWNrZXQudG1w size=5 crc=3610A686
+DESKOS_SD_FILE v=1 id=14 op=put_chunk off=0 len=5 data=aGVsbG8 crc=3610A686
+DESKOS_SD_FILE v=1 id=15 op=put_end
+DESKOS_SD_FILE v=1 id=16 op=put_abort
 ```
 
 Successful replies:
@@ -273,15 +277,44 @@ DESKOS_SD_FILE v=1 id=9 ok=1 op=write off=0 len=5 size=5 note=ok
 DESKOS_SD_FILE v=1 id=10 ok=1 op=append off=5 len=17 size=22 note=ok
 DESKOS_SD_FILE v=1 id=11 ok=1 op=delete note=ok
 DESKOS_SD_FILE v=1 id=12 ok=1 op=rename note=ok
+DESKOS_SD_FILE v=1 id=13 ok=1 op=put_begin off=0 size=5 crc=3610A686 note=ok
+DESKOS_SD_FILE v=1 id=14 ok=1 op=put_chunk off=0 len=5 next=5 note=ok
+DESKOS_SD_FILE v=1 id=15 ok=1 op=put_end size=5 crc=3610A686 note=ok
+DESKOS_SD_FILE v=1 id=16 ok=1 op=put_abort removed=1 note=ok
 ```
+
+`put_begin` starts one fail-closed streaming write session, truncates and opens
+the sanitized target once, and records the declared whole-file `size` and
+CRC32. The size is bounded to 256 KiB. Each `put_chunk` must use the exact next
+offset, carry 1 to 192 decoded bytes, and pass its own CRC32 check. The bridge
+keeps the file open and does not flush between chunks. `put_end` flushes and
+closes the file, reopens it locally on the RP2040, reads the complete file, and
+returns success only when both the exact declared size and whole-file CRC32
+match. The ESP32 may then commit the verified temporary path with the existing
+`rename replace=1` operation.
+
+Only one streaming session may be active. During it, ordinary file operations
+and a second `put_begin` return `busy`; `put_chunk`, `put_end`, or `put_abort`
+without an active session return `no_session`. `put_abort` always closes the
+active file and removes the partial target. Terminal chunk-write and `put_end`
+verification errors also close and remove the partial target and add
+`removed=1` to the error reply. If removal cannot be confirmed, the error
+contains `removed=0`, the bridge retains cleanup-only ownership, and only
+`put_abort` may retry; other requests return `abort_required`. Chunk CRC or
+offset errors leave the normal session active so the same chunk can be retried
+safely.
 
 Any error reply uses:
 
 ```text
-DESKOS_SD_FILE v=1 id=<id-or-0> ok=0 op=<op-or-unknown> err=<code> note=<token>
+DESKOS_SD_FILE v=1 id=<id-or-0> ok=0 op=<op-or-unknown> err=<code> [removed=0|1] note=<token>
 ```
 
-Standard error codes are `bad_request`, `bad_value`, `unsupported_op`,
+`removed` is present on terminal streaming-write, verification, and abort
+errors; it is omitted from ordinary and retryable streaming errors.
+
+Standard error codes are `bad_request`, `bad_value`, `unsupported_op`, `busy`,
+`no_session`, `abort_required`, `size_mismatch`,
 `line_too_long`, `not_ready`, `no_card`, `bad_path`, `not_found`, `is_dir`,
 `exists`, `range`, `too_large`, `decode_failed`, `crc_mismatch`, `open_failed`,
 `read_failed`, `write_failed`, `flush_failed`, `rename_failed`, `delete_failed`,

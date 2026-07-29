@@ -21,3 +21,14 @@ esp_err_t d1l_rp2040_file_reply_bind_write(
     size_t requested_len);
 esp_err_t d1l_rp2040_file_reply_bind_append(
     d1l_rp2040_file_result_t *result, size_t requested_len);
+esp_err_t d1l_rp2040_file_reply_bind_put_begin(
+    d1l_rp2040_file_result_t *result, uint32_t expected_size,
+    uint32_t expected_crc32);
+esp_err_t d1l_rp2040_file_reply_bind_put_chunk(
+    d1l_rp2040_file_result_t *result, uint32_t requested_offset,
+    size_t requested_len);
+esp_err_t d1l_rp2040_file_reply_bind_put_end(
+    d1l_rp2040_file_result_t *result, uint32_t expected_size,
+    uint32_t expected_crc32);
+esp_err_t d1l_rp2040_file_reply_bind_put_abort(
+    d1l_rp2040_file_result_t *result);
