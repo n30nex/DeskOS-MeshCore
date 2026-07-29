@@ -114,15 +114,11 @@ def test_map_https_paths_share_one_measured_internal_worker_stack():
     assert "static __attribute__((noinline)) void run_prefetch_pass" in prefetch
     assert "static __attribute__((noinline)) void publish_visible_pause" in prefetch
     assert "publish_visible_pause()" in dispatcher
-    assert (
-        dispatcher.index(
-            "vTaskPrioritySet(NULL, D1L_MAP_VISIBLE_WORKER_PRIORITY)"
-        )
-        < dispatcher.index("d1l_map_view_service_run_pending()")
-        < dispatcher.index(
-            "vTaskPrioritySet(NULL, D1L_MAP_PREFETCH_WORKER_PRIORITY)"
-        )
-    )
+    assert "vTaskPrioritySet(" not in dispatcher
+    after_visible_dispatch = dispatcher.split(
+        "d1l_map_view_service_run_pending()", 1
+    )[1]
+    assert "D1L_MAP_PREFETCH_WORKER_PRIORITY" not in after_visible_dispatch
     assert "d1l_settings_t" not in dispatcher
     assert "d1l_map_prefetch_plan_t" not in dispatcher
     assert "d1l_map_prefetch_status_t" not in dispatcher
@@ -135,6 +131,59 @@ def test_map_https_paths_share_one_measured_internal_worker_stack():
     assert "worker_stack_free_bytes" in view_header
     assert console.count('\\"worker_stack_bytes\\":%lu') >= 2
     assert console.count('\\"worker_stack_free_bytes\\":%lu') >= 2
+
+
+def test_visible_map_wake_preempts_background_worker_before_dispatch():
+    prefetch = read("main/map/map_prefetch_service.c")
+    wake = prefetch.split(
+        "esp_err_t d1l_map_prefetch_service_wake(void)", 1
+    )[1]
+    visible = prefetch.split(
+        "static bool visible_map_active(void)", 1
+    )[1].split("static bool prefetch_continue", 1)[0]
+    view = read("main/map/map_view_service.c")
+    view_init = view.split(
+        "esp_err_t d1l_map_view_service_init(void)", 1
+    )[1].split("esp_err_t d1l_map_view_service_acquire_visible", 1)[0]
+    blocking_visibility = view.split(
+        "bool d1l_map_view_service_visible(void)", 1
+    )[1].split("void d1l_map_view_service_status", 1)[0]
+    assert (
+        view_init.index("SemaphoreHandle_t lock = xSemaphoreCreateMutex()")
+        < view_init.index("uint16_t *frame0 = heap_caps_malloc(")
+        < view_init.index("memset(&s_map, 0, sizeof(s_map))")
+        < view_init.index("s_map.status.initialized = true")
+        < view_init.index("s_map.lock = lock")
+    )
+    before_publish = view_init.split(
+        "memset(&s_map, 0, sizeof(s_map))", 1
+    )[0]
+    assert "vSemaphoreDelete(lock)" in before_publish
+    assert "vSemaphoreDelete(s_map.lock)" not in view_init
+    assert "d1l_map_view_service_visible()" in visible
+    assert "d1l_map_view_service_status" not in visible
+    assert "!s_map.status.initialized" not in blocking_visibility
+    assert "xSemaphoreTake(s_map.lock, portMAX_DELAY)" in blocking_visibility
+    assert "s_map.status.visible" in blocking_visibility
+    assert "xSemaphoreTake(wake_lock, portMAX_DELAY)" in wake
+    assert (
+        wake.index("xSemaphoreTake(wake_lock, portMAX_DELAY)")
+        < wake.index("vTaskPrioritySet(")
+        < wake.index("visible_map_active() ?")
+        < wake.index("xTaskNotifyGive(worker)")
+        < wake.index("xSemaphoreGive(wake_lock)")
+    )
+    assert "D1L_MAP_VISIBLE_WORKER_PRIORITY" in wake
+    assert "D1L_MAP_PREFETCH_WORKER_PRIORITY" in wake
+    dispatcher = prefetch.split(
+        "static void prefetch_worker(void *context)", 1
+    )[1].split("esp_err_t d1l_map_prefetch_service_init", 1)[0]
+    background = dispatcher.split("if (!visible_map_active()) {", 1)[1]
+    assert "D1L_MAP_PREFETCH_WORKER_PRIORITY" not in background
+    after_dispatch = dispatcher.split(
+        "d1l_map_view_service_run_pending()", 1
+    )[1]
+    assert "D1L_MAP_PREFETCH_WORKER_PRIORITY" not in after_dispatch
 
 
 def test_map_ui_exposes_provider_and_background_state():

@@ -574,29 +574,40 @@ esp_err_t d1l_map_view_service_init(void)
     if (s_map.status.initialized) {
         return ESP_OK;
     }
-    memset(&s_map, 0, sizeof(s_map));
-    s_map.lock = xSemaphoreCreateMutex();
-    if (!s_map.lock) {
+    SemaphoreHandle_t lock = xSemaphoreCreateMutex();
+    if (!lock) {
         return ESP_ERR_NO_MEM;
     }
     const size_t frame_bytes = (size_t)D1L_MAP_VIEW_MAX_WIDTH *
                                D1L_MAP_VIEW_MAX_HEIGHT * sizeof(uint16_t);
-    s_map.frames[0] = heap_caps_malloc(frame_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_map.frames[1] = heap_caps_malloc(frame_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_map.compressed = heap_caps_malloc(D1L_MAP_TILE_DOWNLOAD_MAX_BYTES,
-                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_map.decoded_tile = heap_caps_malloc(D1L_MAP_DECODED_TILE_PIXELS * sizeof(uint16_t),
-                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!s_map.frames[0] || !s_map.frames[1] || !s_map.compressed ||
-        !s_map.decoded_tile) {
-        heap_caps_free(s_map.frames[0]);
-        heap_caps_free(s_map.frames[1]);
-        heap_caps_free(s_map.compressed);
-        heap_caps_free(s_map.decoded_tile);
-        vSemaphoreDelete(s_map.lock);
-        memset(&s_map, 0, sizeof(s_map));
+    uint16_t *frame0 = heap_caps_malloc(
+        frame_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *frame1 = heap_caps_malloc(
+        frame_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *compressed = heap_caps_malloc(
+        D1L_MAP_TILE_DOWNLOAD_MAX_BYTES,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *decoded_tile = heap_caps_malloc(
+        D1L_MAP_DECODED_TILE_PIXELS * sizeof(uint16_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!frame0 || !frame1 || !compressed || !decoded_tile) {
+        heap_caps_free(frame0);
+        heap_caps_free(frame1);
+        heap_caps_free(compressed);
+        heap_caps_free(decoded_tile);
+        vSemaphoreDelete(lock);
         return ESP_ERR_NO_MEM;
     }
+    /*
+     * Publish only a complete service. The prefetch task may ask whether Map
+     * is visible while these large allocations run; it must see either the
+     * zero-initialized service or this fully owned, never-deleted mutex.
+     */
+    memset(&s_map, 0, sizeof(s_map));
+    s_map.frames[0] = frame0;
+    s_map.frames[1] = frame1;
+    s_map.compressed = compressed;
+    s_map.decoded_tile = decoded_tile;
     s_map.status.current_view_only = true;
     s_map.status.public_rf_tx = false;
     s_map.status.formats_sd = false;
@@ -607,6 +618,8 @@ esp_err_t d1l_map_view_service_init(void)
     set_provider_locked(&provider);
     set_message_locked("idle", "Open Map to load the current view");
     s_map.status.initialized = true;
+    /* Publish the stable readiness token only after the service is complete. */
+    s_map.lock = lock;
     return ESP_OK;
 }
 
@@ -732,6 +745,23 @@ void d1l_map_view_service_release_visible(uint32_t generation)
     }
     xSemaphoreGive(s_map.lock);
     (void)d1l_map_prefetch_service_wake();
+}
+
+bool d1l_map_view_service_visible(void)
+{
+    /*
+     * Initialization publishes this never-deleted mutex only after every
+     * allocation and status field is ready.
+     */
+    if (!s_map.lock) {
+        return false;
+    }
+    if (xSemaphoreTake(s_map.lock, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+    const bool visible = s_map.status.visible;
+    xSemaphoreGive(s_map.lock);
+    return visible;
 }
 
 void d1l_map_view_service_status(d1l_map_view_status_t *out_status)
