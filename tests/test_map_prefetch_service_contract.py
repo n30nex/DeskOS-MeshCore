@@ -59,6 +59,51 @@ def test_authorized_default_provider_is_seeded_without_overwrite():
     assert "D1L_MAP_PROVIDER_CONFIG_PATH, false," in provider
 
 
+def test_provider_console_status_is_cached_atomic_and_fail_closed():
+    header = read("main/map/map_tile_provider.h")
+    provider = read("main/map/map_tile_provider.c")
+    console = read("main/comms/usb_console.c")
+    command = console.split(
+        "static void cmd_map_provider_status(void)", 1
+    )[1].split("#if D1L_ENABLE_QUALIFICATION_HOOKS", 1)[0]
+    refresh = provider.split(
+        "esp_err_t d1l_map_tile_provider_refresh(", 1
+    )[1].split("bool d1l_map_tile_provider_path(", 1)[0]
+    publish = provider.split(
+        "static void publish_refresh_result(", 1
+    )[1].split("static esp_err_t seed_default_provider_config", 1)[0]
+
+    assert "d1l_map_tile_provider_status_t" in header
+    assert "last_refresh_result" in header
+    assert "refresh_generation" in header
+    assert "d1l_map_tile_provider_status_snapshot(" in header
+    assert "d1l_map_tile_provider_status_snapshot(&provider_status)" in command
+    assert "d1l_map_tile_provider_refresh(" not in command
+    assert "d1l_rp2040_bridge_" not in command
+    assert (
+        "provider_status.refresh_generation > 0U"
+        in command
+    )
+    assert (
+        "provider_status.last_refresh_result == ESP_OK"
+        in command
+    )
+    assert "provider.configured" in command
+    assert '\\"provider_refresh_generation\\":%lu' in command
+    assert refresh.count("publish_refresh_result(") == 2
+    assert (
+        "publish_refresh_result(\n"
+        "        ret, ret == ESP_OK ? &provider : NULL);"
+        in refresh
+    )
+    assert publish.index("if (result == ESP_OK && provider)") < publish.index(
+        "s_provider = *provider"
+    ) < publish.index("s_provider_last_refresh_result = result")
+    assert publish.index(
+        "s_provider_last_refresh_result = result"
+    ) < publish.index("++s_provider_refresh_generation")
+
+
 def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     cmake = read("main/CMakeLists.txt")
     app = read("main/app_main.c")
@@ -85,6 +130,32 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     assert "cache_budget_mb = provider.cache_budget_mb" in service
     assert "status->evicted_tiles += result.evicted_tiles" in service
     assert "status->cache_used_bytes = result.cache_used_bytes" in service
+    cached = service.split(
+        "if (ret == ESP_OK && cached)", 1
+    )[1].split("if (ret != ESP_ERR_NOT_FOUND)", 1)[0]
+    successful_fetch = service.split(
+        "if (ret == ESP_OK) {", 1
+    )[1].split(
+        "if (result.cancelled ||", 1
+    )[0]
+    assert "taskYIELD()" in cached
+    assert "task_pause_after_network_tile()" in successful_fetch
+    request_tail = service.split(
+        "ret = d1l_map_tile_store_fetch_background(", 1
+    )[1].split("set_phase(status, \"ready\"", 1)[0]
+    assert request_tail.count("task_pause_after_network_tile()") == 1
+    assert request_tail.index(
+        "if (result.status_code == 429"
+    ) < request_tail.index(
+        "if (ret == ESP_OK)"
+    ) < request_tail.index(
+        "task_pause_after_network_tile()"
+    ) < request_tail.index(
+        "if (result.cancelled ||"
+    )
+    assert "ulTaskNotifyTake(" in service.split(
+        "static void task_pause_after_network_tile(void)", 1
+    )[1].split("static bool visible_map_active", 1)[0]
 
 
 def test_map_https_paths_share_one_measured_internal_worker_stack():

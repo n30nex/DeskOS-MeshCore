@@ -56,6 +56,7 @@ def provider_status(
         "configured": True,
         "authorized_provider": True,
         "provider_refresh_ok": True,
+        "provider_refresh_generation": 1,
         "provider_refresh_code": "ESP_OK",
         "source_id": "licensed-local-tiles",
         "network_url_redacted": True,

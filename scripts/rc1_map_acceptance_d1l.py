@@ -298,10 +298,14 @@ def validate_provider_status(
         minimum=MIN_CACHE_BUDGET_MB,
         maximum=MAX_CACHE_BUDGET_MB,
     )
+    provider_refresh_generation = _integer(
+        row.get("provider_refresh_generation"), minimum=1
+    )
     if (
         row.get("configured") is not True
         or row.get("authorized_provider") is not True
         or row.get("provider_refresh_ok") is not True
+        or provider_refresh_generation is None
         or row.get("https") is not True
         or row.get("network_fetch_allowed") is not True
         or row.get("offline_storage_permitted") is not True

@@ -36,8 +36,16 @@ typedef struct {
     uint32_t cache_budget_mb;
 } d1l_map_tile_provider_t;
 
+typedef struct {
+    d1l_map_tile_provider_t provider;
+    esp_err_t last_refresh_result;
+    uint32_t refresh_generation;
+} d1l_map_tile_provider_status_t;
+
 void d1l_map_tile_provider_builtin(d1l_map_tile_provider_t *out_provider);
 void d1l_map_tile_provider_snapshot(d1l_map_tile_provider_t *out_provider);
+void d1l_map_tile_provider_status_snapshot(
+    d1l_map_tile_provider_status_t *out_status);
 bool d1l_map_tile_provider_uses_osm_standard(
     const d1l_map_tile_provider_t *provider);
 esp_err_t d1l_map_tile_provider_refresh(
