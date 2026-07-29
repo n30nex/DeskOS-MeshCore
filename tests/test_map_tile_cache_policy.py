@@ -122,9 +122,23 @@ def test_fresh_tile_miss_precedes_global_cache_recovery():
         "cache_backend_generation_matches("
     )
     assert (
-        "return metadata_ret == ESP_OK ?\n"
-        "            ESP_ERR_INVALID_CRC : metadata_ret;"
+        "metadata_ret == ESP_ERR_INVALID_CRC ||\n"
+        "        metadata_ret == ESP_ERR_INVALID_SIZE"
         in cached
+    )
+    assert (
+        "metadata_ret == ESP_OK &&\n"
+        "         !cache_record_matches_tile(&metadata, z, x, y)"
+        in cached
+    )
+    recoverable_miss = cached.index("return ESP_ERR_NOT_FOUND;")
+    io_error = cached.index(
+        "if (metadata_ret != ESP_OK) {\n"
+        "        return metadata_ret;\n"
+        "    }"
+    )
+    assert recoverable_miss < io_error < cached.index(
+        "load_cache_state_for_generation("
     )
 
     cached_read = store[

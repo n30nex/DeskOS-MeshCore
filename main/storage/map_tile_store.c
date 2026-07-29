@@ -1930,10 +1930,20 @@ static esp_err_t map_tile_store_cached_locked(
     d1l_map_tile_cache_record_t metadata = {0};
     const esp_err_t metadata_ret = read_cache_metadata(
         result.metadata_path, &metadata);
-    if (metadata_ret != ESP_OK ||
-        !cache_record_matches_tile(&metadata, z, x, y)) {
-        return metadata_ret == ESP_OK ?
-            ESP_ERR_INVALID_CRC : metadata_ret;
+    if (metadata_ret == ESP_ERR_INVALID_CRC ||
+        metadata_ret == ESP_ERR_INVALID_SIZE ||
+        (metadata_ret == ESP_OK &&
+         !cache_record_matches_tile(&metadata, z, x, y))) {
+        /*
+         * A corrupt local entry is a recoverable miss. The fetch commit
+         * atomically replaces its tile/metadata and appends a superseding
+         * journal record; the stale record remains conservatively accounted
+         * until normal FIFO eviction skips its metadata mismatch.
+         */
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (metadata_ret != ESP_OK) {
+        return metadata_ret;
     }
     d1l_map_tile_cache_paths_t cache_paths = {0};
     d1l_map_tile_cache_state_t *cache_state = NULL;
