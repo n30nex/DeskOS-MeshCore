@@ -288,6 +288,14 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
             taskYIELD();
             continue;
         }
+        if (ret == ESP_ERR_NOT_FINISHED) {
+            status->last_error = ret;
+            status->running = false;
+            set_phase(status, "storage_busy",
+                      "Background map download is waiting for SD storage");
+            publish_status(status);
+            return;
+        }
         if (ret != ESP_ERR_NOT_FOUND) {
             status->last_error = ret;
             ++status->failed_tiles;
@@ -326,6 +334,15 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
             &mutable_continuation, &result);
         status->evicted_tiles += result.evicted_tiles;
         status->cache_used_bytes = result.cache_used_bytes;
+        if (ret == ESP_ERR_NOT_FINISHED) {
+            status->last_error = ret;
+            status->running = false;
+            set_phase(status, "storage_busy",
+                      "Background map download is waiting for SD storage");
+            memset(&result, 0, sizeof(result));
+            publish_status(status);
+            return;
+        }
         if (result.status_code == 429 ||
             result.status_code == 503) {
             const uint32_t retry =

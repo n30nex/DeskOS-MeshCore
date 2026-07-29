@@ -69,6 +69,14 @@ static void test_write_and_remote_error_semantics_are_preserved(void)
                "err=not_found note=not_found",
                11U, "read", NULL, 0U, &result) == ESP_ERR_NOT_FOUND);
     assert(result.last_error == ESP_ERR_NOT_FOUND);
+
+    memset(&result, 0, sizeof(result));
+    assert(d1l_rp2040_file_reply_parse(
+               "DESKOS_SD_FILE v=1 id=13 ok=0 op=stat "
+               "err=busy note=busy",
+               13U, "stat", NULL, 0U, &result) ==
+           ESP_ERR_NOT_FINISHED);
+    assert(result.last_error == ESP_ERR_NOT_FINISHED);
 }
 
 static void test_stat_requires_canonical_complete_tokens(void)

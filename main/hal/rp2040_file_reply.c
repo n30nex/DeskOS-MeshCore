@@ -161,6 +161,9 @@ static esp_err_t map_file_error(const char *err)
     if (strcmp(err, "timeout") == 0) {
         return ESP_ERR_TIMEOUT;
     }
+    if (strcmp(err, "busy") == 0) {
+        return ESP_ERR_NOT_FINISHED;
+    }
     return ESP_FAIL;
 }
 

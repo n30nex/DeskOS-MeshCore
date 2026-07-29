@@ -80,6 +80,8 @@ def test_provider_console_status_is_cached_atomic_and_fail_closed():
     assert "d1l_map_tile_provider_status_snapshot(&provider_status)" in command
     assert "d1l_map_tile_provider_refresh(" not in command
     assert "d1l_rp2040_bridge_" not in command
+    assert '\\"last_error\\":' in command
+    assert "esp_err_to_name(prefetch.last_error)" in command
     assert (
         "provider_status.refresh_generation > 0U"
         in command
@@ -123,6 +125,13 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     assert "D1L_NODE_SD_HISTORY_CAPACITY" in service
     assert "d1l_map_tile_store_cached(" in service
     assert "d1l_map_tile_store_fetch_background(" in service
+    assert service.count("if (ret == ESP_ERR_NOT_FINISHED)") == 2
+    transient_blocks = service.split(
+        "if (ret == ESP_ERR_NOT_FINISHED)", 1
+    )[1].split("if (ret != ESP_ERR_NOT_FOUND)", 1)[0]
+    assert "storage_busy" in transient_blocks
+    assert "failed_tiles" not in transient_blocks
+    assert "s_backoff_until_us" not in transient_blocks
     assert "plan->reserve_bytes + D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in service
     assert "provider.minimum_request_interval_ms" in read(
         "main/storage/map_tile_store.c"

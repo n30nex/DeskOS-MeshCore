@@ -3563,6 +3563,8 @@ static void cmd_map_provider_status(void)
     print_json_string(prefetch.phase);
     printf(",\"message\":");
     print_json_string(prefetch.message);
+    printf(",\"last_error\":");
+    print_json_string(esp_err_to_name(prefetch.last_error));
     printf("},\"network_requests\":%" PRIu64 ","
            "\"downloaded_tiles\":%" PRIu64 ","
            "\"public_rf_tx\":false,\"formats_sd\":false}\n",
