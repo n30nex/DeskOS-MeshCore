@@ -138,8 +138,8 @@ static lv_obj_t *create_sheet(lv_obj_t *parent)
     if (!sheet) {
         return NULL;
     }
-    lv_obj_set_size(sheet, 480, 424);
-    lv_obj_set_pos(sheet, 0, 56);
+    lv_obj_set_size(sheet, 480, 480);
+    lv_obj_set_pos(sheet, 0, 0);
     lv_obj_set_style_radius(sheet, 0, 0);
     lv_obj_set_style_bg_color(sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_width(sheet, 0, 0);
@@ -524,17 +524,20 @@ bool d1l_ui_contact_sheets_render_detail(
     } else {
         complete = false;
     }
-    snprintf(line, sizeof(line), "fp %.16s", entry->fingerprint);
+    snprintf(line, sizeof(line), "Identity  %.16s", entry->fingerprint);
     lv_obj_t *fingerprint = create_label(sheet, line, 0xE5EDF5);
     if (fingerprint) {
         lv_obj_set_pos(fingerprint, 16, 98);
     } else {
         complete = false;
     }
-    snprintf(line, sizeof(line), "%s  route %s  hops %u",
-             entry->public_key_hex[0] ? "public key retained" : "no public key",
-             entry->out_path_valid ? "direct" : "flood",
-             (unsigned)(entry->out_path_valid ? entry->path_hops : 0U));
+    if (entry->out_path_valid) {
+        snprintf(line, sizeof(line), "Direct route  |  %u hop%s",
+                 (unsigned)entry->path_hops,
+                 entry->path_hops == 1U ? "" : "s");
+    } else {
+        snprintf(line, sizeof(line), "Flood route  |  no saved direct path");
+    }
     lv_obj_t *key = create_label(sheet, line, 0x8EA0AE);
     if (key) {
         lv_label_set_long_mode(key, LV_LABEL_LONG_DOT);
@@ -545,7 +548,7 @@ bool d1l_ui_contact_sheets_render_detail(
     }
     const int snr_abs = entry->last_snr_tenths < 0 ?
         -entry->last_snr_tenths : entry->last_snr_tenths;
-    snprintf(line, sizeof(line), "rssi %d  snr %s%d.%d  heard %.18s",
+    snprintf(line, sizeof(line), "Last signal %d dBm  |  SNR %s%d.%d  |  via %.18s",
              entry->last_rssi_dbm,
              entry->last_snr_tenths < 0 ? "-" : "",
              snr_abs / 10, snr_abs % 10,
@@ -558,7 +561,7 @@ bool d1l_ui_contact_sheets_render_detail(
     } else {
         complete = false;
     }
-    lv_obj_t *actions = create_label(sheet, "Actions", 0x5EEAD4);
+    lv_obj_t *actions = create_label(sheet, "Contact actions", 0x5EEAD4);
     if (actions) {
         lv_obj_set_pos(actions, 16, 210);
     } else {
@@ -571,7 +574,7 @@ bool d1l_ui_contact_sheets_render_detail(
             complete;
     } else {
         char dm_status[96];
-        snprintf(dm_status, sizeof(dm_status), "DM unavailable [%s]",
+        snprintf(dm_status, sizeof(dm_status), "Messaging unavailable [%s]",
                  d1l_ui_dm_identity_reason_code(
                      controller->rendered.dm_identity_reason));
         lv_obj_t *unavailable = create_label(sheet, dm_status, 0xFBBF24);

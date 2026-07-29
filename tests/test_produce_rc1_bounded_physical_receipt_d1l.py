@@ -27,6 +27,12 @@ ROLE_OUTCOMES = {
 }
 
 
+def test_closing_contract_has_exactly_four_fresh_sources():
+    assert producer.SOURCE_ROLES == ("flash", "rf", "protocol", "map")
+    assert "sd_degraded_notice" not in producer.OUTCOME_KEYS
+    assert set(producer.VALIDATORS) == set(producer.SOURCE_ROLES)
+
+
 def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -106,7 +112,9 @@ def test_producer_bundles_unique_machine_sources_and_hashes_receipt(
     assert sidecar["candidate"] == CANDIDATE
     assert sidecar["receipt"]["sha256"] == hashlib.sha256(receipt_bytes).hexdigest()
     assert set(sidecar["sources"]) == set(producer.SOURCE_ROLES)
-    assert len({row["sha256"] for row in sidecar["sources"].values()}) == 5
+    assert len({row["sha256"] for row in sidecar["sources"].values()}) == len(
+        producer.SOURCE_ROLES
+    )
     assert sidecar["coverage"] == producer.COVERAGE
 
 

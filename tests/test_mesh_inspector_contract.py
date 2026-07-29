@@ -97,9 +97,11 @@ def test_app_snapshot_and_ui_surface_mesh_visibility():
     assert "D1L_MESH_ROLES_PAGE_ROOM_SERVERS" in ui
     assert "D1L_MESH_ROLES_PAGE_REPEATER_CANDIDATES" in ui
     assert '"Read-only lists. Each role scrolls separately."' in ui
-    assert "nodes_render_summary" in nodes_ui
-    assert "view_model->role_counts" in nodes_ui
-    for role_label in ('"Chat"', '"Repeater"', '"Room"', '"Sensor"', '"Unknown"'):
+    assert "nodes_render_header" in nodes_ui
+    assert "nodes_render_role_avatar" in nodes_ui
+    assert "nodes_role_badge_text(view->role)" in nodes_ui
+    assert "nodes_node_route_label(view, route, sizeof(route))" in nodes_ui
+    for role_label in ('"Chat"', '"Repeater"', '"Room"', '"Sensor"', '"Node"'):
         assert role_label in nodes_ui
     assert "format_snr_tenths" in ui
 

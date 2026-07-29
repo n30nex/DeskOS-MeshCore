@@ -22,9 +22,9 @@ def test_core_dock_and_home_expose_only_the_five_contract_destinations():
         "_Static_assert",
     )
     assert core_dock.count("{D1L_UI_TAB_") == 5
-    for tab in ("HOME", "MESSAGES", "NODES", "PACKETS", "SETTINGS"):
+    for tab in ("HOME", "MESSAGES", "NODES", "MAP", "SETTINGS"):
         assert f"D1L_UI_TAB_{tab}" in core_dock
-    assert "D1L_UI_TAB_MAP" not in core_dock
+    assert "D1L_UI_TAB_PACKETS" not in core_dock
     assert "active_dock_items" in phase1
     assert 'map_available ? "Map" : "Packets"' in home
     assert 'map_available ? "Tools" : "Settings"' in home

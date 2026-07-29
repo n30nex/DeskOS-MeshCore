@@ -1886,11 +1886,13 @@ bool d1l_packet_log_append_raw_deferred(const d1l_packet_log_entry_t *entry,
     return append_raw_internal(entry, raw, raw_len, true, true, NULL) == ESP_OK;
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 bool d1l_packet_log_append_raw_volatile(const d1l_packet_log_entry_t *entry,
                                         const uint8_t *raw, size_t raw_len)
 {
     return append_raw_internal(entry, raw, raw_len, false, false, NULL) == ESP_OK;
 }
+#endif
 
 esp_err_t d1l_packet_log_flush(void)
 {

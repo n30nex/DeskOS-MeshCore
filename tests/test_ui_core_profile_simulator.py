@@ -48,7 +48,7 @@ def test_core_profile_renders_exact_root_surface_and_non_closure_truth(
         "home",
         "messages",
         "nodes",
-        "packets",
+        "map",
         "settings",
     ]
     assert len(core["dock_observations"]) == 4
@@ -71,13 +71,16 @@ def test_core_profile_renders_exact_root_surface_and_non_closure_truth(
     assert graph["excluded_touch_targets"] == []
     assert graph["dead_touch_targets"] == []
     assert graph["format_touch_targets"] == []
-    assert graph["location_claims"] == []
+    assert all(
+        claim["advert_location"] is not None
+        for claim in graph["location_claims"]
+    )
     assert graph["trapped_states"] == []
     assert graph["rf_actions_dispatched"] == 0
     assert graph["format_actions_dispatched"] == 0
 
 
-def test_core_profile_hides_every_excluded_root_affordance(tmp_path: Path):
+def test_core_profile_exposes_production_root_affordances(tmp_path: Path):
     report = ui_simulator.generate(
         tmp_path,
         release_profile=ui_simulator.CORE_RELEASE_PROFILE,
@@ -85,26 +88,19 @@ def test_core_profile_hides_every_excluded_root_affordance(tmp_path: Path):
     views = views_by_name(report)
 
     home_labels = set(views["home"]["labels"])
-    assert {"Packets", "Settings", "Storage", "Internal"} <= home_labels
-    assert {"Map", "Tools", "Wi-Fi", "BLE", "SD"}.isdisjoint(home_labels)
+    assert {"Map", "Tools", "Wi-Fi", "SD"} <= home_labels
+    assert "BLE" not in home_labels
 
     settings_labels = set(views["settings"]["labels"])
     assert {
+        "Settings",
+        "Tools",
+        "Packets",
+        "Diagnostics",
         "Connections",
-        "Radio profile",
-        "Storage",
-        "Retained internal storage",
+        "Wi-Fi",
     } <= settings_labels
-    assert {
-        "Wi-Fi, Bluetooth, and radio",
-        "Storage & maps",
-        "Advanced",
-    }.isdisjoint(settings_labels)
-
-    packet_actions = {
-        target["action"] for target in views["packets"]["touch_targets"]
-    }
-    assert "open_mesh_roles" not in packet_actions
+    assert "Bluetooth" not in settings_labels
 
     for view in report["views"]:
         dock = [
@@ -117,7 +113,7 @@ def test_core_profile_hides_every_excluded_root_affordance(tmp_path: Path):
                 "home",
                 "messages",
                 "nodes",
-                "packets",
+                "map",
                 "settings",
             ]
 
@@ -135,7 +131,7 @@ def test_core_profile_rejects_excluded_destination_inventory(tmp_path: Path):
     assert set(ui_simulator.CORE_UNAVAILABLE_CAPABILITIES) <= {
         row["feature"] for row in inventory
     }
-    assert "settings_advanced_expanded" in (
+    assert "settings_advanced_expanded" not in (
         ui_simulator.CORE_EXCLUDED_DESTINATIONS
     )
 
@@ -215,9 +211,6 @@ def test_core_profile_all_dispatch_accepted_renderer_aliases_render():
             target["formats_sd"] is False
             for target in surface.touch_targets
         )
-        assert "Advert location" not in surface.labels
-        assert surface.metrics.get("node_detail_advert_location") is None
-
         alias_state = ui_simulator.LifecycleState(
             current_view=destination,
             active_tab="home",
@@ -244,21 +237,15 @@ def test_core_profile_all_dispatch_accepted_renderer_aliases_render():
             assert alias_dispatch.accepted is True
 
 
-def test_core_profile_omits_trace_export_and_location_affordances():
+def test_core_profile_exposes_trace_and_location_but_omits_export():
     snapshot = ui_simulator.project_core_snapshot(
         ui_simulator.SCENARIOS["map-ready"]()
     )
-    assert all(
-        node.advert_lat_e6 is None
-        and node.advert_lon_e6 is None
-        and node.location_advert_timestamp == 0
-        for nodes in (
-            snapshot.rooms,
-            snapshot.repeaters,
-            snapshot.contacts,
-            snapshot.heard,
-        )
-        for node in nodes
+    assert any(
+        node.advert_lat_e6 is not None
+        and node.advert_lon_e6 is not None
+        and node.location_advert_timestamp > 0
+        for node in snapshot.heard
     )
 
     options = ui_simulator.Surface(
@@ -272,15 +259,12 @@ def test_core_profile_omits_trace_export_and_location_affordances():
         for target in options.touch_targets
         if target["destination"]
     }
-    assert {"open_route_trace", "open_contact_export"}.isdisjoint(
-        option_actions
-    )
-    assert {"route_trace_sheet", "contact_export_sheet"}.isdisjoint(
-        option_destinations
-    )
-    assert {"Route", "Trace path", "Export", "Share QR"}.isdisjoint(
-        set(options.labels)
-    )
+    assert "open_route_trace" in option_actions
+    assert "route_trace_sheet" in option_destinations
+    assert "open_contact_export" not in option_actions
+    assert "contact_export_sheet" not in option_destinations
+    assert {"Route", "Trace path"} <= set(options.labels)
+    assert {"Export", "Share QR"}.isdisjoint(set(options.labels))
 
     node_detail = ui_simulator.Surface(
         "node_detail_sheet",
@@ -292,12 +276,10 @@ def test_core_profile_omits_trace_export_and_location_affordances():
         for target in node_detail.touch_targets
         if target["action"] == "close_node_detail"
     )
-    assert close["destination"] == "nodes"
-    assert "Advert location" not in node_detail.labels
-    assert node_detail.metrics["node_detail_advert_location"] is None
-    assert node_detail.metrics["node_detail_location_provenance"] == (
-        "unavailable_in_release_profile"
-    )
+    assert close["destination"] == "map"
+    assert any(label.startswith("Advert location ") for label in node_detail.labels)
+    assert node_detail.metrics["node_detail_advert_location"] is not None
+    assert node_detail.metrics["node_detail_location_provenance"] == "advert"
 
 
 @pytest.mark.parametrize("scenario", tuple(ui_simulator.SCENARIOS))
@@ -314,14 +296,17 @@ def test_core_profile_reachable_graph_is_safe_in_every_scenario(scenario: str):
     assert report["excluded_touch_targets"] == []
     assert report["dead_touch_targets"] == []
     assert report["format_touch_targets"] == []
-    assert report["location_claims"] == []
+    assert all(
+        claim["advert_location"] is not None
+        for claim in report["location_claims"]
+    )
     assert report["trapped_states"] == []
-    assert "map" not in report["rendered_views"]
+    assert "map" in report["rendered_views"]
     assert report["rf_actions_dispatched"] == 0
     assert report["format_actions_dispatched"] == 0
 
 
-def test_core_profile_map_ready_lifecycle_returns_node_detail_to_nodes():
+def test_core_profile_map_ready_lifecycle_covers_map_navigation():
     report = ui_simulator.run_lifecycle_stress(
         ui_simulator.SCENARIOS["map-ready"](),
         transitions=len(ui_simulator.CORE_LIFECYCLE_TRANSITION_CYCLE),

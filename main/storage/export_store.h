@@ -6,6 +6,7 @@
 
 #include "esp_err.h"
 
+#include "app/qualification_hooks.h"
 #include "hal/rp2040_bridge.h"
 #include "storage/storage_status.h"
 
@@ -37,9 +38,11 @@ typedef struct {
 
 bool d1l_export_store_token_valid(const char *token);
 bool d1l_export_store_sd_ready(const d1l_storage_status_t *status);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_export_store_write_canary(const char *token,
                                         const d1l_storage_status_t *status,
                                         d1l_export_canary_result_t *out_result);
+#endif
 esp_err_t d1l_export_store_write_diagnostics(const char *token,
                                              const uint8_t *payload,
                                              size_t payload_len,

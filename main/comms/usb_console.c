@@ -20,6 +20,7 @@
 
 #include "d1l_config.h"
 #include "app/app_model.h"
+#include "app/qualification_hooks.h"
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
 #include "comms/companion_3byte.h"
@@ -60,9 +61,11 @@
 #include "update/update_manager.h"
 
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
 static const uint32_t D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS = 15000U;
+#endif
 static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U;
 /* The default ESP-IDF console writes directly to UART0 without installing the
  * UART driver. Give the final reboot receipt enough bounded wire time before
@@ -296,12 +299,14 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_EXACT(
         "rp2040 stock-probe", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_EXACT(
         "ui scroll-probe storage_card", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
     D1L_RELEASE_RULE_EXACT(
         "ui scroll-probe storage_data", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+#endif
     D1L_RELEASE_RULE_EXACT(
         "storage mount", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
@@ -311,21 +316,25 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_EXACT(
         "storage reset-bridge", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_EXACT(
         "storage filecanary", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
     D1L_RELEASE_RULE_TOKEN(
         "storage export-canary", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+#endif
     D1L_RELEASE_RULE_TOKEN(
         "storage export-diagnostics", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
     D1L_RELEASE_RULE_TOKEN(
         "storage export-data", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_TOKEN(
         "storage retained-canary", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+#endif
     D1L_RELEASE_RULE_EXACT(
         "storage force-nvs off", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
@@ -344,9 +353,11 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "rp2040 double-reset", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_TOKEN(
         "core retained-witness", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_RETAINED_NVS),
+#endif
 
     D1L_RELEASE_RULE_EXACT(
         "map center", D1L_RELEASE_COMMAND_READ_ONLY,
@@ -355,11 +366,13 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "map tiles status", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_EXACT(
-        "map acceptance status", D1L_RELEASE_COMMAND_READ_ONLY,
+        "map provider status", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_MAP),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_EXACT(
         "map acceptance open", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MAP),
+#endif
     D1L_RELEASE_RULE_EXACT(
         "storage map-policy", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_MAP),
@@ -376,12 +389,14 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         D1L_RELEASE_FEATURE_LOCATION),
     D1L_RELEASE_RULE_TOKEN(
         "gps", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_LOCATION),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_TOKEN(
         "storage map-tile-canary", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MAP),
     D1L_RELEASE_RULE_TOKEN(
         "storage map-tile-check", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MAP),
+#endif
 
     D1L_RELEASE_RULE_TOKEN(
         "ui tab map", D1L_RELEASE_COMMAND_MUTATION,
@@ -392,6 +407,7 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "ui tab ble", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_BLE),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_TOKEN(
         "ui scroll-probe map", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_MAP),
@@ -419,6 +435,7 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "ui compose-probe wifi-password", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
+#endif
 
     D1L_RELEASE_RULE_EXACT(
         "channels", D1L_RELEASE_COMMAND_READ_ONLY,
@@ -463,9 +480,11 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "path", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_USER_TRACE),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_TOKEN(
         "ui scroll-probe contact_route", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_USER_TRACE),
+#endif
 
     D1L_RELEASE_RULE_EXACT(
         "roomservers", D1L_RELEASE_COMMAND_READ_ONLY,
@@ -506,6 +525,7 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "mesh repeater", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_ADMIN),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_TOKEN(
         "ui scroll-probe mesh_roles", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_ADMIN),
@@ -515,6 +535,7 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "ui scroll-probe mesh_repeaters", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_ADMIN),
+#endif
 
     D1L_RELEASE_RULE_EXACT(
         "observer status", D1L_RELEASE_COMMAND_READ_ONLY,
@@ -576,14 +597,17 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "emoji", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI),
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     D1L_RELEASE_RULE_TOKEN(
         "ui compose-probe qr", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI),
     D1L_RELEASE_RULE_TOKEN(
         "ui compose-probe emoji", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI),
+#endif
 };
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 typedef struct {
     const char *normalized_alias;
     d1l_release_feature_id_t feature;
@@ -725,6 +749,7 @@ static bool release_ui_probe_feature(
            release_ui_probe_alias_feature(
                normalized, aliases, alias_count, out_feature);
 }
+#endif
 
 static bool release_command_token_matches(
     const d1l_usb_command_view_t *command,
@@ -844,6 +869,7 @@ static bool release_command_feature_available(
 static bool enforce_release_command_policy(
     const d1l_usb_command_view_t *command)
 {
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     d1l_release_feature_id_t ui_probe_feature =
         D1L_RELEASE_FEATURE_COUNT;
     if (release_ui_probe_feature(command, &ui_probe_feature) &&
@@ -851,6 +877,7 @@ static bool enforce_release_command_policy(
         release_unsupported_result(command, ui_probe_feature);
         return false;
     }
+#endif
 
     const d1l_release_command_rule_t *rule = release_command_rule(command);
     if (d1l_release_profile_is_core() && rule &&
@@ -1613,18 +1640,16 @@ static void cmd_settings_onboarding_complete(const char *line)
         arg++;
     }
     if (*arg == '\0') {
-        arg = "D1L Desk";
+        err_result("settings onboarding complete", "INVALID_NAME",
+                   "usage: settings onboarding complete <1-31 chars>");
+        return;
     }
     size_t arg_len = strlen(arg);
     if (arg_len >= D1L_NODE_NAME_LEN) {
         err_result("settings onboarding complete", "INVALID_NAME", "usage: settings onboarding complete <1-31 chars>");
         return;
     }
-    esp_err_t ret = d1l_settings_complete_onboarding(arg, false, false, false);
-    if (ret == ESP_OK) {
-        d1l_meshcore_service_init();
-        ret = d1l_meshcore_service_ensure_identity();
-    }
+    esp_err_t ret = d1l_app_model_complete_onboarding(arg);
     if (ret != ESP_OK) {
         err_result("settings onboarding complete", esp_err_to_name(ret), "could not persist onboarding choices");
         return;
@@ -1835,6 +1860,7 @@ static void cmd_ui_status(void)
     printf("}\n");
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void print_ui_capture_status_fields(const d1l_ui_capture_status_t *status)
 {
     const d1l_ui_capture_status_t empty = {
@@ -1978,6 +2004,7 @@ static void cmd_ui_capture_end(void)
     print_ui_capture_status_fields(&status);
     printf("}\n");
 }
+#endif
 
 static void cmd_ui_tab(const char *line)
 {
@@ -2010,6 +2037,7 @@ static void cmd_ui_tab(const char *line)
     printf("}\n");
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void cmd_ui_scroll_probe(const char *line)
 {
     const char *arg = line + strlen("ui scroll-probe ");
@@ -2114,6 +2142,7 @@ static void cmd_ui_compose_probe(const char *line)
            (long)probe.keyboard_x, (long)probe.keyboard_y,
            (long)probe.keyboard_w, (long)probe.keyboard_h);
 }
+#endif
 
 static void cmd_identity_status(void)
 {
@@ -2152,6 +2181,7 @@ static void cmd_i2c(void)
     printf("],\"expected\":[\"0x20\",\"0x48\"]}\n");
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void cmd_display_test(void)
 {
     esp_err_t ret = d1l_board_display_color_test();
@@ -2187,6 +2217,7 @@ static void cmd_touch_test(void)
            (unsigned long)touch.init_attempts,
            bool_json(touch.coordinate_valid));
 }
+#endif
 
 static void cmd_touch_raw(void)
 {
@@ -3305,13 +3336,17 @@ static void cmd_storage_map_policy(void)
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"license_url\":");
     print_json_string(D1L_MAP_TILE_LICENSE_URL);
-    printf(",\"built_in\":true,\"current_view_only\":true,\"max_current_view_tiles\":%u,\"min_cache_days\":%u,\"zoom\":%u,\"default_zoom\":%u,\"min_zoom\":%u,\"max_zoom\":%u,\"sideload_supported\":false,\"canary_command\":\"storage map-tile-canary <token>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
+    printf(",\"built_in\":true,\"current_view_only\":true,\"max_current_view_tiles\":%u,\"min_cache_days\":%u,\"zoom\":%u,\"default_zoom\":%u,\"min_zoom\":%u,\"max_zoom\":%u,\"sideload_supported\":false",
            (unsigned)D1L_MAP_VIEW_MAX_TILES,
            (unsigned)D1L_MAP_TILE_MIN_CACHE_DAYS,
            (unsigned)D1L_MAP_VIEW_DEFAULT_ZOOM,
            (unsigned)D1L_MAP_VIEW_DEFAULT_ZOOM,
            (unsigned)D1L_MAP_VIEW_MIN_ZOOM,
-           (unsigned)D1L_MAP_VIEW_MAX_ZOOM,
+           (unsigned)D1L_MAP_VIEW_MAX_ZOOM);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+    printf(",\"canary_command\":\"storage map-tile-canary <token>\"");
+#endif
+    printf(",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
            bool_json(download_supported),
            bool_json(live_network_download));
     print_json_string(download_state);
@@ -3386,7 +3421,7 @@ static void cmd_map_tiles_status(void)
     printf(",\"public_rf_tx\":false,\"formats_sd\":false}\n");
 }
 
-static void cmd_map_acceptance_status(void)
+static void cmd_map_provider_status(void)
 {
     d1l_settings_t settings = {0};
     d1l_connectivity_status_t connectivity = {0};
@@ -3415,7 +3450,7 @@ static void cmd_map_acceptance_status(void)
         prefetch.nodes_included + prefetch.nodes_outside_radius ==
         prefetch.nodes_seen;
 
-    ok_begin("map acceptance status");
+    ok_begin("map provider status");
     printf(",\"configured\":%s,\"authorized_provider\":%s,"
            "\"provider_refresh_ok\":%s,\"provider_refresh_code\":",
            bool_json(provider.configured),
@@ -3516,12 +3551,11 @@ static void cmd_map_acceptance_status(void)
     print_json_string(prefetch.message);
     printf("},\"network_requests\":%" PRIu64 ","
            "\"downloaded_tiles\":%" PRIu64 ","
-           "\"public_rf_tx\":false,\"formats_sd\":false,"
-           "\"arbitrary_url_accepted\":false,"
-           "\"arbitrary_location_accepted\":false}\n",
+           "\"public_rf_tx\":false,\"formats_sd\":false}\n",
            prefetch.network_requests, prefetch.downloaded_tiles);
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void cmd_map_acceptance_open(void)
 {
     const esp_err_t ret = d1l_ui_phase1_request_map_acceptance();
@@ -3539,6 +3573,7 @@ static void cmd_map_acceptance_open(void)
            "\"arbitrary_location_accepted\":false,"
            "\"public_rf_tx\":false,\"formats_sd\":false}\n");
 }
+#endif
 
 static void print_storage_setup_payload(const d1l_storage_status_t *status)
 {
@@ -3555,6 +3590,7 @@ static void print_storage_setup_payload(const d1l_storage_status_t *status)
     printf("}\n");
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void print_storage_filecanary_error(const char *step,
                                            esp_err_t ret,
                                            const d1l_storage_status_t *status,
@@ -3728,7 +3764,9 @@ static void cmd_storage_filecanary(void)
                           status.read_state_backend : "volatile");
     printf(",\"note\":\"Serial-only RP2040 SD file-operation canary passed; no Public RF or format command was used\"}\n");
 }
+#endif
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool text_equals(const char *lhs, const char *rhs)
 {
     return lhs && rhs && strcmp(lhs, rhs) == 0;
@@ -3799,8 +3837,9 @@ static bool retained_canary_backend_generations(
     }
     return true;
 }
+#endif
 
-static bool copy_storage_canary_token(char *dest, size_t dest_size, const char *src)
+static bool copy_storage_token(char *dest, size_t dest_size, const char *src)
 {
     if (!dest || dest_size == 0 || !src) {
         return false;
@@ -3998,6 +4037,7 @@ static void print_storage_export_error(const char *cmd,
     printf("}\n");
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void print_storage_map_tile_error(const char *cmd,
                                          const char *step,
                                          esp_err_t ret,
@@ -4031,7 +4071,7 @@ static void cmd_storage_map_tile_canary(const char *line)
     static const char prefix[] = "storage map-tile-canary ";
     char token[D1L_MAP_TILE_CANARY_TOKEN_MAX + 1U] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        !copy_storage_token(token, sizeof(token), line + strlen(prefix))) {
         err_result("storage map-tile-canary", "INVALID_TOKEN",
                    "usage: storage map-tile-canary <token-with-a-z-0-9-dot-dash-underscore>");
         return;
@@ -4077,7 +4117,7 @@ static void cmd_storage_map_tile_check(const char *line)
     static const char prefix[] = "storage map-tile-check ";
     char token[D1L_MAP_TILE_CANARY_TOKEN_MAX + 1U] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        !copy_storage_token(token, sizeof(token), line + strlen(prefix))) {
         err_result("storage map-tile-check", "INVALID_TOKEN",
                    "usage: storage map-tile-check <token-with-a-z-0-9-dot-dash-underscore>");
         return;
@@ -4118,7 +4158,7 @@ static void cmd_storage_export_canary(const char *line)
     static const char prefix[] = "storage export-canary ";
     char token[D1L_EXPORT_CANARY_TOKEN_MAX + 1U] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        !copy_storage_token(token, sizeof(token), line + strlen(prefix))) {
         err_result("storage export-canary", "INVALID_TOKEN",
                    "usage: storage export-canary <token-with-a-z-0-9-dot-dash-underscore>");
         return;
@@ -4155,6 +4195,7 @@ static void cmd_storage_export_canary(const char *line)
     print_json_string(status.export_backend ? status.export_backend : "serial");
     printf(",\"note\":\"Diagnostic export SD canary committed by temp write and atomic rename; no Public RF or format command was used\"}\n");
 }
+#endif
 
 static bool append_export_json(char *dest, size_t dest_size, size_t *used,
                                const char *fmt, ...)
@@ -4837,7 +4878,7 @@ static void cmd_storage_export_diagnostics(const char *line)
     static const char prefix[] = "storage export-diagnostics ";
     char token[D1L_EXPORT_CANARY_TOKEN_MAX + 1U] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        !copy_storage_token(token, sizeof(token), line + strlen(prefix))) {
         err_result("storage export-diagnostics", "INVALID_TOKEN",
                    "usage: storage export-diagnostics <token-with-a-z-0-9-dot-dash-underscore>");
         return;
@@ -4899,7 +4940,7 @@ static void cmd_storage_export_data(const char *line)
     static const char prefix[] = "storage export-data ";
     char token[D1L_EXPORT_CANARY_TOKEN_MAX + 1U] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        !copy_storage_token(token, sizeof(token), line + strlen(prefix))) {
         err_result("storage export-data", "INVALID_TOKEN",
                    "usage: storage export-data <token-with-a-z-0-9-dot-dash-underscore>");
         return;
@@ -4956,6 +4997,7 @@ static void cmd_storage_export_data(const char *line)
     printf(",\"note\":\"Sampled user data export JSON committed to SD by chunked temp write and atomic rename; no private identity material, Public RF, or format command was used\"}\n");
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static uint32_t retained_canary_hash(const char *token)
 {
     uint32_t hash = 2166136261UL;
@@ -4981,7 +5023,7 @@ static void cmd_ui_data_canary(const char *line)
     static const char prefix[] = "ui data-canary ";
     char token[32] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        !copy_storage_token(token, sizeof(token), line + strlen(prefix))) {
         err_result("ui data-canary", "INVALID_TOKEN",
                    "usage: ui data-canary <token-with-a-z-0-9-dot-dash-underscore>");
         return;
@@ -5058,7 +5100,7 @@ static void cmd_storage_retained_canary(const char *line)
     static const char prefix[] = "storage retained-canary ";
     char token[32] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        !copy_storage_token(token, sizeof(token), line + strlen(prefix))) {
         err_result("storage retained-canary", "INVALID_TOKEN",
                    "usage: storage retained-canary <token-with-a-z-0-9-dot-dash-underscore>");
         return;
@@ -5211,6 +5253,7 @@ static void cmd_storage_retained_canary(const char *line)
            (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_READ_STATE]);
     printf(",\"note\":\"Synthetic retained-history canary rows appended without Public or DM RF or a format command\"}\n");
 }
+#endif
 
 static void cmd_storage_setup(const char *line)
 {
@@ -5440,6 +5483,7 @@ static void cmd_packets_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool message_store_stats_snapshot_equal(
     const d1l_message_store_stats_t *left,
     const d1l_message_store_stats_t *right)
@@ -5508,6 +5552,7 @@ static bool dm_store_stats_snapshot_equal(
             right->sd_primary_reconcile_pending &&
         left->nvs_fallback_dirty == right->nvs_fallback_dirty;
 }
+#endif
 
 static bool contact_store_stats_snapshot_equal(
     const d1l_contact_store_stats_t *left,
@@ -6242,6 +6287,7 @@ static void cmd_contacts_import(const char *line)
            bool_json(d1l_contact_store_can_admin(&contact)));
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool core_retained_witness_nvs_only(void)
 {
     for (size_t i = 0U; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
@@ -6374,7 +6420,7 @@ static void cmd_core_retained_witness(const char *line)
     static const char prefix[] = "core retained-witness ";
     char token[32] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_storage_canary_token(
+        !copy_storage_token(
             token, sizeof(token), line + strlen(prefix))) {
         err_result("core retained-witness", "INVALID_TOKEN",
                    "usage: core retained-witness <token-with-a-z-0-9-dot-dash-underscore>");
@@ -6567,6 +6613,7 @@ static void cmd_core_retained_witness(const char *line)
     wipe_console_bytes(public_key, sizeof(public_key));
     wipe_console_bytes(&contact, sizeof(contact));
 }
+#endif
 
 static void cmd_contacts_clear(void)
 {
@@ -8630,13 +8677,17 @@ static void cmd_help(void)
                "\"settings onboarding status\","
                "\"settings onboarding complete <name>\","
                "\"settings onboarding reset\",\"identity status\",\"i2c\","
-               "\"display test\",\"touch test\",\"touch raw\",\"button\","
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+               "\"display test\",\"touch test\","
+#endif
+               "\"touch raw\",\"button\","
                "\"backlight <0-100>\",\"radiohw\",\"radio get\","
                "\"radio set preset uscan\",\"radio set freq 910.525\","
                "\"radio set bw 62.5\",\"radio set sf 7\","
                "\"radio set cr 5\",\"radio set txpower 20\","
                "\"radio set rxboost <0|1>\",\"ui status\","
                "\"ui tab <home|messages|nodes|packets|settings>\","
+#if D1L_ENABLE_QUALIFICATION_HOOKS
                "\"ui scroll-probe "
                "<home|public_messages|dm_thread|nodes|contact_detail|"
                "contact_options|contact_forget|packets|settings|storage>\","
@@ -8645,9 +8696,13 @@ static void cmd_help(void)
                "packet-search|contact-edit|onboarding>\","
                "\"ui data-canary <token>\",\"ui capture status\","
                "\"ui capture begin\",\"ui capture chunk <offset> <len>\","
-               "\"ui capture end\",\"mesh status\",\"companion status\","
+               "\"ui capture end\","
+#endif
+               "\"mesh status\",\"companion status\","
                "\"storage status\",\"storage force-nvs [on]\","
+#if D1L_ENABLE_QUALIFICATION_HOOKS
                "\"core retained-witness <token>\","
+#endif
                "\"mesh advert zero\",\"mesh advert flood\","
                "\"mesh send public <text>\","
                "\"mesh send dm <fingerprint> <text>\","
@@ -8673,7 +8728,7 @@ static void cmd_help(void)
                "\"factory-reset-status\",\"factory-reset-confirm\"],"
                "\"unavailable_status_commands\":[\"wifi status\","
                "\"ble status\",\"map center\",\"map tiles status\","
-               "\"map acceptance status\","
+               "\"map provider status\","
                "\"channels\",\"routes trace status\",\"roomservers\","
                "\"repeaters\",\"repeater ping status\"],"
                "\"unavailable_features\":[\"map\","
@@ -8686,11 +8741,13 @@ static void cmd_help(void)
                "\"public_rf_tx\":false,\"formats_sd\":false}\n");
         return;
     }
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     printf(",\"contact_probe_surfaces\":[\"contact_detail\",\"contact_options\","
            "\"contact_forget\",\"contact_route\"]");
     printf(",\"storage_probe_surfaces\":[\"storage\",\"storage_card\",\"storage_data\"]");
     printf(",\"map_probe_surfaces\":[\"map\",\"map_options\",\"map_location\",\"map_cache\"]");
     printf(",\"map_probes_read_only\":true");
+#endif
     printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\","
             "\"time migration status\","
             "\"time migrate-legacy <expected-mesh-ts> <confirmed-upper-bound> "
@@ -8699,18 +8756,27 @@ static void cmd_help(void)
            "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
            "\"settings set location <lat> <lon>\",\"settings clear location\","
            "\"settings onboarding status\",\"settings onboarding complete <name>\","
-           "\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\","
-           "\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\","
+           "\"settings onboarding reset\",\"identity status\",\"i2c\","
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+           "\"display test\",\"touch test\","
+#endif
+           "\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\","
            "\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\","
            "\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\","
            "\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\","
            "\"ui tab <home|messages|nodes|map|packets|settings>\","
+#if D1L_ENABLE_QUALIFICATION_HOOKS
            "\"ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map|map_options|map_location|map_cache>\","
            "\"ui compose-probe <public|public-long|dm|dm-long|public-search|dm-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>\","
            "\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\","
-           "\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\","
-           "\"map center set <lat> <lon>\",\"map center clear\",\"map tiles status\","
-           "\"map acceptance status\",\"map acceptance open\","
+           "\"ui capture chunk <offset> <len>\",\"ui capture end\","
+#endif
+           "\"map center\","
+           "\"map center set <lat> <lon>\",\"map center clear\","
+           "\"map tiles status\",\"map provider status\","
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+           "\"map acceptance open\","
+#endif
            "\"mesh status\",\"companion status\",\"rp2040 status\","
            "\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\","
            "\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\","
@@ -8718,10 +8784,13 @@ static void cmd_help(void)
            "\"storage status\",\"storage mount\",\"storage remount\","
            "\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\","
            "\"storage diag raw\",\"storage map-policy\",\"storage setup\","
+#if D1L_ENABLE_QUALIFICATION_HOOKS
            "\"storage filecanary\",\"storage map-tile-canary <token>\","
            "\"storage map-tile-check <token>\",\"storage export-canary <token>\","
+           "\"storage retained-canary <token>\","
+#endif
            "\"storage export-diagnostics <token>\",\"storage export-data <token>\","
-           "\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\","
+           "\"mesh advert zero\",\"mesh advert flood\","
            "\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\","
            "\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\","
            "\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\","
@@ -9068,6 +9137,7 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_ui_status();
     } else if (strncmp(line, "ui tab ", strlen("ui tab ")) == 0) {
         cmd_ui_tab(line);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     } else if (strncmp(line, "ui scroll-probe ", strlen("ui scroll-probe ")) == 0) {
         cmd_ui_scroll_probe(line);
     } else if (strncmp(line, "ui compose-probe ", strlen("ui compose-probe ")) == 0) {
@@ -9082,6 +9152,7 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_ui_capture_chunk(line);
     } else if (strcmp(line, "ui capture end") == 0) {
         cmd_ui_capture_end();
+#endif
     } else if (strcmp(line, "map center") == 0) {
         cmd_map_center();
     } else if (strncmp(line, "map center set ", strlen("map center set ")) == 0) {
@@ -9090,10 +9161,12 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_map_center_clear();
     } else if (strcmp(line, "map tiles status") == 0) {
         cmd_map_tiles_status();
-    } else if (strcmp(line, "map acceptance status") == 0) {
-        cmd_map_acceptance_status();
+    } else if (strcmp(line, "map provider status") == 0) {
+        cmd_map_provider_status();
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     } else if (strcmp(line, "map acceptance open") == 0) {
         cmd_map_acceptance_open();
+#endif
     } else if (strcmp(line, "settings onboarding status") == 0) {
         cmd_settings_onboarding_status();
     } else if (strncmp(line, "settings onboarding complete ", 29) == 0) {
@@ -9104,10 +9177,12 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_identity_status();
     } else if (strcmp(line, "i2c") == 0) {
         cmd_i2c();
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     } else if (strcmp(line, "display test") == 0) {
         cmd_display_test();
     } else if (strcmp(line, "touch test") == 0) {
         cmd_touch_test();
+#endif
     } else if (strcmp(line, "touch raw") == 0) {
         cmd_touch_raw();
     } else if (strcmp(line, "button") == 0) {
@@ -9174,6 +9249,7 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_storage_map_policy();
     } else if (strcmp(line, "storage setup") == 0) {
         cmd_storage_setup(line);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     } else if (strcmp(line, "storage filecanary") == 0) {
         cmd_storage_filecanary();
     } else if (strncmp(line, "storage map-tile-canary ", strlen("storage map-tile-canary ")) == 0) {
@@ -9182,14 +9258,17 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_storage_map_tile_check(line);
     } else if (strncmp(line, "storage export-canary ", strlen("storage export-canary ")) == 0) {
         cmd_storage_export_canary(line);
+#endif
     } else if (strncmp(line, "storage export-diagnostics ", strlen("storage export-diagnostics ")) == 0) {
         cmd_storage_export_diagnostics(line);
     } else if (strncmp(line, "storage export-data ", strlen("storage export-data ")) == 0) {
         cmd_storage_export_data(line);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     } else if (strncmp(line, "storage retained-canary ", strlen("storage retained-canary ")) == 0) {
         cmd_storage_retained_canary(line);
     } else if (strncmp(line, "core retained-witness ", strlen("core retained-witness ")) == 0) {
         cmd_core_retained_witness(line);
+#endif
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
     } else if (strncmp(line, "packets filter ", 15) == 0) {

@@ -226,7 +226,14 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "d1l_contact_store_rename(fingerprint, alias, out_contact)" in app_source
     assert "d1l_contact_store_delete(fingerprint, out_contact)" in app_source
     assert "nodes_render_contact_row" in nodes_ui
-    assert 'entry->public_key_hex[0] ? "key" : "no key"' in nodes_ui
+    contact_row = nodes_ui.split(
+        "static void nodes_render_contact_row", 1
+    )[1].split("static void nodes_render_node_row", 1)[0]
+    assert "nodes_role_badge_text(entry->type)" in contact_row
+    assert "nodes_contact_route_label(entry)" in contact_row
+    assert 'nodes_create_button(row, "Message"' in contact_row
+    assert "entry->public_key_hex" not in contact_row
+    assert "entry->fingerprint" not in contact_row
     assert "d1l_ui_contact_sheets_create(" in ui
     for renderer in ("detail", "options", "forget", "edit", "export"):
         assert f"d1l_ui_contact_sheets_render_{renderer}" in contact_ui

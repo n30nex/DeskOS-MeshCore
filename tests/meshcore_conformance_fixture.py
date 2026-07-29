@@ -64,6 +64,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/mesh/contact_uri.h",
         "main/mesh/meshcore_advert_admission.c",
         "main/mesh/meshcore_advert_admission.h",
+        "main/mesh/meshcore_lifetime.h",
         "main/mesh/meshcore_packet_hash.c",
         "main/mesh/meshcore_packet_hash.h",
         "main/mesh/meshcore_path_state.c",
@@ -73,6 +74,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/mesh/node_store.c",
         "main/mesh/node_store.h",
         "main/mesh/store_lock.h",
+        "main/storage/retained_blob_store.h",
         "tests/native/esp_nvs_stubs.c",
         "tests/native/retained_blob_store_nvs_adapter.c",
         "tests/native/mbedtls_md_stub.c",
@@ -87,6 +89,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "tests/native/stubs/nvs.h",
     }
     packet_hash = {
+        "main/mesh/meshcore_lifetime.h",
         "main/mesh/meshcore_packet_hash.c",
         "main/mesh/meshcore_packet_hash.h",
         "main/mesh/meshcore_wire.c",
@@ -106,6 +109,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
     }
     time_service = {
         "main/app/identity_state.h",
+        "main/app/qualification_hooks.h",
         "main/app/settings_envelope.c",
         "main/app/settings_envelope.h",
         "main/app/settings_model.h",

@@ -1358,8 +1358,41 @@ static void test_snapshot_waits_for_coherent_publication(void)
     assert(memcmp(payload, &reader.settings, sizeof(reader.settings)) == 0);
 }
 
+static void test_factory_default_and_explicit_onboarding_name(void)
+{
+    mock_nvs_reset();
+    assert(d1l_settings_load() == ESP_OK);
+    d1l_settings_t current = {0};
+    assert(d1l_settings_public_snapshot(&current) == ESP_OK);
+    assert(strcmp(current.node_name, D1L_NODE_NAME_FACTORY_DEFAULT) == 0);
+    assert(strcmp(current.node_name, "D1L") != 0);
+    assert(strcmp(current.node_name, "D1L Desk") != 0);
+    assert(!current.onboarding_complete);
+
+    assert(d1l_settings_complete_onboarding(
+               NULL, false, false, false) == ESP_ERR_INVALID_ARG);
+    assert(d1l_settings_complete_onboarding(
+               "", false, false, false) == ESP_ERR_INVALID_ARG);
+    assert(d1l_settings_complete_onboarding(
+               "   ", false, false, false) == ESP_ERR_INVALID_ARG);
+    assert(d1l_settings_complete_onboarding(
+               "Invalid\\Name", false, false, false) ==
+           ESP_ERR_INVALID_ARG);
+    assert(d1l_settings_public_snapshot(&current) == ESP_OK);
+    assert(!current.onboarding_complete);
+    assert(strcmp(current.node_name, D1L_NODE_NAME_FACTORY_DEFAULT) == 0);
+
+    assert(d1l_settings_complete_onboarding(
+               "Harbour Desk", false, false, false) == ESP_OK);
+    assert(d1l_settings_load() == ESP_OK);
+    assert(d1l_settings_public_snapshot(&current) == ESP_OK);
+    assert(current.onboarding_complete);
+    assert(strcmp(current.node_name, "Harbour Desk") == 0);
+}
+
 int main(void)
 {
+    test_factory_default_and_explicit_onboarding_name();
     test_all_recognized_raw_legacy_versions_migrate();
     test_v7_envelope_migrates_revision_and_recovers_text();
     test_equal_size_v8_envelope_migrates_and_preserves_identity();

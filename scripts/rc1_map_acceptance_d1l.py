@@ -73,13 +73,13 @@ COMMANDS = frozenset(
         "crashlog",
         "ui status",
         "map center",
-        "map acceptance status",
-        "map acceptance open",
+        "map provider status",
         "map tiles status",
         "wifi status",
         "wifi off",
         "wifi on",
         "wifi connect",
+        "reboot",
         "ui tab home",
         "ui tab messages",
         "ui tab nodes",
@@ -283,7 +283,7 @@ def validate_provider_status(
     location: dict[str, Any],
     require_plan: bool,
 ) -> dict[str, Any]:
-    row = require_result(result, "map acceptance status")
+    row = require_result(result, "map provider status")
     source_id = row.get("source_id")
     attribution = row.get("attribution")
     license_url = row.get("license_url")
@@ -527,7 +527,9 @@ def online_view_ready(
         and row.get("provider_configured") is True
         and row.get("background_prefetch_permitted") is True
         and row.get("source") == source_id
-        and _integer(row.get("generation"), minimum=generation_before + 1)
+        and _integer(
+            row.get("generation"), minimum=max(generation_before, 1)
+        )
         is not None
         and row.get("lat_e7") == location["lat_e7"]
         and row.get("lon_e7") == location["lon_e7"]
@@ -539,24 +541,6 @@ def online_view_ready(
         and row.get("rendered_tiles") == planned
         and row.get("failed_tiles") == 0
     )
-
-
-def validate_acceptance_open(result: object) -> dict[str, Any]:
-    row = require_result(result, "map acceptance open")
-    if (
-        row.get("configured_current_view_only") is not True
-        or row.get("configured_device_center") is not True
-        or row.get("forced_sd_reload") is not True
-        or row.get("arbitrary_url_accepted") is not False
-        or row.get("arbitrary_location_accepted") is not False
-        or row.get("public_rf_tx") is not False
-        or row.get("formats_sd") is not False
-    ):
-        raise AcceptanceFailure(
-            "map_open_safety_invalid",
-            "Map acceptance opener did not preserve its safety boundary",
-        )
-    return row
 
 
 def build_transcript(
@@ -597,10 +581,10 @@ def build_transcript(
     }
     step_rows = (
         ("version", "version", version),
-        ("provider", "map acceptance status", provider),
+        ("provider", "map provider status", provider),
         (
             "before",
-            "map acceptance status",
+            "map provider status",
             {
                 "ok": True,
                 "network_requests": before_requests,
@@ -610,7 +594,7 @@ def build_transcript(
         ),
         (
             "download",
-            "map acceptance status",
+            "map provider status",
             {
                 "ok": True,
                 "online": True,
@@ -622,7 +606,7 @@ def build_transcript(
                 "raw": download,
             },
         ),
-        ("revisit", "map acceptance open", revisit_response),
+        ("revisit", "ui tab map", revisit_response),
         ("health", "health", health),
         ("crashlog", "crashlog", crashlog),
     )
@@ -777,6 +761,52 @@ def wait_for_ui_tab(
     )
 
 
+def reopen_after_product_reboot(
+    ser: Any,
+    *,
+    previous_boot_nonce: int,
+    timeout: float,
+    command_timeout: float,
+    interval: float,
+) -> dict[str, Any]:
+    """Reopen only the stable D1L endpoint and prove a new production boot."""
+
+    ser.close()
+    deadline = time.monotonic() + timeout
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        if Path(POSIX_D1L_TARGET).exists():
+            try:
+                ser.open()
+                ser.reset_input_buffer()
+                remaining = max(0.05, deadline - time.monotonic())
+                health = wait_for_console_ready(
+                    ser,
+                    timeout=min(5.0, remaining),
+                    command_timeout=min(command_timeout, remaining),
+                    interval=interval,
+                )
+                nonce = _integer(health.get("boot_nonce"), minimum=1)
+                if nonce is not None and nonce != previous_boot_nonce:
+                    return health
+                last_error = AcceptanceFailure(
+                    "reboot_not_observed",
+                    "D1L returned without a new boot nonce",
+                )
+            except BaseException as exc:
+                last_error = exc
+            if getattr(ser, "is_open", False):
+                ser.close()
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(max(interval, 0.05), remaining))
+    raise AcceptanceFailure(
+        "reboot_reopen_timeout",
+        "stable D1L endpoint did not return with a new healthy boot"
+        + (f": {last_error}" if last_error is not None else ""),
+    )
+
+
 def _resolve_pi_target(port_lister: Callable[[], Any]) -> dict[str, Any]:
     if os.name != "posix":
         raise AcceptanceFailure(
@@ -833,6 +863,7 @@ def run_acceptance(
     final_health: dict[str, Any] = {}
     final_crashlog: dict[str, Any] = {}
     initial_nonce: int | None = None
+    active_nonce: int | None = None
 
     with open_d1l_serial(
         serial,
@@ -853,6 +884,7 @@ def run_acceptance(
                 expected_commit,
             )
             initial_nonce = int(initial_health["boot_nonce"])
+            active_nonce = initial_nonce
             validate_crashlog(
                 send_checked(ser, "crashlog", command_timeout)
             )
@@ -895,7 +927,7 @@ def run_acceptance(
 
             provider = poll_command(
                 ser,
-                "map acceptance status",
+                "map provider status",
                 timeout=UI_TIMEOUT_SECONDS,
                 command_timeout=command_timeout,
                 interval=poll_interval,
@@ -914,7 +946,7 @@ def run_acceptance(
             deadline = time.monotonic() + prefetch_timeout
             while True:
                 candidate = send_checked(
-                    ser, "map acceptance status", command_timeout
+                    ser, "map provider status", command_timeout
                 )
                 try:
                     download = validate_download_progress(
@@ -944,8 +976,15 @@ def run_acceptance(
                     "map_generation_invalid",
                     "Map view generation counter is invalid",
                 )
-            validate_acceptance_open(
-                send_checked(ser, "map acceptance open", command_timeout)
+            require_result(
+                send_checked(ser, "ui tab map", command_timeout),
+                "ui tab",
+            )
+            wait_for_ui_tab(
+                ser,
+                "map",
+                command_timeout=command_timeout,
+                interval=poll_interval,
             )
             online_view = poll_command(
                 ser,
@@ -983,6 +1022,36 @@ def run_acceptance(
                 command_timeout=command_timeout,
                 interval=poll_interval,
             )
+            require_result(
+                send_checked(ser, "reboot", command_timeout),
+                "reboot",
+            )
+            reboot_health = reopen_after_product_reboot(
+                ser,
+                previous_boot_nonce=initial_nonce,
+                timeout=boot_timeout,
+                command_timeout=command_timeout,
+                interval=poll_interval,
+            )
+            active_nonce = int(reboot_health["boot_nonce"])
+            validate_version(
+                send_checked(ser, "version", command_timeout),
+                expected_commit,
+            )
+            poll_command(
+                ser,
+                "wifi status",
+                timeout=wifi_timeout,
+                command_timeout=command_timeout,
+                interval=poll_interval,
+                predicate=wifi_is_offline,
+            )
+            wait_for_ui_tab(
+                ser,
+                "home",
+                command_timeout=command_timeout,
+                interval=poll_interval,
+            )
             before_open = require_result(
                 send_checked(ser, "map tiles status", command_timeout),
                 "map tiles status",
@@ -995,8 +1064,15 @@ def run_acceptance(
                     "map_generation_invalid",
                     "Map view generation counter is invalid",
                 )
-            validate_acceptance_open(
-                send_checked(ser, "map acceptance open", command_timeout),
+            require_result(
+                send_checked(ser, "ui tab map", command_timeout),
+                "ui tab",
+            )
+            wait_for_ui_tab(
+                ser,
+                "map",
+                command_timeout=command_timeout,
+                interval=poll_interval,
             )
             revisit = poll_command(
                 ser,
@@ -1064,7 +1140,7 @@ def run_acceptance(
                 try:
                     final_health = validate_health(
                         send_checked(ser, "health", command_timeout),
-                        boot_nonce=initial_nonce,
+                        boot_nonce=active_nonce,
                     )
                     final_crashlog = validate_crashlog(
                         send_checked(ser, "crashlog", command_timeout)

@@ -159,7 +159,10 @@ def test_center_source_is_required_before_map_tile_acquisition():
         "d1l_map_view_service_acquire_visible("
     )
     assert '"%s source"' in render
-    assert 'viewport, "Center", 8, 302, 96, 52' in render
+    assert (
+        'viewport, "Center", 8, (int)MAP_VIEWPORT_HEIGHT - 60, 96, 52'
+        in render
+    )
 
     interactive = body(
         source,

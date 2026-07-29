@@ -142,6 +142,7 @@ typedef struct {
     bool map_tile_download_supported;
     bool map_tile_render_supported;
     bool map_tile_sideload_supported;
+    bool map_tile_provider_configured;
     bool map_location_set;
     d1l_map_center_source_t map_center_source;
     bool map_marker_age_reference_valid;

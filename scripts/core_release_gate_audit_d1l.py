@@ -18,6 +18,8 @@ DEFECT_RECEIPT_MAX_AGE_SEC = 15 * 60
 DEFECT_RECEIPT_MAX_FUTURE_SKEW_SEC = 30
 
 try:
+    if __package__:
+        raise ImportError("use canonical package imports")
     import release_gate_audit_d1l as full_release_audit
     import rf_full_acceptance_d1l as rf_acceptance
     import soak_d1l as soak_runner

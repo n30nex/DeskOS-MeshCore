@@ -25,21 +25,21 @@ static void test_docked_screens_gain_height_without_overlap(void)
         D1L_UI_SCREEN_PACKETS,
         D1L_UI_SCREEN_SETTINGS,
     };
-    assert(D1L_UI_DOCKED_CONTENT_Y == 56U);
-    assert(D1L_UI_DOCK_Y == 428U);
-    assert(D1L_UI_DOCK_HEIGHT == 52U);
-    assert(D1L_UI_DOCKED_CONTENT_HEIGHT == 372U);
+    assert(D1L_UI_DOCKED_CONTENT_Y == 0U);
+    assert(D1L_UI_DOCK_Y == 432U);
+    assert(D1L_UI_DOCK_HEIGHT == 48U);
+    assert(D1L_UI_DOCKED_CONTENT_HEIGHT == 432U);
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         const d1l_ui_chrome_layout_t layout =
             d1l_ui_chrome_layout_for_screen(screens[i]);
         assert(layout.content_y == D1L_UI_DOCKED_CONTENT_Y);
         assert(layout.content_height == D1L_UI_DOCKED_CONTENT_HEIGHT);
-        assert(layout.content_height > 362U);
+        assert(layout.content_height == 432U);
         assert(layout.content_y + layout.content_height == D1L_UI_DOCK_Y);
         assert(layout.content_scrollable);
         assert(layout.dock_visible);
-        assert(layout.header_detail_visible);
-        assert(strcmp(layout.title, "MeshCore DeskOS") == 0);
+        assert(!layout.header_detail_visible);
+        assert(strcmp(layout.title, "") == 0);
     }
 }
 

@@ -1463,6 +1463,57 @@ esp_err_t d1l_channel_store_select(
     return ret;
 }
 
+esp_err_t d1l_channel_store_seed_onboarding_defaults(void)
+{
+    static const struct {
+        const char *name;
+        uint8_t secret[D1L_CHANNEL_SECRET_128_LEN];
+    } defaults[] = {
+        {
+            .name = "#bot",
+            .secret = {
+                0xebU, 0x50U, 0xa1U, 0xbcU, 0xb3U, 0xe4U, 0xe5U, 0xd7U,
+                0xbfU, 0x69U, 0xa5U, 0x7cU, 0x9dU, 0xadU, 0xa2U, 0x11U,
+            },
+        },
+        {
+            .name = "#test",
+            .secret = {
+                0x9cU, 0xd8U, 0xfcU, 0xf2U, 0x2aU, 0x47U, 0x33U, 0x3bU,
+                0x59U, 0x1dU, 0x96U, 0xa2U, 0xb8U, 0x48U, 0xb7U, 0x3fU,
+            },
+        },
+    };
+
+    for (size_t i = 0U; i < sizeof(defaults) / sizeof(defaults[0]); ++i) {
+        d1l_channel_mutation_result_t result =
+            D1L_CHANNEL_MUTATION_NONE;
+        d1l_channel_info_t info = {0};
+        const esp_err_t ret = d1l_channel_store_add(
+            defaults[i].name, defaults[i].secret,
+            D1L_CHANNEL_SECRET_128_LEN, true, false, &result, &info);
+        if (ret != ESP_OK ||
+            (result != D1L_CHANNEL_MUTATION_CREATED &&
+             result != D1L_CHANNEL_MUTATION_EXISTS) ||
+            strcmp(info.name, defaults[i].name) != 0 || !info.enabled) {
+            return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+        }
+    }
+
+    d1l_channel_mutation_result_t public_result =
+        D1L_CHANNEL_MUTATION_NONE;
+    d1l_channel_info_t public_info = {0};
+    const esp_err_t ret = d1l_channel_store_select(
+        D1L_CHANNEL_PUBLIC_ID, &public_result, &public_info);
+    if (ret != ESP_OK ||
+        (public_result != D1L_CHANNEL_MUTATION_UPDATED &&
+         public_result != D1L_CHANNEL_MUTATION_EXISTS) ||
+        !public_info.enabled || !public_info.is_default) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    return ESP_OK;
+}
+
 esp_err_t d1l_channel_store_remove(
     uint64_t channel_id, d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_info)

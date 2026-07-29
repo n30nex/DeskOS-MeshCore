@@ -6,6 +6,7 @@
 
 #include "storage/storage_status_policy.h"
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool result_path_set(d1l_export_canary_result_t *result,
                             const char *token)
 {
@@ -22,6 +23,7 @@ static bool result_path_set(d1l_export_canary_result_t *result,
            (size_t)final_len < sizeof(result->path) &&
            (size_t)tmp_len < sizeof(result->tmp_path);
 }
+#endif
 
 static bool data_path_set(d1l_export_canary_result_t *result,
                           const char *token)
@@ -224,6 +226,7 @@ bool d1l_export_store_sd_ready(const d1l_storage_status_t *status)
            status->path_max >= D1L_RP2040_FILE_PATH_MAX;
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_export_store_write_canary(const char *token,
                                         const d1l_storage_status_t *status,
                                         d1l_export_canary_result_t *out_result)
@@ -265,6 +268,7 @@ esp_err_t d1l_export_store_write_canary(const char *token,
     *out_result = result;
     return ret;
 }
+#endif
 
 esp_err_t d1l_export_store_write_diagnostics(const char *token,
                                              const uint8_t *payload,

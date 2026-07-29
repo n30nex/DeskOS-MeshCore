@@ -611,6 +611,31 @@ jobs:
           path: artifacts/rp2040-release-inputs
           merge-multiple: false
 
+      - name: Audit production firmware payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          . /opt/esp/idf/export.sh
+          audit_args=(
+            --esp-bin build/meshcore_deskos_d1l.bin
+            --esp-elf build/meshcore_deskos_d1l.elf
+            --sdkconfig sdkconfig
+          )
+          if [[ "${{ needs.change-filter.outputs.include_sd_bridge }}" == "true" ]]; then
+            mapfile -t production_uf2 < <(
+              find artifacts/rp2040-release-inputs/rp2040-sd-bridge-firmware \
+                -maxdepth 1 -type f -name "deskos_sd_bridge.ino.uf2" -print
+            )
+            if [[ "${#production_uf2[@]}" -ne 1 ]]; then
+              printf 'Expected exactly one production RP2040 UF2, found %s\n' \
+                "${#production_uf2[@]}" >&2
+              exit 1
+            fi
+            audit_args+=(--rp2040-payload "${production_uf2[0]}")
+          fi
+          python scripts/audit_production_firmware_payload_d1l.py \
+            "${audit_args[@]}" | tee artifacts/production-payload-audit.json
+
       - name: Package D1L release
         shell: bash
         run: |

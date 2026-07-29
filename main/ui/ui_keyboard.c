@@ -137,6 +137,7 @@ void d1l_ui_keyboard_clear_textarea(lv_obj_t *keyboard)
     }
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 bool d1l_ui_keyboard_normalize_probe_target(const char *name, char *out_target,
                                             size_t out_target_len)
 {
@@ -258,3 +259,4 @@ int32_t d1l_ui_keyboard_probe_min_height(const char *target)
     }
     return 80;
 }
+#endif

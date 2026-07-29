@@ -86,7 +86,10 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
     )
 
     assert 'viewport, "Options", 8, 8, 96, 48' in render
-    assert 'viewport, "Center", 8, 302, 96, 52' in render
+    assert (
+        'viewport, "Center", 8, (int)MAP_VIEWPORT_HEIGHT - 60, 96, 52'
+        in render
+    )
     assert 'viewport, "-", 420, 92, 52, 52' in render
     assert 'viewport, "+", 420, 8, 52, 52' in render
     assert "map_style_overlay_button" in render
@@ -184,6 +187,12 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
 
 def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():
     source = read("main/ui/ui_map.c")
+    marker_name = function_body(
+        source, "static void map_marker_display_name",
+        "static int32_t map_e7_to_e6"
+    )
+    assert '"Mesh node"' in marker_name
+    assert "marker->fingerprint" not in marker_name
     header = read("main/ui/ui_map.h")
     marker_refresh = function_body(
         source,
@@ -290,8 +299,8 @@ def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view
     assert "entry->lat_e6" in detail
     assert "entry->lon_e6" in detail
     assert "GPS" not in detail
-    assert "lv_obj_set_size(controller->sheet, 448, 416);" in node_detail
-    assert "lv_obj_set_pos(controller->sheet, 16, 60);" in node_detail
+    assert "lv_obj_set_size(controller->sheet, 480, 480);" in node_detail
+    assert "lv_obj_set_pos(controller->sheet, 0, 0);" in node_detail
     assert "d1l_app_model_query_nodes(" in open_from_map
     assert "&query, s_map_node_rows, D1L_NODE_STORE_CAPACITY" in open_from_map
     assert "D1L_NODE_STORE_CAPACITY" in open_from_map
@@ -328,7 +337,7 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
     assert "if (!eligibility.can_open_compose)" in compose
     assert "show_dm_identity_reason(eligibility)" in compose
     assert "if (controller->rendered.can_dm)" in detail
-    assert '"DM unavailable [%s]"' in detail
+    assert '"Messaging unavailable [%s]"' in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
 
     nodes_source = read("main/ui/ui_nodes.c")
@@ -619,7 +628,7 @@ def test_map_cache_status_is_read_only_and_reports_saved_work_honestly():
     assert 'map_render_header(parent, "Cache status", "Read-only readiness", "Back"' in cache_page
 
 
-def test_unsaved_map_location_uses_empty_fields_and_example_placeholders():
+def test_unsaved_map_location_uses_empty_fields_and_range_guidance():
     map_source = read("main/ui/ui_map.c")
     phase_source = read("main/ui/ui_phase1.c")
     editor = function_body(
@@ -632,8 +641,10 @@ def test_unsaved_map_location_uses_empty_fields_and_example_placeholders():
     assert 'char latitude[20] = "";' in editor
     assert 'char longitude[20] = "";' in editor
     assert "if (snapshot->map_location_set)" in editor
-    assert 'map_configure_textarea(controls->latitude_textarea, "e.g. 43.6532000", latitude' in editor
-    assert 'map_configure_textarea(controls->longitude_textarea, "e.g. -79.3832000", longitude' in editor
+    assert '"Range: -90 to 90", latitude' in editor
+    assert '"Range: -180 to 180", longitude' in editor
+    assert "43.6532" not in editor
+    assert "-79.3832" not in editor
     assert "s_map_location_lat_e7 = 0;" in snapshot_copy
     assert "s_map_location_lon_e7 = 0;" in snapshot_copy
     assert "436532000L" not in phase_source

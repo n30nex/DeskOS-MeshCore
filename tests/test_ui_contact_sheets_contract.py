@@ -172,7 +172,10 @@ def test_contact_progressive_disclosure_layout_and_truth_are_preserved():
         "Contact options",
     ):
         assert f'"{label}"' in detail
-    assert '"DM unavailable [%s]"' in detail
+    assert '"Messaging unavailable [%s]"' in detail
+    assert '"Direct route  |  %u hop%s"' in detail
+    assert '"Flood route  |  no saved direct path"' in detail
+    assert '"Identity  %.16s"' in detail
     assert "d1l_ui_dm_identity_reason_code(" in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
     assert "controller->rendered.dm_identity_reason" in detail
@@ -198,7 +201,7 @@ def test_contact_progressive_disclosure_layout_and_truth_are_preserved():
         "Scan with a MeshCore client or copy from serial",
     ):
         assert f'"{label}"' in source
-    assert "lv_obj_set_size(sheet, 480, 424);" in source
-    assert "lv_obj_set_pos(sheet, 0, 56);" in source
+    assert "lv_obj_set_size(sheet, 480, 480);" in source
+    assert "lv_obj_set_pos(sheet, 0, 0);" in source
     assert "d1l_ui_keyboard_configure_input(" in source
     assert "16, 148, 448, 200" in source

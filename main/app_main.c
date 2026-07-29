@@ -241,12 +241,25 @@ void app_main(void)
         }
     }
     d1l_meshcore_service_init();
+    /*
+     * Create or restore the persisted identity before the startup-readiness
+     * overlay evaluates its Identity row. This performs no RF transmission:
+     * a factory-fresh unit remains silent until explicit onboarding
+     * completion requests its first signed advert.
+     */
+    esp_err_t identity_ret = d1l_meshcore_service_ensure_identity();
+    if (identity_ret != ESP_OK) {
+        ESP_LOGE(TAG, "MeshCore identity is not ready for setup: %s",
+                 esp_err_to_name(identity_ret));
+    }
 
+    d1l_settings_t public_settings = {0};
+    const bool onboarding_complete =
+        d1l_settings_public_snapshot(&public_settings) == ESP_OK &&
+        public_settings.onboarding_complete;
     if (board_ret == ESP_OK) {
         d1l_display_preferences_t display_preferences = {0};
         d1l_display_preferences_get(&display_preferences);
-        d1l_settings_t public_settings = {0};
-        (void)d1l_settings_public_snapshot(&public_settings);
         const uint8_t startup_brightness = public_settings.night_mode ?
             25U : display_preferences.brightness_percent;
         const esp_err_t backlight_ret =
@@ -260,11 +273,12 @@ void app_main(void)
         esp_err_t mesh_rx_ret = d1l_meshcore_service_start_rx_async();
         if (mesh_rx_ret != ESP_OK) {
             ESP_LOGW(TAG, "MeshCore RX start queue failed: %s", esp_err_to_name(mesh_rx_ret));
-        } else {
+        } else if (onboarding_complete) {
             /*
              * Public channel packets do not carry a sender name. Announce the
              * retained signed identity once after RX starts so nearby clients
-             * can attribute subsequent messages to this D1L.
+             * can attribute subsequent messages to this desk. A factory-fresh
+             * unit remains RF-silent until onboarding persists a user name.
              */
             esp_err_t boot_advert_ret =
                 d1l_meshcore_service_request_boot_advert(true);

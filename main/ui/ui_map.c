@@ -67,7 +67,9 @@ static uint32_t s_viewport_generation;
 static uint32_t s_viewport_revision;
 static uint32_t s_viewport_suppression_depth;
 static bool s_viewport_suppress_next_acquire;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool s_viewport_acceptance_reset_pending;
+#endif
 static bool s_viewport_allocation_failed;
 static portMUX_TYPE s_viewport_lease_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint16_t *s_viewport_pixels;
@@ -373,6 +375,7 @@ static void map_viewport_sync_position(const d1l_app_snapshot_t *snapshot)
     s_viewport_position_initialized = true;
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void map_viewport_apply_acceptance_reset(
     const d1l_app_snapshot_t *snapshot)
 {
@@ -391,6 +394,7 @@ static void map_viewport_apply_acceptance_reset(
     s_viewport_zoom = map_zoom_clamp(snapshot->map_tile_zoom);
     s_viewport_position_initialized = true;
 }
+#endif
 
 static bool map_text_contains(const char *text, const char *needle)
 {
@@ -650,7 +654,7 @@ static void map_marker_display_name(const d1l_node_marker_t *marker,
     if (!marker) {
         return;
     }
-    const char *source = marker->name[0] ? marker->name : marker->fingerprint;
+    const char *source = marker->name[0] ? marker->name : "Mesh node";
     const size_t source_len = strlen(source);
     if (source_len <= MAP_MARKER_NAME_MAX_CHARS) {
         map_copy_bounded_text(dest, dest_len, source);
@@ -1525,7 +1529,9 @@ void d1l_ui_map_render(lv_obj_t *parent,
         return;
     }
     map_viewport_sync_position(snapshot);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
     map_viewport_apply_acceptance_reset(snapshot);
+#endif
     d1l_ui_map_viewport_release();
     /* Rendering runs on the UI task, so it owns marker hit/cache mutation.
      * Cross-task release only invalidates the lease. */
@@ -1601,14 +1607,14 @@ void d1l_ui_map_render(lv_obj_t *parent,
         lv_obj_set_style_text_font(status, &lv_font_montserrat_24, 0);
         map_label_dot(status, 420);
         lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(status, 30, 116);
+        lv_obj_set_pos(status, 30, (int)MAP_VIEWPORT_HEIGHT / 2 - 72);
     }
     lv_obj_t *detail = map_label(viewport, state_detail, MAP_COLOR_DETAIL);
     s_viewport_detail_label = detail;
     if (detail) {
         map_label_wrap(detail, 420);
         lv_obj_set_style_text_align(detail, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(detail, 30, 158);
+        lv_obj_set_pos(detail, 30, (int)MAP_VIEWPORT_HEIGHT / 2 - 30);
     }
     char readiness[96];
     snprintf(readiness, sizeof(readiness), "Wi-Fi %s  |  SD %s",
@@ -1618,7 +1624,7 @@ void d1l_ui_map_render(lv_obj_t *parent,
     if (ready) {
         map_label_dot(ready, 420);
         lv_obj_set_style_text_align(ready, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(ready, 30, 216);
+        lv_obj_set_pos(ready, 30, (int)MAP_VIEWPORT_HEIGHT / 2 + 28);
     }
     lv_obj_t *attribution = map_label(viewport, "(c) OpenStreetMap contributors",
                                       MAP_COLOR_DETAIL);
@@ -1626,7 +1632,7 @@ void d1l_ui_map_render(lv_obj_t *parent,
     if (attribution) {
         map_label_dot(attribution, 240);
         lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_pos(attribution, 228, 334);
+        lv_obj_set_pos(attribution, 228, (int)MAP_VIEWPORT_HEIGHT - 36);
         lv_obj_set_style_bg_color(attribution, lv_color_hex(0x071018), 0);
         lv_obj_set_style_bg_opa(attribution, LV_OPA_80, 0);
         lv_obj_set_style_pad_all(attribution, 2, 0);
@@ -1636,7 +1642,8 @@ void d1l_ui_map_render(lv_obj_t *parent,
     if (s_viewport_pin_truth_label) {
         lv_label_set_long_mode(s_viewport_pin_truth_label, LV_LABEL_LONG_WRAP);
         lv_obj_set_size(s_viewport_pin_truth_label, 112, 58);
-        lv_obj_set_pos(s_viewport_pin_truth_label, 112, 298);
+        lv_obj_set_pos(s_viewport_pin_truth_label, 112,
+                       (int)MAP_VIEWPORT_HEIGHT - 74);
         lv_obj_set_style_text_align(s_viewport_pin_truth_label,
                                     LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_bg_color(s_viewport_pin_truth_label,
@@ -1661,14 +1668,15 @@ void d1l_ui_map_render(lv_obj_t *parent,
             map_label_dot(s_viewport_center_source_label, 96);
             lv_obj_set_style_text_align(s_viewport_center_source_label,
                                         LV_TEXT_ALIGN_CENTER, 0);
-            lv_obj_set_pos(s_viewport_center_source_label, 8, 278);
+            lv_obj_set_pos(s_viewport_center_source_label, 8,
+                           (int)MAP_VIEWPORT_HEIGHT - 94);
             lv_obj_set_style_bg_color(s_viewport_center_source_label,
                                       lv_color_hex(MAP_COLOR_BG), 0);
             lv_obj_set_style_bg_opa(s_viewport_center_source_label,
                                     LV_OPA_80, 0);
         }
         lv_obj_t *center_button = map_button(
-            viewport, "Center", 8, 302, 96, 52,
+            viewport, "Center", 8, (int)MAP_VIEWPORT_HEIGHT - 60, 96, 52,
             map_viewport_recenter_event_cb);
         s_viewport_center_button = center_button;
         map_style_overlay_button(center_button);
@@ -2211,7 +2219,8 @@ void d1l_ui_map_render_location(lv_obj_t *parent,
     if (controls->latitude_textarea) {
         lv_obj_set_size(controls->latitude_textarea, 448, 48);
         lv_obj_set_pos(controls->latitude_textarea, 16, 146);
-        map_configure_textarea(controls->latitude_textarea, "e.g. 43.6532000", latitude, 14);
+        map_configure_textarea(controls->latitude_textarea,
+                               "Range: -90 to 90", latitude, 14);
         if (callbacks->location_textarea) {
             lv_obj_add_event_cb(controls->latitude_textarea, callbacks->location_textarea,
                                 LV_EVENT_FOCUSED, NULL);
@@ -2227,7 +2236,8 @@ void d1l_ui_map_render_location(lv_obj_t *parent,
     if (controls->longitude_textarea) {
         lv_obj_set_size(controls->longitude_textarea, 448, 48);
         lv_obj_set_pos(controls->longitude_textarea, 16, 228);
-        map_configure_textarea(controls->longitude_textarea, "e.g. -79.3832000", longitude, 15);
+        map_configure_textarea(controls->longitude_textarea,
+                               "Range: -180 to 180", longitude, 15);
         if (callbacks->location_textarea) {
             lv_obj_add_event_cb(controls->longitude_textarea, callbacks->location_textarea,
                                 LV_EVENT_FOCUSED, NULL);
@@ -2290,6 +2300,7 @@ void d1l_ui_map_viewport_release(void)
     }
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 void d1l_ui_map_viewport_prepare_acceptance(void)
 {
     portENTER_CRITICAL(&s_viewport_lease_lock);
@@ -2297,6 +2308,7 @@ void d1l_ui_map_viewport_prepare_acceptance(void)
     portEXIT_CRITICAL(&s_viewport_lease_lock);
     d1l_ui_map_viewport_release();
 }
+#endif
 
 void d1l_ui_map_viewport_prepare_cover(void)
 {

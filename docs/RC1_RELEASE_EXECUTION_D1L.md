@@ -3,7 +3,7 @@
 This is the authoritative closing procedure for tag `v1.0.0`. It starts only
 after the final RC1 change is merged. It uses one exact successful `main`
 push, one clean Pi checkout, one downloaded Actions package, one non-erasing
-flash, five machine-generated evidence sources, one aggregate, and one
+flash, four machine-generated evidence sources, one aggregate, and one
 final audit.
 
 Do not add a soak, run another broad test campaign, erase NVS, format SD, use
@@ -11,11 +11,13 @@ a local firmware build, or use the package's older `flash_project.sh` helper
 as closing evidence. The only Public transmission permitted here is the one
 tokenized send enabled by `--authorize-public-tx`.
 
-The completed UI-navigation, saved-profile Wi-Fi reconnect, and SD
-write/reboot/remount gates are not rerun during closing. They are also not
-represented as fresh outcomes in the final receipt. The remaining sources
-still prove the exact candidate flash, controlled RF/protocol behavior, SD
-remove/reinsert recovery, and authorized Map download/cache behavior.
+The completed UI-navigation, saved-profile Wi-Fi reconnect, SD
+write/reboot/remount, and prepared-card remove/reinsert gates are not rerun
+during closing. The prior operator-observed SD cycle is carried forward as
+context only; this procedure does not claim a fresh SD receipt or represent
+that cycle as a fresh outcome. The remaining sources still prove the exact
+candidate flash, controlled RF/protocol behavior, and authorized Map
+download/cache behavior.
 
 ## 1. Freeze the merged candidate
 
@@ -185,9 +187,32 @@ The receipt is evidence source one and must report `closure_eligible=true`,
 the ready baseline commit, the exact post-flash candidate commit, and
 preserved retained state.
 
-## 6. Produce the other four bounded sources
+## 6. Produce the other three bounded sources
 
-Run these serially against the retained-reflash image.
+Run these serially against the retained-reflash image in the order shown.
+Map acceptance includes one normal product reboot, so it must finish before
+the RF and protocol receipts. The protocol receipt remains last because it
+contains the sole authorized Public send.
+
+### Source 4: authorized Map download and offline cache revisit
+
+The runner reads the provider authorization already installed on the device.
+`--root` binds the transcript to this exact clean source checkout. It opens Map
+through the normal product UI, disables Wi-Fi, performs a normal product
+reboot, reopens Map from the prepared SD cache with no view-network request,
+then restores the original UI tab and saved Wi-Fi connection. It does not
+remove, reinsert, erase, or format the SD card.
+
+```bash
+MAP="$EVIDENCE_DIR/map-acceptance.json"
+"$PY" scripts/rc1_map_acceptance_d1l.py \
+  --root "$ROOT" \
+  --port "$PORT" \
+  --expected-firmware-commit "$SHA" \
+  --github-actions-run "$RUN" \
+  --workflow-run-attempt "$ATTEMPT" \
+  --output "$MAP"
+```
 
 ### Source 2: controlled-peer DM/ACK
 
@@ -273,38 +298,7 @@ Before the single Public send, the runner queues one signed D1L flood advert
 and requires COM11 to resolve exactly one signed `D1L` contact to the current
 D1L key. The subsequent Public receive must reference that exact advert.
 
-### Source 4: SD degraded notice and reinsert recovery
-
-This runner prompts for one physical remove/reinsert cycle. It is the only
-physical intervention in this evidence set. Remove only the prepared DeskOS
-card when prompted; do not format or repair it.
-
-```bash
-SD_DEGRADED="$EVIDENCE_DIR/sd-remove-reinsert.json"
-"$PY" scripts/sd_remove_reinsert_acceptance_d1l.py \
-  --port "$PORT" \
-  --expected-firmware-commit "$SHA" \
-  --strict-evidence \
-  --out "$SD_DEGRADED"
-```
-
-### Source 5: authorized Map download and offline cache revisit
-
-The runner reads the provider authorization already installed on the device.
-`--root` binds the transcript to this exact clean source checkout.
-
-```bash
-MAP="$EVIDENCE_DIR/map-acceptance.json"
-"$PY" scripts/rc1_map_acceptance_d1l.py \
-  --root "$ROOT" \
-  --port "$PORT" \
-  --expected-firmware-commit "$SHA" \
-  --github-actions-run "$RUN" \
-  --workflow-run-attempt "$ATTEMPT" \
-  --output "$MAP"
-```
-
-## 7. Aggregate the five sources
+## 7. Aggregate the four sources
 
 ```bash
 PHYSICAL="$EVIDENCE_DIR/rc1-bounded-physical-${SHA}.json"
@@ -316,13 +310,12 @@ PHYSICAL_EVIDENCE="$EVIDENCE_DIR/rc1-bounded-physical-${SHA}.evidence.json"
   --flash-receipt "$FLASH" \
   --rf-receipt "$RF" \
   --protocol-receipt "$PROTOCOL" \
-  --sd-degraded-receipt "$SD_DEGRADED" \
   --map-receipt "$MAP" \
   --output "$PHYSICAL" \
   --evidence-output "$PHYSICAL_EVIDENCE"
 ```
 
-The producer must copy five unique source JSON files into
+The producer must copy four unique source JSON files into
 `rc1-bounded-physical-${SHA}.sources/` and fail on missing, duplicate,
 simulated, dry-run, manual-only, stale-source or candidate-mismatched evidence.
 

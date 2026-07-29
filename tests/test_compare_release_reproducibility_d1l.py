@@ -312,7 +312,12 @@ def write_rp2040_artifacts(root: Path, run_index: int) -> Path:
     for name in compare_release_reproducibility_d1l.RP2040_ARTIFACT_NAMES:
         artifact_dir = artifact_root / name
         artifact_dir.mkdir(parents=True)
-        uf2 = artifact_dir / f"{name}.uf2"
+        uf2_name = (
+            "deskos_sd_bridge.ino.uf2"
+            if name == "rp2040-sd-bridge-firmware"
+            else f"{name}.uf2"
+        )
+        uf2 = artifact_dir / uf2_name
         uf2.write_bytes(
             deterministic_build_payload(f"rp2040:{name}", b"rp2040-source-v1")
         )
@@ -481,6 +486,16 @@ def build_pair(
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+
+    # This suite exercises the internal evidence-rich reproducibility shape.
+    # Customer production-package surface enforcement is covered separately;
+    # keep this fixture out of that path so its comparator evidence remains
+    # available without changing what production packages contain.
+    monkeypatch.setattr(
+        package_release_d1l,
+        "PRODUCTION_RELEASE_PROFILES",
+        frozenset({package_release_d1l.CORE_RELEASE_PROFILE}),
+    )
 
     signing_key = root / "test-update-signing-key.pem"
     signing_key.write_text("fixture key; signing is covered by release CI\n", encoding="ascii")

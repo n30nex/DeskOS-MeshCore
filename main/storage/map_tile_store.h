@@ -6,10 +6,13 @@
 
 #include "esp_err.h"
 
+#include "app/qualification_hooks.h"
 #include "hal/rp2040_bridge.h"
 #include "storage/storage_status.h"
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 #define D1L_MAP_TILE_CANARY_TOKEN_MAX 31U
+#endif
 #define D1L_MAP_TILE_ZOOM_MAX 18U
 #define D1L_MAP_TILE_URL_TEMPLATE_MAX 192U
 #define D1L_MAP_TILE_ATTRIBUTION_MAX 64U
@@ -27,6 +30,7 @@
 #define D1L_MAP_TILE_PROVIDER_POLICY "built_in_osm_current_view_and_sd_authorized_background"
 #define D1L_MAP_TILE_PROVIDER_ATTRIBUTION D1L_MAP_TILE_ATTRIBUTION
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 typedef struct {
     char token[D1L_MAP_TILE_CANARY_TOKEN_MAX + 1U];
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
@@ -46,6 +50,7 @@ typedef struct {
     esp_err_t last_error;
     d1l_rp2040_file_result_t file;
 } d1l_map_tile_canary_result_t;
+#endif
 
 typedef struct {
     char url[D1L_MAP_TILE_URL_TEMPLATE_MAX + 32U];
@@ -91,7 +96,9 @@ typedef struct {
 
 typedef bool (*d1l_map_tile_continue_cb_t)(void *context);
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 bool d1l_map_tile_store_token_valid(const char *token);
+#endif
 bool d1l_map_tile_store_sd_ready(const d1l_storage_status_t *status);
 bool d1l_map_tile_store_coord_valid(uint8_t z, uint32_t x, uint32_t y);
 bool d1l_map_tile_store_path(uint8_t z, uint32_t x, uint32_t y,
@@ -124,9 +131,11 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
                                    d1l_map_tile_continue_cb_t should_continue,
                                    void *continue_context,
                                    d1l_map_tile_download_result_t *out_result);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_map_tile_store_write_canary(const char *token,
                                           const d1l_storage_status_t *status,
                                           d1l_map_tile_canary_result_t *out_result);
 esp_err_t d1l_map_tile_store_check_canary(const char *token,
                                           const d1l_storage_status_t *status,
                                           d1l_map_tile_canary_result_t *out_result);
+#endif

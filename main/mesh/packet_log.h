@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "app/qualification_hooks.h"
 #include "esp_err.h"
 
 #define D1L_PACKET_LOG_RAM_CAPACITY 128U
@@ -84,8 +85,10 @@ bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_
  * storage I/O on the caller. The retained-store worker owns the flush. */
 bool d1l_packet_log_append_raw_deferred(const d1l_packet_log_entry_t *entry,
                                         const uint8_t *raw, size_t raw_len);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 bool d1l_packet_log_append_raw_volatile(const d1l_packet_log_entry_t *entry,
                                         const uint8_t *raw, size_t raw_len);
+#endif
 esp_err_t d1l_packet_log_flush(void);
 esp_err_t d1l_packet_log_flush_if_due(void);
 d1l_packet_log_stats_t d1l_packet_log_stats(void);

@@ -78,10 +78,10 @@ static void test_truthful_render_actions_generation_and_cleanup(void)
     assert(screen);
     d1l_ui_node_detail_controller_t controller = {0};
     assert(d1l_ui_node_detail_create(&controller, screen));
-    assert(controller.sheet->x == 16);
-    assert(controller.sheet->y == 60);
-    assert(controller.sheet->width == 448);
-    assert(controller.sheet->height == 416);
+    assert(controller.sheet->x == 0);
+    assert(controller.sheet->y == 0);
+    assert(controller.sheet->width == 480);
+    assert(controller.sheet->height == 480);
     assert(lv_obj_has_flag(controller.sheet, LV_OBJ_FLAG_HIDDEN));
 
     d1l_node_view_t node = sample_node("repeater");
@@ -95,24 +95,22 @@ static void test_truthful_render_actions_generation_and_cleanup(void)
     assert(view_model.management_gated);
     assert(d1l_ui_node_detail_render(
         &controller, &view_model, handle_action, (void *)0x1234));
-    assert(lv_test_has_label(controller.sheet, "Node Detail"));
+    assert(lv_test_has_label(controller.sheet, "Contact"));
     assert(lv_test_has_label(controller.sheet, "Hilltop"));
     assert(lv_test_has_label(controller.sheet, "Role Repeater"));
     assert(lv_test_has_label(controller.sheet,
-                             "Fingerprint 0123456789abcdef"));
+                             "Direct route  |  2 hops  |  reachable"));
     assert(lv_test_has_label(controller.sheet,
-                             "Public key retained  favorite  unread counted"));
-    assert(lv_test_has_label(controller.sheet,
-                             "Signal rssi -88  snr -3.5  reachable"));
-    assert(lv_test_has_label(controller.sheet,
-                             "Path hops 2  hash 1 byte  advert 1234ms"));
+                             "Last signal -88 dBm  |  SNR -3.5"));
     assert(lv_test_has_label(controller.sheet,
                              "Advert location 43.675000, -79.440000"));
     assert(lv_test_has_label(controller.sheet,
-                             "Last heard 200ms  first 100ms  count 3"));
+                             "Heard on this boot  |  3 sightings"));
+    assert(lv_test_has_label(controller.sheet,
+                             "Advanced identity  0123456789abcdef  |  key retained"));
     assert(lv_test_has_label(
         controller.sheet,
-        "DM unavailable [heard_only]: Heard node only; add or import a verified chat Contact."));
+        "Messaging unavailable [heard_only]: Heard node only; add or import a verified chat Contact."));
     assert(lv_test_has_label(controller.sheet, "Admin"));
     assert(lv_test_has_label(controller.sheet,
                              "Verified server; local authenticated login required."));
@@ -166,7 +164,7 @@ static void test_ready_dm_close_and_invalid_models_fail_closed(void)
         &controller, &view_model, handle_action, (void *)0x1234));
     assert(lv_test_has_label(
         controller.sheet,
-        "DM ready [ready]: Verified canonical chat Contact."));
+        "Messaging ready [ready]: Verified canonical chat Contact."));
     assert(!lv_test_has_label(controller.sheet, "Admin"));
 
     const size_t before = s_action_count;

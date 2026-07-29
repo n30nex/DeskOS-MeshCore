@@ -104,7 +104,6 @@ SOURCE_KINDS = {
     "flash": "esp32_flash",
     "rf": "rf_full_acceptance",
     "protocol": PROTOCOL_KIND,
-    "sd_degraded": "d1l_sd_remove_reinsert_source",
     "map": MAP_KIND,
 }
 SOURCE_ROLES = tuple(SOURCE_KINDS)
@@ -116,7 +115,6 @@ OUTCOME_KEYS = (
     "ping",
     "repeater_login",
     "repeater_query",
-    "sd_degraded_notice",
     "authorized_map_download",
     "map_cache_revisit",
 )
@@ -130,7 +128,6 @@ COVERAGE = {
     "ping": "protocol",
     "repeater_login": "protocol",
     "repeater_query": "protocol",
-    "sd_degraded_notice": "sd_degraded",
     "authorized_map_download": "map",
     "map_cache_revisit": "map",
 }
@@ -1232,87 +1229,6 @@ def validate_protocol(
     }
 
 
-def validate_sd_degraded(
-    data: dict[str, Any], candidate: dict[str, str]
-) -> dict[str, bool | int]:
-    events = data.get("events")
-    cycles = data.get("cycles")
-    required = _integer(data.get("cycles_required"), minimum=1)
-    completed = _integer(data.get("cycles_completed"), minimum=1)
-    version = data.get("version")
-    ordered_events = (
-        isinstance(events, list)
-        and bool(events)
-        and all(
-            isinstance(event, dict)
-            and event.get("sequence") == sequence
-            and (
-                (
-                    event.get("kind") == "command"
-                    and isinstance(event.get("command"), str)
-                    and isinstance(event.get("result"), dict)
-                    and event["result"].get("ok") is True
-                    and event["result"].get("public_rf_tx") is not True
-                    and event["result"].get("dm_rf_tx") is not True
-                    and event["result"].get("formats_sd") is not True
-                    and event["result"].get("format_performed") is not True
-                )
-                or (
-                    event.get("kind") == "prompt"
-                    and event.get("action") in {"remove", "reinsert"}
-                )
-            )
-            for sequence, event in enumerate(events, 1)
-        )
-    )
-    cycle_truth = (
-        required is not None
-        and completed == required
-        and isinstance(cycles, list)
-        and len(cycles) == required
-        and all(
-            isinstance(cycle, dict)
-            and cycle.get("cycle") == sequence
-            and cycle.get("ok") is True
-            and isinstance(cycle.get("absent"), dict)
-            and cycle["absent"].get("mode") == "live_only_no_card"
-            and cycle["absent"].get("ok") is True
-            and cycle["absent"].get("degraded_notice_visible") is True
-            and isinstance(cycle.get("health"), dict)
-            and cycle["health"].get("ok") is True
-            and _integer(cycle["health"].get("boot_nonce"), minimum=1) is not None
-            and isinstance(cycle.get("crashlog"), dict)
-            and cycle["crashlog"].get("ok") is True
-            and not crashlog_has_crash_like_entries(cycle["crashlog"])
-            for sequence, cycle in enumerate(cycles, 1)
-        )
-    )
-    if not (
-        data.get("schema") == 1
-        and data.get("kind") == SOURCE_KINDS["sd_degraded"]
-        and data.get("mode") == "hardware"
-        and data.get("dry_run") is not True
-        and data.get("simulated") is not True
-        and data.get("manual_only") is not True
-        and data.get("port") == POSIX_D1L_TARGET
-        and _candidate_binding(data, candidate, require_run=False)
-        and data.get("strict_evidence") is True
-        and data.get("ok") is True
-        and data.get("public_rf_tx") is False
-        and data.get("dm_rf_tx") is False
-        and data.get("formats_sd") is False
-        and isinstance(version, dict)
-        and version.get("ok") is True
-        and version.get("cmd") == "version"
-        and _exact_commit(version.get("build_commit"))
-        == candidate["firmware_commit"]
-        and ordered_events
-        and cycle_truth
-    ):
-        raise EvidenceError("SD degraded receipt lacks machine-observed live-only notice")
-    return {"sd_degraded_notice": True}
-
-
 def validate_map(
     data: dict[str, Any], candidate: dict[str, str]
 ) -> dict[str, bool | int]:
@@ -1371,7 +1287,6 @@ VALIDATORS: dict[
     "flash": validate_flash,
     "rf": validate_rf,
     "protocol": validate_protocol,
-    "sd_degraded": validate_sd_degraded,
     "map": validate_map,
 }
 
@@ -1444,7 +1359,7 @@ def produce(
     evidence_output: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if set(sources) != set(SOURCE_ROLES):
-        raise EvidenceError("all five exact source roles are required")
+        raise EvidenceError("all four exact source roles are required")
     resolved = {role: Path(path).resolve(strict=True) for role, path in sources.items()}
     if len(set(resolved.values())) != len(resolved):
         raise EvidenceError("one source file cannot fill multiple evidence roles")

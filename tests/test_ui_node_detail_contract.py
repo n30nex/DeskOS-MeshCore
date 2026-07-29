@@ -71,30 +71,28 @@ def test_node_detail_preserves_truthful_fields_geometry_and_actions() -> None:
     simulator = read("tools/ui_simulator.py")
 
     for exact in (
-        "Node Detail",
-        "Fingerprint %.16s",
-        "Public key %s  %s  %s",
-        "Signal rssi %d  snr %s%d.%d  %s",
-        "Path hops %u  hash %u byte  advert %lums",
+        "Contact",
+        "%s route  |  %u hop%s  |  %s",
+        "Last signal %d dBm  |  SNR %s%d.%d",
         "Advert location %s, %s",
         "Advert location not provided",
-        "Last heard %lums  first %lums  count %lu",
-        "DM %s [%s]: %s",
+        "Heard on this boot  |  %lu sighting%s",
+        "Messaging %s [%s]: %s",
+        "Advanced identity  %.16s  |  key %s",
         "Admin",
         "Verified server; local authenticated login required.",
     ):
         assert f'"{exact}"' in source
     assert "GPS" not in source
-    assert "lv_obj_set_size(controller->sheet, 448, 416);" in source
-    assert "lv_obj_set_pos(controller->sheet, 16, 60);" in source
+    assert "lv_obj_set_size(controller->sheet, 480, 480);" in source
+    assert "lv_obj_set_pos(controller->sheet, 0, 0);" in source
     assert "lv_obj_set_style_pad_all(controller->sheet, 12, 0);" in source
     assert '"Why no DM?", 174, 0, 120, 44' in source
     assert '"DM", 208, 0, 54, 44' in source
     assert '"Close", 316, 0, 76, 44' in source
-    assert '"Admin", 8, 352, 104, 40' in source
+    assert '"Admin", 8, 352, 104, 44' in source
     assert "lv_obj_set_pos(managed_reason, 120, 360);" in source
-    assert 12 + 360 + 40 <= 416
-    assert 60 + 416 <= 480
+    assert 12 + 360 + 40 <= 480
 
     handler = body(
         phase1, "static void handle_node_detail_action", "static void show_node_detail_view"
@@ -139,6 +137,6 @@ def test_node_detail_focused_simulator_views_remain_truthful(tmp_path: Path) -> 
     assert heard_only["metrics"]["node_detail_dm_opens_compose"] is False
     assert heard_only["metrics"]["node_detail_dm_rf_tx"] is False
     assert managed["metrics"]["node_detail_management_gated"] is True
-    assert managed["metrics"]["node_detail_content_bottom"] == 460
+    assert managed["metrics"]["node_detail_content_bottom"] == 400
     assert managed["metrics"]["node_detail_content_clipped"] is False
     assert "Verified server; local authenticated login required." in managed["labels"]

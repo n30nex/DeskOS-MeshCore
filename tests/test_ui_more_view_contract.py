@@ -85,7 +85,9 @@ def test_more_renderer_preserves_geometry_and_rejects_stale_events():
     renderer = read("main/ui/ui_settings.c")
 
     assert "settings_create_row(parent, 444, 54, item->warning)" in renderer
-    assert "settings_create_row(group, 444, 48, category->warning)" in renderer
+    assert "settings_create_container(group, 444)" in renderer
+    assert "lv_obj_set_height(category_row, 34)" in renderer
+    assert "settings_set_dot_width(title_label, 410)" in renderer
     assert "lv_obj_set_pos(controller->menu, 18, 54)" in renderer
     assert "settings_set_dot_width(title, 190)" in renderer
     assert "settings_set_dot_width(status, item->actionable ? 176 : 202)" in renderer

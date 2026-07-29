@@ -57,14 +57,14 @@ is open.
 The 1.0 dock contains:
 
 1. Home
-2. Messages
-3. Nodes
+2. Channels
+3. Contacts
 4. Map
-5. Tools
+5. Settings
 
-Tools groups Packets, Diagnostics, Terminal, Wi-Fi, Observer, SD Card, Map
-options, Display, Notifications, Identity, About, Radio, Server admin, and
-Mesh advertise. Lists and detail sheets scroll on the device.
+Settings groups Packet log, Diagnostics, Terminal, Wi-Fi, Observer, SD Card,
+Map options, Display, Identity, About, Radio, Server admin, and Mesh advertise.
+Lists and detail pages scroll on the device.
 
 ## Safety and privacy
 
@@ -76,8 +76,10 @@ Mesh advertise. Lists and detail sheets scroll on the device.
   local confirmation. Sensitive input is not persistently retained or logged;
   volatile confirmation buffers are wiped.
 - Users prepare FAT32 SD cards on a computer. There is no device-side SD
-  formatting path. Missing or unusable media enters a visible live-only RF
-  chat mode; retained history is not silently redirected into default NVS.
+  formatting path. First setup requires a prepared card and the included
+  authorized NRCan provider manifest. If media is later removed or becomes
+  unusable, a visible live-only RF chat mode remains; retained history is not
+  silently redirected into default NVS.
 - Default NVS remains a bounded configuration, identity, boot/recovery and
   diagnostic store, not the retained-history authority.
 - Normal project flashing is non-erasing. OTA/update/recovery product
@@ -145,7 +147,8 @@ That package helper is for an ordinary post-release install. It is not the
 closing path for `v1.0.0`; the production candidate must follow the
 [authoritative RC1 release execution](docs/RC1_RELEASE_EXECUTION_D1L.md),
 including its single retained-state-preserving flash receipt, bounded
-five-source gate, final audit, exact tag and checksummed release assets.
+four-source gate (flash, RF, protocol and Map), final audit, exact tag and
+checksummed release assets.
 
 ## Documentation
 

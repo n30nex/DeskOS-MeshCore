@@ -4,10 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "app/qualification_hooks.h"
 #include "esp_err.h"
 
-#define D1L_UI_CAPTURE_WIDTH 480U
-#define D1L_UI_CAPTURE_HEIGHT 480U
+#define D1L_UI_DISPLAY_WIDTH 480U
+#define D1L_UI_DISPLAY_HEIGHT 480U
+
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+#define D1L_UI_CAPTURE_WIDTH D1L_UI_DISPLAY_WIDTH
+#define D1L_UI_CAPTURE_HEIGHT D1L_UI_DISPLAY_HEIGHT
 #define D1L_UI_CAPTURE_BYTES_PER_PIXEL 2U
 #define D1L_UI_CAPTURE_TOTAL_BYTES (D1L_UI_CAPTURE_WIDTH * D1L_UI_CAPTURE_HEIGHT * D1L_UI_CAPTURE_BYTES_PER_PIXEL)
 #define D1L_UI_CAPTURE_MAX_CHUNK_BYTES 1024U
@@ -77,19 +82,21 @@ typedef struct {
     int32_t keyboard_w;
     int32_t keyboard_h;
 } d1l_ui_compose_probe_result_t;
+#endif
 
 esp_err_t d1l_ui_phase1_start(void);
 bool d1l_ui_phase1_started(void);
 esp_err_t d1l_ui_phase1_show_home(void);
 esp_err_t d1l_ui_phase1_request_tab(const char *name);
+const char *d1l_ui_phase1_active_tab_name(void);
+const char *d1l_ui_phase1_pending_tab_name(void);
+bool d1l_ui_phase1_tab_switch_pending(void);
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_ui_phase1_request_map_acceptance(void);
 esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
                                       d1l_ui_scroll_probe_result_t *result);
 esp_err_t d1l_ui_phase1_compose_probe(const char *target,
                                        d1l_ui_compose_probe_result_t *result);
-const char *d1l_ui_phase1_active_tab_name(void);
-const char *d1l_ui_phase1_pending_tab_name(void);
-bool d1l_ui_phase1_tab_switch_pending(void);
 esp_err_t d1l_ui_capture_status(d1l_ui_capture_status_t *out_status);
 esp_err_t d1l_ui_capture_begin(d1l_ui_capture_status_t *out_status);
 esp_err_t d1l_ui_capture_chunk(size_t offset,
@@ -100,3 +107,4 @@ esp_err_t d1l_ui_capture_chunk(size_t offset,
                                uint32_t *out_crc32,
                                d1l_ui_capture_status_t *out_status);
 esp_err_t d1l_ui_capture_end(d1l_ui_capture_status_t *out_status);
+#endif

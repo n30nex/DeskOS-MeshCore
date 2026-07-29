@@ -9,7 +9,7 @@ exact-candidate hardware gate.
 
 | Capability | RC1 status | DeskOS workflow |
 |---|---|---|
-| Local identity and boot advert | Ready | A signed flood advert is queued after MeshCore RX starts so nearby clients can attribute later messages to the retained D1L identity. |
+| Local identity and boot advert | Ready | Factory-fresh units stay silent until onboarding saves an explicit device name; RX then starts before the first signed flood advert is queued. Later boots advertise only an already-onboarded retained identity. |
 | Public and custom channels | Ready | Create/import, select, enable, rename, make default, send/receive, search, unread state and confirmed removal. |
 | Direct messages | Ready | Exact verified contact keys, direct/flood route selection, ACK correlation, bounded retry and terminal delivery state. |
 | Contacts | Ready | USB `contacts import <meshcore-uri>` plus on-device rename, favorite, mute and confirmed removal. Heard-only or incomplete identities remain read-only; touchscreen URI import and QR sharing are not RC1 claims. |

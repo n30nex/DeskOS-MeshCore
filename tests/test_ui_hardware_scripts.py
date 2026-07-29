@@ -750,7 +750,7 @@ def test_active_release_docs_require_reduced_bounded_gate_without_soak():
     active = "\n".join(release_docs)
 
     assert "reduced bounded same-artifact gate" in active
-    assert "commands and five evidence roles" in active
+    assert "commands and four fresh evidence roles" in active
     assert "No soak" in active
     assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active
     assert "VID:PID 1a86:7523" in active

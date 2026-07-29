@@ -362,6 +362,7 @@ EXPECTED_WP05_COMPANION_UPSTREAM_SUITES = {
 }
 EXPECTED_WP05_SOURCE_PATHS = {
     "main/app/identity_state.h",
+    "main/app/qualification_hooks.h",
     "main/app/settings_envelope.c",
     "main/app/settings_envelope.h",
     "main/app/settings_model.h",
@@ -1367,6 +1368,7 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
 }
 EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/CMakeLists.txt",
+    "main/app/qualification_hooks.h",
     "main/comms/usb_command_parser.c",
     "main/comms/usb_command_parser.h",
     "main/comms/usb_console.c",

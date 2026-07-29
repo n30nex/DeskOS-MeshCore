@@ -21,11 +21,13 @@
   by-id route and retain a target-bound receipt.
 - [ ] Pass the reduced bounded same-artifact gate: one retained-state-preserving
   non-erasing flash, boot advert and one operator-authorized Public send,
-  DM/ACK from the authoritative RF receipt, contact PATH/TRACE, repeater Ping,
-  repeater login/authenticated query, SD degraded notice/reinsert recovery,
-  and authorized Map download/offline revisit. The completed UI-navigation,
-  Wi-Fi-reconnect, and SD write/reboot/remount campaigns are not rerun. The
-  protocol receipt does not repeat DM.
+  DM/ACK from the authoritative RF receipt, contact PATH, repeater Ping,
+  repeater login/authenticated query, and authorized Map download/offline revisit.
+  These are exactly four fresh evidence sources: flash, RF, protocol
+  and Map. The completed UI-navigation, Wi-Fi-reconnect, SD
+  write/reboot/remount, and prepared-card remove/reinsert campaigns are
+  not rerun. The prior operator-observed SD cycle is context only, not a fresh
+  receipt or outcome. The protocol receipt does not repeat DM.
 - [ ] Verify the exact Actions host-contract evidence keeps built-in OSM
   attributed/current-view-only and pauses authorized-provider prefetch while
   interactive Map is open. The physical Map receipt is intentionally limited
@@ -41,8 +43,9 @@ No soak is required. Do not cut a release tag until every current item above
 passes on the exact downloaded and flashed Actions artifact.
 
 Use the [authoritative RC1 release execution](RC1_RELEASE_EXECUTION_D1L.md)
-for the exact-main capture, one retained-state-preserving flash, five evidence
-sources, aggregate, final audit, `v1.0.0` tag and production download.
+for the exact-main capture, one retained-state-preserving flash, exactly four
+fresh evidence sources, aggregate, final audit, `v1.0.0` tag and production
+download.
 
 ## Historical phase ledger
 

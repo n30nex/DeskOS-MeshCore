@@ -161,6 +161,7 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "lv_obj_set_size(s_content, 480, layout.content_height)" in source
     assert "lv_obj_set_size(s_top_bar, 480, layout.content_y)" in source
     assert "layout.header_detail_visible ? 8 : 1" in source
+    assert "set_object_hidden(s_title_label, layout.content_y == 0U)" in source
     assert "lv_obj_align(s_title_label, LV_ALIGN_TOP_LEFT, 10, 0)" in source
     assert ".content_y = 16" in chrome
     assert ".content_height = 464" in chrome
@@ -170,12 +171,13 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert ".title = \"DeskOS\"" in chrome
     assert ".content_y = D1L_UI_DOCKED_CONTENT_Y" in chrome
     assert ".content_height = D1L_UI_DOCKED_CONTENT_HEIGHT" in chrome
-    assert "D1L_UI_DOCKED_CONTENT_Y 56U" in chrome_header
+    assert "D1L_UI_DOCKED_CONTENT_Y 0U" in chrome_header
+    assert "D1L_UI_DOCK_Y 432U" in chrome_header
     assert "D1L_UI_DOCKED_CONTENT_HEIGHT" in chrome_header
     assert ".content_scrollable = true" in chrome
     assert ".dock_visible = true" in chrome
-    assert ".header_detail_visible = true" in chrome
-    assert ".title = \"MeshCore DeskOS\"" in chrome
+    assert chrome.count(".header_detail_visible = false") == 2
+    assert ".title = \"\"" in chrome
     assert "layout_content_for_active_tab();" in source
 
 
@@ -296,17 +298,17 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     dm_row = messages_source.split("static void messages_render_dm_row", 1)[1].split(
         "void d1l_ui_messages_render", 1
     )[0]
-    assert "messages_create_panel(body, outgoing ? 76 : 8, y, 332, 82)" in message_row
+    assert "messages_create_panel(body, outgoing ? 76 : 8, y, 332, 68)" in message_row
     assert "messages_create_panel(parent, 8, y, 408, 72)" in dm_row
     assert "lv_obj_set_pos(text, 8, 26)" in message_row
-    assert "lv_obj_set_pos(details, 8, 60)" in message_row
     assert "lv_obj_set_pos(text, 8, 28)" in dm_row
-    assert "lv_obj_set_pos(details, 8, 50)" in dm_row
+    assert '"rssi %d | snr %s | hops %u | details >"' not in message_row
+    assert '"rssi %d  snr %s  hops %u"' not in dm_row
 
-    assert "messages_create_scroll_body(parent, 18, 112, 424, 184)" in messages_source
+    assert "messages_create_scroll_body(parent, 18, 60, 424, 238)" in messages_source
     assert "messages_create_scroll_body(parent, 18, 68, 424, 286)" in messages_source
-    assert '"Compose" : "Channel unavailable"' in messages_source
-    assert "18, 304, 424, 50" in messages_source
+    assert '"Message this channel                         >"' in messages_source
+    assert "18, 306, 424, 48" in messages_source
     assert "controller->rendered.public_row_count" in messages_source
     assert "controller->rendered.dm_row_count" in messages_source
 
@@ -509,7 +511,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '"state %s | reason %s | error %d | revision %lu | session %llu"' in read(
         "main/ui/ui_messages.c"
     )
-    assert '"Scroll proof keeps this empty-state layout validated too."' in nodes_source
+    assert '"Scroll proof keeps this empty-state layout validated too."' not in nodes_source
 
 
 def test_d1l_ui_display_path_uses_bsp_direct_framebuffers_and_capture_shadow():
@@ -752,7 +754,17 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_contact_store_export_uri(&contact, dest, dest_size)" in model
     assert "d1l_route_store_copy_for_target(fingerprint, out_entries, max_entries)" in model
     assert "d1l_meshcore_service_request_advert(flood)" in model
-    assert "d1l_settings_complete_onboarding(node_name, false, false, false)" in model
+    assert "d1l_settings_complete_onboarding(" in model
+    onboarding = model.split(
+        "esp_err_t d1l_app_model_complete_onboarding", 1
+    )[1].split("esp_err_t d1l_app_model_reset_onboarding", 1)[0]
+    assert "const bool first_completion = !before.onboarding_complete" in onboarding
+    assert "d1l_channel_store_seed_onboarding_defaults()" in onboarding
+    assert "d1l_meshcore_service_start_rx_async()" in onboarding
+    assert "d1l_meshcore_service_request_boot_advert(true)" in onboarding
+    assert onboarding.index("d1l_meshcore_service_start_rx_async()") < onboarding.index(
+        "d1l_meshcore_service_request_boot_advert(true)"
+    )
     assert "d1l_settings_update_fields(" in model
     assert "d1l_meshcore_service_ensure_identity()" in model
 
@@ -760,6 +772,7 @@ def test_touch_ui_actions_route_through_app_model():
 def test_ui_simulator_flow_names_match_lvgl_handlers():
     source = (
         read("main/ui/ui_phase1.c")
+        + read("main/ui/ui_first_start.c")
         + read("main/ui/ui_wifi.c")
         + read("main/ui/ui_radio_settings.c")
         + read("main/ui/ui_radio_settings.h")
@@ -792,15 +805,19 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
     } <= flow_names
 
     handler_symbols = {
-        "complete_onboarding": "onboarding_start_event_cb",
-        "apply_onboarding_defaults": "onboarding_defaults_event_cb",
+        "edit_node_name": "controller->primary_textarea",
+        "save_first_start_name": "save_name_and_advance",
+        "save_first_start_location": "save_location_and_advance",
+        "first_start_skip": "handle_skip",
+        "save_first_start_wifi": "save_wifi_and_advance",
+        "confirm_canadian_radio": "confirm_radio_and_advance",
+        "continue_first_start_storage": "render_channels",
+        "complete_first_start": "finish_onboarding",
         "unlock": "unlock_event_cb",
         "open_public_compose": "open_compose_event_cb",
         "edit_public_message": "s_compose_textarea",
         "send_channel_text": "send_compose_text",
-        "open_channel_selector": "D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR",
-        "select_channel_1": "D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL",
-        "select_channel_2": "D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL",
+            "select_channel_2": "D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL",
         "mark_channel_read": "D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ",
         "open_channel_history": "D1L_UI_MESSAGES_ACTION_OPEN_HISTORY",
         "open_channel_search": "open_public_search_event_cb",
@@ -891,6 +908,11 @@ def test_first_boot_onboarding_sheet_is_touch_backed_and_persisted():
     assert '"MeshCore DeskOS D1L"' in source
     assert '"First boot setup"' in source
     assert '"Node name"' in source
+    assert "D1L_NODE_NAME_FACTORY_DEFAULT" in source
+    onboarding_callbacks = source.split(
+        "static void complete_onboarding_from_ui", 1
+    )[1].split("static const char *public_row_state", 1)[0]
+    assert '"D1L Desk"' not in onboarding_callbacks
     assert '"Canada/USA preset confirmed  910.525 BW62.5 SF7 CR5"' in source
     assert '"Role Desk Companion  Wi-Fi off  BLE off  Observer off"' in source
     assert 'create_button(s_onboarding_sheet, "Start"' in source
@@ -992,7 +1014,7 @@ def test_dm_composer_opens_from_contact_rows():
     assert "static bool s_compose_dm" in source
     assert "static d1l_contact_entry_t s_compose_contact" in source
     assert "D1L_UI_NODES_ACTION_OPEN_CONTACT_DM" in source
-    assert 'nodes_create_button(row, "DM"' in nodes_source
+    assert 'nodes_create_button(row, "Message"' in nodes_source
     assert "nodes_dispatch_contact_dm_event_cb" in nodes_source
     assert "open_dm_compose_for_contact(event->contact);" in source
     assert "selected = *entry" in source
@@ -1031,8 +1053,8 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD" in messages_source
     assert "D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD" in messages_source
     assert "D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS" in messages_source
-    assert "lv_obj_set_size(sheet, 480, 424)" in messages_source
-    assert "lv_obj_set_pos(sheet, 0, 56)" in messages_source
+    assert "lv_obj_set_size(sheet, 480, 480)" in messages_source
+    assert "lv_obj_set_pos(sheet, 0, 0)" in messages_source
     assert 'sheet, "Back", 12, 6, 72, 44' in messages_source
     assert "loader(" in messages_source
     assert "d1l_app_model_query_dm_thread_page(" in source
@@ -1076,7 +1098,7 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "d1l_app_model_find_contact(fingerprint, &contact)" in source
     assert "open_dm_compose_for_contact(&contact)" in source
     reply = re.search(
-        r'messages_create_button\(\s*sheet,\s*"Reply",\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)',
+        r'messages_create_button\(\s*sheet,\s*"Message this contact\s+>",\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)',
         messages_source,
     )
     assert reply is not None
@@ -1169,22 +1191,24 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "nodes_role_color" in nodes_source
     assert "node_view_can_dm" in source
     assert "role_is_managed_service" in node_detail_source
-    assert 'nodes_create_button(row, "DM", 364, 6, 52, 44' in nodes_source
-    assert 'nodes_create_button(row, "DM", 368, 2, 48, 44' in nodes_source
-    assert "lv_obj_set_style_pad_all(row, 0, 0);" in nodes_source
+    assert 'nodes_create_button(row, "Message", 340, 7, 84, 44' in nodes_source
+    assert "lv_obj_set_style_pad_all(panel, 0, 0);" in nodes_source
     assert "render_role_badge" in node_detail_source
     assert "nodes_dispatch_node_open_event_cb" in nodes_source
     assert "recent_contact_count" in source
     assert "recent_contacts" in source
-    assert "No heard nodes yet" in nodes_source
+    assert "No contacts yet" in nodes_source
+    assert "No other nearby nodes" in nodes_source
     assert "node_total_written" in source
     assert "contact_total_written" in source
     assert "#define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "#define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
-    assert "contact_row_count && y <= 190" in nodes_source
+    assert "i < controller->rendered.contact_row_count" in nodes_source
     assert "d1l_app_model_query_nodes(" in source
     assert "D1L_NODE_STORE_CAPACITY" in source
-    assert '"All Heard"' in nodes_source
+    assert '"Saved contacts"' in nodes_source
+    assert '"Nearby"' in nodes_source
+    assert "nodes_node_matches_contact" in nodes_source
     assert "i < controller->rendered.node_row_count" in nodes_source
 
 
@@ -1200,13 +1224,12 @@ def test_node_detail_sheet_opens_from_heard_node_rows():
     assert "show_node_detail_view(event->node, false);" in source
     assert "D1L_UI_NODE_DETAIL_ACTION_CLOSE" in source
     assert "hide_node_detail_sheet()" in source
-    assert 'create_label(controller->sheet, "Node Detail"' in detail
+    assert 'create_label(controller->sheet, "Contact"' in detail
     assert '"Role %s"' in detail
-    assert '"Fingerprint %.16s"' in detail
-    assert '"Public key %s  %s  %s"' in detail
-    assert '"Signal rssi %d  snr %s%d.%d  %s"' in detail
-    assert '"Path hops %u  hash %u byte  advert %lums"' in detail
-    assert '"Last heard %lums  first %lums  count %lu"' in detail
+    assert '"%s route  |  %u hop%s  |  %s"' in detail
+    assert '"Last signal %d dBm  |  SNR %s%d.%d"' in detail
+    assert '"Heard on this boot  |  %lu sighting%s"' in detail
+    assert '"Advanced identity  %.16s  |  key %s"' in detail
     assert 'create_button(controller, "DM"' in detail
     assert '"Admin"' in detail
     assert '"Verified server; local authenticated login required."' in detail
@@ -1277,7 +1300,10 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert landing.count('viewport, "Options", 8, 8, 96, 48') == 1
     assert "map_view_service_acquire_visible" in landing
     assert "s_viewport_lat_e7, s_viewport_lon_e7, s_viewport_zoom" in landing
-    assert 'viewport, "Center", 8, 302, 96, 52' in landing
+    assert (
+        'viewport, "Center", 8, (int)MAP_VIEWPORT_HEIGHT - 60, 96, 52'
+        in landing
+    )
     assert 'viewport, "-", 420, 92, 52, 52' in landing
     assert 'viewport, "+", 420, 8, 52, 52' in landing
     assert 'map_label(viewport, "Drag to pan"' in landing
@@ -1285,6 +1311,7 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert "MAP_VIEWPORT_HEIGHT (D1L_UI_DOCKED_CONTENT_HEIGHT - 2U)" in map_source
     assert "MAP_VIEWPORT_PANEL_HEIGHT (MAP_VIEWPORT_HEIGHT + 2U)" in map_source
     assert "parent, 0, 0, 480, MAP_VIEWPORT_PANEL_HEIGHT" in landing
+    assert "(int)MAP_VIEWPORT_HEIGHT - 36" in landing
 
     options = map_source.split("static void map_render_options_root", 1)[1].split(
         "static void map_render_cache_status", 1
@@ -1356,10 +1383,10 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert "map_location_save_event_cb" in source
     assert "map_format_coordinate" in map_source
     assert '{D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME}' in source
-    assert '{D1L_UI_TAB_MESSAGES, "Messages", LV_SYMBOL_ENVELOPE}' in source
-    assert '{D1L_UI_TAB_NODES, "Nodes", LV_SYMBOL_LIST}' in source
+    assert '{D1L_UI_TAB_MESSAGES, "Channels", LV_SYMBOL_ENVELOPE}' in source
+    assert '{D1L_UI_TAB_NODES, "Contacts", LV_SYMBOL_LIST}' in source
     assert '{D1L_UI_TAB_MAP, "Map", LV_SYMBOL_IMAGE}' in source
-    assert '{D1L_UI_TAB_SETTINGS, "Tools", LV_SYMBOL_SETTINGS}' in source
+    assert '{D1L_UI_TAB_SETTINGS, "Settings", LV_SYMBOL_SETTINGS}' in source
     assert "create_dock_button" in source
     assert "lv_obj_set_size(button, 88, 44)" in source
     assert "lv_obj_add_state(s_dock_buttons[i], LV_STATE_CHECKED)" in source
@@ -1404,12 +1431,12 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert "set_messages_mode(D1L_UI_MESSAGES_MODE_ROOT)" in source
     assert "set_messages_mode(D1L_UI_MESSAGES_MODE_PUBLIC)" in source
     assert "set_messages_mode(D1L_UI_MESSAGES_MODE_DIRECT)" in source
-    assert '"Choose a conversation type"' in messages_source
-    assert '"Default channel conversation"' in messages_source
+    assert '"Group conversations"' in messages_source
+    assert "messages_render_channel_row(" in messages_source
     assert '"Direct messages"' in messages_source
     assert "for (size_t i = 0; i < controller->rendered.public_row_count; ++i)" in messages_source
     assert "for (size_t i = 0; i < controller->rendered.dm_row_count; ++i)" in messages_source
-    assert "row_y + (int)i * 90" in messages_source
+    assert "row_y + (int)i * 74" in messages_source
     assert "row_y + (int)i * 80" in messages_source
     assert "public_rows[D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS]" in messages_header
     assert "dm_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS]" in messages_header
@@ -1504,7 +1531,7 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
         '"Contact options"',
     ):
         assert label in detail
-    assert '"DM unavailable [%s]"' in detail
+    assert '"Messaging unavailable [%s]"' in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
     for hidden_action in ('"Route trace"', '"Rename"', '"Export QR"', '"Forget contact"'):
         assert hidden_action not in detail
@@ -1678,13 +1705,13 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
     ):
         assert style in settings_module
     assert "settings_create_row(parent, 444, 54, item->warning)" in settings_module
-    assert "settings_create_row(group, 444, 48, category->warning)" in settings_module
-    assert "settings_category_event_cb" in settings_module
-    assert "settings_apply_category_state" in settings_module
+    assert "settings_create_container(group, 444)" in settings_module
+    assert 'settings_create_label(parent, "Settings", 0xF4F7FB)' in settings_module
+    assert '"Device, radio, network and support"' in settings_module
+    assert "settings_category_event_cb" not in settings_module
+    assert "settings_apply_category_state" not in settings_module
     assert "binding->generation != controller->generation" in settings_module
-    assert "controller->expanded_category == binding->category" in settings_module
-    assert "lv_obj_add_flag(controller->category_children[index], LV_OBJ_FLAG_HIDDEN)" in settings_module
-    assert "lv_obj_clear_flag(controller->category_children[index], LV_OBJ_FLAG_HIDDEN)" in settings_module
+    assert "LV_OBJ_FLAG_HIDDEN" not in settings_module
     for category in ("Tools", "Connections", "Storage & maps", "Device", "Support", "Advanced"):
         assert f'"{category}"' in more_module
 
@@ -1741,7 +1768,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "open_ble_sheet_event_cb" in source
     assert "open_display_sheet_event_cb" in source
     assert "open_diagnostics_sheet_event_cb" in source
-    assert '"Wi-Fi Setup"' in wifi_module
+    assert '"Wi-Fi"' in wifi_module
     assert '"BLE Setup"' in ble_module
     assert '"Display"' in device_sheets
     assert '"Diagnostics"' in device_sheets
@@ -1765,7 +1792,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "lv_textarea_set_max_length(" in wifi_module
     assert "D1L_WIFI_SSID_LEN - 1U" in wifi_module
     assert "D1L_WIFI_PASSWORD_LEN - 1U" in wifi_module
-    assert '"Network name"' in wifi_module
+    assert '"Network name (SSID)"' in wifi_module
     assert '"Password"' in wifi_module
     assert '"Scan to list nearby 2.4 GHz networks"' in connectivity
     assert '"Connect"' in wifi_module
@@ -1801,13 +1828,15 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "radio_edit_from_snapshot" in source
     assert "format_radio_profile_line" not in source
     assert '"Radio", radio_status' in more_module
-    assert '"Radio Settings"' in radio_module
+    assert '"Radio"' in radio_module
+    assert '"Canada preset"' in radio_module
     assert '"Live RF matches saved profile"' in radio_module
     assert '"Saved profile pending next radio start/apply"' in radio_module
     assert '"Radio saved; RF apply pending"' in source
-    assert '"US/CAN"' in radio_module
+    assert '"Restore Canada"' in radio_module
     assert '"Save"' in radio_module
     assert '"RX Boost On"' in radio_module
+    assert "lv_obj_set_size(controller->sheet, 480, 480)" in radio_module
     assert "D1L_UI_RADIO_SETTINGS_ACTION_FREQ_DOWN" in radio_header
     assert "controller->edit.frequency_hz -= 25000UL" in radio_module
     assert "controller->edit.frequency_hz += 25000UL" in radio_module

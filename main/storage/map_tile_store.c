@@ -16,9 +16,11 @@
 #include "platform/time_service.h"
 #include "storage/storage_status_policy.h"
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 #define D1L_MAP_TILE_CANARY_Z 12U
 #define D1L_MAP_TILE_CANARY_X 1U
 #define D1L_MAP_TILE_CANARY_Y 2U
+#endif
 #define D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000
 #define D1L_MAP_TILE_NETWORK_LEASE_TIMEOUT_MS 1000U
 #define D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U
@@ -150,6 +152,7 @@ static bool build_tile_url(const char *url_template,
     return out > 0;
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool result_path_set(d1l_map_tile_canary_result_t *result,
                             const char *token)
 {
@@ -175,6 +178,7 @@ static bool result_path_set(d1l_map_tile_canary_result_t *result,
            (size_t)final_len < sizeof(result->path) &&
            (size_t)tmp_len < sizeof(result->tmp_path);
 }
+#endif
 
 static void download_step(d1l_map_tile_download_result_t *result,
                           const char *step,
@@ -191,6 +195,7 @@ static void download_step(d1l_map_tile_download_result_t *result,
     }
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 static void result_step(d1l_map_tile_canary_result_t *result,
                         const char *step,
                         esp_err_t ret,
@@ -247,6 +252,7 @@ bool d1l_map_tile_store_token_valid(const char *token)
     }
     return true;
 }
+#endif
 
 bool d1l_map_tile_store_sd_ready(const d1l_storage_status_t *status)
 {
@@ -2051,6 +2057,7 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
         out_len, should_continue, continue_context, out_result);
 }
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_map_tile_store_write_canary(const char *token,
                                           const d1l_storage_status_t *status,
                                           d1l_map_tile_canary_result_t *out_result)
@@ -2223,3 +2230,4 @@ esp_err_t d1l_map_tile_store_check_canary(const char *token,
     *out_result = result;
     return ESP_OK;
 }
+#endif

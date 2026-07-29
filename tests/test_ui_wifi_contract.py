@@ -110,12 +110,16 @@ def test_wifi_renderer_preserves_available_and_unavailable_surfaces():
     source = read("main/ui/ui_wifi.c")
     phase1 = read("main/ui/ui_phase1.c")
 
-    assert '"Wi-Fi Setup"' in source
-    assert '"Profile and state"' in source
-    assert '"Network name"' in source
+    assert '"Wi-Fi"' in source
+    assert '"Connection and saved network"' in source
+    assert '"Network name (SSID)"' in source
     assert '"Password"' in source
-    for label in ("Close", "Save", "Delete", "Next", "Scan", "Connect"):
+    for label in (
+        "Close", "Save network", "Delete", "Next saved", "Scan", "Connect"
+    ):
         assert f'"{label}"' in source
+    assert "lv_obj_set_size(controller->sheet, 480, 480)" in source
+    assert "lv_obj_set_size(textarea, 448, 44)" in source
     assert "if (!controller->rendered.controls_available)" in source
     assert "controller->rendered.scan_line" in source
     assert "d1l_ui_wifi_sheet(&s_wifi_controller)" in phase1
