@@ -672,6 +672,15 @@ static void messages_render_channel_row(
     }
 }
 
+static int messages_render_notice(lv_obj_t *parent,
+                                  int y,
+                                  const char *text,
+                                  uint32_t color);
+static int messages_render_store_notice(
+    lv_obj_t *parent,
+    int y,
+    d1l_ui_messages_store_state_t state);
+
 static void messages_render_root(d1l_ui_messages_controller_t *controller,
                                  lv_obj_t *parent)
 {
