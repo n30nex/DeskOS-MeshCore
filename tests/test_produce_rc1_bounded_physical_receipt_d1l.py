@@ -37,6 +37,7 @@ def test_closing_contract_has_exactly_four_fresh_sources():
 def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    target_field_calls = []
     data = {
         "schema": 2,
         "kind": "esp32_flash",
@@ -57,9 +58,28 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
         "erase_flash": False,
         "formats_sd": False,
         "retained_state_preserved": True,
+        "d1l_target": {
+            "stable_identity_sha256": "f" * 64,
+        },
+        "d1l_target_before": {
+            "stable_identity_sha256": "f" * 64,
+        },
         "pre_flash_target_after_open": {
             "stable_identity_sha256": "f" * 64,
         },
+        "post_flash_target_after_settle": {
+            "stable_identity_sha256": "f" * 64,
+        },
+        "post_flash_capture_target_before_open": {
+            "stable_identity_sha256": "f" * 64,
+        },
+        "post_flash_capture_target_after_open": {
+            "stable_identity_sha256": "f" * 64,
+        },
+        "d1l_target_after": {
+            "stable_identity_sha256": "f" * 64,
+        },
+        "target_identity_continuity_ok": True,
         "post_flash_reset_required": True,
         "post_flash_reset_ok": True,
         "post_flash_reset": {
@@ -82,16 +102,51 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
             "admitted_target_stable_identity_sha256": "f" * 64,
         },
         "post_flash_reset_error": None,
-        "post_flash_capture_binding": "same_admitted_handle",
+        "post_flash_boot_settle": {
+            "schema": 1,
+            "kind": "d1l_post_flash_boot_settle",
+            "ok": True,
+            "method": "same_admitted_handle_hold_no_console_io",
+            "same_admitted_handle": True,
+            "console_io_attempted": False,
+            "settle_seconds": (
+                core_flash.MIN_POSIX_POST_FLASH_BOOT_SETTLE_SECONDS
+            ),
+            "admitted_target_stable_identity_sha256": "f" * 64,
+            "settled_target_stable_identity_sha256": "f" * 64,
+        },
+        "post_flash_capture": {
+            "schema": 1,
+            "kind": "d1l_post_flash_capture",
+            "ok": True,
+            "method": "fresh_posix_exclusive_reopen",
+            "separate_admitted_handle": True,
+            "original_handle_closed": True,
+            "baudrate": core_flash.POST_FLASH_CAPTURE_BAUD,
+            "commands": list(core_flash.RETAINED_STATE_COMMANDS),
+            "admitted_target_stable_identity_sha256": "f" * 64,
+            "settled_target_stable_identity_sha256": "f" * 64,
+            "capture_target_before_open_stable_identity_sha256": "f" * 64,
+            "capture_target_after_open_stable_identity_sha256": "f" * 64,
+        },
+        "post_flash_capture_binding": core_flash.POST_FLASH_CAPTURE_BINDING,
         "post_flash_capture_binding_ok": True,
+        "post_flash_capture_error": None,
         "result": {"name": "esp32_flash", "ok": True},
     }
     monkeypatch.setattr(producer, "_machine_physical", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(producer, "_candidate_binding", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(producer, "_target_pair", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        producer,
+        "_target_pair",
+        lambda _data, fields: target_field_calls.append(fields) or True,
+    )
     monkeypatch.setattr(producer, "_find_app_row", lambda *_args, **_kwargs: True)
 
+    assert core_flash.post_flash_reset_contract_ok(data) is True
+    assert core_flash.post_flash_capture_contract_ok(data) is True
     assert producer.validate_flash(data, CANDIDATE) == {}
+    assert target_field_calls == [producer.FLASH_TARGET_FIELDS]
 
     data["pre_flash_build_commit"] = "not-a-commit"
     with pytest.raises(producer.EvidenceError):
@@ -103,9 +158,37 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
         producer.validate_flash(data, CANDIDATE)
 
     data["post_flash_reset"]["method"] = "bound_posix_rts_en_pulse"
-    data["post_flash_capture_binding"] = "validated_path_reopen"
+    data["post_flash_capture_binding"] = "same_admitted_handle"
     with pytest.raises(producer.EvidenceError):
         producer.validate_flash(data, CANDIDATE)
+
+
+def test_flash_target_pair_requires_every_two_epoch_snapshot(monkeypatch):
+    data = {
+        field: {"stable_identity_sha256": "a" * 64}
+        for field in producer.FLASH_TARGET_FIELDS
+    }
+    monkeypatch.setattr(
+        producer,
+        "_target",
+        lambda value, field="d1l_target": value[field],
+    )
+
+    assert producer._target_pair(data, producer.FLASH_TARGET_FIELDS) is True
+
+    for field in producer.FLASH_TARGET_FIELDS:
+        tampered = {
+            key: dict(value)
+            for key, value in data.items()
+        }
+        tampered[field]["stable_identity_sha256"] = "b" * 64
+        assert (
+            producer._target_pair(
+                tampered,
+                producer.FLASH_TARGET_FIELDS,
+            )
+            is False
+        )
 
 
 def test_producer_bundles_unique_machine_sources_and_hashes_receipt(

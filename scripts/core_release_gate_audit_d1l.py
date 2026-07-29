@@ -63,6 +63,7 @@ try:
     from core_flash_only_d1l import (
         FLASH_PHASE_RETAINED_REFLASH,
         RETAINED_STATE_COMMANDS,
+        post_flash_capture_contract_ok,
         post_flash_reset_contract_ok,
         projection_sha256,
         retained_state_preserved,
@@ -154,6 +155,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.core_flash_only_d1l import (
         FLASH_PHASE_RETAINED_REFLASH,
         RETAINED_STATE_COMMANDS,
+        post_flash_capture_contract_ok,
         post_flash_reset_contract_ok,
         projection_sha256,
         retained_state_preserved,
@@ -1388,7 +1390,14 @@ def core_flash_receipt_gate(
         "d1l_target_after",
     ]
     if expected_target == POSIX_D1L_TARGET:
-        flash_snapshot_fields.append("pre_flash_target_after_open")
+        flash_snapshot_fields.extend(
+            (
+                "pre_flash_target_after_open",
+                "post_flash_target_after_settle",
+                "post_flash_capture_target_before_open",
+                "post_flash_capture_target_after_open",
+            )
+        )
     target_ok, target_identity, target_details = target_receipt_binding(
         data,
         expected_target=expected_target,
@@ -1456,6 +1465,11 @@ def core_flash_receipt_gate(
         if expected_target == POSIX_D1L_TARGET
         else True
     )
+    post_flash_capture_ok = (
+        post_flash_capture_contract_ok(data)
+        if expected_target == POSIX_D1L_TARGET
+        else True
+    )
     scope_ok = (
         real_evidence(data)
         and data.get("schema") == 2
@@ -1469,6 +1483,7 @@ def core_flash_receipt_gate(
         and public_key_ok
         and serial_binding_ok
         and post_flash_reset_ok
+        and post_flash_capture_ok
         and exact_candidate_fields(data, commit)
         and str(data.get("github_actions_run")) == str(run_id)
         and str(data.get("workflow_run_attempt")) == str(run_attempt)
@@ -1535,6 +1550,7 @@ def core_flash_receipt_gate(
             "actions_archive_binding_ok": capture_ok,
             "flash_serial_binding_ok": serial_binding_ok,
             "post_flash_reset_contract_ok": post_flash_reset_ok,
+            "post_flash_capture_contract_ok": post_flash_capture_ok,
             "d1l_target_binding": target_details,
             "d1l_public_key_binding": public_key_details,
             "legacy_details": legacy.to_dict().get("details", {}),

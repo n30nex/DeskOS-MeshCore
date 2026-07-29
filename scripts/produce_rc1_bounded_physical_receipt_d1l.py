@@ -23,7 +23,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 try:
-    from core_flash_only_d1l import post_flash_reset_contract_ok
+    from core_flash_only_d1l import (
+        post_flash_capture_contract_ok,
+        post_flash_reset_contract_ok,
+    )
     from d1l_serial_target import POSIX_D1L_TARGET, validate_snapshot
     from rc1_release_gate_audit_d1l import (
         APP_NAME,
@@ -41,7 +44,10 @@ try:
     from release_gate_audit_d1l import full_rf_acceptance_ok
     from scroll_probe_d1l import crashlog_has_crash_like_entries
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.core_flash_only_d1l import post_flash_reset_contract_ok
+    from scripts.core_flash_only_d1l import (
+        post_flash_capture_contract_ok,
+        post_flash_reset_contract_ok,
+    )
     from scripts.d1l_serial_target import POSIX_D1L_TARGET, validate_snapshot
     from scripts.rc1_release_gate_audit_d1l import (
         APP_NAME,
@@ -101,6 +107,15 @@ PEER_PROFILE_BINDINGS = {
 }
 MESHCOREBOT_HARDWARE_ID = "303a:1001"
 MESHCOREBOT_BAUD = 115200
+FLASH_TARGET_FIELDS = (
+    "d1l_target",
+    "d1l_target_before",
+    "pre_flash_target_after_open",
+    "post_flash_target_after_settle",
+    "post_flash_capture_target_before_open",
+    "post_flash_capture_target_after_open",
+    "d1l_target_after",
+)
 
 SOURCE_KINDS = {
     "flash": "esp32_flash",
@@ -324,10 +339,15 @@ def _target(data: dict[str, Any], field: str = "d1l_target") -> dict[str, Any]:
     return snapshot
 
 
-def _target_pair(data: dict[str, Any]) -> bool:
-    before = _target(data)
-    after = _target(data, "d1l_target_after")
-    return before["stable_identity_sha256"] == after["stable_identity_sha256"]
+def _target_pair(
+    data: dict[str, Any],
+    fields: tuple[str, ...] = ("d1l_target", "d1l_target_after"),
+) -> bool:
+    snapshots = [_target(data, field) for field in fields]
+    identities = {
+        snapshot["stable_identity_sha256"] for snapshot in snapshots
+    }
+    return len(identities) == 1
 
 
 def _find_app_row(value: object, app_sha256: str) -> bool:
@@ -369,10 +389,11 @@ def validate_flash(
         and data.get("formats_sd") is False
         and data.get("retained_state_preserved") is True
         and post_flash_reset_contract_ok(data)
+        and post_flash_capture_contract_ok(data)
         and isinstance(result, dict)
         and result.get("name") == "esp32_flash"
         and result.get("ok") is True
-        and _target_pair(data)
+        and _target_pair(data, FLASH_TARGET_FIELDS)
         and _find_app_row(data, candidate["app_sha256"])
     ):
         raise EvidenceError("flash receipt does not prove the exact non-erasing app flash")

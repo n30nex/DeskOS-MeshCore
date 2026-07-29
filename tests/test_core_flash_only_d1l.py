@@ -547,26 +547,190 @@ def test_bound_posix_postflash_reset_cleans_up_after_early_line_failure(
     ]
 
 
+def valid_posix_postflash_contract_receipt() -> dict:
+    return {
+        "post_flash_reset_required": True,
+        "post_flash_reset_ok": True,
+        "post_flash_reset_error": None,
+        "pre_flash_target_after_open": posix_target(),
+        "post_flash_reset": {
+            "schema": 1,
+            "kind": "d1l_post_flash_reset",
+            "ok": True,
+            "method": "bound_posix_rts_en_pulse",
+            "same_admitted_handle": True,
+            "dtr_deasserted": True,
+            "dtr_reaffirmed_after_release": True,
+            "line_sequence": list(
+                flash.POST_FLASH_RESET_LINE_SEQUENCE
+            ),
+            "reset_assert_seconds": (
+                flash.POST_FLASH_RESET_ASSERT_SECONDS
+            ),
+            "post_release_seconds": (
+                flash.POST_FLASH_RESET_RELEASE_SECONDS
+            ),
+            "admitted_target_stable_identity_sha256": "1" * 64,
+        },
+        "post_flash_target_after_settle": posix_target(),
+        "post_flash_boot_settle": {
+            "schema": 1,
+            "kind": "d1l_post_flash_boot_settle",
+            "ok": True,
+            "method": "same_admitted_handle_hold_no_console_io",
+            "same_admitted_handle": True,
+            "console_io_attempted": False,
+            "settle_seconds": 90.0,
+            "admitted_target_stable_identity_sha256": "1" * 64,
+            "settled_target_stable_identity_sha256": "1" * 64,
+        },
+        "post_flash_capture_target_before_open": posix_target(),
+        "post_flash_capture_target_after_open": posix_target(),
+        "post_flash_capture": {
+            "schema": 1,
+            "kind": "d1l_post_flash_capture",
+            "ok": True,
+            "method": "fresh_posix_exclusive_reopen",
+            "separate_admitted_handle": True,
+            "original_handle_closed": True,
+            "baudrate": 115200,
+            "commands": list(flash.RETAINED_STATE_COMMANDS),
+            "admitted_target_stable_identity_sha256": "1" * 64,
+            "settled_target_stable_identity_sha256": "1" * 64,
+            (
+                "capture_target_before_open_"
+                "stable_identity_sha256"
+            ): "1" * 64,
+            (
+                "capture_target_after_open_"
+                "stable_identity_sha256"
+            ): "1" * 64,
+        },
+        "d1l_target_after": posix_target(),
+        "target_identity_continuity_ok": True,
+        "post_flash_capture_binding": (
+            "posix_exclusive_reopen_after_bound_settle"
+        ),
+        "post_flash_capture_binding_ok": True,
+        "post_flash_capture_error": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "tampered"),
+    [
+        (("post_flash_capture_binding",), "same_admitted_handle"),
+        (("post_flash_capture_binding_ok",), False),
+        (("post_flash_capture_error",), "injected"),
+        (
+            ("post_flash_capture", "separate_admitted_handle"),
+            False,
+        ),
+        (
+            ("post_flash_capture", "original_handle_closed"),
+            False,
+        ),
+        (("post_flash_capture", "baudrate"), 460800),
+        (
+            ("post_flash_capture", "commands"),
+            list(flash.RETAINED_STATE_COMMANDS[:-1]),
+        ),
+        (
+            (
+                "post_flash_target_after_settle",
+                "stable_identity_sha256",
+            ),
+            "2" * 64,
+        ),
+        (
+            (
+                "post_flash_capture_target_before_open",
+                "stable_identity_sha256",
+            ),
+            "2" * 64,
+        ),
+        (
+            (
+                "post_flash_capture_target_after_open",
+                "stable_identity_sha256",
+            ),
+            "2" * 64,
+        ),
+        (
+            ("d1l_target_after", "stable_identity_sha256"),
+            "2" * 64,
+        ),
+        (
+            ("post_flash_boot_settle", "console_io_attempted"),
+            True,
+        ),
+        (
+            ("post_flash_boot_settle", "same_admitted_handle"),
+            False,
+        ),
+        (
+            ("post_flash_boot_settle", "settle_seconds"),
+            89.999,
+        ),
+        (
+            ("post_flash_boot_settle", "settle_seconds"),
+            float("nan"),
+        ),
+        (
+            (
+                "post_flash_boot_settle",
+                "settled_target_stable_identity_sha256",
+            ),
+            "2" * 64,
+        ),
+    ],
+)
+def test_posix_postflash_capture_contract_rejects_tampering(
+    path, tampered
+):
+    receipt = valid_posix_postflash_contract_receipt()
+    assert flash.post_flash_reset_contract_ok(receipt) is True
+    assert flash.post_flash_capture_contract_ok(receipt) is True
+
+    selected = receipt
+    for key in path[:-1]:
+        selected = selected[key]
+    selected[path[-1]] = tampered
+
+    assert flash.post_flash_reset_contract_ok(receipt) is True
+    assert flash.post_flash_capture_contract_ok(receipt) is False
+
+
 def posix_run_kwargs(
     *,
-    handle: FakeSerialHandle,
+    handle: FakeSerialHandle | None = None,
+    handles: tuple[FakeSerialHandle, ...] | None = None,
     identity_result: dict | None = None,
     calls: list | None = None,
 ):
     observed = calls if calls is not None else []
+    admitted_handles = (
+        list(handles) if handles is not None else [handle]
+    )
+    assert admitted_handles
+    assert all(item is not None for item in admitted_handles)
+    handle_iter = iter(admitted_handles)
+    flash_handle = admitted_handles[0]
 
     @contextlib.contextmanager
     def opener(_port, _baud, _timeout):
-        observed.append(("open", handle))
+        selected_handle = next(handle_iter)
+        selected_handle.closed = False
+        observed.append(("open", selected_handle))
         try:
-            yield handle
+            yield selected_handle
         finally:
-            handle.closed = True
-            observed.append(("close", handle))
+            selected_handle.closed = True
+            observed.append(("close", selected_handle))
 
     def sender(selected_handle, command, _timeout):
-        assert selected_handle is handle
-        assert handle.closed is False
+        assert selected_handle in admitted_handles
+        assert selected_handle.closed is False
         observed.append(("command", command, selected_handle))
         return identity_result or {
             "schema": 1,
@@ -579,8 +743,8 @@ def posix_run_kwargs(
         }
 
     def resetter(selected_handle, admitted_identity):
-        assert selected_handle is handle
-        assert handle.closed is False
+        assert selected_handle is flash_handle
+        assert flash_handle.closed is False
         assert admitted_identity == "1" * 64
         observed.append(("reset", selected_handle))
         return {
@@ -612,6 +776,57 @@ def posix_run_kwargs(
         "post_flash_resetter": resetter,
         "serial_command_sender": sender,
     }
+
+
+@pytest.mark.parametrize(
+    "settle_sec",
+    (0.0, 89.999, float("nan"), float("inf"), float("-inf"), True),
+)
+def test_posix_rejects_unsafe_settle_before_serial_admission_or_flash(
+    tmp_path,
+    monkeypatch,
+    settle_sec,
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    handle = FakeSerialHandle()
+    calls = []
+    monkeypatch.setattr(
+        flash,
+        "resolve_core_target",
+        lambda *_args, **_kwargs: posix_target(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="post-flash capture requires --settle-sec >= 90",
+    ):
+        flash.run_core_flash_only(
+            root=tmp_path,
+            github_run_dir=run_dir,
+            package_dir=package,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            actions_capture_receipt=capture_receipt,
+            port=POSIX_PORT,
+            expected_d1l_public_key=PUBLIC_KEY,
+            serial_baud=115200,
+            flash_baud=460800,
+            serial_timeout=5.0,
+            flash_timeout=60,
+            settle_sec=settle_sec,
+            raw_log_path=raw_log,
+            flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+            posix_flash_runner=(
+                lambda *_args: pytest.fail("unsafe settle must not flash")
+            ),
+            **posix_run_kwargs(handle=handle, calls=calls),
+        )
+
+    assert calls == []
+    assert handle.closed is False
+    assert not raw_log.exists()
 
 
 @pytest.mark.parametrize("absolute_run_dir", [False, True])
@@ -676,6 +891,9 @@ def test_main_default_capture_receipt_follows_custom_run_dir(
         / "core-actions-run-metadata"
         / f"core_actions_run_{RUN_ID}.json"
     ).resolve()
+    assert captured["settle_sec"] == (
+        flash.MIN_POSIX_POST_FLASH_BOOT_SETTLE_SECONDS
+    )
 
 
 def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
@@ -1052,7 +1270,7 @@ def test_postflash_target_drift_blocks_serial_reopen_and_closure(
     assert raw_log.is_file()
 
 
-def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
+def test_posix_flash_settles_on_first_handle_then_readmits_for_capture(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
@@ -1089,14 +1307,34 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
             assert self.timeout == 5.0
             calls.append(("drain", self))
 
-    handle = TrackingSerialHandle()
+    class CaptureSerialHandle(FakeSerialHandle):
+        def reset_input_buffer(self):
+            assert self.closed is False
+            assert self.baudrate == 115200
+            assert self.timeout == 5.0
+            calls.append(("drain", self))
+
+    flash_handle = TrackingSerialHandle()
+    capture_handle = CaptureSerialHandle()
     snapshots = iter(
-        (posix_target(), posix_target(), posix_target())
+        (
+            posix_target(),
+            posix_target(),
+            posix_target(),
+            posix_target(),
+            posix_target(),
+        )
     )
 
     def resolve_while_bound(*_args, **_kwargs):
         snapshot = next(snapshots)
-        calls.append(("resolve", handle.closed))
+        calls.append(
+            (
+                "resolve",
+                flash_handle.closed,
+                capture_handle.closed,
+            )
+        )
         return snapshot
 
     monkeypatch.setattr(
@@ -1111,8 +1349,8 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
     )
 
     def bound_runner(command, _cwd, _timeout, selected_handle):
-        assert selected_handle is handle
-        assert handle.closed is False
+        assert selected_handle is flash_handle
+        assert flash_handle.closed is False
         selected_handle._baudrate = 460800
         calls.append(("flash", selected_handle))
         return (
@@ -1129,21 +1367,23 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
     after_by_command = {
         row["cmd"]: row for row in retained_state()
     }
-    identity_reads = 0
 
     def sender(selected_handle, command, _timeout):
-        nonlocal identity_reads
-        assert selected_handle is handle
-        assert handle.closed is False
+        assert selected_handle in {flash_handle, capture_handle}
+        assert selected_handle.closed is False
         calls.append(("command", command, selected_handle))
-        if command == "identity status" and identity_reads == 0:
-            identity_reads += 1
+        if selected_handle is flash_handle:
+            assert command == "identity status"
             return after_by_command[command]
-        assert handle.baudrate == 115200
-        assert handle.timeout == 5.0
+        assert selected_handle is capture_handle
+        assert capture_handle.baudrate == 115200
+        assert capture_handle.timeout == 5.0
         return after_by_command[command]
 
-    kwargs = posix_run_kwargs(handle=handle, calls=calls)
+    kwargs = posix_run_kwargs(
+        handles=(flash_handle, capture_handle),
+        calls=calls,
+    )
     kwargs["serial_command_sender"] = sender
 
     report = flash.run_core_flash_only(
@@ -1160,13 +1400,13 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
         flash_baud=460800,
         serial_timeout=5.0,
         flash_timeout=60,
-        settle_sec=75.0,
+        settle_sec=90.0,
         raw_log_path=raw_log,
         flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
         posix_flash_runner=bound_runner,
         retained_state_reader=(
             lambda *_args: pytest.fail(
-                "POSIX post-flash capture must not reopen the tty path"
+                "POSIX capture must use the second admitted handle"
             )
         ),
         **kwargs,
@@ -1180,6 +1420,34 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
     assert report["post_flash_reset_required"] is True
     assert report["post_flash_reset_ok"] is True
     assert report["post_flash_reset"]["same_admitted_handle"] is True
+    assert report["post_flash_boot_settle"] == {
+        "schema": 1,
+        "kind": "d1l_post_flash_boot_settle",
+        "ok": True,
+        "method": "same_admitted_handle_hold_no_console_io",
+        "same_admitted_handle": True,
+        "console_io_attempted": False,
+        "settle_seconds": 90.0,
+        "admitted_target_stable_identity_sha256": "1" * 64,
+        "settled_target_stable_identity_sha256": "1" * 64,
+    }
+    assert report["post_flash_target_after_settle"] == posix_target()
+    assert (
+        report["post_flash_capture_target_before_open"]
+        == posix_target()
+    )
+    assert (
+        report["post_flash_capture_target_after_open"]
+        == posix_target()
+    )
+    assert report["d1l_target_after"] == posix_target()
+    assert report["post_flash_capture_binding"] == (
+        "posix_exclusive_reopen_after_bound_settle"
+    )
+    assert report["post_flash_capture_binding_ok"] is True
+    assert report["post_flash_capture_error"] is None
+    assert flash.post_flash_reset_contract_ok(report) is True
+    assert flash.post_flash_capture_contract_ok(report) is True
     assert report["pre_flash_target_after_open"] == posix_target()
     assert [row[0] for row in calls] == [
         "resolve",
@@ -1192,6 +1460,10 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
         "reset",
         "sleep",
         "resolve",
+        "close",
+        "resolve",
+        "open",
+        "resolve",
         "drain",
         "command",
         "command",
@@ -1202,13 +1474,20 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
         "command",
         "close",
     ]
-    assert calls[0] == ("resolve", False)
-    assert calls[2] == ("resolve", False)
-    assert calls[9] == ("resolve", False)
-    assert calls[7] == ("reset", handle)
-    assert calls[8] == ("sleep", 75.0)
-    assert handle.baudrate == 115200
-    assert handle.timeout == 5.0
+    assert calls[7] == ("reset", flash_handle)
+    assert calls[8] == ("sleep", 90.0)
+    assert all(
+        not (row[0] == "command" and row[-1] is flash_handle)
+        for row in calls[8:]
+    )
+    assert not any(
+        row[0] == "drain" and row[1] is flash_handle
+        for row in calls
+    )
+    assert flash_handle.closed is True
+    assert capture_handle.closed is True
+    assert flash_handle.baudrate == 115200
+    assert flash_handle.timeout == 5.0
 
 
 def test_posix_capture_failure_persists_log_and_blocks_second_flash(
@@ -1218,27 +1497,30 @@ def test_posix_capture_failure_persists_log_and_blocks_second_flash(
     run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
     calls = []
 
-    class FailingCaptureHandle(FakeSerialHandle):
-        def reset_input_buffer(self):
-            calls.append(("drain", self))
-            raise OSError("injected post-flash capture failure")
-
-    handle = FailingCaptureHandle()
+    flash_handle = FakeSerialHandle()
+    capture_handle = FakeSerialHandle()
     snapshots = iter(
-        (posix_target(), posix_target(), posix_target())
+        (
+            posix_target(),
+            posix_target(),
+            posix_target(),
+            posix_target(),
+            posix_target(),
+        )
     )
     monkeypatch.setattr(
         flash,
         "resolve_core_target",
         lambda *_args, **_kwargs: next(snapshots),
     )
+    monkeypatch.setattr(flash.time, "sleep", lambda _seconds: None)
     flash_count = 0
 
     def bound_runner(command, _cwd, _timeout, selected_handle):
         nonlocal flash_count
         flash_count += 1
-        assert selected_handle is handle
-        assert handle.closed is False
+        assert selected_handle is flash_handle
+        assert flash_handle.closed is False
         return (
             {
                 "name": "esp32_flash",
@@ -1250,6 +1532,28 @@ def test_posix_capture_failure_persists_log_and_blocks_second_flash(
             b"persisted before capture\n",
         )
 
+    run_kwargs = posix_run_kwargs(
+        handles=(flash_handle, capture_handle),
+        calls=calls,
+    )
+
+    def sender(selected_handle, command, _timeout):
+        calls.append(("command", command, selected_handle))
+        if selected_handle is capture_handle:
+            raise OSError("injected post-flash capture failure")
+        assert selected_handle is flash_handle
+        assert command == "identity status"
+        return {
+            "schema": 1,
+            "cmd": "identity status",
+            "ok": True,
+            "public_key_ready": True,
+            "public_key": PUBLIC_KEY,
+            "fingerprint": PUBLIC_KEY[:16].upper(),
+            "role": "desk_companion",
+        }
+
+    run_kwargs["serial_command_sender"] = sender
     kwargs = {
         "root": tmp_path,
         "github_run_dir": run_dir,
@@ -1264,24 +1568,30 @@ def test_posix_capture_failure_persists_log_and_blocks_second_flash(
         "flash_baud": 460800,
         "serial_timeout": 5.0,
         "flash_timeout": 60,
-        "settle_sec": 0.0,
+        "settle_sec": 90.0,
         "raw_log_path": raw_log,
         "flash_phase": flash.FLASH_PHASE_BOOTSTRAP,
         "posix_flash_runner": bound_runner,
         "retained_state_reader": (
             lambda *_args: pytest.fail(
-                "POSIX post-flash capture must not reopen the tty path"
+                "POSIX capture must use the second admitted handle"
             )
         ),
-        **posix_run_kwargs(handle=handle, calls=calls),
+        **run_kwargs,
     }
 
-    with pytest.raises(
-        OSError, match="injected post-flash capture failure"
-    ):
-        flash.run_core_flash_only(**kwargs)
+    report = flash.run_core_flash_only(**kwargs)
 
-    assert handle.closed is True
+    assert report["ok"] is False
+    assert report["closure_eligible"] is False
+    assert report["post_flash_capture_binding_ok"] is False
+    assert report["post_flash_capture_error"] == (
+        "OSError: injected post-flash capture failure"
+    )
+    assert flash.post_flash_reset_contract_ok(report) is True
+    assert flash.post_flash_capture_contract_ok(report) is False
+    assert flash_handle.closed is True
+    assert capture_handle.closed is True
     assert raw_log.read_bytes() == b"persisted before capture\n"
     assert flash_count == 1
 
@@ -1326,7 +1636,7 @@ def test_posix_target_swap_after_open_fails_before_identity_or_flash(
             flash_baud=460800,
             serial_timeout=5.0,
             flash_timeout=60,
-            settle_sec=0.0,
+            settle_sec=90.0,
             raw_log_path=raw_log,
             flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
             posix_flash_runner=(
@@ -1381,7 +1691,7 @@ def test_posix_wrong_full_key_on_admitted_handle_never_flashes(
             flash_baud=460800,
             serial_timeout=5.0,
             flash_timeout=60,
-            settle_sec=0.0,
+            settle_sec=90.0,
             raw_log_path=raw_log,
             flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
             posix_flash_runner=(
@@ -1402,7 +1712,7 @@ def test_posix_wrong_full_key_on_admitted_handle_never_flashes(
     assert not raw_log.exists()
 
 
-def test_posix_postflash_path_drift_cannot_redirect_admitted_flash(
+def test_posix_settle_target_drift_blocks_capture_readmission(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
@@ -1417,6 +1727,7 @@ def test_posix_postflash_path_drift_cannot_redirect_admitted_flash(
         "resolve_core_target",
         lambda *_args, **_kwargs: next(snapshots),
     )
+    monkeypatch.setattr(flash.time, "sleep", lambda _seconds: None)
 
     def bound_runner(command, _cwd, _timeout, selected_handle):
         assert selected_handle is handle
@@ -1447,12 +1758,14 @@ def test_posix_postflash_path_drift_cannot_redirect_admitted_flash(
         flash_baud=460800,
         serial_timeout=5.0,
         flash_timeout=60,
-        settle_sec=0.0,
+        settle_sec=90.0,
         raw_log_path=raw_log,
         flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
         posix_flash_runner=bound_runner,
         retained_state_reader=(
-            lambda *_args: calls.append(("post", None))
+            lambda *_args: pytest.fail(
+                "settle drift must block all path-based capture"
+            )
         ),
         **posix_run_kwargs(handle=handle, calls=calls),
     )
@@ -1460,7 +1773,20 @@ def test_posix_postflash_path_drift_cannot_redirect_admitted_flash(
     assert handle.closed is True
     assert report["ok"] is False
     assert report["target_identity_continuity_ok"] is False
-    assert report["d1l_target_after"] == posix_target("2")
+    assert report["post_flash_target_after_settle"] == posix_target("2")
+    assert report["post_flash_boot_settle"]["ok"] is False
+    assert (
+        report["post_flash_boot_settle"][
+            "settled_target_stable_identity_sha256"
+        ]
+        == "2" * 64
+    )
+    assert report["post_flash_capture_target_before_open"] is None
+    assert report["post_flash_capture_target_after_open"] is None
+    assert report["d1l_target_after"] is None
+    assert report["post_flash_capture_binding_ok"] is False
+    assert flash.post_flash_reset_contract_ok(report) is True
+    assert flash.post_flash_capture_contract_ok(report) is False
     assert [row[0] for row in calls] == [
         "open",
         "command",
@@ -1470,22 +1796,31 @@ def test_posix_postflash_path_drift_cannot_redirect_admitted_flash(
     ]
 
 
-def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
+def test_posix_capture_target_drift_before_open_blocks_readmission(
     tmp_path, monkeypatch
 ):
     install_preflight_mocks(monkeypatch)
     run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
-    handle = FakeSerialHandle()
+    flash_handle = FakeSerialHandle()
+    capture_handle = FakeSerialHandle()
     calls = []
-    snapshots = iter((posix_target(), posix_target()))
+    snapshots = iter(
+        (
+            posix_target("1"),
+            posix_target("1"),
+            posix_target("1"),
+            posix_target("2"),
+        )
+    )
     monkeypatch.setattr(
         flash,
         "resolve_core_target",
         lambda *_args, **_kwargs: next(snapshots),
     )
+    monkeypatch.setattr(flash.time, "sleep", lambda _seconds: None)
 
     def bound_runner(command, _cwd, _timeout, selected_handle):
-        assert selected_handle is handle
+        assert selected_handle is flash_handle
         calls.append(("flash", selected_handle))
         return (
             {
@@ -1498,10 +1833,189 @@ def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
             b"bound flash log\n",
         )
 
-    kwargs = posix_run_kwargs(handle=handle, calls=calls)
+    report = flash.run_core_flash_only(
+        root=tmp_path,
+        github_run_dir=run_dir,
+        package_dir=package,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        actions_capture_receipt=capture_receipt,
+        port=POSIX_PORT,
+        expected_d1l_public_key=PUBLIC_KEY,
+        serial_baud=115200,
+        flash_baud=460800,
+        serial_timeout=5.0,
+        flash_timeout=60,
+        settle_sec=90.0,
+        raw_log_path=raw_log,
+        flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+        posix_flash_runner=bound_runner,
+        retained_state_reader=(
+            lambda *_args: pytest.fail(
+                "capture target drift must block path-based capture"
+            )
+        ),
+        **posix_run_kwargs(
+            handles=(flash_handle, capture_handle),
+            calls=calls,
+        ),
+    )
+
+    assert report["ok"] is False
+    assert report["post_flash_boot_settle"]["ok"] is True
+    assert report["post_flash_target_after_settle"] == posix_target("1")
+    assert (
+        report["post_flash_capture_target_before_open"]
+        == posix_target("2")
+    )
+    assert report["post_flash_capture_target_after_open"] is None
+    assert report["d1l_target_after"] is None
+    assert report["post_flash_capture_binding_ok"] is False
+    assert flash.post_flash_reset_contract_ok(report) is True
+    assert flash.post_flash_capture_contract_ok(report) is False
+    assert flash_handle.closed is True
+    assert capture_handle.closed is False
+    assert [row[0] for row in calls] == [
+        "open",
+        "command",
+        "flash",
+        "reset",
+        "close",
+    ]
+
+
+def test_posix_capture_target_drift_after_open_closes_without_commands(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    flash_handle = FakeSerialHandle()
+    capture_handle = FakeSerialHandle()
+    calls = []
+    snapshots = iter(
+        (
+            posix_target("1"),
+            posix_target("1"),
+            posix_target("1"),
+            posix_target("1"),
+            posix_target("2"),
+        )
+    )
+    monkeypatch.setattr(
+        flash,
+        "resolve_core_target",
+        lambda *_args, **_kwargs: next(snapshots),
+    )
+    monkeypatch.setattr(flash.time, "sleep", lambda _seconds: None)
+
+    def bound_runner(command, _cwd, _timeout, selected_handle):
+        assert selected_handle is flash_handle
+        calls.append(("flash", selected_handle))
+        return (
+            {
+                "name": "esp32_flash",
+                "ok": True,
+                "returncode": 0,
+                "args": command,
+                "serial_handoff": "fork_inherited_open_serial",
+            },
+            b"bound flash log\n",
+        )
+
+    report = flash.run_core_flash_only(
+        root=tmp_path,
+        github_run_dir=run_dir,
+        package_dir=package,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        actions_capture_receipt=capture_receipt,
+        port=POSIX_PORT,
+        expected_d1l_public_key=PUBLIC_KEY,
+        serial_baud=115200,
+        flash_baud=460800,
+        serial_timeout=5.0,
+        flash_timeout=60,
+        settle_sec=90.0,
+        raw_log_path=raw_log,
+        flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
+        posix_flash_runner=bound_runner,
+        retained_state_reader=(
+            lambda *_args: pytest.fail(
+                "capture target drift must block path-based capture"
+            )
+        ),
+        **posix_run_kwargs(
+            handles=(flash_handle, capture_handle),
+            calls=calls,
+        ),
+    )
+
+    assert report["ok"] is False
+    assert report["post_flash_boot_settle"]["ok"] is True
+    assert (
+        report["post_flash_capture_target_before_open"]
+        == posix_target("1")
+    )
+    assert (
+        report["post_flash_capture_target_after_open"]
+        == posix_target("2")
+    )
+    assert report["d1l_target_after"] == posix_target("2")
+    assert report["target_identity_continuity_ok"] is False
+    assert report["post_flash_capture_binding_ok"] is False
+    assert flash.post_flash_reset_contract_ok(report) is True
+    assert flash.post_flash_capture_contract_ok(report) is False
+    assert flash_handle.closed is True
+    assert capture_handle.closed is True
+    assert [row[0] for row in calls] == [
+        "open",
+        "command",
+        "flash",
+        "reset",
+        "close",
+        "open",
+        "close",
+    ]
+
+
+def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    flash_handle = FakeSerialHandle()
+    capture_handle = FakeSerialHandle()
+    calls = []
+    snapshots = iter((posix_target(), posix_target()))
+    monkeypatch.setattr(
+        flash,
+        "resolve_core_target",
+        lambda *_args, **_kwargs: next(snapshots),
+    )
+
+    def bound_runner(command, _cwd, _timeout, selected_handle):
+        assert selected_handle is flash_handle
+        calls.append(("flash", selected_handle))
+        return (
+            {
+                "name": "esp32_flash",
+                "ok": True,
+                "returncode": 0,
+                "args": command,
+                "serial_handoff": "fork_inherited_open_serial",
+            },
+            b"bound flash log\n",
+        )
+
+    kwargs = posix_run_kwargs(
+        handles=(flash_handle, capture_handle),
+        calls=calls,
+    )
 
     def failed_reset(selected_handle, admitted_identity):
-        assert selected_handle is handle
+        assert selected_handle is flash_handle
         assert admitted_identity == "1" * 64
         calls.append(("reset", selected_handle))
         return {
@@ -1529,12 +2043,14 @@ def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
         flash_baud=460800,
         serial_timeout=5.0,
         flash_timeout=60,
-        settle_sec=0.0,
+        settle_sec=90.0,
         raw_log_path=raw_log,
         flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
         posix_flash_runner=bound_runner,
         retained_state_reader=(
-            lambda *_args: calls.append(("post", None))
+            lambda *_args: pytest.fail(
+                "failed reset must block path-based capture"
+            )
         ),
         **kwargs,
     )
@@ -1543,6 +2059,12 @@ def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
     assert report["closure_eligible"] is False
     assert report["post_flash_reset_required"] is True
     assert report["post_flash_reset_ok"] is False
+    assert report["post_flash_target_after_settle"] is None
+    assert report["post_flash_capture_target_before_open"] is None
+    assert report["post_flash_capture_target_after_open"] is None
+    assert report["post_flash_capture_binding_ok"] is False
+    assert flash.post_flash_reset_contract_ok(report) is False
+    assert flash.post_flash_capture_contract_ok(report) is False
     assert report["post_flash_version"] == {}
     assert [row[0] for row in calls] == [
         "open",
@@ -1551,6 +2073,8 @@ def test_posix_postflash_reset_failure_blocks_reopen_and_closure(
         "reset",
         "close",
     ]
+    assert flash_handle.closed is True
+    assert capture_handle.closed is False
     assert raw_log.is_file()
 
 
