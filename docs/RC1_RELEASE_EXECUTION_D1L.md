@@ -162,6 +162,10 @@ the retained projection survived. The baseline may be a predecessor
 `core_1_0` commit; the post-flash version must be the exact release commit.
 This phase does not erase flash, erase NVS, format SD, or touch another serial
 target.
+On Linux, the admitted stable-identity handle remains open from esptool
+through the explicit EN reset, boot settle, and post-flash retained-state
+capture. The runner restores console termios on that inherited handle and
+does not reopen the serial path during this evidence boundary.
 
 ```bash
 EVIDENCE_DIR="$ROOT/artifacts/rc1-final/$SHA"
@@ -179,6 +183,7 @@ FLASH="$EVIDENCE_DIR/flash-retained-reflash.json"
   --port "$PORT" \
   --expected-d1l-public-key "$D1L_PUBLIC_KEY" \
   --serial-timeout 60 \
+  --settle-sec 90 \
   --phase retained-reflash \
   --out "$FLASH"
 ```

@@ -424,6 +424,11 @@ def posix_target(identity: str = "1") -> dict:
 class FakeSerialHandle:
     def __init__(self):
         self.closed = False
+        self.baudrate = 115200
+        self.timeout = 5.0
+
+    def reset_input_buffer(self):
+        pass
 
 
 def test_bound_posix_postflash_reset_uses_safe_en_pulse(monkeypatch):
@@ -1052,20 +1057,63 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
 ):
     install_preflight_mocks(monkeypatch)
     run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
-    handle = FakeSerialHandle()
     calls = []
+
+    class TrackingSerialHandle:
+        def __init__(self):
+            self.closed = False
+            self._baudrate = 115200
+            self._timeout = 5.0
+
+        @property
+        def baudrate(self):
+            return self._baudrate
+
+        @baudrate.setter
+        def baudrate(self, value):
+            self._baudrate = value
+            calls.append(("baudrate", value))
+
+        @property
+        def timeout(self):
+            return self._timeout
+
+        @timeout.setter
+        def timeout(self, value):
+            self._timeout = value
+            calls.append(("timeout", value))
+
+        def reset_input_buffer(self):
+            assert self.closed is False
+            assert self.baudrate == 115200
+            assert self.timeout == 5.0
+            calls.append(("drain", self))
+
+    handle = TrackingSerialHandle()
     snapshots = iter(
         (posix_target(), posix_target(), posix_target())
     )
+
+    def resolve_while_bound(*_args, **_kwargs):
+        snapshot = next(snapshots)
+        calls.append(("resolve", handle.closed))
+        return snapshot
+
     monkeypatch.setattr(
         flash,
         "resolve_core_target",
-        lambda *_args, **_kwargs: next(snapshots),
+        resolve_while_bound,
+    )
+    monkeypatch.setattr(
+        flash.time,
+        "sleep",
+        lambda seconds: calls.append(("sleep", seconds)),
     )
 
     def bound_runner(command, _cwd, _timeout, selected_handle):
         assert selected_handle is handle
         assert handle.closed is False
+        selected_handle._baudrate = 460800
         calls.append(("flash", selected_handle))
         return (
             {
@@ -1078,10 +1126,25 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
             b"bound flash log\n",
         )
 
-    def post_reader(*_args):
-        assert handle.closed is True
-        calls.append(("post", None))
-        return retained_state()
+    after_by_command = {
+        row["cmd"]: row for row in retained_state()
+    }
+    identity_reads = 0
+
+    def sender(selected_handle, command, _timeout):
+        nonlocal identity_reads
+        assert selected_handle is handle
+        assert handle.closed is False
+        calls.append(("command", command, selected_handle))
+        if command == "identity status" and identity_reads == 0:
+            identity_reads += 1
+            return after_by_command[command]
+        assert handle.baudrate == 115200
+        assert handle.timeout == 5.0
+        return after_by_command[command]
+
+    kwargs = posix_run_kwargs(handle=handle, calls=calls)
+    kwargs["serial_command_sender"] = sender
 
     report = flash.run_core_flash_only(
         root=tmp_path,
@@ -1097,12 +1160,16 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
         flash_baud=460800,
         serial_timeout=5.0,
         flash_timeout=60,
-        settle_sec=0.0,
+        settle_sec=75.0,
         raw_log_path=raw_log,
         flash_phase=flash.FLASH_PHASE_BOOTSTRAP,
         posix_flash_runner=bound_runner,
-        retained_state_reader=post_reader,
-        **posix_run_kwargs(handle=handle, calls=calls),
+        retained_state_reader=(
+            lambda *_args: pytest.fail(
+                "POSIX post-flash capture must not reopen the tty path"
+            )
+        ),
+        **kwargs,
     )
 
     assert report["ok"] is True
@@ -1115,13 +1182,115 @@ def test_posix_flash_keeps_key_admitted_handle_open_through_esptool(
     assert report["post_flash_reset"]["same_admitted_handle"] is True
     assert report["pre_flash_target_after_open"] == posix_target()
     assert [row[0] for row in calls] == [
+        "resolve",
         "open",
+        "resolve",
         "command",
         "flash",
+        "baudrate",
+        "timeout",
         "reset",
+        "sleep",
+        "resolve",
+        "drain",
+        "command",
+        "command",
+        "command",
+        "command",
+        "command",
+        "command",
+        "command",
         "close",
-        "post",
     ]
+    assert calls[0] == ("resolve", False)
+    assert calls[2] == ("resolve", False)
+    assert calls[9] == ("resolve", False)
+    assert calls[7] == ("reset", handle)
+    assert calls[8] == ("sleep", 75.0)
+    assert handle.baudrate == 115200
+    assert handle.timeout == 5.0
+
+
+def test_posix_capture_failure_persists_log_and_blocks_second_flash(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    calls = []
+
+    class FailingCaptureHandle(FakeSerialHandle):
+        def reset_input_buffer(self):
+            calls.append(("drain", self))
+            raise OSError("injected post-flash capture failure")
+
+    handle = FailingCaptureHandle()
+    snapshots = iter(
+        (posix_target(), posix_target(), posix_target())
+    )
+    monkeypatch.setattr(
+        flash,
+        "resolve_core_target",
+        lambda *_args, **_kwargs: next(snapshots),
+    )
+    flash_count = 0
+
+    def bound_runner(command, _cwd, _timeout, selected_handle):
+        nonlocal flash_count
+        flash_count += 1
+        assert selected_handle is handle
+        assert handle.closed is False
+        return (
+            {
+                "name": "esp32_flash",
+                "ok": True,
+                "returncode": 0,
+                "args": command,
+                "serial_handoff": "fork_inherited_open_serial",
+            },
+            b"persisted before capture\n",
+        )
+
+    kwargs = {
+        "root": tmp_path,
+        "github_run_dir": run_dir,
+        "package_dir": package,
+        "commit": COMMIT,
+        "run_id": RUN_ID,
+        "run_attempt": RUN_ATTEMPT,
+        "actions_capture_receipt": capture_receipt,
+        "port": POSIX_PORT,
+        "expected_d1l_public_key": PUBLIC_KEY,
+        "serial_baud": 115200,
+        "flash_baud": 460800,
+        "serial_timeout": 5.0,
+        "flash_timeout": 60,
+        "settle_sec": 0.0,
+        "raw_log_path": raw_log,
+        "flash_phase": flash.FLASH_PHASE_BOOTSTRAP,
+        "posix_flash_runner": bound_runner,
+        "retained_state_reader": (
+            lambda *_args: pytest.fail(
+                "POSIX post-flash capture must not reopen the tty path"
+            )
+        ),
+        **posix_run_kwargs(handle=handle, calls=calls),
+    }
+
+    with pytest.raises(
+        OSError, match="injected post-flash capture failure"
+    ):
+        flash.run_core_flash_only(**kwargs)
+
+    assert handle.closed is True
+    assert raw_log.read_bytes() == b"persisted before capture\n"
+    assert flash_count == 1
+
+    with pytest.raises(
+        ValueError, match="refusing to overwrite Core flash evidence"
+    ):
+        flash.run_core_flash_only(**kwargs)
+
+    assert flash_count == 1
 
 
 def test_posix_target_swap_after_open_fails_before_identity_or_flash(

@@ -262,6 +262,8 @@ def core_flash_gate_fixture(
             ),
         },
         "post_flash_reset_error": None,
+        "post_flash_capture_binding": "same_admitted_handle",
+        "post_flash_capture_binding_ok": True,
         "expected_firmware_commit": COMMIT,
         "device_build_commit": COMMIT,
         "firmware_identity_required": True,
@@ -378,6 +380,8 @@ def test_core_flash_gate_accepts_one_key_bound_retained_snapshot_pair(
     [
         (("post_flash_reset_required",), False),
         (("post_flash_reset_ok",), False),
+        (("post_flash_capture_binding",), "validated_path_reopen"),
+        (("post_flash_capture_binding_ok",), False),
         (("post_flash_reset", "method"), "unbound-reset"),
         (("post_flash_reset", "reset_assert_seconds"), 0.3),
         (

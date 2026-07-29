@@ -746,6 +746,9 @@ def post_flash_reset_contract_ok(receipt: object) -> bool:
             receipt.get("post_flash_reset"),
             receipt.get("pre_flash_target_after_open"),
         )
+        and receipt.get("post_flash_capture_binding")
+        == "same_admitted_handle"
+        and receipt.get("post_flash_capture_binding_ok") is True
     )
 
 
@@ -1339,6 +1342,22 @@ def run_core_flash_only(
     before_build_commit: str | None = None
     post_flash_reset: dict[str, Any] = {}
     post_flash_reset_error: str | None = None
+    version: dict = {}
+    health: dict = {}
+    after_results: list[dict] = []
+    after_projection: dict | None = None
+    after_snapshot_row: dict | None = None
+    d1l_target_after: dict[str, Any] | None = None
+    target_continuity_ok = False
+    target_post_error: str | None = None
+    post_flash_identity: dict = {}
+    post_flash_capture_binding = (
+        "same_admitted_handle"
+        if posix_binding
+        else "validated_path_reopen"
+    )
+    post_flash_capture_binding_ok = False
+    raw_log_row: dict[str, Any] | None = None
     with admission_context as admitted_handle:
         if posix_binding:
             if admitted_handle is None:
@@ -1457,6 +1476,9 @@ def run_core_flash_only(
                 flash_timeout,
                 admitted_handle,
             )
+            raw_log_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_log_path.write_bytes(raw_log)
+            raw_log_row = _relative_file_row(raw_log_path, root)
             if (
                 result.get("name") == "esp32_flash"
                 and result.get("ok") is True
@@ -1466,6 +1488,12 @@ def run_core_flash_only(
                 == "fork_inherited_open_serial"
             ):
                 try:
+                    # esptool reconfigures the inherited tty file description
+                    # to the flash baud. Re-apply the console termios before
+                    # resetting, then keep this exact admitted handle open
+                    # through boot and post-flash retained-state capture.
+                    admitted_handle.baudrate = serial_baud
+                    admitted_handle.timeout = serial_timeout
                     reset_value = post_flash_resetter(
                         admitted_handle,
                         pre_flash_target_after_open[
@@ -1483,20 +1511,44 @@ def run_core_flash_only(
                     post_flash_reset_error = (
                         f"{type(exc).__name__}: {exc}"
                     )
+                if post_flash_reset_result_ok(
+                    post_flash_reset,
+                    pre_flash_target_after_open,
+                ):
+                    if settle_sec > 0:
+                        time.sleep(settle_sec)
+                    try:
+                        d1l_target_after = resolve_core_target(
+                            port,
+                            port_lister=port_lister,
+                            platform_name=platform_name,
+                        )
+                    except ValueError as exc:
+                        target_post_error = str(exc)
+                    else:
+                        target_continuity_ok = (
+                            d1l_target_after[
+                                "stable_identity_sha256"
+                            ]
+                            == d1l_target_before[
+                                "stable_identity_sha256"
+                            ]
+                        )
+                    if target_continuity_ok:
+                        admitted_handle.reset_input_buffer()
+                        after_results = read_retained_state_from_handle(
+                            admitted_handle,
+                            serial_timeout,
+                            serial_command_sender,
+                        )
+                        post_flash_capture_binding_ok = True
         else:
             result, raw_log = flash_runner(command, root, flash_timeout)
-    raw_log_path.parent.mkdir(parents=True, exist_ok=True)
-    raw_log_path.write_bytes(raw_log)
-    raw_log_row = _relative_file_row(raw_log_path, root)
-    version: dict = {}
-    health: dict = {}
-    after_results: list[dict] = []
-    after_projection: dict | None = None
-    after_snapshot_row: dict | None = None
-    d1l_target_after: dict[str, Any] | None = None
-    target_continuity_ok = False
-    target_post_error: str | None = None
-    post_flash_identity: dict = {}
+            raw_log_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_log_path.write_bytes(raw_log)
+            raw_log_row = _relative_file_row(raw_log_path, root)
+    if raw_log_row is None:
+        raise RuntimeError("flash runner returned without a persisted raw log")
     post_flash_reset_required = posix_binding
     post_flash_reset_ok = (
         not post_flash_reset_required
@@ -1506,7 +1558,8 @@ def run_core_flash_only(
         )
     )
     if (
-        result.get("name") == "esp32_flash"
+        not posix_binding
+        and result.get("name") == "esp32_flash"
         and result.get("ok") is True
         and result.get("returncode") == 0
         and result.get("args") == command
@@ -1531,45 +1584,47 @@ def run_core_flash_only(
             after_results = retained_state_reader(
                 port, serial_baud, serial_timeout, 0.0
             )
-            version = next(
-                (
-                    row
-                    for row in after_results
-                    if isinstance(row, dict) and row.get("cmd") == "version"
+            post_flash_capture_binding_ok = True
+    if target_continuity_ok:
+        version = next(
+            (
+                row
+                for row in after_results
+                if isinstance(row, dict) and row.get("cmd") == "version"
+            ),
+            {},
+        )
+        health = next(
+            (
+                row
+                for row in after_results
+                if isinstance(row, dict) and row.get("cmd") == "health"
+            ),
+            {},
+        )
+        post_flash_identity = next(
+            (
+                row
+                for row in after_results
+                if isinstance(row, dict)
+                and row.get("cmd") == "identity status"
+            ),
+            {},
+        )
+        after_projection = retained_state_projection(after_results)
+        if after_projection is not None:
+            _, after_snapshot_row = write_state_snapshot(
+                path=after_snapshot_path,
+                root=root,
+                phase=(
+                    "post_flash"
+                    if flash_phase == FLASH_PHASE_RETAINED_REFLASH
+                    else "post_bootstrap"
                 ),
-                {},
+                commit=normalized_commit,
+                results=after_results,
+                d1l_target=d1l_target_after,
             )
-            health = next(
-                (
-                    row
-                    for row in after_results
-                    if isinstance(row, dict) and row.get("cmd") == "health"
-                ),
-                {},
-            )
-            post_flash_identity = next(
-                (
-                    row
-                    for row in after_results
-                    if isinstance(row, dict)
-                    and row.get("cmd") == "identity status"
-                ),
-                {},
-            )
-            after_projection = retained_state_projection(after_results)
-            if after_projection is not None:
-                _, after_snapshot_row = write_state_snapshot(
-                    path=after_snapshot_path,
-                    root=root,
-                    phase=(
-                        "post_flash"
-                        if flash_phase == FLASH_PHASE_RETAINED_REFLASH
-                        else "post_bootstrap"
-                    ),
-                    commit=normalized_commit,
-                    results=after_results,
-                    d1l_target=d1l_target_after,
-                )
     flash_serial_binding = (
         "posix_fork_inherited_open_serial"
         if posix_binding
@@ -1600,6 +1655,7 @@ def run_core_flash_only(
         and identity_ok
         and flash_serial_binding_ok
         and post_flash_reset_ok
+        and post_flash_capture_binding_ok
     )
     retained_preserved = (
         bool(
@@ -1654,6 +1710,8 @@ def run_core_flash_only(
         "post_flash_reset_ok": post_flash_reset_ok,
         "post_flash_reset": post_flash_reset,
         "post_flash_reset_error": post_flash_reset_error,
+        "post_flash_capture_binding": post_flash_capture_binding,
+        "post_flash_capture_binding_ok": post_flash_capture_binding_ok,
         "commit": normalized_commit,
         "github_actions_run": str(run_id),
         "workflow_run_attempt": str(run_attempt),
