@@ -40,7 +40,7 @@ def test_core_deep_links_are_denied_before_probe_or_screen_work():
         "esp_err_t d1l_ui_phase1_scroll_probe",
     )
     assert request.index("d1l_ui_screen_available(tab)") < request.index(
-        "set_map_interactive_touch_authorized(false)"
+        "set_map_interactive_touch_authorized(tab == D1L_UI_TAB_MAP)"
     )
     assert "return ESP_ERR_NOT_SUPPORTED;" in request
 
