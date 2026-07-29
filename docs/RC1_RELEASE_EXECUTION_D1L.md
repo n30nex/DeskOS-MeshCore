@@ -100,8 +100,8 @@ test -f "$PACKAGE/SHA256SUMS.txt"
 (cd "$PACKAGE" && sha256sum --check SHA256SUMS.txt)
 ```
 
-The capture receipt is valid for at most 24 hours. Complete both flashes and
-the bounded gate promptly. If it expires, recapture the same exact run from a
+The capture receipt is valid for at most 24 hours. Complete the single flash
+and bounded gate promptly. If it expires, recapture the same exact run from a
 fresh exact-clean checkout/evidence path; never edit a timestamp or reuse a
 stale receipt.
 
