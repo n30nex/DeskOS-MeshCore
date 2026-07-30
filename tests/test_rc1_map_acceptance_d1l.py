@@ -1,4 +1,5 @@
 import copy
+import time
 from pathlib import Path
 
 import pytest
@@ -559,7 +560,7 @@ def test_read_only_timeout_is_retried_once_and_recorded(
     assert result["ok"] is True
     assert result["host_timeout_retries"] == 1
     assert calls == [
-        ("map provider status", 20.0),
+        ("map provider status", 10.0),
         ("map provider status", runner.READ_ONLY_TIMEOUT_RETRY_SECONDS),
     ]
 
@@ -586,7 +587,7 @@ def test_read_only_timeout_is_never_retried_more_than_once(
     assert result["ok"] is False
     assert result["code"] == "TIMEOUT"
     assert result["host_timeout_retries"] == 1
-    assert calls == [("ui status", 4.0), ("ui status", 4.0)]
+    assert calls == [("ui status", 2.0), ("ui status", 2.0)]
 
 
 def test_mutating_command_timeout_is_not_retried(
@@ -655,7 +656,356 @@ def test_saved_wifi_readiness_polls_until_saved_profile_connects(
 
     assert result["state"] == "connected"
     assert result["ssid"] == "Toddmas2.4"
-    assert calls == [("wifi status", 0.1), ("wifi status", 0.1)]
+    assert calls == [("wifi status", 0.05), ("wifi status", 0.05)]
+
+
+def test_provider_plan_ready_rejects_failed_retry_generation():
+    failed = provider_status()
+    failed["prefetch"]["failed_tiles"] = 1
+
+    assert runner.provider_plan_ready(failed) is False
+
+
+def transient_provider_failure(
+    baseline: dict,
+    *,
+    phase: str = "http_open",
+    error: str = "ESP_ERR_HTTP_CONNECT",
+) -> dict:
+    transient = copy.deepcopy(baseline)
+    transient["prefetch"].update(
+        {
+            "phase": phase,
+            "running": False,
+            "last_error": error,
+            "failed_tiles": 1,
+        }
+    )
+    return transient
+
+
+def provider_backoff(baseline: dict) -> dict:
+    backoff = copy.deepcopy(baseline)
+    requests = baseline["prefetch"]["network_requests"]
+    backoff["node_markers"] = {
+        "generation": 0,
+        "seen": 0,
+        "included": 0,
+        "outside_radius": 0,
+    }
+    backoff["downloaded_tiles"] = 0
+    backoff["network_requests"] = requests
+    backoff["prefetch"].update(
+        {
+            "phase": "backoff",
+            "running": False,
+            "last_error": "ESP_OK",
+            "network_requests": requests,
+            "selected_max_zoom": 0,
+            "total_tiles": 0,
+            "visited_tiles": 0,
+            "cached_tiles": 0,
+            "downloaded_tiles": 0,
+            "failed_tiles": 0,
+            "evicted_tiles": 0,
+            "downloaded_bytes": 0,
+            "cache_used_bytes": 0,
+            "estimated_bytes": 0,
+            "allocation_bytes": 0,
+        }
+    )
+    return backoff
+
+
+def test_fresh_download_recovers_after_observed_failure_and_counter_reset(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    failure = transient_provider_failure(baseline)
+    backoff = provider_backoff(baseline)
+    recovered = provider_status(network_requests=4, downloaded_tiles=0)
+    progressed = provider_status(network_requests=5, downloaded_tiles=1)
+    responses = [failure, backoff, recovered, progressed]
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return responses.pop(0)
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    result = runner.wait_for_fresh_download(
+        object(),
+        baseline,
+        location=LOCATION,
+        deadline=time.monotonic() + 1.0,
+        command_timeout=0.1,
+        interval=0,
+    )
+
+    assert result["prefetch"]["downloaded_tiles"] == 1
+    assert result["host_prefetch_counter_reset_observed"] is True
+    assert result["host_witnessed_downloaded_tiles"] == 1
+    assert [command for command, _timeout in calls] == [
+        "map provider status",
+        "map provider status",
+        "map provider status",
+        "map provider status",
+    ]
+
+    target = target_snapshot()
+    transcript = runner.build_transcript(
+        version=version(),
+        provider=baseline,
+        baseline=baseline,
+        download=result,
+        online_view=online_view(),
+        revisit=offline_view(),
+        health=health(),
+        crashlog=crashlog(),
+        target_before=target,
+        target_after=copy.deepcopy(target),
+        runner_commit=COMMIT,
+        runner_source_clean=True,
+        expected_commit=COMMIT,
+        actions_run=RUN,
+        workflow_run_attempt=ATTEMPT,
+    )
+    download_step = next(
+        step for step in transcript["steps"]
+        if step["operation"] == "download"
+    )
+    assert download_step["response"]["downloaded_tiles"] == 1
+    assert (
+        download_step["response"]["prefetch_counter_reset_observed"]
+        is True
+    )
+    assert aggregate.validate_map(
+        transcript,
+        {
+            "firmware_commit": COMMIT,
+            "actions_run": RUN,
+            "actions_run_attempt": ATTEMPT,
+        },
+    ) == {
+        "authorized_map_download": True,
+        "map_cache_revisit": True,
+    }
+
+
+def test_provider_plan_wait_does_not_mask_storage_reserve(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    invalid = provider_status(network_requests=4, downloaded_tiles=7)
+    invalid["prefetch"]["storage_reserve_reached"] = True
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return invalid
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    with pytest.raises(runner.AcceptanceFailure) as caught:
+        runner.wait_for_provider_plan(
+            object(),
+            location=LOCATION,
+            deadline=time.monotonic() + 1.0,
+            command_timeout=0.1,
+            interval=0,
+        )
+
+    assert caught.value.code == "prefetch_plan_invalid"
+    assert [command for command, _timeout in calls] == [
+        "map provider status"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("phase", "error"),
+    sorted(runner.TRANSIENT_PREFETCH_PHASE_ERRORS),
+)
+def test_transient_failure_pairs_match_firmware(phase: str, error: str):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    transient = transient_provider_failure(
+        baseline, phase=phase, error=error
+    )
+
+    assert runner.transient_network_failure(
+        transient, location=LOCATION
+    ) is not None
+
+
+def test_transient_failure_rejects_impossible_pair():
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    impossible = transient_provider_failure(
+        baseline, phase="http_read", error="ESP_ERR_HTTP_CONNECT"
+    )
+    assert runner.transient_network_failure(
+        impossible, location=LOCATION
+    ) is None
+
+
+def test_fresh_download_rejects_changed_transient_plan(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    changed = transient_provider_failure(baseline)
+    changed["prefetch"]["allocation_bytes"] += 1
+    monkeypatch.setattr(
+        runner,
+        "send_console_command",
+        lambda _ser, _command, _timeout: changed,
+    )
+
+    with pytest.raises(runner.AcceptanceFailure) as caught:
+        runner.wait_for_fresh_download(
+            object(),
+            baseline,
+            location=LOCATION,
+            deadline=time.monotonic() + 1.0,
+            command_timeout=0.1,
+            interval=0,
+        )
+
+    assert caught.value.code == "prefetch_plan_changed"
+
+
+def test_fresh_download_recovers_when_zeroed_backoff_poll_is_missed(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    failure = transient_provider_failure(baseline)
+    recovered = provider_status(network_requests=4, downloaded_tiles=0)
+    progressed = provider_status(network_requests=5, downloaded_tiles=1)
+    responses = [failure, recovered, progressed]
+    monkeypatch.setattr(
+        runner,
+        "send_console_command",
+        lambda _ser, _command, _timeout: responses.pop(0),
+    )
+
+    result = runner.wait_for_fresh_download(
+        object(),
+        baseline,
+        location=LOCATION,
+        deadline=time.monotonic() + 1.0,
+        command_timeout=0.1,
+        interval=0,
+    )
+
+    assert result["host_prefetch_counter_reset_observed"] is True
+    assert result["host_witnessed_downloaded_tiles"] == 1
+
+
+def test_context_free_backoff_is_not_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    backoff = provider_backoff(baseline)
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return backoff
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    with pytest.raises(runner.AcceptanceFailure) as caught:
+        runner.wait_for_fresh_download(
+            object(),
+            baseline,
+            location=LOCATION,
+            deadline=time.monotonic() + 1.0,
+            command_timeout=0.1,
+            interval=0,
+        )
+
+    assert caught.value.code == "prefetch_plan_invalid"
+    assert len(calls) == 1
+
+
+def test_malformed_backoff_counter_copy_is_not_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    failure = transient_provider_failure(baseline)
+    backoff = provider_backoff(baseline)
+    backoff["network_requests"] += 1
+    responses = [failure, backoff]
+    monkeypatch.setattr(
+        runner,
+        "send_console_command",
+        lambda _ser, _command, _timeout: responses.pop(0),
+    )
+
+    with pytest.raises(runner.AcceptanceFailure) as caught:
+        runner.wait_for_fresh_download(
+            object(),
+            baseline,
+            location=LOCATION,
+            deadline=time.monotonic() + 1.0,
+            command_timeout=0.1,
+            interval=0,
+        )
+
+    assert caught.value.code == "prefetch_plan_invalid"
+
+
+def test_fresh_download_transient_wait_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    failure = transient_provider_failure(baseline)
+    backoff = provider_backoff(baseline)
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return failure if len(calls) == 1 else backoff
+
+    now = [100.0]
+    monkeypatch.setattr(runner, "send_console_command", send)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        runner.time,
+        "sleep",
+        lambda seconds: now.__setitem__(0, now[0] + seconds),
+    )
+
+    with pytest.raises(runner.AcceptanceFailure) as caught:
+        runner.wait_for_fresh_download(
+            object(),
+            baseline,
+            location=LOCATION,
+            deadline=100.03,
+            command_timeout=0.01,
+            interval=0.01,
+        )
+
+    assert caught.value.code == "prefetch_timeout"
+    assert len(calls) >= 2
+
+
+def test_download_validation_rejects_plan_and_counter_copy_drift():
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    changed = provider_status(network_requests=5, downloaded_tiles=8)
+    changed["node_markers"].update(
+        {"seen": 3, "included": 2, "outside_radius": 1}
+    )
+    with pytest.raises(runner.AcceptanceFailure) as plan:
+        runner.validate_download_progress(
+            changed, baseline, location=LOCATION
+        )
+    assert plan.value.code == "prefetch_plan_changed"
+
+    stale_copy = provider_status(network_requests=5, downloaded_tiles=8)
+    stale_copy["network_requests"] = 4
+    with pytest.raises(runner.AcceptanceFailure) as counter:
+        runner.validate_download_progress(
+            stale_copy, baseline, location=LOCATION
+        )
+    assert counter.value.code == "prefetch_plan_invalid"
 
 
 def test_cli_exposes_bounded_boot_timeout():

@@ -67,6 +67,15 @@ OFFLINE_VIEW_TIMEOUT_SECONDS = 120.0
 FOREGROUND_TRANSITION_TIMEOUT_SECONDS = 120.0
 WIFI_TIMEOUT_SECONDS = 45.0
 UI_TIMEOUT_SECONDS = 20.0
+TRANSIENT_PREFETCH_PHASE_ERRORS = frozenset(
+    {
+        ("http_open", "ESP_ERR_HTTP_CONNECT"),
+        ("http_open", "ESP_ERR_TIMEOUT"),
+        ("http_open", "ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT"),
+        ("fetch_headers", "ESP_ERR_TIMEOUT"),
+        ("http_read", "ESP_ERR_TIMEOUT"),
+    }
+)
 
 COMMANDS = frozenset(
     {
@@ -415,6 +424,10 @@ def validate_provider_status(
             or _integer(prefetch.get("total_tiles"), minimum=1) is None
             or _integer(prefetch.get("network_requests"), minimum=0) is None
             or _integer(prefetch.get("downloaded_tiles"), minimum=0) is None
+            or row.get("network_requests")
+            != prefetch.get("network_requests")
+            or row.get("downloaded_tiles")
+            != prefetch.get("downloaded_tiles")
             or _integer(prefetch.get("failed_tiles"), minimum=0) != 0
         ):
             raise AcceptanceFailure(
@@ -439,6 +452,127 @@ def provider_plan_ready(result: object) -> bool:
         and _integer(prefetch.get("selected_max_zoom"), minimum=MIN_PROVIDER_ZOOM)
         is not None
         and _integer(prefetch.get("total_tiles"), minimum=1) is not None
+        and _integer(prefetch.get("failed_tiles"), minimum=0) == 0
+        and prefetch.get("storage_reserve_reached") is False
+    )
+
+
+def provider_plan_signature(result: dict[str, Any]) -> tuple[object, ...]:
+    markers = result["node_markers"]
+    prefetch = result["prefetch"]
+    sd = result["sd"]
+    return (
+        result.get("source_id"),
+        result.get("attribution"),
+        result.get("license_url"),
+        result.get("provider_max_zoom"),
+        result.get("minimum_request_interval_ms"),
+        result.get("average_tile_bytes"),
+        result.get("cache_budget_mb"),
+        sd.get("backend"),
+        sd.get("capacity_kb"),
+        markers.get("generation"),
+        markers.get("seen"),
+        markers.get("included"),
+        markers.get("outside_radius"),
+        prefetch.get("source_id"),
+        prefetch.get("cache_budget_mb"),
+        prefetch.get("selected_max_zoom"),
+        prefetch.get("total_tiles"),
+        prefetch.get("estimated_bytes"),
+        prefetch.get("allocation_bytes"),
+    )
+
+
+def transient_network_failure(
+    result: object,
+    *,
+    location: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return only a valid plan stopped by an exact transient HTTPS failure."""
+    try:
+        row = validate_provider_status(
+            result, location=location, require_plan=False
+        )
+    except AcceptanceFailure:
+        return None
+    prefetch = row["prefetch"]
+    if (
+        (prefetch.get("phase"), prefetch.get("last_error"))
+        not in TRANSIENT_PREFETCH_PHASE_ERRORS
+        or prefetch.get("running") is not False
+        or prefetch.get("complete") is not False
+        or prefetch.get("paused_for_visible_map") is not False
+        or prefetch.get("storage_reserve_reached") is not False
+        or _integer(prefetch.get("failed_tiles"), minimum=0) != 1
+    ):
+        return None
+    normalized = dict(row)
+    normalized_prefetch = dict(prefetch)
+    normalized_prefetch["failed_tiles"] = 0
+    normalized["prefetch"] = normalized_prefetch
+    try:
+        validate_provider_status(
+            normalized, location=location, require_plan=True
+        )
+    except AcceptanceFailure:
+        return None
+    return row
+
+
+def exact_network_backoff(
+    result: object,
+    *,
+    location: dict[str, Any],
+) -> bool:
+    """Match the zeroed status published during a causally observed backoff."""
+    try:
+        row = validate_provider_status(
+            result, location=location, require_plan=False
+        )
+    except AcceptanceFailure:
+        return False
+    markers = row["node_markers"]
+    prefetch = row["prefetch"]
+    return (
+        prefetch.get("initialized") is True
+        and prefetch.get("phase") == "backoff"
+        and prefetch.get("running") is False
+        and prefetch.get("eligible") is True
+        and prefetch.get("complete") is False
+        and prefetch.get("paused_for_visible_map") is False
+        and prefetch.get("location_set") is True
+        and prefetch.get("wifi_connected") is True
+        and prefetch.get("sd_ready") is True
+        and prefetch.get("provider_configured") is True
+        and prefetch.get("background_prefetch_permitted") is True
+        and prefetch.get("source_id") == row.get("source_id")
+        and prefetch.get("cache_budget_mb") == row.get("cache_budget_mb")
+        and prefetch.get("storage_reserve_reached") is False
+        and prefetch.get("last_error") == "ESP_OK"
+        and _integer(prefetch.get("network_requests"), minimum=0) is not None
+        and row.get("network_requests") == prefetch.get("network_requests")
+        and row.get("downloaded_tiles") == prefetch.get("downloaded_tiles")
+        and all(
+            _integer(prefetch.get(field), minimum=0) == 0
+            for field in (
+                "selected_max_zoom",
+                "total_tiles",
+                "visited_tiles",
+                "cached_tiles",
+                "downloaded_tiles",
+                "failed_tiles",
+                "evicted_tiles",
+                "downloaded_bytes",
+                "cache_used_bytes",
+                "estimated_bytes",
+                "allocation_bytes",
+            )
+        )
+        and all(
+            _integer(markers.get(field), minimum=0) == 0
+            for field in ("generation", "seen", "included", "outside_radius")
+        )
     )
 
 
@@ -453,14 +587,7 @@ def validate_download_progress(
     )
     before = baseline["prefetch"]
     after = row["prefetch"]
-    if (
-        row.get("source_id") != baseline.get("source_id")
-        or row.get("provider_max_zoom") != baseline.get("provider_max_zoom")
-        or row.get("node_markers", {}).get("generation")
-        != baseline.get("node_markers", {}).get("generation")
-        or after.get("selected_max_zoom") != before.get("selected_max_zoom")
-        or after.get("total_tiles") != before.get("total_tiles")
-    ):
+    if provider_plan_signature(row) != provider_plan_signature(baseline):
         raise AcceptanceFailure(
             "prefetch_plan_changed",
             "provider or node plan changed during online acceptance",
@@ -487,6 +614,44 @@ def validate_download_progress(
             "no fresh authorized background tile was fetched and cached",
         )
     return row
+
+
+def validate_download_progress_after_reset(
+    result: object,
+    baseline: dict[str, Any],
+    *,
+    location: dict[str, Any],
+) -> dict[str, Any]:
+    row = validate_provider_status(
+        result, location=location, require_plan=True
+    )
+    if provider_plan_signature(row) != provider_plan_signature(baseline):
+        raise AcceptanceFailure(
+            "prefetch_plan_changed",
+            "provider or node plan changed during online acceptance",
+        )
+    before_requests = _integer(
+        baseline["prefetch"].get("network_requests"), minimum=0
+    )
+    after_requests = _integer(
+        row["prefetch"].get("network_requests"), minimum=0
+    )
+    after_downloaded = _integer(
+        row["prefetch"].get("downloaded_tiles"), minimum=0
+    )
+    if None in {before_requests, after_requests, after_downloaded}:
+        raise AcceptanceFailure(
+            "prefetch_counter_invalid", "Map prefetch counters are invalid"
+        )
+    if after_requests <= before_requests or after_downloaded < 1:
+        raise AcceptanceFailure(
+            "fresh_download_not_observed",
+            "no fresh authorized background tile was fetched and cached",
+        )
+    witnessed = dict(row)
+    witnessed["host_prefetch_counter_reset_observed"] = True
+    witnessed["host_witnessed_downloaded_tiles"] = after_downloaded
+    return witnessed
 
 
 def offline_view_ready(
@@ -583,10 +748,23 @@ def build_transcript(
     download_prefetch = download["prefetch"]
     before_requests = int(before_prefetch["network_requests"])
     download_requests = int(download_prefetch["network_requests"])
-    downloaded_delta = (
-        int(download_prefetch["downloaded_tiles"])
-        - int(before_prefetch["downloaded_tiles"])
+    reset_observed = (
+        download.get("host_prefetch_counter_reset_observed") is True
     )
+    if reset_observed:
+        downloaded_delta = _integer(
+            download.get("host_witnessed_downloaded_tiles"), minimum=1
+        )
+        if downloaded_delta is None:
+            raise AcceptanceFailure(
+                "prefetch_counter_invalid",
+                "reset recovery did not record a positive downloaded tile witness",
+            )
+    else:
+        downloaded_delta = (
+            int(download_prefetch["downloaded_tiles"])
+            - int(before_prefetch["downloaded_tiles"])
+        )
     revisit_response = {
         "ok": True,
         "offline": True,
@@ -620,6 +798,7 @@ def build_transcript(
                 "network_requests": download_requests,
                 "downloaded_tiles": downloaded_delta,
                 "total_downloaded_tiles": download_prefetch["downloaded_tiles"],
+                "prefetch_counter_reset_observed": reset_observed,
                 "current_view_cache_fill": online_view,
                 "raw": download,
             },
@@ -668,7 +847,17 @@ def send_checked(
             "command_not_allowlisted",
             f"refusing command outside Map acceptance allowlist: {command}",
         )
-    result = send_console_command(ser, command, timeout)
+    retry_reserve = (
+        min(READ_ONLY_TIMEOUT_RETRY_SECONDS, timeout / 2.0)
+        if command in READ_ONLY_COMMANDS
+        else 0.0
+    )
+    deadline = time.monotonic() + timeout
+    result = send_console_command(
+        ser,
+        command,
+        timeout - retry_reserve,
+    )
     if not (
         command in READ_ONLY_COMMANDS
         and type(result) is dict
@@ -680,10 +869,13 @@ def send_checked(
     ):
         return result
 
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return result
     retried = send_console_command(
         ser,
         command,
-        min(timeout, READ_ONLY_TIMEOUT_RETRY_SECONDS),
+        min(retry_reserve, remaining),
     )
     if type(retried) is dict:
         retried = dict(retried)
@@ -741,8 +933,17 @@ def poll_command(
     deadline = time.monotonic() + timeout
     last: dict[str, Any] = {}
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceFailure(
+                "acceptance_timeout",
+                f"{command} did not reach the required state",
+            )
         last = require_result(
-            send_checked(ser, command, command_timeout), command
+            send_checked(
+                ser, command, min(command_timeout, remaining)
+            ),
+            command,
         )
         if predicate(last):
             return last
@@ -751,6 +952,157 @@ def poll_command(
             raise AcceptanceFailure(
                 "acceptance_timeout",
                 f"{command} did not reach the required state",
+            )
+        time.sleep(min(interval, remaining))
+
+
+def wait_for_provider_plan(
+    ser: Any,
+    *,
+    location: dict[str, Any],
+    deadline: float,
+    command_timeout: float,
+    interval: float,
+) -> dict[str, Any]:
+    """Acquire a valid plan, allowing only causally observed HTTPS recovery."""
+    retry_signature: tuple[object, ...] | None = None
+    network_backoff = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceFailure(
+                "prefetch_timeout",
+                "Map provider plan did not become ready in time",
+            )
+        candidate = send_checked(
+            ser,
+            "map provider status",
+            min(command_timeout, remaining),
+        )
+        try:
+            row = validate_provider_status(
+                candidate, location=location, require_plan=True
+            )
+        except AcceptanceFailure:
+            failure = transient_network_failure(
+                candidate, location=location
+            )
+            if failure is not None:
+                signature = provider_plan_signature(failure)
+                if (
+                    retry_signature is not None
+                    and signature != retry_signature
+                ):
+                    raise AcceptanceFailure(
+                        "prefetch_plan_changed",
+                        "provider or node plan changed during online acceptance",
+                    )
+                retry_signature = signature
+                network_backoff = True
+            elif network_backoff and exact_network_backoff(
+                candidate, location=location
+            ):
+                pass
+            else:
+                raise
+        else:
+            if (
+                retry_signature is not None
+                and provider_plan_signature(row) != retry_signature
+            ):
+                raise AcceptanceFailure(
+                    "prefetch_plan_changed",
+                    "provider or node plan changed during online acceptance",
+                )
+            return row
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceFailure(
+                "prefetch_timeout",
+                "Map provider plan did not become ready in time",
+            )
+        time.sleep(min(interval, remaining))
+
+
+def wait_for_fresh_download(
+    ser: Any,
+    baseline: dict[str, Any],
+    *,
+    location: dict[str, Any],
+    deadline: float,
+    command_timeout: float,
+    interval: float,
+) -> dict[str, Any]:
+    """Wait through bounded provider backoff for one successful fresh tile."""
+    transient_observed = False
+    reset_observed = False
+    baseline_signature = provider_plan_signature(baseline)
+    baseline_downloaded = int(baseline["prefetch"]["downloaded_tiles"])
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceFailure(
+                "prefetch_timeout",
+                "no fresh authorized background tile completed in time",
+            )
+        candidate = send_checked(
+            ser,
+            "map provider status",
+            min(command_timeout, remaining),
+        )
+        failure = transient_network_failure(
+            candidate, location=location
+        )
+        if failure is not None:
+            if provider_plan_signature(failure) != baseline_signature:
+                raise AcceptanceFailure(
+                    "prefetch_plan_changed",
+                    "provider or node plan changed during online acceptance",
+                )
+            transient_observed = True
+        elif transient_observed and exact_network_backoff(
+            candidate, location=location
+        ):
+            reset_observed = True
+        else:
+            try:
+                clean = validate_provider_status(
+                    candidate, location=location, require_plan=True
+                )
+            except AcceptanceFailure:
+                raise
+            if provider_plan_signature(clean) != baseline_signature:
+                raise AcceptanceFailure(
+                    "prefetch_plan_changed",
+                    "provider or node plan changed during online acceptance",
+                )
+            current_downloaded = int(
+                clean["prefetch"]["downloaded_tiles"]
+            )
+            if transient_observed and current_downloaded < baseline_downloaded:
+                # The zeroed backoff status is published for only one worker
+                # interval. A clean same-plan pass with a smaller per-pass
+                # counter is equivalent host evidence that the retry reset it.
+                reset_observed = True
+            try:
+                if reset_observed:
+                    row = validate_download_progress_after_reset(
+                        clean, baseline, location=location
+                    )
+                else:
+                    row = validate_download_progress(
+                        clean, baseline, location=location
+                    )
+            except AcceptanceFailure as exc:
+                if exc.code != "fresh_download_not_observed":
+                    raise
+            else:
+                return row
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceFailure(
+                "prefetch_timeout",
+                "no fresh authorized background tile completed in time",
             )
         time.sleep(min(interval, remaining))
 
@@ -963,16 +1315,13 @@ def run_acceptance(
                 )
                 map_was_hidden = True
 
-            provider = poll_command(
+            prefetch_deadline = time.monotonic() + prefetch_timeout
+            provider = wait_for_provider_plan(
                 ser,
-                "map provider status",
-                timeout=UI_TIMEOUT_SECONDS,
+                location=location,
+                deadline=prefetch_deadline,
                 command_timeout=command_timeout,
                 interval=poll_interval,
-                predicate=provider_plan_ready,
-            )
-            provider = validate_provider_status(
-                provider, location=location, require_plan=True
             )
             baseline = provider
             if baseline["prefetch"].get("complete") is True:
@@ -981,26 +1330,14 @@ def run_acceptance(
                     "prefetch is already complete; provide one uncached authorized tile",
                 )
 
-            deadline = time.monotonic() + prefetch_timeout
-            while True:
-                candidate = send_checked(
-                    ser, "map provider status", command_timeout
-                )
-                try:
-                    download = validate_download_progress(
-                        candidate, baseline, location=location
-                    )
-                    break
-                except AcceptanceFailure as exc:
-                    if exc.code != "fresh_download_not_observed":
-                        raise
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise AcceptanceFailure(
-                        "prefetch_timeout",
-                        "no fresh authorized background tile completed in time",
-                    )
-                time.sleep(min(poll_interval, remaining))
+            download = wait_for_fresh_download(
+                ser,
+                baseline,
+                location=location,
+                deadline=prefetch_deadline,
+                command_timeout=command_timeout,
+                interval=poll_interval,
+            )
 
             before_online = require_result(
                 send_checked(ser, "map tiles status", command_timeout),
