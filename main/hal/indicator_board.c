@@ -5,6 +5,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "rom/cache.h"
 #include "bsp_board.h"
 #include "bsp_i2c.h"
 #include "bsp_lcd.h"
@@ -78,18 +79,6 @@ static bool splash_text_pixel(int x, int y)
     const int glyph_y = (y - text_y) / D1L_SPLASH_GLYPH_SCALE;
     return rows && (rows[glyph_y] & (1U << (D1L_SPLASH_GLYPH_WIDTH - 1 - glyph_x)));
 }
-
-#if CONFIG_LCD_LVGL_DIRECT_MODE
-static bool splash_flush_is_last(void)
-{
-    return true;
-}
-
-static void splash_direct_mode_copy(void)
-{
-    /* Both RGB framebuffers are rendered identically before the refresh. */
-}
-#endif
 
 static uint16_t clamp_touch_coord(int32_t value, uint16_t max)
 {
@@ -299,14 +288,17 @@ esp_err_t d1l_board_display_boot_splash(void)
     }
 #if CONFIG_LCD_LVGL_DIRECT_MODE
     /*
-     * The BSP direct-mode flush requires callbacks that LVGL normally
-     * registers later. Install bounded splash callbacks for this one refresh;
-     * UI startup replaces both with its real dirty-area callbacks.
+     * The RGB panel is already refreshing its two live framebuffers. Do not
+     * call bsp_lcd_flush() before LVGL owns the direct-mode callbacks: that
+     * path waits forever on the BSP's VSYNC semaphore when the LCD refresh
+     * task wins the semaphore race. Rendering the same splash into both live
+     * buffers is sufficient and lets startup continue to the readiness UI.
      */
-    bsp_lcd_flush_is_last_register(splash_flush_is_last);
-    bsp_lcd_direct_mode_register(splash_direct_mode_copy);
-    return bsp_lcd_flush(
-        0, 0, D1L_LCD_WIDTH, D1L_LCD_HEIGHT, framebuffers[0]);
+    const uint32_t framebuffer_bytes =
+        D1L_LCD_WIDTH * D1L_LCD_HEIGHT * sizeof(uint16_t);
+    Cache_WriteBack_Addr((uint32_t)framebuffers[0], framebuffer_bytes);
+    Cache_WriteBack_Addr((uint32_t)framebuffers[1], framebuffer_bytes);
+    return ESP_OK;
 #else
     free(line);
     return ESP_OK;
