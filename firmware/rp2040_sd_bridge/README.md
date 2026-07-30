@@ -36,7 +36,7 @@ It speaks the newline-delimited protocol documented in
   RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
   so a floating or open card-response line does not read as a false all-zero
   response.
-- UART baud: 460800 for bounded ESP32/RP2040 file transfer and command exchange.
+- UART baud: 115200 for reliable bounded ESP32/RP2040 file transfer and command exchange.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
 This bridge code is original project code and intentionally keeps the protocol
@@ -57,7 +57,7 @@ maintainer's SPI1 pin method names used by Seeed's sample: `setCS`, `setRX`,
 `setTX`, and `setSCK`.
 
 The production bridge deliberately selects Arduino-Pico's `No USB` stack. Its
-only production control/data path is the 460800-baud ESP32 UART, including the
+only production control/data path is the 115200-baud ESP32 UART, including the
 explicit `DESKOS_SD_BOOTLOADER` command. This prevents an unrelated Windows
 serial poll from using Arduino-Pico's standard 1200-baud/DTR USB-CDC trigger to
 put the RP2040 into UF2 mode and mount an Explorer drive while the bridge is

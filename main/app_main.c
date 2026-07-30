@@ -135,7 +135,7 @@ void app_main(void)
            esp_err_to_name(d1l_retained_blob_store_nvs_migration_error()));
 
     /*
-     * Bring up the LCD before retained SD history is read over the 460800-baud
+     * Bring up the LCD before retained SD history is read over the 115200-baud
      * RP2040 bridge. A populated card can take tens of seconds to replay, and
      * leaving the panel at its power-on blue during that bounded work makes a
      * healthy boot indistinguishable from a hang.
