@@ -61,8 +61,12 @@ typedef struct {
     uint32_t persistence_commit_count;
     uint32_t persistence_coalesced_count;
     uint32_t persistence_fail_count;
+    uint32_t sd_backend_generation;
     esp_err_t persistence_last_error;
     bool persistence_dirty;
+    bool loaded;
+    bool sd_primary_required;
+    bool sd_primary_reconcile_pending;
 } d1l_contact_store_stats_t;
 
 typedef enum {

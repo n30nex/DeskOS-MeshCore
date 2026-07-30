@@ -2426,6 +2426,280 @@ static void test_factory_reset_sd_recovery_end_to_end(void)
     }
 }
 
+static void test_missing_primary_reads_valid_dm_replace_backup(void)
+{
+    static const uint8_t backup[] = "recoverable retained dms";
+    static const char primary_path[] =
+        "stores/messages/dm/threads.bin";
+    static const char backup_path[] =
+        "stores/messages/dm/threads.bin.bak";
+    uint8_t readback[sizeof(backup)] = {0};
+    size_t readback_len = sizeof(readback);
+
+    clear_nvs_case();
+    reset_sd_files();
+    d1l_retained_blob_store_note_sd_backend(false, false, false,
+                                             0U, 0U, 0U);
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    seed_sd_file(backup_path, backup, sizeof(backup));
+    reset_sd_events();
+    const uint32_t renames_before = s_rename_count;
+    const uint32_t deletes_before = s_delete_count;
+
+    assert(d1l_retained_blob_store_read_sd_primary(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
+               readback, &readback_len) == ESP_OK);
+    assert(readback_len == sizeof(backup));
+    assert(memcmp(readback, backup, sizeof(backup)) == 0);
+    assert(find_sd_file(primary_path) == NULL);
+    assert(find_sd_file(backup_path) != NULL);
+
+    const size_t primary_stat =
+        first_sd_event(TEST_SD_EVENT_STAT, primary_path);
+    const size_t backup_stat =
+        first_sd_event(TEST_SD_EVENT_STAT, backup_path);
+    const size_t backup_read =
+        first_sd_event(TEST_SD_EVENT_READ, backup_path);
+    assert(primary_stat != SIZE_MAX);
+    assert(backup_stat > primary_stat);
+    assert(backup_read > backup_stat);
+    assert(count_sd_event(TEST_SD_EVENT_READ, primary_path) == 0U);
+    assert(count_sd_event(TEST_SD_EVENT_WRITE, primary_path) == 0U);
+    assert(count_sd_event(TEST_SD_EVENT_WRITE, backup_path) == 0U);
+    assert(s_rename_count == renames_before);
+    assert(s_delete_count == deletes_before);
+}
+
+static void test_primary_error_never_reads_stale_dm_backup(void)
+{
+    static const uint8_t primary[] =
+        "newer primary is larger than the admitted destination";
+    static const uint8_t stale_backup[] = "older";
+    static const char primary_path[] =
+        "stores/messages/dm/threads.bin";
+    static const char backup_path[] =
+        "stores/messages/dm/threads.bin.bak";
+    uint8_t readback[sizeof(stale_backup)] = {0};
+    size_t readback_len = sizeof(readback);
+
+    clear_nvs_case();
+    reset_sd_files();
+    d1l_retained_blob_store_note_sd_backend(false, false, false,
+                                             0U, 0U, 0U);
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    seed_sd_file(primary_path, primary, sizeof(primary));
+    seed_sd_file(backup_path, stale_backup, sizeof(stale_backup));
+    reset_sd_events();
+    const uint32_t renames_before = s_rename_count;
+    const uint32_t deletes_before = s_delete_count;
+
+    assert(d1l_retained_blob_store_read_sd_primary(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
+               readback, &readback_len) == ESP_ERR_INVALID_SIZE);
+    assert(readback_len == sizeof(primary));
+    assert(first_sd_event(TEST_SD_EVENT_STAT, primary_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, backup_path) == SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_READ, backup_path) == SIZE_MAX);
+    assert(s_rename_count == renames_before);
+    assert(s_delete_count == deletes_before);
+}
+
+static void test_explicit_dm_erase_removes_primary_temp_and_backup(void)
+{
+    static const uint8_t stale[] = "stale retained dms";
+    static const char primary_path[] =
+        "stores/messages/dm/threads.bin";
+    static const char temp_path[] =
+        "stores/messages/dm/threads.tmp";
+    static const char backup_path[] =
+        "stores/messages/dm/threads.bin.bak";
+
+    clear_nvs_case();
+    reset_sd_files();
+    d1l_retained_blob_store_note_sd_backend(false, false, false,
+                                             0U, 0U, 0U);
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    seed_sd_file(primary_path, stale, sizeof(stale));
+    seed_sd_file(temp_path, stale, sizeof(stale));
+    seed_sd_file(backup_path, stale, sizeof(stale));
+    const d1l_retained_blob_store_backend_state_t backend =
+        state_for(D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
+    reset_sd_events();
+
+    assert(d1l_retained_blob_store_erase_sd_primary_guarded(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
+               backend.generation) == ESP_OK);
+    assert(find_sd_file(primary_path) == NULL);
+    assert(find_sd_file(temp_path) == NULL);
+    assert(find_sd_file(backup_path) == NULL);
+    assert(count_sd_event(TEST_SD_EVENT_DELETE, primary_path) == 1U);
+    assert(count_sd_event(TEST_SD_EVENT_DELETE, temp_path) == 1U);
+    assert(count_sd_event(TEST_SD_EVENT_DELETE, backup_path) == 1U);
+    const size_t backup_delete =
+        first_sd_event(TEST_SD_EVENT_DELETE, backup_path);
+    const size_t temp_delete =
+        first_sd_event(TEST_SD_EVENT_DELETE, temp_path);
+    const size_t primary_delete =
+        first_sd_event(TEST_SD_EVENT_DELETE, primary_path);
+    assert(backup_delete < temp_delete);
+    assert(temp_delete < primary_delete);
+    assert(count_sd_event(TEST_SD_EVENT_WRITE, primary_path) == 0U);
+    assert(count_sd_event(TEST_SD_EVENT_WRITE, temp_path) == 0U);
+    assert(count_sd_event(TEST_SD_EVENT_WRITE, backup_path) == 0U);
+}
+
+static void test_interrupted_dm_erase_keeps_primary_authoritative(void)
+{
+    static const uint8_t primary[] = "authoritative retained dms";
+    static const uint8_t stale_backup[] = "stale retained dms";
+    static const char primary_path[] =
+        "stores/messages/dm/threads.bin";
+    static const char temp_path[] =
+        "stores/messages/dm/threads.tmp";
+    static const char backup_path[] =
+        "stores/messages/dm/threads.bin.bak";
+    uint8_t readback[sizeof(primary)] = {0};
+    size_t readback_len = sizeof(readback);
+
+    clear_nvs_case();
+    reset_sd_files();
+    d1l_retained_blob_store_note_sd_backend(false, false, false,
+                                             0U, 0U, 0U);
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    seed_sd_file(primary_path, primary, sizeof(primary));
+    seed_sd_file(temp_path, stale_backup, sizeof(stale_backup));
+    seed_sd_file(backup_path, stale_backup, sizeof(stale_backup));
+    const d1l_retained_blob_store_backend_state_t backend =
+        state_for(D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
+    reset_sd_events();
+
+    /* Simulate interruption/media-generation drift after the first delete.
+     * The recovery backup is gone, but the primary commit point is intact. */
+    s_toggle_backend_during_delete = true;
+    assert(d1l_retained_blob_store_erase_sd_primary_guarded(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
+               backend.generation) == ESP_ERR_INVALID_STATE);
+    assert(find_sd_file(backup_path) == NULL);
+    assert(find_sd_file(temp_path) != NULL);
+    assert(find_sd_file(primary_path) != NULL);
+    assert(count_sd_event(TEST_SD_EVENT_DELETE, backup_path) == 1U);
+    assert(count_sd_event(TEST_SD_EVENT_DELETE, temp_path) == 0U);
+    assert(count_sd_event(TEST_SD_EVENT_DELETE, primary_path) == 0U);
+
+    readback_len = sizeof(readback);
+    assert(d1l_retained_blob_store_read_sd_primary(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
+               readback, &readback_len) == ESP_OK);
+    assert(readback_len == sizeof(primary));
+    assert(memcmp(readback, primary, sizeof(primary)) == 0);
+}
+
+static void test_completed_lineage_reads_exact_marker_and_data_backups(void)
+{
+    static const uint8_t retained[] = "retained dms behind lineage backup";
+    static const char marker_path[] =
+        "stores/messages/dm/reset_lineage_v1.bin";
+    static const char marker_backup_path[] =
+        "stores/messages/dm/reset_lineage_v1.bin.bak";
+    static const char data_path[] =
+        "stores/messages/dm/threads.bin";
+    static const char data_backup_path[] =
+        "stores/messages/dm/threads.bin.bak";
+    const uint32_t lineage_generation = assert_reset_lineage(
+        D1L_FACTORY_RESET_SD_STORE_DM_MESSAGES, false);
+    test_sd_file_t *committed_marker = find_sd_file(marker_path);
+    assert(committed_marker);
+    assert(committed_marker->length ==
+           sizeof(d1l_factory_reset_sd_media_marker_t));
+    d1l_factory_reset_sd_media_marker_t marker = {0};
+    memcpy(&marker, committed_marker->data, sizeof(marker));
+    assert(d1l_factory_reset_sd_media_marker_matches(
+        &marker, sizeof(marker),
+        D1L_FACTORY_RESET_SD_STORE_DM_MESSAGES,
+        lineage_generation));
+
+    reset_sd_files();
+    d1l_retained_blob_store_note_sd_backend(false, false, false,
+                                             0U, 0U, 0U);
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    seed_sd_file(data_backup_path, retained, sizeof(retained));
+    const d1l_retained_blob_store_backend_state_t backend =
+        state_for(D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
+
+    reset_sd_events();
+    const uint32_t renames_before = s_rename_count;
+    const uint32_t deletes_before = s_delete_count;
+    d1l_factory_reset_sd_media_marker_t wrong_marker = {0};
+    d1l_factory_reset_sd_media_marker_init(
+        &wrong_marker, D1L_FACTORY_RESET_SD_STORE_DM_MESSAGES,
+        lineage_generation + 1U);
+    seed_sd_file(marker_backup_path, &wrong_marker, sizeof(wrong_marker));
+    bool lineage_ready = true;
+    assert(d1l_retained_blob_store_sd_media_lineage_ready(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES,
+               backend.generation, &lineage_ready) == ESP_OK);
+    assert(!lineage_ready);
+    assert(s_rename_count == renames_before);
+    assert(s_delete_count == deletes_before);
+
+    seed_sd_file(marker_backup_path, &marker, sizeof(marker));
+    seed_sd_file(marker_path, &wrong_marker, sizeof(wrong_marker));
+    reset_sd_events();
+    lineage_ready = true;
+    assert(d1l_retained_blob_store_sd_media_lineage_ready(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES,
+               backend.generation, &lineage_ready) == ESP_OK);
+    assert(!lineage_ready);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, marker_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, marker_backup_path) == SIZE_MAX);
+    test_sd_file_t *wrong_primary = find_sd_file(marker_path);
+    assert(wrong_primary);
+    memset(wrong_primary, 0, sizeof(*wrong_primary));
+
+    reset_sd_events();
+    lineage_ready = false;
+    assert(d1l_retained_blob_store_sd_media_lineage_ready(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES,
+               backend.generation, &lineage_ready) == ESP_OK);
+    assert(lineage_ready);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, marker_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, marker_backup_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_READ, marker_backup_path) != SIZE_MAX);
+    assert(s_rename_count == renames_before);
+    assert(s_delete_count == deletes_before);
+
+    reset_sd_events();
+    uint8_t readback[sizeof(retained)] = {0};
+    size_t readback_len = sizeof(readback);
+    assert(d1l_retained_blob_store_read_sd_primary(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
+               readback, &readback_len) == ESP_OK);
+    assert(readback_len == sizeof(retained));
+    assert(memcmp(readback, retained, sizeof(retained)) == 0);
+    assert(find_sd_file(marker_path) == NULL);
+    assert(find_sd_file(marker_backup_path) != NULL);
+    assert(find_sd_file(data_path) == NULL);
+    assert(find_sd_file(data_backup_path) != NULL);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, marker_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, marker_backup_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_READ, marker_backup_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, data_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_STAT, data_backup_path) != SIZE_MAX);
+    assert(first_sd_event(TEST_SD_EVENT_READ, data_backup_path) != SIZE_MAX);
+    assert(s_rename_count == renames_before);
+    assert(s_delete_count == deletes_before);
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 2 && strcmp(argv[1], "profile-gate") == 0) {
@@ -2523,7 +2797,12 @@ int main(int argc, char **argv)
     test_legacy_read_remains_read_only_after_dedicated_miss();
     test_sd_only_retirement_erases_legacy_without_history_write();
     test_erase_clears_dedicated_and_legacy_copies();
+    test_missing_primary_reads_valid_dm_replace_backup();
+    test_primary_error_never_reads_stale_dm_backup();
+    test_explicit_dm_erase_removes_primary_temp_and_backup();
+    test_interrupted_dm_erase_keeps_primary_authoritative();
     test_factory_reset_sd_recovery_end_to_end();
+    test_completed_lineage_reads_exact_marker_and_data_backups();
 
     puts("native retained backend generation and NVS partition: ok");
     return 0;

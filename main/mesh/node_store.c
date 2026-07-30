@@ -1431,7 +1431,16 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
 
 d1l_node_store_stats_t d1l_node_store_stats(void)
 {
+    d1l_retained_blob_store_backend_state_t backend_state = {0};
+    (void)d1l_retained_blob_store_backend_state(D1L_NODE_STORE_ID,
+                                                &backend_state);
     d1l_store_lock_take(&s_store_lock);
+    const bool backend_generation_changed =
+        s_loaded && backend_state.enabled &&
+        backend_state.generation != s_last_sd_backend_generation;
+    const bool reconcile_pending =
+        backend_state.enabled &&
+        (s_sd_reconcile_pending || backend_generation_changed);
     d1l_node_store_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
@@ -1439,14 +1448,15 @@ d1l_node_store_stats_t d1l_node_store_stats(void)
         .persistence_commit_count = s_persistence_commit_count,
         .persistence_coalesced_count = s_persistence_coalesced_count,
         .persistence_fail_count = s_persistence_fail_count,
-        .sd_backend_generation = s_last_sd_backend_generation,
+        .sd_backend_generation = backend_state.generation,
         .sd_primary_last_error = s_sd_primary_last_error,
         .persistence_revision = s_revision,
         .count = s_count,
         .capacity = D1L_NODE_STORE_CAPACITY,
         .persistence_dirty =
-            s_persistence_dirty || s_legacy_cleanup_pending,
-        .sd_primary_reconcile_pending = s_sd_reconcile_pending,
+            s_persistence_dirty || s_legacy_cleanup_pending ||
+            backend_generation_changed,
+        .sd_primary_reconcile_pending = reconcile_pending,
     };
     d1l_store_lock_give(&s_store_lock);
     return stats;

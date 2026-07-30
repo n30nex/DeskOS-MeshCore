@@ -22,6 +22,7 @@ try:
         raise ImportError("use canonical package imports")
     import release_gate_audit_d1l as full_release_audit
     import rf_full_acceptance_d1l as rf_acceptance
+    import rc1_release_gate_audit_d1l as rc1_release_audit
     import soak_d1l as soak_runner
     import time_protocol_migration_d1l as time_protocol_migration
     from artifact_metadata import git_metadata
@@ -66,6 +67,7 @@ try:
         post_flash_capture_contract_ok,
         post_flash_reset_contract_ok,
         projection_sha256,
+        retained_reflash_baseline_ready,
         retained_state_preserved,
         retained_state_projection,
     )
@@ -114,6 +116,7 @@ try:
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts import release_gate_audit_d1l as full_release_audit
     from scripts import rf_full_acceptance_d1l as rf_acceptance
+    from scripts import rc1_release_gate_audit_d1l as rc1_release_audit
     from scripts import soak_d1l as soak_runner
     from scripts import time_protocol_migration_d1l as time_protocol_migration
     from scripts.artifact_metadata import git_metadata
@@ -158,6 +161,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         post_flash_capture_contract_ok,
         post_flash_reset_contract_ok,
         projection_sha256,
+        retained_reflash_baseline_ready,
         retained_state_preserved,
         retained_state_projection,
     )
@@ -235,8 +239,41 @@ except ImportError:  # pragma: no cover - integration dependency
 
 
 CORE_AUDIT_SCHEMA = 2
-FINAL_SD_HISTORY_MODES = frozenset({"disabled"})
+FINAL_SD_HISTORY_MODES = frozenset({"conditional"})
+FINAL_SD_HISTORY_MODE = "conditional"
+FINAL_SD_HISTORY_STATE = "runtime_conditional_sd_primary"
+FINAL_STORAGE_AUTHORITY = "sd_primary_live_only_without_sd"
 REQUIRED_ACTIONS_ARTIFACTS = EXPECTED_ACTIONS_ARTIFACTS
+CLOSING_NOT_REQUIRED = (
+    {
+        "id": "core_ui_corruption",
+        "reason": "previously qualified UI behavior is not rerun for closing",
+    },
+    {
+        "id": "core_scroll_probe",
+        "reason": "previously qualified touch and scroll behavior is not rerun for closing",
+    },
+    {
+        "id": "manual_display_touch_core_review",
+        "reason": "previously completed manual UI and photo review is not a closing rerun",
+    },
+    {
+        "id": "core_reboot_persistence",
+        "reason": "the nonempty retained reflash receipt supplies the closing reboot proof",
+    },
+    {
+        "id": "sd_history_decision",
+        "reason": "physical SD removal and reinsertion qualification was completed earlier",
+    },
+    {
+        "id": "core_90_minute_soak",
+        "reason": "the bounded 1.0 closing gate explicitly requires no soak",
+    },
+    {
+        "id": "core_install_recovery_review",
+        "reason": "the bounded package audit supersedes the previously completed manual install review",
+    },
+)
 REQUIRED_MANUAL_CONFIRMATIONS = (
     "display_480x480_stable",
     "touch_accurate",
@@ -763,21 +800,33 @@ def core_immutable_source_inputs_gate(
             "ci-host-windows-installed.json",
             "d1l-candidate-scope.json",
         },
-        "candidate_scope_exact": scope
+        "candidate_scope_exact": set(scope)
         == {
-            "schema": 1,
-            "kind": "d1l_candidate_scope",
-            "source_commit": commit,
-            "workflow_run_id": str(run_id),
-            "workflow_run_attempt": str(scope.get("workflow_run_attempt")),
-            "repository": "n30nex/SIGUI",
-            "workflow": "d1l-ci",
-            "event": "workflow_dispatch",
-            "include_sd_bridge": False,
-            "scope_reason": "esp32_only",
-            "release_profile": CORE_RELEASE_PROFILE,
-            "sd_history_mode": "disabled",
+            "schema",
+            "kind",
+            "source_commit",
+            "workflow_run_id",
+            "workflow_run_attempt",
+            "repository",
+            "workflow",
+            "event",
+            "include_sd_bridge",
+            "scope_reason",
+            "release_profile",
+            "sd_history_mode",
         }
+        and scope.get("schema") == 1
+        and scope.get("kind") == "d1l_candidate_scope"
+        and scope.get("source_commit") == commit
+        and str(scope.get("workflow_run_id")) == str(run_id)
+        and scope.get("repository") == "n30nex/SIGUI"
+        and scope.get("workflow") == "d1l-ci"
+        and scope.get("event") in {"push", "workflow_dispatch"}
+        and scope.get("include_sd_bridge") is True
+        and scope.get("scope_reason")
+        in {"rc1_candidate", "rc1_sd_paths", "manual_dispatch"}
+        and scope.get("release_profile") == CORE_RELEASE_PROFILE
+        and scope.get("sd_history_mode") == FINAL_SD_HISTORY_MODE
         and str(scope.get("workflow_run_attempt")).isdigit()
         and int(scope.get("workflow_run_attempt")) >= 1,
         "idf_metadata_copy_exact": digest(metadata_path) is not None
@@ -790,8 +839,9 @@ def core_immutable_source_inputs_gate(
         and digest(idf_dependency_lock) == digest(dependency_lock),
         "idf_dependency_patch_empty": digest(idf_dependency_patch)
         == hashlib.sha256(b"").hexdigest(),
-        "disabled_rp2040_artifacts_absent": not any(
-            path.exists() for path in rp2040_paths
+        "paired_rp2040_artifacts_present": all(
+            path.is_dir() and not is_link_or_reparse(path)
+            for path in rp2040_paths
         ),
     }
     failures = [name for name, value in checks.items() if not value]
@@ -813,7 +863,7 @@ def core_immutable_source_inputs_gate(
     return CoreGate(
         "core_immutable_release_source_inputs",
         not failures,
-        "Core host and IDF inputs are exact; disabled RP2040 scope is absent",
+        "Core host, IDF, and paired RP2040 inputs match the conditional 1.0 candidate",
         [
             path_text(path, root)[0]
             for path in evidence_paths
@@ -972,9 +1022,9 @@ def actions_run_metadata_gate(
         and str(run_attempt) == str(run_attempt_expected)
         and scope.get("source_commit") == commit
         and str(scope.get("workflow_run_id")) == str(run_id)
-        and scope.get("include_sd_bridge") is False
+        and scope.get("include_sd_bridge") is True
         and scope.get("release_profile") == CORE_RELEASE_PROFILE
-        and scope.get("sd_history_mode") == "disabled"
+        and scope.get("sd_history_mode") == FINAL_SD_HISTORY_MODE
         and capture_fresh
     )
     return CoreGate(
@@ -1307,12 +1357,22 @@ def _retained_snapshot(
         ),
         None,
     ) if isinstance(results, list) else None
-    version = (
-        results[0] if isinstance(results, list) and len(results) > 0 else {}
-    )
-    health = (
-        results[1] if isinstance(results, list) and len(results) > 1 else {}
-    )
+    version = next(
+        (
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("cmd") == "version"
+        ),
+        {},
+    ) if isinstance(results, list) else {}
+    health = next(
+        (
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("cmd") == "health"
+        ),
+        {},
+    ) if isinstance(results, list) else {}
     ok = (
         file_ok
         and real_evidence(data)
@@ -1336,8 +1396,8 @@ def _retained_snapshot(
             identity_status,
             expected_d1l_public_key,
         )
-        and _profile_version_result(version, commit, "disabled")
-        and _profile_ready_health_result(health, commit, "disabled")
+        and _profile_version_result(version, commit, FINAL_SD_HISTORY_MODE)
+        and _profile_ready_health_result(health, commit, FINAL_SD_HISTORY_MODE)
     )
     return path, projection, identity_status, ok, target_identity
 
@@ -1350,7 +1410,13 @@ def core_flash_receipt_gate(
     run_id: str,
     run_attempt: str,
     expected_target: str = WINDOWS_D1L_TARGET,
+    receipt_path: Path | None = None,
 ) -> CoreGate:
+    receipt = (
+        Path(receipt_path)
+        if receipt_path is not None
+        else newest_commit_json(hardware_dir, commit, "esp32_flash_*.json")
+    )
     legacy = esp32_flash_receipt_gate(
         hardware_dir,
         github_run_dir,
@@ -1358,8 +1424,8 @@ def core_flash_receipt_gate(
         commit,
         run_id,
         expected_target,
+        receipt_path=receipt,
     )
-    receipt = newest_commit_json(hardware_dir, commit, "esp32_flash_*.json")
     data = read_json(receipt)
     package = data.get("package_verification")
     package = package if isinstance(package, dict) else {}
@@ -1407,6 +1473,7 @@ def core_flash_receipt_gate(
     public_key_ok, d1l_public_key, public_key_details = (
         flash_d1l_public_key_binding(data)
     )
+    pre_flash_build_commit = exact_sha(data.get("pre_flash_build_commit"))
     (
         before_path,
         before_projection,
@@ -1416,7 +1483,7 @@ def core_flash_receipt_gate(
     ) = _retained_snapshot(
         data.get("retained_state_before"),
         root,
-        commit,
+        pre_flash_build_commit or "",
         "pre_flash",
         expected_target,
         target_identity,
@@ -1447,8 +1514,11 @@ def core_flash_receipt_gate(
         and retained_identity_binding_ok
         and before_target_identity == target_identity
         and after_target_identity == target_identity
+        and pre_flash_build_commit is not None
         and before_projection is not None
         and after_projection is not None
+        and retained_reflash_baseline_ready(before_projection)
+        and retained_reflash_baseline_ready(after_projection)
         and retained_state_preserved(before_projection, after_projection)
     )
     version = data.get("post_flash_version")
@@ -1488,10 +1558,11 @@ def core_flash_receipt_gate(
         and str(data.get("github_actions_run")) == str(run_id)
         and str(data.get("workflow_run_attempt")) == str(run_attempt)
         and data.get("release_profile") == CORE_RELEASE_PROFILE
-        and data.get("sd_history_mode") == "disabled"
+        and data.get("sd_history_mode") == FINAL_SD_HISTORY_MODE
+        and pre_flash_build_commit is not None
         and data.get("runner_source_identity_ok") is True
-        and _profile_version_result(version, commit, "disabled")
-        and _profile_identity_result(health, commit, "disabled")
+        and _profile_version_result(version, commit, FINAL_SD_HISTORY_MODE)
+        and _profile_identity_result(health, commit, FINAL_SD_HISTORY_MODE)
         and isinstance(health, dict)
         and health.get("board_ready") is True
         and health.get("ui_ready") is True
@@ -1500,8 +1571,8 @@ def core_flash_receipt_gate(
         and exact_sha(package.get("firmware_commit")) == commit
         and str(package.get("github_actions_run")) == str(run_id)
         and package.get("release_profile") == CORE_RELEASE_PROFILE
-        and package.get("sd_history_mode") == "disabled"
-        and package.get("storage_authority") == "nvs"
+        and package.get("sd_history_mode") == FINAL_SD_HISTORY_MODE
+        and package.get("storage_authority") == FINAL_STORAGE_AUTHORITY
         and package.get("repository") == "n30nex/SIGUI"
         and str(package.get("workflow_run_attempt")) == str(run_attempt)
         and package.get("flash_files_match_actions") is True
@@ -1510,6 +1581,7 @@ def core_flash_receipt_gate(
         == ["identity status", *RETAINED_STATE_COMMANDS]
         and data.get("commands_after_flash") == list(RETAINED_STATE_COMMANDS)
         and data.get("retained_state_preserved") is True
+        and data.get("retained_nonempty_baseline") is True
         and retained_ok
         and data.get("erase_flash") is False
         and data.get("public_rf_tx") is False
@@ -1541,7 +1613,9 @@ def core_flash_receipt_gate(
         ),
         {
             "legacy_receipt_contract_ok": legacy_ok,
+            "legacy_receipt_contract_required": True,
             "core_flash_only_scope_ok": scope_ok,
+            "pre_flash_build_commit": pre_flash_build_commit,
             "raw_flash_log_ok": raw_log_ok,
             "retained_before_ok": before_ok,
             "retained_after_ok": after_ok,
@@ -4905,6 +4979,139 @@ def defect_gate(
     )
 
 
+def bounded_physical_acceptance_gate(
+    *,
+    package: Path | None,
+    actions_receipt: Path | None,
+    flash_receipt: Path | None,
+    physical_receipt: Path | None,
+    physical_evidence: Path | None,
+    root: Path,
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+) -> CoreGate:
+    """Validate the bounded no-soak flash/RF/protocol/Map closing receipt."""
+
+    report: dict[str, Any] = {}
+    error: str | None = None
+    flash_receipt_sha256: str | None = None
+    bounded_flash_source_sha256: str | None = None
+    bounded_flash_source_path: Path | None = None
+    bounded_flash_source_copy_sha256: str | None = None
+    flash_source_receipt_binding_ok = False
+    if (
+        package is None
+        or actions_receipt is None
+        or flash_receipt is None
+        or physical_receipt is None
+        or physical_evidence is None
+    ):
+        error = "bounded package or evidence input is missing"
+    else:
+        try:
+            report = rc1_release_audit.audit(
+                package,
+                actions_receipt,
+                physical_receipt,
+                physical_evidence,
+                repository_root=root,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        try:
+            evidence = read_json(physical_evidence)
+            sources = evidence.get("sources")
+            sources = sources if isinstance(sources, dict) else {}
+            flash_source = sources.get("flash")
+            flash_source = flash_source if isinstance(flash_source, dict) else {}
+            bounded_flash_source_sha256 = rc1_release_audit.exact_sha(
+                flash_source.get("sha256")
+            )
+            bounded_flash_source_path = rc1_release_audit.safe_package_file(
+                Path(physical_evidence).parent,
+                flash_source.get("path"),
+            )
+            if bounded_flash_source_path is not None:
+                bounded_flash_source_copy_sha256 = sha256_file(
+                    bounded_flash_source_path
+                )
+            if (
+                Path(flash_receipt).is_file()
+                and not is_link_or_reparse(Path(flash_receipt))
+            ):
+                flash_receipt_sha256 = sha256_file(Path(flash_receipt))
+            flash_source_receipt_binding_ok = (
+                set(flash_source) == {"path", "sha256", "kind"}
+                and flash_source.get("kind")
+                == rc1_release_audit.PHYSICAL_SOURCE_KINDS["flash"]
+                and flash_receipt_sha256 is not None
+                and bounded_flash_source_sha256 == flash_receipt_sha256
+                and bounded_flash_source_copy_sha256 == flash_receipt_sha256
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            flash_source_receipt_binding_ok = False
+
+    identity = report.get("identity")
+    checks = report.get("checks")
+    failures = report.get("failures")
+    ok = (
+        error is None
+        and report.get("schema") == rc1_release_audit.AUDIT_SCHEMA
+        and report.get("kind") == "d1l_rc1_release_gate_audit"
+        and report.get("ready_for_public_release") is True
+        and flash_source_receipt_binding_ok
+        and isinstance(identity, dict)
+        and exact_sha(identity.get("firmware_commit")) == commit
+        and str(identity.get("actions_run")) == str(run_id)
+        and str(identity.get("actions_run_attempt")) == str(run_attempt)
+        and isinstance(checks, dict)
+        and bool(checks)
+        and all(value is True for value in checks.values())
+        and failures == []
+        and checks.get("bounded_gate_without_soak_or_duration_requirement")
+        is True
+        and checks.get("authorized_map_download_and_cache_revisit") is True
+        and checks.get("boot_advert_and_one_public_send") is True
+        and checks.get("dm_ack") is True
+        and checks.get("path_and_ping") is True
+        and checks.get("repeater_login_and_query") is True
+    )
+    return CoreGate(
+        "bounded_flash_rf_protocol_map",
+        ok,
+        "Bounded exact-candidate flash, RF, protocol, and Map acceptance passes without soak",
+        (
+            path_text(actions_receipt, root)
+            + path_text(flash_receipt, root)
+            + path_text(physical_receipt, root)
+            + path_text(physical_evidence, root)
+        ),
+        {
+            "error": error,
+            "exact_flash_receipt_sha256": flash_receipt_sha256,
+            "bounded_flash_source_path": (
+                path_text(bounded_flash_source_path, root)
+                if bounded_flash_source_path is not None
+                else []
+            ),
+            "bounded_flash_source_sha256": bounded_flash_source_sha256,
+            "bounded_flash_source_copy_sha256": (
+                bounded_flash_source_copy_sha256
+            ),
+            "flash_source_exact_receipt_binding_ok": (
+                flash_source_receipt_binding_ok
+            ),
+            "ready_for_public_release": report.get(
+                "ready_for_public_release"
+            ),
+            "identity": identity,
+            "checks": checks,
+            "failures": failures,
+        },
+    )
+
+
 def _resolve(root: Path, value: str | None) -> Path | None:
     if not value:
         return None
@@ -5115,7 +5322,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         raise ValueError("--github-run-attempt must be a positive integer")
     if args.sd_history_mode not in FINAL_SD_HISTORY_MODES:
         raise ValueError(
-            "Final Core audit requires SD history disabled with NVS authoritative"
+            "Final Core audit requires conditional SD-primary history"
         )
     selected_target = exact_d1l_target(args.d1l_port)
 
@@ -5203,6 +5410,18 @@ def build_audit(args: argparse.Namespace) -> dict:
             hardware_dir,
             "core_github_defect_snapshot*.json",
         ),
+        "bounded_receipt": evidence_path(
+            root,
+            getattr(args, "bounded_physical_receipt", None),
+            hardware_dir,
+            "d1l_rc1_bounded_physical_acceptance*.json",
+        ),
+        "bounded_evidence": evidence_path(
+            root,
+            getattr(args, "bounded_physical_evidence", None),
+            hardware_dir,
+            "d1l_rc1_bounded_physical_acceptance_evidence*.json",
+        ),
     }
 
     gates: list[CoreGate] = [
@@ -5254,11 +5473,6 @@ def build_audit(args: argparse.Namespace) -> dict:
             args.sd_history_mode,
         ),
         imported_gate(notices_gate(github_run_dir, root)),
-        physical_target_identity_gate(
-            root=root,
-            expected_target=selected_target,
-            paths=paths,
-        ),
         core_flash_receipt_gate(
             hardware_dir,
             github_run_dir,
@@ -5267,96 +5481,18 @@ def build_audit(args: argparse.Namespace) -> dict:
             str(args.github_run_id),
             str(args.github_run_attempt),
             selected_target,
+            receipt_path=paths["flash_receipt"],
         ),
-        core_smoke_gate(
-            paths["core_smoke"],
-            root,
-            commit,
-            args.sd_history_mode,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            selected_target,
-        ),
-        core_ui_gate(
-            paths["core_ui"],
-            root,
-            commit,
-            args.sd_history_mode,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            selected_target,
-        ),
-        core_scroll_gate(
-            paths["core_scroll"],
-            root,
-            commit,
-            args.sd_history_mode,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            selected_target,
-        ),
-        manual_review_gate(
-            paths["manual_review"],
-            root,
-            commit,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            paths["core_ui"],
-            selected_target,
-        ),
-        reboot_persistence_gate(
-            paths["reboot_receipt"],
-            root,
-            commit,
-            args.sd_history_mode,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            selected_target,
-        ),
-        protocol_migration_gate(
-            paths["protocol_migration"],
-            root,
-            commit,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            selected_target,
-        ),
-        rf_gate(
-            paths["rf_receipt"],
-            root,
-            commit,
-            args.sd_history_mode,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            selected_target,
-        ),
-        sd_decision_gate(
-            paths["sd_receipt"],
-            root,
-            commit,
-            str(args.github_run_id),
-            args.sd_history_mode,
-            paths["core_smoke"],
-            selected_target,
-        ),
-        soak_gate(
-            paths["active_soak"],
-            paths["idle_soak"],
-            root,
-            commit,
-            args.sd_history_mode,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            paths["rf_receipt"],
-            selected_target,
-        ),
-        install_review_gate(
-            paths["install_review"],
-            root,
-            commit,
-            str(args.github_run_id),
-            str(args.github_run_attempt),
-            package,
+        bounded_physical_acceptance_gate(
+            package=package,
+            actions_receipt=paths["actions_run"],
+            flash_receipt=paths["flash_receipt"],
+            physical_receipt=paths["bounded_receipt"],
+            physical_evidence=paths["bounded_evidence"],
+            root=root,
+            commit=commit,
+            run_id=str(args.github_run_id),
+            run_attempt=str(args.github_run_attempt),
         ),
         defect_gate(
             paths["defect_receipt"],
@@ -5392,6 +5528,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         "failed_count": len(failed),
         "p0_failed_count": len(p0_failed),
         "gates": [gate.to_dict() for gate in gates],
+        "not_required_for_closing": list(CLOSING_NOT_REQUIRED),
         "evidence_paths": {
             name: str(path) if path is not None else None
             for name, path in paths.items()
@@ -5430,7 +5567,7 @@ def dry_run_report(args: argparse.Namespace) -> dict:
             else None
         ),
         "d1l_port": selected_target,
-        "sd_history_mode": args.sd_history_mode or "disabled",
+        "sd_history_mode": args.sd_history_mode or FINAL_SD_HISTORY_MODE,
         "core_release_ready": False,
         "full_feature_release_ready": False,
         "gate_count": 0,
@@ -5474,6 +5611,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--sd-receipt")
     parser.add_argument("--install-review")
     parser.add_argument("--defect-receipt")
+    parser.add_argument("--bounded-physical-receipt")
+    parser.add_argument("--bounded-physical-evidence")
     parser.add_argument("--out")
     return parser.parse_args(argv)
 

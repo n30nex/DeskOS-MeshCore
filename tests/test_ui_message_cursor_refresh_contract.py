@@ -36,18 +36,29 @@ def test_cursor_advances_are_exact_idempotent_and_visible_to_refresh_generation(
         "esp_err_t d1l_read_state_mark_all_read(void)",
     )
     assert "same_fingerprint(entry->contact_fingerprint, fingerprint)" in dm_mark
-    assert "newest_rx_seq <= dm_thread_read_seq(fingerprint)" in dm_mark
+    assert "newest_rx_seq <=" in dm_mark
+    assert (
+        "dm_thread_read_seq_for_blob(&s_state, fingerprint)"
+    ) in dm_mark
     assert "upsert_dm_cursor(fingerprint, newest_rx_seq)" in dm_mark
     assert "d1l_read_state_mark_dm_read" not in dm_mark
     assert "d1l_read_state_mark_all_read" not in dm_mark
     assert "return read_seq >= dm_stats.next_seq ? 0U : read_seq;" in read_state
     assert "persist_mutation_or_rollback" in read_state
-    assert "s_state = *previous;" in read_state
+    assert "restore_runtime(previous);" in read_state
     assert "if (s_state.mark_read_count < UINT32_MAX)" in read_state
     assert "note_cursor_advance();" in public_mark
-    assert "persist_mutation_or_rollback(&previous)" in public_mark
+    assert "ret = persist_mutation_or_rollback(" in public_mark
+    assert (
+        "&previous, D1L_READ_STATE_AUTHORITY_LOCAL"
+        in public_mark.replace("\n", " ")
+    )
     assert "note_cursor_advance();" in dm_mark
-    assert "persist_mutation_or_rollback(&previous)" in dm_mark
+    assert "ret = persist_mutation_or_rollback(" in dm_mark
+    assert (
+        "&previous, D1L_READ_STATE_AUTHORITY_LOCAL"
+        in dm_mark.replace("\n", " ")
+    )
 
     assert "uint32_t read_state_mark_count;" in app_header
     assert "snapshot->read_state_mark_count = read_state.mark_read_count;" in app_model

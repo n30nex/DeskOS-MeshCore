@@ -1738,7 +1738,21 @@ esp_err_t d1l_message_store_append_channel_volatile(
 static d1l_message_store_stats_t message_store_stats_locked(
     d1l_retained_blob_store_backend_state_t backend_state)
 {
-    s_persistence_dirty = persistence_dirty_locked(backend_state.enabled);
+    /*
+     * A clean store still has work when the removable-SD backend generation
+     * changes.  Reporting that drift lets the retained worker enter
+     * persist_store(), where the generation is accepted and reconciled under
+     * the persistence I/O lock.
+     */
+    const bool backend_generation_changed =
+        s_loaded && backend_state.enabled &&
+        backend_state.generation != s_last_sd_backend_generation;
+    const bool reconcile_pending =
+        backend_state.enabled &&
+        (s_sd_reconcile_pending || backend_generation_changed);
+    s_persistence_dirty =
+        persistence_dirty_locked(backend_state.enabled) ||
+        backend_generation_changed;
     size_t public_count = 0U;
     for (size_t i = 0U; i < s_count; ++i) {
         if (s_entries[i].channel_id == D1L_CHANNEL_PUBLIC_ID) {
@@ -1770,7 +1784,7 @@ static d1l_message_store_stats_t message_store_stats_locked(
         .persistence_dirty = s_persistence_dirty,
         .sd_primary_required = backend_state.enabled,
         .sd_primary_dirty = s_sd_primary_dirty,
-        .sd_primary_reconcile_pending = s_sd_reconcile_pending,
+        .sd_primary_reconcile_pending = reconcile_pending,
         .nvs_fallback_dirty = s_nvs_fallback_dirty,
     };
     return stats;

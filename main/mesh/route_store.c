@@ -1607,7 +1607,15 @@ d1l_route_store_stats_t d1l_route_store_stats(void)
                                                 &backend_state);
     const bool sd_primary_required = backend_state.enabled;
     d1l_store_lock_take(&s_store_lock);
-    s_persistence_dirty = persistence_dirty_locked(sd_primary_required);
+    const bool backend_generation_changed =
+        s_loaded && sd_primary_required &&
+        backend_state.generation != s_last_sd_backend_generation;
+    const bool reconcile_pending =
+        sd_primary_required &&
+        (s_sd_reconcile_pending || backend_generation_changed);
+    s_persistence_dirty =
+        persistence_dirty_locked(sd_primary_required) ||
+        backend_generation_changed;
     d1l_route_store_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
@@ -1631,7 +1639,7 @@ d1l_route_store_stats_t d1l_route_store_stats(void)
         .persistence_dirty = s_persistence_dirty,
         .sd_primary_required = sd_primary_required,
         .sd_primary_dirty = s_sd_primary_dirty,
-        .sd_primary_reconcile_pending = s_sd_reconcile_pending,
+        .sd_primary_reconcile_pending = reconcile_pending,
         .nvs_fallback_dirty = s_nvs_fallback_dirty,
         .clear_failure_latched = s_clear_failure_latched,
     };

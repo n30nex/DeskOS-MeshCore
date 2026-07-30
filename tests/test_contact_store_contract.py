@@ -78,8 +78,10 @@ def test_contact_store_is_bounded_and_sd_first():
     assert '#include "storage/retained_blob_store.h"' in source
     assert "D1L_RETAINED_BLOB_STORE_CONTACTS" in source
     assert "d1l_retained_blob_store_read(" in source
-    assert "d1l_retained_blob_store_write(" in source
-    assert "d1l_retained_blob_store_erase(" in source
+    assert "d1l_retained_blob_store_read_sd_primary(" in source
+    assert "d1l_retained_blob_store_write_sd_primary_guarded(" in source
+    assert "d1l_retained_blob_store_erase_sd_primary_guarded(" in source
+    assert "d1l_retained_blob_store_erase_nvs_fallback(" in source
     assert "nvs_get_blob" not in source
     assert "nvs_set_blob" not in source
     assert "static d1l_contact_store_blob_t s_blob_scratch" in source
@@ -133,7 +135,9 @@ def test_contact_store_is_bounded_and_sd_first():
 
     deferred_flush = c_function(source, "static esp_err_t flush_deferred_path_state(")
     assert "fill_blob(&s_persist_snapshot)" in deferred_flush
-    assert "write_contact_blob(&s_persist_snapshot)" in deferred_flush
+    assert "d1l_retained_blob_store_write_sd_primary_guarded(" in deferred_flush
+    assert "d1l_retained_blob_store_erase_sd_primary_guarded(" in deferred_flush
+    assert "contact_sd_backend_generation_matches(" in deferred_flush
     assert "s_persist_io_lock" in deferred_flush
     revision = c_function(source, "static esp_err_t reserve_persistence_revision_locked(")
     assert "revision == UINT32_MAX" in revision
@@ -167,8 +171,54 @@ def test_contact_store_is_bounded_and_sd_first():
     assert "nvs_erase_key" not in init
     assert "ESP_ERR_NOT_SUPPORTED" in init
     assert "ESP_ERR_INVALID_STATE" in init
-    assert "d1l_retained_blob_store_erase(" in clear
-    assert "D1L_RETAINED_BLOB_STORE_CONTACTS" in clear
+    assert "D1L_CONTACT_MUTATION_AUTHORITY_EXPLICIT_CLEAR" in clear
+    assert "persist_store()" in clear
+
+
+def test_contact_sd_generation_reconciliation_is_guarded_and_identity_scoped():
+    header = read("main/mesh/contact_store.h")
+    source = read("main/mesh/contact_store.c")
+
+    for field in (
+        "sd_backend_generation",
+        "sd_primary_required",
+        "sd_primary_reconcile_pending",
+    ):
+        assert field in header
+
+    persist = c_function(source, "static esp_err_t persist_store(")
+    assert persist.index("d1l_retained_blob_store_backend_state(") < persist.index(
+        "d1l_retained_blob_store_write_sd_primary_guarded("
+    )
+    assert persist.index("reconcile_sd_primary_locked(") < persist.index(
+        "d1l_retained_blob_store_write_sd_primary_guarded("
+    )
+    assert persist.count("contact_sd_backend_generation_matches(") >= 2
+    assert "s_sd_reconcile_pending = true;" in persist
+
+    reconcile = c_function(source, "static esp_err_t reconcile_sd_primary_locked(")
+    assert reconcile.index("read_current_sd_blob(") < reconcile.index(
+        "merge_contact_blobs_locked("
+    )
+    assert "D1L_CONTACT_MUTATION_AUTHORITY_NONE" in reconcile
+    assert "D1L_CONTACT_MUTATION_AUTHORITY_EXPLICIT_CLEAR" in reconcile
+    assert "contact_blobs_equivalent(" in reconcile
+
+    merge = c_function(source, "static esp_err_t merge_contact_blobs_locked(")
+    assert "fingerprint_was_deleted_locked(" in merge
+    assert "fingerprint_was_touched_locked(" in merge
+    assert merge.index("*candidate") < merge.index(
+        "fingerprint_was_touched_locked("
+    )
+
+    release = c_function(
+        source, "static void release_durable_mutation_authority_locked("
+    )
+    assert "D1L_CONTACT_MUTATION_AUTHORITY_NONE" in release
+    assert "s_deleted_fingerprint_count = 0U;" in release
+    assert "s_touched_fingerprint_count = 0U;" in release
+    clear = c_function(source, "esp_err_t d1l_contact_store_clear(")
+    assert "release_durable_mutation_authority_locked();" in clear
 
 
 def test_contacts_can_promote_heard_nodes_by_fingerprint():

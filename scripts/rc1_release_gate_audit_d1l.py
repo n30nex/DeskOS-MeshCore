@@ -774,6 +774,7 @@ def _machine_source_payload(
             and payload.get("simulation") is not True
             and payload.get("source_inspection") is not True
             and payload.get("manual_only") is False
+            and payload.get("retained_nonempty_baseline") is True
         )
     if role == "rf":
         return (

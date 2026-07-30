@@ -14,6 +14,7 @@
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
+#include "mesh/read_state.h"
 #include "mesh/route_store.h"
 #include "platform/time_service.h"
 #include "storage/retained_store_scheduler.h"
@@ -175,7 +176,33 @@ static void observe_contacts(
         .commit_count = stats.persistence_commit_count,
         .failure_count = stats.persistence_fail_count,
         .dirty = stats.persistence_dirty,
-        .reconcile_pending = false,
+        .reconcile_pending = stats.sd_primary_reconcile_pending,
+    };
+}
+
+static esp_err_t flush_read_state(void *context)
+{
+    (void)context;
+    return d1l_read_state_flush();
+}
+
+static esp_err_t flush_read_state_if_due(void *context)
+{
+    (void)context;
+    return d1l_read_state_flush_if_due();
+}
+
+static void observe_read_state(
+    void *context, d1l_retained_store_observation_t *out_observation)
+{
+    (void)context;
+    const d1l_read_state_stats_t stats = d1l_read_state_stats();
+    *out_observation = (d1l_retained_store_observation_t) {
+        .revision = stats.persistence_revision,
+        .commit_count = stats.persistence_commit_count,
+        .failure_count = stats.persistence_fail_count,
+        .dirty = stats.persistence_dirty,
+        .reconcile_pending = stats.sd_primary_reconcile_pending,
     };
 }
 
@@ -267,6 +294,13 @@ static const d1l_retained_store_descriptor_t s_retained_stores[] = {
         .flush = flush_contacts,
         .flush_if_due = flush_contacts_if_due,
         .observe = observe_contacts,
+    },
+    {
+        .kind = D1L_RETAINED_STORE_READ_STATE,
+        .name = "read_state",
+        .flush = flush_read_state,
+        .flush_if_due = flush_read_state_if_due,
+        .observe = observe_read_state,
     },
     {
         .kind = D1L_RETAINED_STORE_TIME_CHECKPOINT,

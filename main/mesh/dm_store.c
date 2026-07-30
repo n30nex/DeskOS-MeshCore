@@ -3358,6 +3358,19 @@ esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash,
 static d1l_dm_store_stats_t dm_store_stats_locked(
     d1l_retained_blob_store_backend_state_t backend_state)
 {
+    /*
+     * Backend availability can cycle while a clean store has no ordinary
+     * persistence work.  The retained worker decides whether to call flush
+     * from this snapshot, so expose generation drift as pending work without
+     * mutating the store from a read-only stats call.  persist_store() owns
+     * accepting the new generation and reconciling it under the I/O lock.
+     */
+    const bool backend_generation_changed =
+        s_loaded && backend_state.enabled &&
+        backend_state.generation != s_last_sd_backend_generation;
+    const bool reconcile_pending =
+        backend_state.enabled &&
+        (s_sd_reconcile_pending || backend_generation_changed);
     d1l_dm_store_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
@@ -3380,10 +3393,12 @@ static d1l_dm_store_stats_t dm_store_stats_locked(
         .count = s_count,
         .capacity = D1L_DM_STORE_CAPACITY,
         .loaded = s_loaded,
-        .persistence_dirty = persistence_dirty_locked(backend_state.enabled),
+        .persistence_dirty =
+            persistence_dirty_locked(backend_state.enabled) ||
+            backend_generation_changed,
         .sd_primary_required = backend_state.enabled,
         .sd_primary_dirty = s_sd_primary_dirty,
-        .sd_primary_reconcile_pending = s_sd_reconcile_pending,
+        .sd_primary_reconcile_pending = reconcile_pending,
         .nvs_fallback_dirty = s_nvs_fallback_dirty,
     };
     return stats;
