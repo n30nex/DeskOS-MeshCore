@@ -9,6 +9,7 @@
 #include "map/map_math.h"
 
 #define D1L_MAP_SHARED_WORKER_STACK_BYTES 20480U
+#define D1L_MAP_VIEW_MAX_GENERATION_PASSES 3U
 
 typedef struct {
     bool initialized;
@@ -23,9 +24,21 @@ typedef struct {
     bool background_prefetch_permitted;
     bool public_rf_tx;
     bool formats_sd;
+    bool last_failure_content_type_valid;
+    bool last_failure_png_valid;
+    bool last_failure_checksum_verified;
+    bool last_failure_cache_intent_recorded;
+    bool last_failure_file_ok;
+    bool last_failure_file_response_truncated;
+    bool last_failure_file_cancelled;
     uint32_t generation;
     uint32_t frame_revision;
     uint32_t retry_after_sec;
+    uint32_t last_failure_retry_after_sec;
+    uint32_t last_failure_bytes;
+    uint32_t last_failure_file_size;
+    uint32_t last_failure_file_offset;
+    uint32_t last_failure_file_length;
     uint32_t decode_total_us;
     uint32_t decode_max_us;
     uint32_t worker_stack_bytes;
@@ -44,10 +57,22 @@ typedef struct {
     uint8_t rendered_tiles;
     uint8_t failed_tiles;
     uint8_t decode_samples;
+    uint8_t pass_attempts;
+    uint8_t last_failure_zoom;
+    int32_t last_failure_error;
+    int32_t last_failure_file_error;
+    int32_t last_failure_http_status;
+    uint32_t last_failure_x;
+    uint32_t last_failure_y;
     char source_id[25];
     char attribution[65];
     char phase[24];
     char message[80];
+    char last_failure_step[24];
+    char last_failure_detail_step[32];
+    char last_failure_file_op[12];
+    char last_failure_file_err[24];
+    char last_failure_file_note[48];
 } d1l_map_view_status_t;
 
 typedef struct {

@@ -382,6 +382,73 @@ def test_offline_revisit_requires_new_generation_complete_cache_and_zero_network
     )
 
 
+def test_retry_progress_must_converge_to_one_complete_bounded_pass():
+    poisoned = online_view()
+    poisoned.update(
+        {
+            "worker_running": True,
+            "planned_tiles": 9,
+            "attempted_tiles": 39,
+            "cache_hits": 30,
+            "network_requests": 8,
+            "downloaded_tiles": 0,
+            "rendered_tiles": 30,
+            "failed_tiles": 8,
+            "phase": "loading_cache",
+        }
+    )
+    assert not runner.online_view_ready(
+        poisoned,
+        generation_before=11,
+        source_id="licensed-local-tiles",
+        location=LOCATION,
+    )
+    assert not runner.offline_view_ready(
+        poisoned,
+        generation_before=11,
+        source_id="licensed-local-tiles",
+        location=LOCATION,
+    )
+
+    recovered_online = online_view()
+    recovered_online.update(
+        {
+            "planned_tiles": 9,
+            "attempted_tiles": 9,
+            "cache_hits": 8,
+            "network_requests": 1,
+            "downloaded_tiles": 1,
+            "rendered_tiles": 9,
+            "failed_tiles": 0,
+        }
+    )
+    assert runner.online_view_ready(
+        recovered_online,
+        generation_before=11,
+        source_id="licensed-local-tiles",
+        location=LOCATION,
+    )
+
+    recovered_offline = offline_view()
+    recovered_offline.update(
+        {
+            "planned_tiles": 9,
+            "attempted_tiles": 9,
+            "cache_hits": 9,
+            "network_requests": 0,
+            "downloaded_tiles": 0,
+            "rendered_tiles": 9,
+            "failed_tiles": 0,
+        }
+    )
+    assert runner.offline_view_ready(
+        recovered_offline,
+        generation_before=11,
+        source_id="licensed-local-tiles",
+        location=LOCATION,
+    )
+
+
 def test_online_foreground_transition_has_a_fixed_physical_deadline():
     acceptance = (
         ROOT / "scripts/rc1_map_acceptance_d1l.py"
