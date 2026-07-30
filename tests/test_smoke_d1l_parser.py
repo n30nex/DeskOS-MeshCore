@@ -178,6 +178,15 @@ def test_storage_utility_commands_map_to_console_responses():
     assert expected_command_name("storage export-data dataTest1") == "storage export-data"
 
 
+def test_public_history_commands_map_to_console_response():
+    assert expected_command_name("messages public") == "messages public"
+    assert expected_command_name("messages public offset 8") == "messages public"
+    assert (
+        expected_command_name("messages public search weather offset 8")
+        == "messages public"
+    )
+
+
 def test_contact_mutation_commands_map_to_console_responses():
     assert expected_command_name("contacts add A1B2C3D4E5F60789 CodexTemp") == "contacts add"
     assert expected_command_name("contacts import meshcore://contact/add?name=A&public_key=00&type=1") == "contacts import"

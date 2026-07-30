@@ -178,7 +178,7 @@ def read_command_result(ser, command: str, timeout: float) -> dict:
 
 
 def expected_command_name(command: str) -> str:
-    if command.startswith("messages public search "):
+    if command.startswith("messages public "):
         return "messages public"
     if command in {"routes trace status", "repeater ping status"}:
         return command
