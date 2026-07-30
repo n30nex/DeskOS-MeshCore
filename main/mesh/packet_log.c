@@ -1925,6 +1925,12 @@ d1l_packet_log_stats_t d1l_packet_log_stats(void)
     (void)packet_backend_state(&backend_state);
     d1l_store_lock_take(&s_store_lock);
     const bool sd_history_enabled = backend_state.enabled;
+    const bool backend_generation_changed =
+        s_loaded && sd_history_enabled &&
+        backend_state.generation != s_last_sd_backend_generation;
+    const bool reconcile_pending =
+        sd_history_enabled &&
+        (s_sd_reconcile_pending || backend_generation_changed);
     d1l_packet_log_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
@@ -1950,9 +1956,11 @@ d1l_packet_log_stats_t d1l_packet_log_stats(void)
         .count = s_count,
         .capacity = D1L_PACKET_LOG_CAPACITY,
         .sd_capacity = D1L_PACKET_LOG_SD_CAPACITY,
-        .persistence_dirty = persistence_dirty_locked(sd_history_enabled),
+        .persistence_dirty =
+            persistence_dirty_locked(sd_history_enabled) ||
+            backend_generation_changed,
         .sd_primary_dirty = s_sd_primary_dirty,
-        .sd_primary_reconcile_pending = s_sd_reconcile_pending,
+        .sd_primary_reconcile_pending = reconcile_pending,
         .nvs_fallback_dirty = s_nvs_fallback_dirty,
         .journal_dirty = s_journal_dirty,
         .clear_in_progress = s_clear_in_progress,

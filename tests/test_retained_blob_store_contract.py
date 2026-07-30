@@ -103,11 +103,19 @@ def test_retained_blob_store_keeps_history_sd_first_and_retires_legacy_nvs():
         "D1L_RETAINED_BLOB_STORE_ROUTES",
         "D1L_RETAINED_BLOB_STORE_PACKET_LOG",
         "D1L_RETAINED_BLOB_STORE_CONTACTS",
-        "D1L_RETAINED_BLOB_STORE_READ_STATE",
     ):
         store_config = source.split(f".id = {store_id}", 1)[1].split("},", 1)[0]
         assert ".nvs_fallback_allowed = false" in store_config
         assert ".legacy_retired_key =" in store_config
+    read_state_config = source.split(
+        ".id = D1L_RETAINED_BLOB_STORE_READ_STATE", 1
+    )[1].split("},", 1)[0]
+    assert ".nvs_fallback_allowed = true" in read_state_config
+    assert "clear durable until the next SD-generation reconciliation" in (
+        read_state_config
+    )
+    assert ".legacy_retired_key =" in read_state_config
+    assert source.count(".nvs_fallback_allowed = true") == 1
     for retirement_key in (
         '"sd_pub_v1"',
         '"sd_dm_v1"',

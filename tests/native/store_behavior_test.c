@@ -19,76 +19,77 @@
 #define CONTACT_KEY "contacts"
 #define LEGACY_ALIAS_LEN 24U
 #define LEGACY_TYPE_LEN 8U
-#define NODE_SD_BLOB_MAX (128U * 1024U)
+static bool s_contact_sd_enabled;
+static uint32_t s_contact_sd_generation;
 
-static uint8_t s_node_sd_blob[NODE_SD_BLOB_MAX];
-static size_t s_node_sd_blob_len;
-static esp_err_t s_node_sd_fail_next_write;
+void d1l_test_retained_blob_store_reset(void);
+void d1l_test_retained_blob_store_set_backend(
+    d1l_retained_blob_store_id_t store_id, bool enabled,
+    uint32_t generation);
+bool d1l_test_retained_blob_store_seed_sd(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    const void *src, size_t len);
+size_t d1l_test_retained_blob_store_copy_sd(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    void *dst, size_t dst_size);
+size_t d1l_test_retained_blob_store_sd_write_commit_count(
+    d1l_retained_blob_store_id_t store_id);
+size_t d1l_test_retained_blob_store_sd_erase_commit_count(
+    d1l_retained_blob_store_id_t store_id);
+void d1l_test_retained_blob_store_change_after_next_sd_read(
+    d1l_retained_blob_store_id_t store_id, bool enabled,
+    uint32_t generation);
+void d1l_test_retained_blob_store_fail_next_sd_write(
+    d1l_retained_blob_store_id_t store_id, esp_err_t error,
+    bool after_commit);
 
 static void native_store_reset(void)
 {
     mock_nvs_reset();
-    memset(s_node_sd_blob, 0, sizeof(s_node_sd_blob));
-    s_node_sd_blob_len = 0U;
-    s_node_sd_fail_next_write = ESP_OK;
+    d1l_test_retained_blob_store_reset();
+    d1l_test_retained_blob_store_set_backend(
+        D1L_RETAINED_BLOB_STORE_NODES, true, 1U);
+    d1l_test_retained_blob_store_set_backend(
+        D1L_RETAINED_BLOB_STORE_CONTACTS, true, 1U);
+    s_contact_sd_enabled = true;
+    s_contact_sd_generation = 1U;
+}
+
+static bool native_store_seed_blob(const char *namespace_name, const char *key,
+                                   const void *value, size_t length)
+{
+    const bool seeded =
+        mock_nvs_seed_blob(namespace_name, key, value, length);
+    if (seeded && namespace_name && key && value &&
+        strcmp(namespace_name, CONTACT_NAMESPACE) == 0 &&
+        strcmp(key, CONTACT_KEY) == 0) {
+        return d1l_test_retained_blob_store_seed_sd(
+            D1L_RETAINED_BLOB_STORE_CONTACTS, key, value, length);
+    }
+    return seeded;
+}
+
+static size_t native_store_copy_blob(const char *namespace_name,
+                                     const char *key, void *dest,
+                                     size_t dest_size)
+{
+    if (namespace_name && key &&
+        strcmp(namespace_name, CONTACT_NAMESPACE) == 0 &&
+        strcmp(key, CONTACT_KEY) == 0) {
+        return d1l_test_retained_blob_store_copy_sd(
+            D1L_RETAINED_BLOB_STORE_CONTACTS, key, dest, dest_size);
+    }
+    return mock_nvs_copy_blob(namespace_name, key, dest, dest_size);
 }
 
 #define mock_nvs_reset native_store_reset
+#define mock_nvs_seed_blob native_store_seed_blob
+#define mock_nvs_copy_blob native_store_copy_blob
 
 static void mock_node_sd_fail_next_write(esp_err_t error)
 {
-    s_node_sd_fail_next_write = error;
-}
-
-bool d1l_retained_blob_store_backend_state(
-    d1l_retained_blob_store_id_t store_id,
-    d1l_retained_blob_store_backend_state_t *out_state)
-{
-    if (store_id != D1L_RETAINED_BLOB_STORE_NODES || !out_state) {
-        return false;
-    }
-    out_state->enabled = true;
-    out_state->generation = 1U;
-    return true;
-}
-
-esp_err_t d1l_retained_blob_store_read_sd_primary(
-    d1l_retained_blob_store_id_t store_id, const char *key,
-    void *dst, size_t *len_inout)
-{
-    if (store_id != D1L_RETAINED_BLOB_STORE_NODES || !key || !dst ||
-        !len_inout || strcmp(key, "nodes_v1") != 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (s_node_sd_blob_len == 0U) {
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (*len_inout < s_node_sd_blob_len) {
-        *len_inout = s_node_sd_blob_len;
-        return ESP_ERR_INVALID_SIZE;
-    }
-    memcpy(dst, s_node_sd_blob, s_node_sd_blob_len);
-    *len_inout = s_node_sd_blob_len;
-    return ESP_OK;
-}
-
-esp_err_t d1l_retained_blob_store_write_sd_primary_guarded(
-    d1l_retained_blob_store_id_t store_id, const char *key,
-    const void *src, size_t len, uint32_t expected_generation)
-{
-    if (store_id != D1L_RETAINED_BLOB_STORE_NODES || !key || !src ||
-        strcmp(key, "nodes_v1") != 0 || expected_generation != 1U ||
-        len == 0U || len > sizeof(s_node_sd_blob)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (s_node_sd_fail_next_write != ESP_OK) {
-        const esp_err_t failure = s_node_sd_fail_next_write;
-        s_node_sd_fail_next_write = ESP_OK;
-        return failure;
-    }
-    memcpy(s_node_sd_blob, src, len);
-    s_node_sd_blob_len = len;
-    return ESP_OK;
+    d1l_test_retained_blob_store_fail_next_sd_write(
+        D1L_RETAINED_BLOB_STORE_NODES, error, false);
 }
 
 static const char KEY_HEX[] =
@@ -286,6 +287,69 @@ _Static_assert(sizeof(d1l_contact_entry_t) == 280U,
 _Static_assert(sizeof(KEY_HEX) == D1L_NODE_PUBLIC_KEY_HEX_LEN,
                "test public key must be exactly 64 hex characters");
 
+static void mock_contact_sd_set_enabled(bool enabled)
+{
+    if (s_contact_sd_enabled != enabled) {
+        s_contact_sd_enabled = enabled;
+        s_contact_sd_generation++;
+        d1l_test_retained_blob_store_set_backend(
+            D1L_RETAINED_BLOB_STORE_CONTACTS, enabled,
+            s_contact_sd_generation);
+    }
+}
+
+static void mock_contact_sd_replace_blob(const contact_blob_v7_t *blob)
+{
+    assert(blob != NULL);
+    s_contact_sd_generation++;
+    assert(d1l_test_retained_blob_store_seed_sd(
+        D1L_RETAINED_BLOB_STORE_CONTACTS, CONTACT_KEY, blob, sizeof(*blob)));
+    d1l_test_retained_blob_store_set_backend(
+        D1L_RETAINED_BLOB_STORE_CONTACTS, s_contact_sd_enabled,
+        s_contact_sd_generation);
+}
+
+static contact_blob_v7_t mock_contact_sd_current_blob(void)
+{
+    contact_blob_v7_t blob = {0};
+    assert(d1l_test_retained_blob_store_copy_sd(
+               D1L_RETAINED_BLOB_STORE_CONTACTS, CONTACT_KEY, &blob,
+               sizeof(blob)) == sizeof(blob));
+    return blob;
+}
+
+static size_t mock_contact_sd_write_count(void)
+{
+    return d1l_test_retained_blob_store_sd_write_commit_count(
+        D1L_RETAINED_BLOB_STORE_CONTACTS);
+}
+
+static size_t mock_contact_sd_erase_count(void)
+{
+    return d1l_test_retained_blob_store_sd_erase_commit_count(
+        D1L_RETAINED_BLOB_STORE_CONTACTS);
+}
+
+static bool mock_contact_sd_is_empty(void)
+{
+    return d1l_test_retained_blob_store_copy_sd(
+               D1L_RETAINED_BLOB_STORE_CONTACTS, CONTACT_KEY, NULL, 0U) == 0U;
+}
+
+static size_t contact_blob_index(const contact_blob_v7_t *blob,
+                                 const char *fingerprint)
+{
+    assert(blob != NULL);
+    assert(fingerprint != NULL);
+    for (size_t i = 0U; i < blob->count; ++i) {
+        if (strcmp(blob->entries[i].fingerprint, fingerprint) == 0) {
+            return i;
+        }
+    }
+    assert(!"contact fixture fingerprint not found");
+    return 0U;
+}
+
 static void copy_field(char *dest, size_t dest_size, const char *src)
 {
     assert(dest != NULL);
@@ -329,8 +393,13 @@ static void assert_contact_stats_exact(d1l_contact_store_stats_t left,
     assert(left.persistence_commit_count == right.persistence_commit_count);
     assert(left.persistence_coalesced_count == right.persistence_coalesced_count);
     assert(left.persistence_fail_count == right.persistence_fail_count);
+    assert(left.sd_backend_generation == right.sd_backend_generation);
     assert(left.persistence_last_error == right.persistence_last_error);
     assert(left.persistence_dirty == right.persistence_dirty);
+    assert(left.loaded == right.loaded);
+    assert(left.sd_primary_required == right.sd_primary_required);
+    assert(left.sd_primary_reconcile_pending ==
+           right.sd_primary_reconcile_pending);
 }
 
 static void fill_node_v3(node_entry_v3_t *entry, uint32_t seq,
@@ -1053,7 +1122,7 @@ static void test_oversized_future_contact_schema_is_preserved_fail_closed(void)
     assert(mock_nvs_seed_blob(CONTACT_NAMESPACE, CONTACT_KEY, future,
                               sizeof(future)));
 
-    assert(d1l_contact_store_init() == ESP_ERR_NVS_INVALID_LENGTH);
+    assert(d1l_contact_store_init() == ESP_ERR_INVALID_SIZE);
     assert(d1l_contact_store_stats().count == 0U);
     assert_contact_blob_preserved(future, sizeof(future));
 }
@@ -2344,6 +2413,239 @@ static void test_contact_export_role_mapping(void)
     assert(uri[0] == '\0');
 }
 
+static void test_contact_clean_generation_drift_adopts_sd_without_write(void)
+{
+    static const char fingerprint[] = "8181818181818181";
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               fingerprint, "Before card change", NULL) == ESP_OK);
+
+    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    const size_t index = contact_blob_index(&replacement, fingerprint);
+    copy_field(replacement.entries[index].alias,
+               sizeof(replacement.entries[index].alias), "From new card");
+    const size_t writes_before = mock_contact_sd_write_count();
+    mock_contact_sd_replace_blob(&replacement);
+
+    d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    assert(stats.persistence_dirty);
+    assert(stats.loaded);
+    assert(stats.sd_primary_required);
+    assert(stats.sd_primary_reconcile_pending);
+    assert(stats.sd_backend_generation == s_contact_sd_generation);
+    assert(d1l_contact_store_flush() == ESP_OK);
+    assert(mock_contact_sd_write_count() == writes_before);
+
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &contact));
+    assert(strcmp(contact.alias, "From new card") == 0);
+    stats = d1l_contact_store_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_reconcile_pending);
+}
+
+static void test_contact_generation_fence_rejects_mid_read_change(void)
+{
+    static const char fingerprint[] = "8282828282828282";
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               fingerprint, "Before fenced read", NULL) == ESP_OK);
+
+    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    const size_t index = contact_blob_index(&replacement, fingerprint);
+    copy_field(replacement.entries[index].alias,
+               sizeof(replacement.entries[index].alias), "After fenced read");
+    mock_contact_sd_replace_blob(&replacement);
+    const size_t writes_before = mock_contact_sd_write_count();
+    s_contact_sd_generation++;
+    d1l_test_retained_blob_store_change_after_next_sd_read(
+        D1L_RETAINED_BLOB_STORE_CONTACTS, true,
+        s_contact_sd_generation);
+
+    assert(d1l_contact_store_flush() == ESP_ERR_INVALID_STATE);
+    assert(mock_contact_sd_write_count() == writes_before);
+    d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    assert(stats.persistence_dirty);
+    assert(stats.sd_primary_reconcile_pending);
+    assert(stats.persistence_last_error == ESP_ERR_INVALID_STATE);
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &contact));
+    assert(strcmp(contact.alias, "Before fenced read") == 0);
+
+    assert(d1l_contact_store_flush() == ESP_OK);
+    assert(mock_contact_sd_write_count() == writes_before);
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &contact));
+    assert(strcmp(contact.alias, "After fenced read") == 0);
+    assert(!d1l_contact_store_stats().persistence_dirty);
+}
+
+static void test_contact_ambiguous_write_error_rereads_committed_sd(void)
+{
+    static const char fingerprint[] = "8a8a8a8a8a8a8a8a";
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               fingerprint, "Before ambiguous write", NULL) == ESP_OK);
+    const size_t writes_before = mock_contact_sd_write_count();
+    d1l_test_retained_blob_store_fail_next_sd_write(
+        D1L_RETAINED_BLOB_STORE_CONTACTS, ESP_FAIL, true);
+
+    assert(d1l_contact_store_rename(
+               fingerprint, "Committed on card", NULL) == ESP_FAIL);
+    assert(mock_contact_sd_write_count() == writes_before + 1U);
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &contact));
+    assert(strcmp(contact.alias, "Before ambiguous write") == 0);
+    const contact_blob_v7_t committed = mock_contact_sd_current_blob();
+    assert(strcmp(committed.entries[
+                      contact_blob_index(&committed, fingerprint)].alias,
+                  "Committed on card") == 0);
+    d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    assert(stats.persistence_dirty);
+    assert(stats.sd_primary_reconcile_pending);
+    assert(stats.persistence_last_error == ESP_FAIL);
+
+    assert(d1l_contact_store_flush() == ESP_OK);
+    assert(mock_contact_sd_write_count() == writes_before + 1U);
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &contact));
+    assert(strcmp(contact.alias, "Committed on card") == 0);
+    stats = d1l_contact_store_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(stats.persistence_last_error == ESP_OK);
+}
+
+static void test_contact_local_touch_merges_with_current_sd(void)
+{
+    static const char fingerprint_a[] = "8383838383838383";
+    static const char fingerprint_b[] = "8484848484848484";
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               fingerprint_a, "A original", NULL) == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               fingerprint_b, "B original", NULL) == ESP_OK);
+    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    const size_t index_a = contact_blob_index(&replacement, fingerprint_a);
+    const size_t index_b = contact_blob_index(&replacement, fingerprint_b);
+    copy_field(replacement.entries[index_a].alias,
+               sizeof(replacement.entries[index_a].alias), "A card");
+    copy_field(replacement.entries[index_b].alias,
+               sizeof(replacement.entries[index_b].alias), "B card");
+
+    mock_contact_sd_set_enabled(false);
+    assert(d1l_contact_store_rename(
+               fingerprint_a, "A local", NULL) == ESP_OK);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    mock_contact_sd_replace_blob(&replacement);
+    mock_contact_sd_set_enabled(true);
+    const size_t writes_before = mock_contact_sd_write_count();
+
+    assert(d1l_contact_store_flush() == ESP_OK);
+    assert(mock_contact_sd_write_count() == writes_before + 1U);
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint_a, &contact));
+    assert(strcmp(contact.alias, "A local") == 0);
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint_b, &contact));
+    assert(strcmp(contact.alias, "B card") == 0);
+    const contact_blob_v7_t merged = mock_contact_sd_current_blob();
+    assert(strcmp(merged.entries[contact_blob_index(&merged, fingerprint_a)].alias,
+                  "A local") == 0);
+    assert(strcmp(merged.entries[contact_blob_index(&merged, fingerprint_b)].alias,
+                  "B card") == 0);
+    assert(!d1l_contact_store_stats().persistence_dirty);
+
+    assert(d1l_contact_store_flush() == ESP_OK);
+    assert(mock_contact_sd_write_count() == writes_before + 1U);
+}
+
+static void test_contact_delete_tombstone_does_not_resurrect_from_sd(void)
+{
+    static const char deleted_fingerprint[] = "8585858585858585";
+    static const char retained_fingerprint[] = "8686868686868686";
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               deleted_fingerprint, "Delete me", NULL) == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               retained_fingerprint, "B original", NULL) == ESP_OK);
+    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    const size_t retained_index =
+        contact_blob_index(&replacement, retained_fingerprint);
+    copy_field(replacement.entries[retained_index].alias,
+               sizeof(replacement.entries[retained_index].alias), "B card");
+
+    mock_contact_sd_set_enabled(false);
+    assert(d1l_contact_store_delete(
+               deleted_fingerprint, NULL) == ESP_OK);
+    mock_contact_sd_replace_blob(&replacement);
+    mock_contact_sd_set_enabled(true);
+    assert(d1l_contact_store_flush() == ESP_OK);
+
+    assert(!d1l_contact_store_find_by_fingerprint(deleted_fingerprint, NULL));
+    d1l_contact_entry_t retained = {0};
+    assert(d1l_contact_store_find_by_fingerprint(
+        retained_fingerprint, &retained));
+    assert(strcmp(retained.alias, "B card") == 0);
+    const contact_blob_v7_t merged = mock_contact_sd_current_blob();
+    assert(merged.count == 1U);
+    assert(strcmp(merged.entries[0].fingerprint, retained_fingerprint) == 0);
+}
+
+static void test_contact_explicit_clear_does_not_resurrect_replacement_sd(void)
+{
+    static const char fingerprint[] = "8787878787878787";
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               fingerprint, "Old card contact", NULL) == ESP_OK);
+    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    const size_t index = contact_blob_index(&replacement, fingerprint);
+    copy_field(replacement.entries[index].alias,
+               sizeof(replacement.entries[index].alias),
+               "Still on replacement card");
+
+    mock_contact_sd_set_enabled(false);
+    assert(d1l_contact_store_clear() == ESP_OK);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    mock_contact_sd_replace_blob(&replacement);
+    mock_contact_sd_set_enabled(true);
+    const size_t erases_before = mock_contact_sd_erase_count();
+    assert(d1l_contact_store_flush() == ESP_OK);
+
+    assert(mock_contact_sd_erase_count() == erases_before + 1U);
+    assert(mock_contact_sd_is_empty());
+    assert(!d1l_contact_store_find_by_fingerprint(fingerprint, NULL));
+    assert(d1l_contact_store_stats().count == 0U);
+    assert(!d1l_contact_store_stats().persistence_dirty);
+    assert(d1l_contact_store_flush() == ESP_OK);
+    assert(mock_contact_sd_erase_count() == erases_before + 1U);
+}
+
+static void test_contact_clear_then_add_persists(void)
+{
+    static const char old_fingerprint[] = "8888888888888888";
+    static const char new_fingerprint[] = "8989898989898989";
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_upsert_from_node(
+               old_fingerprint, "Old contact", NULL) == ESP_OK);
+    assert(d1l_contact_store_clear() == ESP_OK);
+    assert(mock_contact_sd_is_empty());
+    const size_t writes_before = mock_contact_sd_write_count();
+
+    assert(d1l_contact_store_upsert_from_node(
+               new_fingerprint, "New contact", NULL) == ESP_OK);
+    assert(mock_contact_sd_write_count() == writes_before + 1U);
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(!d1l_contact_store_find_by_fingerprint(old_fingerprint, NULL));
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_contact_store_find_by_fingerprint(new_fingerprint, &contact));
+    assert(strcmp(contact.alias, "New contact") == 0);
+}
+
 int main(void)
 {
     test_node_v3_to_v4_migration();
@@ -2388,6 +2690,13 @@ int main(void)
     test_full_key_chat_without_provenance_is_not_dm_capable();
     test_path_probe_roles_do_not_expand_dm_capability();
     test_contact_export_role_mapping();
+    test_contact_clean_generation_drift_adopts_sd_without_write();
+    test_contact_generation_fence_rejects_mid_read_change();
+    test_contact_ambiguous_write_error_rereads_committed_sd();
+    test_contact_local_touch_merges_with_current_sd();
+    test_contact_delete_tombstone_does_not_resurrect_from_sd();
+    test_contact_explicit_clear_does_not_resurrect_replacement_sd();
+    test_contact_clear_then_add_persists();
     puts("native node/contact store behavior: ok");
     return 0;
 }

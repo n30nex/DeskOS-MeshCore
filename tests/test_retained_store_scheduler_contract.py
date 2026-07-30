@@ -26,6 +26,7 @@ def test_common_scheduler_owns_descriptor_order_and_one_forced_deadline():
         '.name = "packets"',
         '.name = "routes"',
         '.name = "contacts"',
+        '.name = "read_state"',
     ]
     positions = [descriptor_block.index(name) for name in names]
     assert positions == sorted(positions)

@@ -388,6 +388,7 @@ def validate_flash(
         and data.get("erase_flash") is False
         and data.get("formats_sd") is False
         and data.get("retained_state_preserved") is True
+        and data.get("retained_nonempty_baseline") is True
         and post_flash_reset_contract_ok(data)
         and post_flash_capture_contract_ok(data)
         and isinstance(result, dict)

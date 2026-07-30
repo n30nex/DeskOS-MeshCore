@@ -28,13 +28,28 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_packet_log_flush_if_due()" in worker
     assert "d1l_route_store_flush_if_due()" in worker
     assert "d1l_contact_store_flush_if_due()" in worker
+    assert "d1l_read_state_flush_if_due()" in worker
     assert "d1l_node_store_flush_if_due()" in worker
     assert "d1l_message_store_flush()" in worker
     assert "d1l_dm_store_flush()" in worker
     assert "d1l_packet_log_flush()" in worker
     assert "d1l_route_store_flush()" in worker
     assert "d1l_contact_store_flush()" in worker
+    assert "d1l_read_state_flush()" in worker
     assert "d1l_node_store_flush()" in worker
+    contact_observer = worker.split(
+        "static void observe_contacts", 1
+    )[1].split("static esp_err_t flush_time_checkpoint", 1)[0]
+    assert ".reconcile_pending = stats.sd_primary_reconcile_pending" in contact_observer
+    read_state_observer = worker.split(
+        "static void observe_read_state", 1
+    )[1].split("static esp_err_t flush_time_checkpoint", 1)[0]
+    assert ".revision = stats.persistence_revision" in read_state_observer
+    assert ".commit_count = stats.persistence_commit_count" in read_state_observer
+    assert ".failure_count = stats.persistence_fail_count" in read_state_observer
+    assert ".reconcile_pending = stats.sd_primary_reconcile_pending" in (
+        read_state_observer
+    )
     assert "request_id" in worker
     assert "s_result_request_id" in worker
     assert "deadline_us" in worker

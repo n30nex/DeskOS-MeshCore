@@ -58,6 +58,7 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
         "erase_flash": False,
         "formats_sd": False,
         "retained_state_preserved": True,
+        "retained_nonempty_baseline": True,
         "d1l_target": {
             "stable_identity_sha256": "f" * 64,
         },
@@ -151,6 +152,15 @@ def test_flash_validator_does_not_duplicate_settings_preserved_outcome(
     assert producer.validate_flash(data, CANDIDATE) == {}
     assert target_field_calls == [producer.FLASH_TARGET_FIELDS]
 
+    data["retained_nonempty_baseline"] = False
+    with pytest.raises(producer.EvidenceError):
+        producer.validate_flash(data, CANDIDATE)
+
+    data.pop("retained_nonempty_baseline")
+    with pytest.raises(producer.EvidenceError):
+        producer.validate_flash(data, CANDIDATE)
+
+    data["retained_nonempty_baseline"] = True
     data["pre_flash_build_commit"] = "not-a-commit"
     with pytest.raises(producer.EvidenceError):
         producer.validate_flash(data, CANDIDATE)

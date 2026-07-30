@@ -115,13 +115,30 @@ EXPECTED_FLASH_ROLES = {
 FORBIDDEN_PORTS = frozenset({"COM8", "COM11", "COM16", "COM29"})
 RETAINED_STATE_COMMANDS = (
     "contacts",
+    "channels",
     "version",
     "health",
     "settings get",
+    "wifi profiles",
     "messages public",
+    "messages public offset 8",
     "messages dm",
+    "messages dm offset 8",
+    "messages unread",
     "identity status",
 )
+PUBLIC_RETAINED_PAGE_COMMANDS = (
+    "messages public",
+    "messages public offset 8",
+)
+PUBLIC_RETAINED_PAGE_SIZE = 8
+DM_RETAINED_PAGE_COMMANDS = (
+    "messages dm",
+    "messages dm offset 8",
+)
+DM_RETAINED_PAGE_SIZE = 8
+CONTACT_RETAINED_CAPACITY = 16
+D1L_READ_STATE_CURSOR_CAPACITY = 16
 CONTACT_RETENTION_REQUIRED_FIELDS = frozenset(
     {
         "alias",
@@ -593,15 +610,22 @@ def read_retained_state_from_handle(
     timeout: float,
     command_sender: Callable[[Any, str, float], dict],
 ) -> list[dict]:
-    return [
-        _read_retained_state_command(
+    results: list[dict] = []
+    for command in RETAINED_STATE_COMMANDS:
+        result = _read_retained_state_command(
             handle,
             command,
             timeout,
             command_sender,
         )
-        for command in RETAINED_STATE_COMMANDS
-    ]
+        if command in (
+            *PUBLIC_RETAINED_PAGE_COMMANDS,
+            *DM_RETAINED_PAGE_COMMANDS,
+        ):
+            result = dict(result)
+            result["capture_command"] = command
+        results.append(result)
+    return results
 
 
 def _command_option(command: list[str], *names: str) -> str | None:
@@ -1134,46 +1158,405 @@ def read_retained_state(
     ) as handle:
         time.sleep(1.0)
         handle.reset_input_buffer()
-        return [
-            _read_retained_state_command(
+        results: list[dict] = []
+        for command in RETAINED_STATE_COMMANDS:
+            result = _read_retained_state_command(
                 handle,
                 command,
                 timeout,
                 send_console_command,
             )
-            for command in RETAINED_STATE_COMMANDS
-        ]
+            if command in (
+                *PUBLIC_RETAINED_PAGE_COMMANDS,
+                *DM_RETAINED_PAGE_COMMANDS,
+            ):
+                result = dict(result)
+                result["capture_command"] = command
+            results.append(result)
+        return results
 
 
 def retained_state_projection(results: object) -> dict | None:
     if not isinstance(results, list):
         return None
-    by_command = {
-        result.get("cmd"): result
-        for result in results
-        if isinstance(result, dict) and isinstance(result.get("cmd"), str)
-    }
-    if set(by_command) != set(RETAINED_STATE_COMMANDS):
+    by_command: dict[str, dict] = {}
+    public_pages: dict[str, dict] = {}
+    dm_pages: dict[str, dict] = {}
+    for result in results:
+        if not isinstance(result, dict):
+            return None
+        command = result.get("cmd")
+        if not isinstance(command, str):
+            return None
+        if command in {"messages public", "messages dm"}:
+            capture_command = result.get("capture_command")
+            page_commands = (
+                PUBLIC_RETAINED_PAGE_COMMANDS
+                if command == "messages public"
+                else DM_RETAINED_PAGE_COMMANDS
+            )
+            pages = public_pages if command == "messages public" else dm_pages
+            if (
+                capture_command not in page_commands
+                or capture_command in pages
+            ):
+                return None
+            pages[capture_command] = result
+        else:
+            if command in by_command:
+                return None
+            by_command[command] = result
+    expected_commands = set(RETAINED_STATE_COMMANDS) - set(
+        (*PUBLIC_RETAINED_PAGE_COMMANDS, *DM_RETAINED_PAGE_COMMANDS)
+    )
+    if (
+        set(by_command) != expected_commands
+        or set(public_pages) != set(PUBLIC_RETAINED_PAGE_COMMANDS)
+        or set(dm_pages) != set(DM_RETAINED_PAGE_COMMANDS)
+    ):
         return None
-    if not all(result.get("ok") is True for result in by_command.values()):
+    if not all(
+        result.get("ok") is True
+        for result in (
+            *by_command.values(),
+            *public_pages.values(),
+            *dm_pages.values(),
+        )
+    ):
         return None
     settings = by_command["settings get"]
+    timezone = settings.get("timezone")
+    map_location = settings.get("map_location")
+    map_tiles = settings.get("map_tiles")
+    radio = settings.get("radio")
+    wifi_profiles = by_command["wifi profiles"]
+    profiles = wifi_profiles.get("profiles")
+
+    def contains_secret_field(value: object) -> bool:
+        if isinstance(value, dict):
+            for raw_key, child in value.items():
+                key = str(raw_key).strip().lower().replace("-", "_")
+                if key not in {
+                    "password_saved",
+                    "passwords_printed",
+                    "secret_material_redacted",
+                } and any(
+                    marker in key
+                    for marker in (
+                        "password",
+                        "passphrase",
+                        "psk",
+                        "secret",
+                        "credential",
+                        "token",
+                        "private_key",
+                    )
+                ):
+                    return True
+                if contains_secret_field(child):
+                    return True
+        elif isinstance(value, list):
+            return any(contains_secret_field(child) for child in value)
+        return False
+
     settings_projection = {
-        key: settings.get(key)
-        for key in (
-            "node_name",
-            "path_hash_bytes",
-            "radio_frequency_mhz",
-            "radio_bandwidth_khz",
-            "radio_spreading_factor",
-            "radio_coding_rate",
-            "radio_tx_power_dbm",
-        )
-        if key in settings
+        "node_name": settings.get("node_name"),
+        "role": settings.get("role"),
+        "onboarding_complete": settings.get("onboarding_complete"),
+        "wifi_enabled": settings.get("wifi_enabled"),
+        "ble_companion_enabled": settings.get("ble_companion_enabled"),
+        "observer_enabled": settings.get("observer_enabled"),
+        "high_contrast": settings.get("high_contrast"),
+        "night_mode": settings.get("night_mode"),
+        "path_hash_bytes": settings.get("path_hash_bytes"),
+        "timezone": {
+            key: timezone.get(key)
+            for key in (
+                "settings_ready",
+                "settings_error",
+                "schema_version",
+                "offset_minutes",
+            )
+        } if isinstance(timezone, dict) else None,
+        "map_location": {
+            key: map_location.get(key)
+            for key in ("set", "lat", "lon", "source")
+        } if isinstance(map_location, dict) else None,
+        "map_tile_zoom": (
+            map_tiles.get("zoom") if isinstance(map_tiles, dict) else None
+        ),
+        "radio": {
+            key: radio.get(key)
+            for key in (
+                "frequency_hz",
+                "bandwidth_khz",
+                "sf",
+                "cr",
+                "tx_power_dbm",
+                "rx_boost",
+                "tcxo",
+            )
+        } if isinstance(radio, dict) else None,
+        "wifi_profiles": {
+            "count": wifi_profiles.get("count"),
+            "active_profile": wifi_profiles.get("active_profile"),
+            "capacity": wifi_profiles.get("capacity"),
+            "passwords_printed": wifi_profiles.get("passwords_printed"),
+            "profiles": profiles,
+        },
     }
+    channels_result = by_command["channels"]
+    channel_entries = channels_result.get("entries")
+    channel_count = channels_result.get("count")
+    channel_capacity = channels_result.get("capacity")
+    channel_revision = channels_result.get("revision")
+    active_channel_id = channels_result.get("active_channel_id")
+    if (
+        contains_secret_field(channels_result)
+        or set(channels_result)
+        != {
+            "schema",
+            "cmd",
+            "ok",
+            "count",
+            "capacity",
+            "revision",
+            "active_channel_id",
+            "entries",
+            "persisted",
+            "secret_material_redacted",
+            "public_rf_tx",
+            "formats_sd",
+        }
+        or isinstance(channel_count, bool)
+        or not isinstance(channel_count, int)
+        or channel_count < 1
+        or channel_capacity != 8
+        or channel_count > channel_capacity
+        or isinstance(channel_revision, bool)
+        or not isinstance(channel_revision, int)
+        or channel_revision < 1
+        or not isinstance(active_channel_id, str)
+        or re.fullmatch(r"[0-9a-f]{16}", active_channel_id) is None
+        or not isinstance(channel_entries, list)
+        or len(channel_entries) != channel_count
+        or channels_result.get("persisted") is not True
+        or channels_result.get("secret_material_redacted") is not True
+        or channels_result.get("public_rf_tx") is not False
+        or channels_result.get("formats_sd") is not False
+    ):
+        return None
+    channel_projection: list[dict] = []
+    channel_cursors: dict[str, dict] = {}
+    selected_ids: list[str] = []
+    for channel in channel_entries:
+        if (
+            not isinstance(channel, dict)
+            or set(channel)
+            != {
+                "channel_id",
+                "name",
+                "source",
+                "enabled",
+                "selected",
+                "unread",
+                "newest_message_seq",
+                "read_through_seq",
+            }
+        ):
+            return None
+        channel_id = channel.get("channel_id")
+        if (
+            not isinstance(channel_id, str)
+            or re.fullmatch(r"[0-9a-f]{16}", channel_id) is None
+            or channel_id in channel_cursors
+            or not isinstance(channel.get("name"), str)
+            or not channel["name"]
+            or channel.get("source")
+            not in {"builtin", "manual", "uri_import", "migrated"}
+            or type(channel.get("enabled")) is not bool
+            or type(channel.get("selected")) is not bool
+            or any(
+                isinstance(channel.get(field), bool)
+                or not isinstance(channel.get(field), int)
+                or channel[field] < 0
+                for field in (
+                    "unread",
+                    "newest_message_seq",
+                    "read_through_seq",
+                )
+            )
+        ):
+            return None
+        if channel["selected"]:
+            selected_ids.append(channel_id)
+        channel_projection.append(
+            {
+                key: channel[key]
+                for key in (
+                    "channel_id",
+                    "name",
+                    "source",
+                    "enabled",
+                    "selected",
+                )
+            }
+        )
+        channel_cursors[channel_id] = {
+            key: channel[key]
+            for key in (
+                "unread",
+                "newest_message_seq",
+                "read_through_seq",
+            )
+        }
+    if selected_ids != [active_channel_id]:
+        return None
+    channel_projection.sort(key=lambda row: row["channel_id"])
     if (
         not isinstance(settings_projection.get("node_name"), str)
         or not settings_projection["node_name"]
+        or settings_projection.get("role") != EXPECTED_D1L_ROLE
+        or contains_secret_field(settings)
+        or contains_secret_field(wifi_profiles)
+        or not {
+            "node_name",
+            "role",
+            "onboarding_complete",
+            "wifi_enabled",
+            "ble_companion_enabled",
+            "observer_enabled",
+            "high_contrast",
+            "night_mode",
+            "path_hash_bytes",
+            "timezone",
+            "map_location",
+            "map_tiles",
+            "radio",
+        }.issubset(settings)
+        or any(
+            type(settings_projection.get(field)) is not bool
+            for field in (
+                "onboarding_complete",
+                "wifi_enabled",
+                "ble_companion_enabled",
+                "observer_enabled",
+                "high_contrast",
+                "night_mode",
+            )
+        )
+        or settings_projection.get("path_hash_bytes") not in (1, 2, 3)
+        or not isinstance(timezone, dict)
+        or not {
+            "settings_ready",
+            "settings_error",
+            "schema_version",
+            "offset_minutes",
+        }.issubset(timezone)
+        or timezone.get("settings_ready") is not True
+        or timezone.get("settings_error") != "ESP_OK"
+        or isinstance(timezone.get("schema_version"), bool)
+        or not isinstance(timezone.get("schema_version"), int)
+        or isinstance(timezone.get("offset_minutes"), bool)
+        or not isinstance(timezone.get("offset_minutes"), int)
+        or not isinstance(map_location, dict)
+        or not {"set", "lat", "lon", "source"}.issubset(map_location)
+        or type(map_location.get("set")) is not bool
+        or any(
+            isinstance(map_location.get(field), bool)
+            or not isinstance(map_location.get(field), (int, float))
+            for field in ("lat", "lon")
+        )
+        or not isinstance(map_location.get("source"), str)
+        or (
+            map_location.get("set") is True
+            and (
+                not (-90.0 <= float(map_location.get("lat")) <= 90.0)
+                or not (-180.0 <= float(map_location.get("lon")) <= 180.0)
+                or map_location.get("source")
+                not in {"manual", "authenticated_companion"}
+            )
+        )
+        or (
+            map_location.get("set") is False
+            and (
+                float(map_location.get("lat")) != 0.0
+                or float(map_location.get("lon")) != 0.0
+                or map_location.get("source")
+                not in {"unset", "unavailable_in_release_profile"}
+            )
+        )
+        or not isinstance(map_tiles, dict)
+        or "zoom" not in map_tiles
+        or isinstance(map_tiles.get("zoom"), bool)
+        or not isinstance(map_tiles.get("zoom"), int)
+        or not isinstance(radio, dict)
+        or not {
+            "frequency_hz",
+            "bandwidth_khz",
+            "sf",
+            "cr",
+            "tx_power_dbm",
+            "rx_boost",
+            "tcxo",
+        }.issubset(radio)
+        or any(
+            isinstance(radio.get(field), bool)
+            or not isinstance(radio.get(field), int)
+            for field in ("frequency_hz", "sf", "cr", "tx_power_dbm")
+        )
+        or isinstance(radio.get("bandwidth_khz"), bool)
+        or not isinstance(radio.get("bandwidth_khz"), (int, float))
+        or type(radio.get("rx_boost")) is not bool
+        or not isinstance(radio.get("tcxo"), str)
+        or wifi_profiles.get("passwords_printed") is not False
+        or set(wifi_profiles)
+        != {
+            "schema",
+            "cmd",
+            "ok",
+            "count",
+            "active_profile",
+            "capacity",
+            "passwords_printed",
+            "profiles",
+        }
+        or isinstance(wifi_profiles.get("count"), bool)
+        or not isinstance(wifi_profiles.get("count"), int)
+        or isinstance(wifi_profiles.get("capacity"), bool)
+        or not isinstance(wifi_profiles.get("capacity"), int)
+        or isinstance(wifi_profiles.get("active_profile"), bool)
+        or not isinstance(wifi_profiles.get("active_profile"), int)
+        or not isinstance(profiles, list)
+        or wifi_profiles.get("count") != len(profiles)
+        or wifi_profiles.get("capacity") != 3
+        or wifi_profiles.get("active_profile") < 0
+        or wifi_profiles.get("active_profile") > wifi_profiles.get("count")
+        or (
+            bool(profiles)
+            and wifi_profiles.get("active_profile") < 1
+        )
+        or not all(
+            isinstance(profile, dict)
+            and set(profile)
+            == {"index", "active", "saved", "password_saved", "ssid"}
+            and isinstance(profile.get("index"), int)
+            and not isinstance(profile.get("index"), bool)
+            and type(profile.get("active")) is bool
+            and profile.get("saved") is True
+            and type(profile.get("password_saved")) is bool
+            and isinstance(profile.get("ssid"), str)
+            and bool(profile.get("ssid"))
+            for profile in profiles
+        )
+        or [profile["index"] for profile in profiles]
+        != list(range(1, len(profiles) + 1))
+        or sum(profile["active"] for profile in profiles)
+        != (1 if profiles else 0)
+        or (
+            profiles
+            and not profiles[wifi_profiles["active_profile"] - 1]["active"]
+        )
     ):
         return None
 
@@ -1190,15 +1573,422 @@ def retained_state_projection(results: object) -> dict | None:
             ),
         )
 
-    public = projected_entries("messages public")
-    direct = projected_entries("messages dm")
+    contact_result = by_command["contacts"]
     contacts = projected_entries("contacts")
+    contact_persistence = contact_result.get("persistence")
+    contact_sd = (
+        contact_persistence.get("sd")
+        if isinstance(contact_persistence, dict)
+        else None
+    )
+    contact_count = contact_result.get("count")
+    contact_capacity = contact_result.get("capacity")
+    contact_next_seq = contact_result.get("next_seq")
+    contact_total_written = contact_result.get("total_written")
+    contact_dropped_oldest = contact_result.get("dropped_oldest")
+    if (
+        contacts is None
+        or isinstance(contact_count, bool)
+        or not isinstance(contact_count, int)
+        or contact_count < 0
+        or contact_count != len(contacts)
+        or contact_capacity != CONTACT_RETAINED_CAPACITY
+        or contact_count > contact_capacity
+        or isinstance(contact_next_seq, bool)
+        or not isinstance(contact_next_seq, int)
+        or contact_next_seq < 1
+        or any(
+            isinstance(row.get("seq"), bool)
+            or not isinstance(row.get("seq"), int)
+            or row.get("seq") < 1
+            or row.get("seq") >= contact_next_seq
+            for row in contacts
+        )
+        or isinstance(contact_total_written, bool)
+        or not isinstance(contact_total_written, int)
+        or contact_total_written < contact_count
+        or isinstance(contact_dropped_oldest, bool)
+        or not isinstance(contact_dropped_oldest, int)
+        or contact_dropped_oldest < 0
+        or contact_result.get("persisted") is not True
+        or not isinstance(contact_persistence, dict)
+        or contact_persistence.get("loaded") is not True
+        or contact_persistence.get("dirty") is not False
+        or isinstance(contact_persistence.get("revision"), bool)
+        or not isinstance(contact_persistence.get("revision"), int)
+        or contact_persistence.get("revision") < 0
+        or isinstance(contact_persistence.get("commits"), bool)
+        or not isinstance(contact_persistence.get("commits"), int)
+        or contact_persistence.get("commits") < 0
+        or isinstance(contact_persistence.get("coalesced"), bool)
+        or not isinstance(contact_persistence.get("coalesced"), int)
+        or contact_persistence.get("coalesced") < 0
+        or contact_persistence.get("failures") != 0
+        or contact_persistence.get("last_error") != "ESP_OK"
+        or not isinstance(contact_sd, dict)
+        or contact_sd.get("required") is not True
+        or isinstance(contact_sd.get("generation"), bool)
+        or not isinstance(contact_sd.get("generation"), int)
+        or contact_sd.get("generation") < 1
+        or contact_sd.get("reconcile_pending") is not False
+    ):
+        return None
+    if contact_retention_projection(contacts) is None:
+        return None
+
+    read_state_result = by_command["messages unread"]
+    read_state_persistence = read_state_result.get("persistence")
+    read_state_sd = (
+        read_state_persistence.get("sd")
+        if isinstance(read_state_persistence, dict)
+        else None
+    )
+    read_state_nvs = (
+        read_state_persistence.get("nvs")
+        if isinstance(read_state_persistence, dict)
+        else None
+    )
+    read_state_threads = read_state_result.get("dm_threads")
+    persisted_cursors = read_state_result.get("persisted_dm_cursors")
+    if (
+        any(
+            isinstance(read_state_result.get(field), bool)
+            or not isinstance(read_state_result.get(field), int)
+            or read_state_result[field] < 0
+            for field in (
+                "public_unread",
+                "dm_unread",
+                "muted_dm_unread",
+                "dm_thread_count",
+                "persisted_dm_cursor_count",
+                "last_public_read_seq",
+                "last_dm_read_seq",
+                "newest_public_rx_seq",
+                "newest_dm_rx_seq",
+                "mark_read_count",
+            )
+        )
+        or read_state_result.get("cursor_capacity")
+        != D1L_READ_STATE_CURSOR_CAPACITY
+        or not isinstance(read_state_threads, list)
+        or read_state_result.get("dm_thread_count")
+        != len(read_state_threads)
+        or not isinstance(persisted_cursors, list)
+        or read_state_result.get("persisted_dm_cursor_count")
+        != len(persisted_cursors)
+        or len(persisted_cursors) > D1L_READ_STATE_CURSOR_CAPACITY
+        or read_state_result.get("persisted") is not True
+        or not isinstance(read_state_persistence, dict)
+        or read_state_persistence.get("loaded") is not True
+        or read_state_persistence.get("dirty") is not False
+        or isinstance(read_state_persistence.get("revision"), bool)
+        or not isinstance(read_state_persistence.get("revision"), int)
+        or read_state_persistence.get("revision") < 0
+        or isinstance(read_state_persistence.get("commits"), bool)
+        or not isinstance(read_state_persistence.get("commits"), int)
+        or read_state_persistence.get("commits") < 0
+        or read_state_persistence.get("failures") != 0
+        or read_state_persistence.get("last_error") != "ESP_OK"
+        or read_state_persistence.get("clear_tombstone_pending") is not False
+        or not isinstance(read_state_sd, dict)
+        or read_state_sd.get("required") is not True
+        or isinstance(read_state_sd.get("accepted_generation"), bool)
+        or not isinstance(read_state_sd.get("accepted_generation"), int)
+        or read_state_sd.get("accepted_generation") < 1
+        or read_state_sd.get("generation")
+        != read_state_sd.get("accepted_generation")
+        or read_state_sd.get("dirty") is not False
+        or read_state_sd.get("reconcile_pending") is not False
+        or not isinstance(read_state_nvs, dict)
+        or read_state_nvs.get("dirty") is not False
+    ):
+        return None
+    seen_visible_threads: set[str] = set()
+    for thread in read_state_threads:
+        if not isinstance(thread, dict):
+            return None
+        fingerprint = thread.get("fingerprint")
+        if (
+            set(thread)
+            != {
+                "fingerprint",
+                "last_read_seq",
+                "newest_rx_seq",
+                "unread",
+                "muted",
+            }
+            or not isinstance(fingerprint, str)
+            or re.fullmatch(r"[0-9A-Fa-f]{16}", fingerprint) is None
+            or fingerprint.lower() in seen_visible_threads
+            or any(
+                isinstance(thread.get(field), bool)
+                or not isinstance(thread.get(field), int)
+                or thread[field] < 0
+                for field in ("last_read_seq", "newest_rx_seq", "unread")
+            )
+            or thread["last_read_seq"] > thread["newest_rx_seq"]
+            or type(thread.get("muted")) is not bool
+        ):
+            return None
+        seen_visible_threads.add(fingerprint.lower())
+    persisted_cursor_projection: dict[str, int] = {}
+    for cursor in persisted_cursors:
+        if not isinstance(cursor, dict):
+            return None
+        fingerprint = cursor.get("fingerprint")
+        last_read_seq = cursor.get("last_read_seq")
+        if (
+            set(cursor) != {"fingerprint", "last_read_seq"}
+            or not isinstance(fingerprint, str)
+            or re.fullmatch(r"[0-9A-Fa-f]{16}", fingerprint) is None
+            or fingerprint.lower() in persisted_cursor_projection
+            or isinstance(last_read_seq, bool)
+            or not isinstance(last_read_seq, int)
+            or last_read_seq < 0
+        ):
+            return None
+        persisted_cursor_projection[fingerprint.lower()] = last_read_seq
+
+    public_result = public_pages["messages public"]
+    public_persistence = public_result.get("persistence")
+    public_sd = (
+        public_persistence.get("sd")
+        if isinstance(public_persistence, dict)
+        else None
+    )
+    public_count = public_result.get("count")
+    public_capacity = public_result.get("capacity")
+    public_store_count = public_result.get("retained_store_count")
+    public_retained_count = public_result.get("retained_public_count")
+    public_total_written = public_result.get("total_written")
+    public_dropped_oldest = public_result.get("dropped_oldest")
+    public_epoch = public_result.get("retained_epoch")
+    public_content_revision = public_result.get("content_revision")
+    if (
+        isinstance(public_count, bool)
+        or not isinstance(public_count, int)
+        or public_count < 0
+        or isinstance(public_capacity, bool)
+        or not isinstance(public_capacity, int)
+        or public_capacity != PUBLIC_RETAINED_PAGE_SIZE * 2
+        or public_count > public_capacity
+        or isinstance(public_store_count, bool)
+        or not isinstance(public_store_count, int)
+        or public_store_count < public_count
+        or public_store_count > public_capacity
+        or public_retained_count != public_count
+        or isinstance(public_total_written, bool)
+        or not isinstance(public_total_written, int)
+        or public_total_written < public_store_count
+        or isinstance(public_dropped_oldest, bool)
+        or not isinstance(public_dropped_oldest, int)
+        or public_dropped_oldest < 0
+        or isinstance(public_epoch, bool)
+        or not isinstance(public_epoch, int)
+        or public_epoch < 1
+        or isinstance(public_content_revision, bool)
+        or not isinstance(public_content_revision, int)
+        or public_content_revision < 1
+    ):
+        return None
+    public_rows: list[dict] = []
+    public_sequences: set[int] = set()
+    for capture_command, expected_offset in (
+        ("messages public", 0),
+        ("messages public offset 8", PUBLIC_RETAINED_PAGE_SIZE),
+    ):
+        page = public_pages[capture_command]
+        rows = page.get("entries")
+        expected_page_count = (
+            min(public_count, PUBLIC_RETAINED_PAGE_SIZE)
+            if expected_offset == 0
+            else max(public_count - PUBLIC_RETAINED_PAGE_SIZE, 0)
+        )
+        expected_has_older = (
+            expected_offset == 0
+            and public_count > PUBLIC_RETAINED_PAGE_SIZE
+        )
+        expected_next_offset = (
+            PUBLIC_RETAINED_PAGE_SIZE
+            if expected_has_older or expected_offset > 0
+            else 0
+        )
+        if (
+            not isinstance(rows, list)
+            or not all(isinstance(row, dict) for row in rows)
+            or page.get("filtered") is not False
+            or page.get("count") != public_count
+            or page.get("capacity") != public_capacity
+            or page.get("retained_store_count") != public_store_count
+            or page.get("retained_public_count") != public_retained_count
+            or page.get("offset") != expected_offset
+            or page.get("page_size") != PUBLIC_RETAINED_PAGE_SIZE
+            or page.get("page_count") != expected_page_count
+            or page.get("page_count") != len(rows)
+            or page.get("has_older") is not expected_has_older
+            or page.get("next_offset") != expected_next_offset
+            or page.get("total_matches") != public_retained_count
+            or page.get("total_written") != public_total_written
+            or page.get("dropped_oldest") != public_dropped_oldest
+            or page.get("history_counters_scope") != "shared_all_channels"
+            or page.get("retained_epoch") != public_epoch
+            or page.get("content_revision") != public_content_revision
+            or page.get("volatile_preview_present") is not False
+            or page.get("volatile_preview_seq") != 0
+            or page.get("persisted") is not True
+            or page.get("persistence") != public_persistence
+        ):
+            return None
+        for row in rows:
+            sequence = row.get("seq")
+            if (
+                isinstance(sequence, bool)
+                or not isinstance(sequence, int)
+                or sequence < 1
+                or sequence in public_sequences
+                or row.get("retained") is not True
+                or row.get("volatile_preview") is not False
+            ):
+                return None
+            public_sequences.add(sequence)
+        public_rows.extend(rows)
+    public = sorted(
+        public_rows,
+        key=lambda row: json.dumps(
+            row, sort_keys=True, separators=(",", ":")
+        ),
+    )
+    direct_result = dm_pages["messages dm"]
+    direct_persistence = direct_result.get("persistence")
+    direct_sd = (
+        direct_persistence.get("sd")
+        if isinstance(direct_persistence, dict)
+        else None
+    )
+    direct_count = direct_result.get("count")
+    direct_capacity = direct_result.get("capacity")
+    direct_retained_count = direct_result.get("retained_count")
+    direct_total_written = direct_result.get("total_written")
+    direct_dropped_oldest = direct_result.get("dropped_oldest")
+    direct_epoch = direct_result.get("retained_epoch")
+    direct_content_revision = direct_result.get("content_revision")
+    if (
+        isinstance(direct_count, bool)
+        or not isinstance(direct_count, int)
+        or direct_count < 0
+        or isinstance(direct_capacity, bool)
+        or not isinstance(direct_capacity, int)
+        or direct_capacity != DM_RETAINED_PAGE_SIZE * 2
+        or direct_count > direct_capacity
+        or direct_retained_count != direct_count
+        or isinstance(direct_total_written, bool)
+        or not isinstance(direct_total_written, int)
+        or direct_total_written < direct_count
+        or isinstance(direct_dropped_oldest, bool)
+        or not isinstance(direct_dropped_oldest, int)
+        or direct_dropped_oldest < 0
+        or isinstance(direct_content_revision, bool)
+        or not isinstance(direct_content_revision, int)
+        or direct_content_revision < 1
+    ):
+        return None
+    direct_rows: list[dict] = []
+    direct_sequences: set[int] = set()
+    for capture_command, expected_offset in (
+        ("messages dm", 0),
+        ("messages dm offset 8", DM_RETAINED_PAGE_SIZE),
+    ):
+        page = dm_pages[capture_command]
+        rows = page.get("entries")
+        expected_page_count = (
+            min(direct_count, DM_RETAINED_PAGE_SIZE)
+            if expected_offset == 0
+            else max(direct_count - DM_RETAINED_PAGE_SIZE, 0)
+        )
+        expected_has_older = (
+            expected_offset == 0
+            and direct_count > DM_RETAINED_PAGE_SIZE
+        )
+        expected_next_offset = (
+            DM_RETAINED_PAGE_SIZE
+            if expected_has_older or expected_offset > 0
+            else 0
+        )
+        if (
+            not isinstance(rows, list)
+            or not all(isinstance(row, dict) for row in rows)
+            or page.get("filtered") is not False
+            or page.get("count") != direct_count
+            or page.get("capacity") != direct_capacity
+            or page.get("offset") != expected_offset
+            or page.get("page_size") != DM_RETAINED_PAGE_SIZE
+            or page.get("page_count") != expected_page_count
+            or page.get("page_count") != len(rows)
+            or page.get("has_older") is not expected_has_older
+            or page.get("next_offset") != expected_next_offset
+            or page.get("retained_count") != direct_retained_count
+            or page.get("total_matches") != direct_retained_count
+            or page.get("total_written") != direct_total_written
+            or page.get("dropped_oldest") != direct_dropped_oldest
+            or page.get("retained_epoch") != direct_epoch
+            or page.get("content_revision") != direct_content_revision
+            or page.get("volatile_preview_present") is not False
+            or page.get("volatile_preview_seq") != 0
+            or page.get("persisted") is not True
+            or page.get("persistence") != direct_persistence
+        ):
+            return None
+        for row in rows:
+            sequence = row.get("seq")
+            if (
+                isinstance(sequence, bool)
+                or not isinstance(sequence, int)
+                or sequence < 1
+                or sequence in direct_sequences
+                or row.get("retained") is not True
+                or row.get("volatile_preview") is not False
+            ):
+                return None
+            direct_sequences.add(sequence)
+        direct_rows.extend(rows)
+    direct = sorted(
+        direct_rows,
+        key=lambda row: json.dumps(
+            row, sort_keys=True, separators=(",", ":")
+        ),
+    )
     identity = by_command["identity status"]
     identity_public_key = exact_public_key(identity.get("public_key"))
     if (
         public is None
         or direct is None
         or contacts is None
+        or isinstance(direct_retained_count, bool)
+        or not isinstance(direct_retained_count, int)
+        or isinstance(direct_epoch, bool)
+        or not isinstance(direct_epoch, int)
+        or direct_epoch < 1
+        or not isinstance(direct_persistence, dict)
+        or direct_result.get("persisted") is not True
+        or direct_persistence.get("loaded") is not True
+        or direct_persistence.get("dirty") is not False
+        or not isinstance(direct_sd, dict)
+        or direct_sd.get("required") is not True
+        or direct_sd.get("dirty") is not False
+        or direct_sd.get("reconcile_pending") is not False
+        or direct_sd.get("last_error") != "ESP_OK"
+        or direct_retained_count != direct_result.get("total_matches")
+        or direct_retained_count != len(direct)
+        or len(public) != public_retained_count
+        or not isinstance(public_persistence, dict)
+        or public_result.get("persisted") is not True
+        or public_persistence.get("loaded") is not True
+        or public_persistence.get("dirty") is not False
+        or not isinstance(public_sd, dict)
+        or public_sd.get("required") is not True
+        or public_sd.get("dirty") is not False
+        or public_sd.get("reconcile_pending") is not False
+        or public_sd.get("last_error") != "ESP_OK"
         or identity_public_key is None
         or identity.get("public_key_ready") is not True
         or identity.get("fingerprint")
@@ -1208,9 +1998,54 @@ def retained_state_projection(results: object) -> dict | None:
         return None
     return {
         "settings": settings_projection,
+        "channels": channel_projection,
+        "channel_state": {
+            "capacity": channel_capacity,
+            "active_channel_id": active_channel_id,
+            "revision": channel_revision,
+        },
+        "channel_cursors": channel_cursors,
         "public_messages": public,
+        "public_messages_state": {
+            "count": public_count,
+            "capacity": public_capacity,
+            "retained_store_count": public_store_count,
+            "retained_public_count": public_retained_count,
+            "total_written": public_total_written,
+            "dropped_oldest": public_dropped_oldest,
+            "retained_epoch": public_epoch,
+            "content_revision": public_content_revision,
+        },
         "direct_messages": direct,
+        "direct_messages_state": {
+            "count": direct_count,
+            "capacity": direct_capacity,
+            "retained_count": direct_retained_count,
+            "total_written": direct_total_written,
+            "dropped_oldest": direct_dropped_oldest,
+            "retained_epoch": direct_epoch,
+            "content_revision": direct_content_revision,
+        },
         "contacts": contacts,
+        "contacts_state": {
+            "count": contact_count,
+            "capacity": contact_capacity,
+            "next_seq": contact_next_seq,
+            "total_written": contact_total_written,
+            "dropped_oldest": contact_dropped_oldest,
+            "persistence_revision": contact_persistence["revision"],
+            "persistence_commits": contact_persistence["commits"],
+            "persistence_coalesced": contact_persistence["coalesced"],
+            "persistence_failures": contact_persistence["failures"],
+        },
+        "read_state": {
+            "cursor_capacity": read_state_result["cursor_capacity"],
+            "last_public_read_seq":
+                read_state_result["last_public_read_seq"],
+            "last_dm_read_seq": read_state_result["last_dm_read_seq"],
+            "mark_read_count": read_state_result["mark_read_count"],
+            "persisted_dm_cursors": persisted_cursor_projection,
+        },
         "identity_public_key": identity_public_key,
     }
 
@@ -1229,10 +2064,16 @@ def contact_retention_projection(rows: object) -> dict[str, dict] | None:
 
     All unlisted fields remain part of the comparison so aliases, user flags,
     capabilities, and future schema additions still fail closed on mutation.
+    Contacts stay keyed by their validated short fingerprint so a legitimate
+    heard-only placeholder can be promoted by a signed advert without looking
+    like a deletion plus unrelated insertion. Full keys, once present, remain
+    immutable; user-owned alias/favorite/muted/creation state is projected
+    separately from RF-owned observations and capabilities.
     """
     if not isinstance(rows, list):
         return None
     projected: dict[str, dict] = {}
+    seen_fingerprints: set[str] = set()
     required_fields = (
         CONTACT_RETENTION_REQUIRED_FIELDS
         | CONTACT_RETENTION_VOLATILE_FIELDS
@@ -1240,15 +2081,30 @@ def contact_retention_projection(rows: object) -> dict[str, dict] | None:
     for row in rows:
         if not isinstance(row, dict) or not required_fields.issubset(row):
             return None
-        public_key = exact_public_key(row.get("public_key"))
+        public_key_value = row.get("public_key")
+        public_key = exact_public_key(public_key_value)
         fingerprint = row.get("fingerprint")
         alias = row.get("alias")
         created_ms = row.get("created_ms")
+        normalized_fingerprint = (
+            fingerprint.strip().lower()
+            if isinstance(fingerprint, str)
+            else ""
+        )
         if (
-            public_key is None
-            or not isinstance(fingerprint, str)
-            or fingerprint.strip().lower() != public_key[:16]
-            or public_key in projected
+            re.fullmatch(r"[0-9a-f]{16}", normalized_fingerprint) is None
+            or normalized_fingerprint in seen_fingerprints
+            or (
+                public_key is not None
+                and normalized_fingerprint != public_key[:16]
+            )
+            or (
+                public_key is None
+                and (
+                    not isinstance(public_key_value, str)
+                    or public_key_value != ""
+                )
+            )
             or not isinstance(alias, str)
             or not isinstance(row.get("favorite"), bool)
             or not isinstance(row.get("muted"), bool)
@@ -1257,22 +2113,109 @@ def contact_retention_projection(rows: object) -> dict[str, dict] | None:
             or created_ms < 0
         ):
             return None
-        stable = {
-            key: value
-            for key, value in row.items()
-            if key not in CONTACT_RETENTION_VOLATILE_FIELDS
+        canonical = row.get("canonical")
+        if (
+            type(canonical) is not bool
+            or type(row.get("can_dm")) is not bool
+            or type(row.get("can_admin")) is not bool
+            or (public_key is not None and canonical is not True)
+            or (
+                public_key is None
+                and (
+                    canonical is not False
+                    or row.get("can_dm") is not False
+                    or row.get("can_admin") is not False
+                )
+            )
+        ):
+            return None
+        projected[normalized_fingerprint] = {
+            "fingerprint": normalized_fingerprint,
+            "public_key": public_key or "",
+            "alias": alias,
+            "favorite": row["favorite"],
+            "muted": row["muted"],
+            "created_ms": created_ms,
         }
-        stable["public_key"] = public_key
-        stable["fingerprint"] = public_key[:16]
-        projected[public_key] = stable
+        seen_fingerprints.add(normalized_fingerprint)
     return projected
 
 
 def retained_state_preserved(before: dict, after: dict) -> bool:
     if (
         before.get("settings") != after.get("settings")
+        or before.get("channels") != after.get("channels")
         or before.get("identity_public_key")
         != after.get("identity_public_key")
+        or before.get("direct_messages_state")
+        != after.get("direct_messages_state")
+    ):
+        return False
+    before_channel_state = before.get("channel_state")
+    after_channel_state = after.get("channel_state")
+    before_channel_cursors = before.get("channel_cursors")
+    after_channel_cursors = after.get("channel_cursors")
+    if not (
+        isinstance(before_channel_state, dict)
+        and isinstance(after_channel_state, dict)
+        and before_channel_state.get("capacity")
+        == after_channel_state.get("capacity")
+        and before_channel_state.get("active_channel_id")
+        == after_channel_state.get("active_channel_id")
+        and isinstance(before_channel_state.get("revision"), int)
+        and not isinstance(before_channel_state.get("revision"), bool)
+        and isinstance(after_channel_state.get("revision"), int)
+        and not isinstance(after_channel_state.get("revision"), bool)
+        and after_channel_state["revision"]
+        >= before_channel_state["revision"]
+        and isinstance(before_channel_cursors, dict)
+        and isinstance(after_channel_cursors, dict)
+        and set(before_channel_cursors) == set(after_channel_cursors)
+    ):
+        return False
+    for channel_id, before_cursor in before_channel_cursors.items():
+        after_cursor = after_channel_cursors.get(channel_id)
+        if not (
+            isinstance(before_cursor, dict)
+            and isinstance(after_cursor, dict)
+            and all(
+                isinstance(before_cursor.get(field), int)
+                and not isinstance(before_cursor.get(field), bool)
+                and isinstance(after_cursor.get(field), int)
+                and not isinstance(after_cursor.get(field), bool)
+                and after_cursor[field] >= before_cursor[field]
+                for field in (
+                    "unread",
+                    "newest_message_seq",
+                    "read_through_seq",
+                )
+            )
+        ):
+            return False
+    before_public_state = before.get("public_messages_state")
+    after_public_state = after.get("public_messages_state")
+    if not (
+        isinstance(before_public_state, dict)
+        and isinstance(after_public_state, dict)
+        and before_public_state.get("capacity")
+        == after_public_state.get("capacity")
+        and before_public_state.get("retained_epoch")
+        == after_public_state.get("retained_epoch")
+        and all(
+            isinstance(before_public_state.get(field), int)
+            and not isinstance(before_public_state.get(field), bool)
+            and isinstance(after_public_state.get(field), int)
+            and not isinstance(after_public_state.get(field), bool)
+            and after_public_state[field] >= before_public_state[field]
+            for field in (
+                "count",
+                "retained_store_count",
+                "retained_public_count",
+                "total_written",
+                "dropped_oldest",
+                "content_revision",
+            )
+        )
     ):
         return False
     for field in ("public_messages", "direct_messages"):
@@ -1286,14 +2229,130 @@ def retained_state_preserved(before: dict, after: dict) -> bool:
         }
         if not before_rows.issubset(after_rows):
             return False
+    before_read_state = before.get("read_state")
+    after_read_state = after.get("read_state")
+    if (
+        not isinstance(before_read_state, dict)
+        or not isinstance(after_read_state, dict)
+        or before_read_state.get("cursor_capacity")
+        != after_read_state.get("cursor_capacity")
+        or any(
+            isinstance(before_read_state.get(field), bool)
+            or not isinstance(before_read_state.get(field), int)
+            or isinstance(after_read_state.get(field), bool)
+            or not isinstance(after_read_state.get(field), int)
+            or after_read_state[field] < before_read_state[field]
+            for field in (
+                "last_public_read_seq",
+                "last_dm_read_seq",
+                "mark_read_count",
+            )
+        )
+        or not isinstance(
+            before_read_state.get("persisted_dm_cursors"), dict
+        )
+        or not isinstance(
+            after_read_state.get("persisted_dm_cursors"), dict
+        )
+    ):
+        return False
+    for fingerprint, before_cursor in before_read_state[
+        "persisted_dm_cursors"
+    ].items():
+        after_cursor = after_read_state["persisted_dm_cursors"].get(
+            fingerprint
+        )
+        if (
+            isinstance(before_cursor, bool)
+            or not isinstance(before_cursor, int)
+            or isinstance(after_cursor, bool)
+            or not isinstance(after_cursor, int)
+            or after_cursor < before_cursor
+        ):
+            return False
     before_contacts = contact_retention_projection(before.get("contacts"))
     after_contacts = contact_retention_projection(after.get("contacts"))
-    if before_contacts is None or after_contacts is None:
+    before_contact_state = before.get("contacts_state")
+    after_contact_state = after.get("contacts_state")
+    if (
+        before_contacts is None
+        or after_contacts is None
+        or not isinstance(before_contact_state, dict)
+        or not isinstance(after_contact_state, dict)
+        or before_contact_state.get("capacity")
+        != after_contact_state.get("capacity")
+        or before_contact_state.get("persistence_failures") != 0
+        or after_contact_state.get("persistence_failures") != 0
+        or any(
+            isinstance(before_contact_state.get(field), bool)
+            or not isinstance(before_contact_state.get(field), int)
+            or isinstance(after_contact_state.get(field), bool)
+            or not isinstance(after_contact_state.get(field), int)
+            or after_contact_state[field] < before_contact_state[field]
+            for field in (
+                "next_seq",
+                "total_written",
+                "dropped_oldest",
+            )
+        )
+    ):
         return False
-    for public_key, before_contact in before_contacts.items():
-        if after_contacts.get(public_key) != before_contact:
+    for fingerprint, before_contact in before_contacts.items():
+        after_contact = after_contacts.get(fingerprint)
+        if not isinstance(after_contact, dict):
+            return False
+        if any(
+            before_contact.get(field) != after_contact.get(field)
+            for field in (
+                "fingerprint",
+                "alias",
+                "favorite",
+                "muted",
+                "created_ms",
+            )
+        ):
+            return False
+        before_public_key = before_contact.get("public_key")
+        after_public_key = after_contact.get("public_key")
+        if (
+            not isinstance(before_public_key, str)
+            or not isinstance(after_public_key, str)
+            or (
+                before_public_key
+                and after_public_key != before_public_key
+            )
+        ):
             return False
     return True
+
+
+def retained_reflash_baseline_ready(projection: object) -> bool:
+    """Require a real, non-empty durable DM witness for a closing reflash.
+
+    An empty projection is a valid fresh-install state, but it cannot prove
+    that a firmware replacement retained user data: empty is trivially a
+    subset of empty.  The closing gate therefore requires at least one
+    retained SD-primary DM row and stable store metadata.
+    """
+    if not isinstance(projection, dict):
+        return False
+    state = projection.get("direct_messages_state")
+    rows = projection.get("direct_messages")
+    return (
+        isinstance(state, dict)
+        and isinstance(rows, list)
+        and len(rows) > 0
+        and isinstance(state.get("retained_count"), int)
+        and not isinstance(state.get("retained_count"), bool)
+        and state["retained_count"] > 0
+        and state["retained_count"] == len(rows)
+        and isinstance(state.get("total_written"), int)
+        and not isinstance(state.get("total_written"), bool)
+        and state["total_written"] >= state["retained_count"]
+        and isinstance(state.get("retained_epoch"), int)
+        and not isinstance(state.get("retained_epoch"), bool)
+        and state["retained_epoch"] >= 1
+    )
 
 
 def write_state_snapshot(
@@ -1636,6 +2695,7 @@ def run_core_flash_only(
             )
             if not (
                 before_projection is not None
+                and retained_reflash_baseline_ready(before_projection)
                 and before_build_commit is not None
                 and exact_version_identity(
                     before_version,
@@ -1656,7 +2716,8 @@ def run_core_flash_only(
             ):
                 raise ValueError(
                     "Closing reflash baseline must be a ready compatible Core "
-                    "candidate with the pinned D1L identity"
+                    "candidate with the pinned D1L identity and a non-empty "
+                    "clean SD-primary DM witness"
                 )
             _, before_snapshot_row = write_state_snapshot(
                 path=before_snapshot_path,
@@ -1970,6 +3031,8 @@ def run_core_flash_only(
         bool(
             before_projection is not None
             and after_projection is not None
+            and retained_reflash_baseline_ready(before_projection)
+            and retained_reflash_baseline_ready(after_projection)
             and retained_state_preserved(
                 before_projection, after_projection
             )
@@ -2072,6 +3135,11 @@ def run_core_flash_only(
         "retained_state_before": before_snapshot_row,
         "retained_state_after": after_snapshot_row,
         "retained_state_preserved": retained_preserved,
+        "retained_nonempty_baseline": (
+            retained_reflash_baseline_ready(before_projection)
+            if flash_phase == FLASH_PHASE_RETAINED_REFLASH
+            else None
+        ),
         "erase_flash": False,
         "public_rf_tx": False,
         "dm_rf_tx": False,

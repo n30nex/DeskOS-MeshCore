@@ -26,13 +26,33 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "d1l_read_state_mark_dm_thread_read" in header
     assert "d1l_read_state_dm_entry_is_unread" in header
     assert "d1l_read_state_copy_dm_threads" in header
+    assert "d1l_read_state_copy_persisted_dm_cursors" in header
+    assert "persisted_dm_cursor_count" in header
+    assert "persisted_dm_cursor_capacity" in header
+    assert "accepted_sd_backend_generation" in header
+    assert "sd_primary_reconcile_pending" in header
+    assert "persistence_revision" in header
+    assert "persistence_commit_count" in header
+    assert "persistence_fail_count" in header
+    assert "d1l_read_state_flush" in header
+    assert "d1l_read_state_flush_if_due" in header
 
     assert 'D1L_READ_STATE_KEY "state"' in source
     assert '#include "storage/retained_blob_store.h"' in source
     assert "D1L_RETAINED_BLOB_STORE_READ_STATE" in source
-    assert "d1l_retained_blob_store_read(" in source
-    assert "d1l_retained_blob_store_write(" in source
-    assert "d1l_retained_blob_store_erase(" in source
+    assert "d1l_retained_blob_store_backend_state(" in source
+    assert "d1l_retained_blob_store_read_sd_primary(" in source
+    assert "d1l_retained_blob_store_read_nvs_fallback(" in source
+    assert "d1l_retained_blob_store_write_sd_primary_guarded(" in source
+    assert "d1l_retained_blob_store_erase_sd_primary_guarded(" in source
+    assert "d1l_retained_blob_store_write_nvs_fallback(" in source
+    assert "d1l_retained_blob_store_erase_nvs_fallback(" in source
+    assert "d1l_retained_blob_store_read(" not in source
+    assert "d1l_retained_blob_store_write(" not in source
+    assert "d1l_retained_blob_store_erase(" not in source
+    assert "merge_monotonic" in source
+    assert "sd_backend_generation_matches" in source
+    assert "D1L_READ_STATE_AUTHORITY_EXPLICIT_CLEAR" in source
     assert "nvs_get_blob" not in source
     assert "nvs_set_blob" not in source
     assert "static d1l_message_entry_t s_message_scratch" in source
@@ -46,10 +66,14 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "D1L_READ_STATE_SCHEMA_V1 1U" in source
     assert "dm_cursors[D1L_READ_STATE_DM_THREAD_CAPACITY]" in source
     assert "blob_v1_is_valid" in source
-    assert "thread_seq > s_state.last_dm_read_seq" in source
+    assert "thread_seq > blob->last_dm_read_seq" in source
+    assert "s_store_lock" in source
+    assert "s_persist_io_lock" in source
+    assert "s_projection_lock" in source
+    assert "s_persistence_revision != expected_revision" in source
     assert "return read_seq >= dm_stats.next_seq ? 0U : read_seq;" in source
     assert "stats.newest_public_rx_seq <= stats.last_public_read_seq" in source
-    assert "newest_rx_seq <= dm_thread_read_seq(fingerprint)" in source
+    assert "dm_thread_read_seq_for_blob(&s_state, fingerprint)" in source
     assert "build_dm_thread_stats" in source
     assert source.count(
         "s_dm_scratch, D1L_READ_STATE_VISIBLE_DM_CAPACITY"
@@ -95,7 +119,9 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert '"messages unread"' in console
     assert "messages read <public|dm|dm <fingerprint>|all>" in console
     assert "d1l_read_state_mark_dm_thread_read(thread_fingerprint)" in console
-    assert "d1l_read_state_copy_dm_threads(threads, 8)" in console
+    assert "d1l_read_state_copy_dm_threads(" in console
+    assert "d1l_read_state_copy_persisted_dm_cursors(" in console
+    assert "persisted_dm_cursors" in console
     assert "dm_threads" in console
     assert "dm_thread_count" in console
     assert "messages unread" in SMOKE_COMMANDS

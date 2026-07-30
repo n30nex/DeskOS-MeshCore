@@ -5629,10 +5629,46 @@ static bool contact_store_stats_snapshot_equal(
             right->persistence_coalesced_count &&
         left->persistence_fail_count == right->persistence_fail_count &&
         left->persistence_revision == right->persistence_revision &&
+        left->sd_backend_generation == right->sd_backend_generation &&
         left->persistence_last_error == right->persistence_last_error &&
         left->count == right->count &&
         left->capacity == right->capacity &&
-        left->persistence_dirty == right->persistence_dirty;
+        left->persistence_dirty == right->persistence_dirty &&
+        left->loaded == right->loaded &&
+        left->sd_primary_required == right->sd_primary_required &&
+        left->sd_primary_reconcile_pending ==
+            right->sd_primary_reconcile_pending;
+}
+
+static bool read_state_stats_snapshot_equal(
+    const d1l_read_state_stats_t *left,
+    const d1l_read_state_stats_t *right)
+{
+    return left && right &&
+        left->last_public_read_seq == right->last_public_read_seq &&
+        left->last_dm_read_seq == right->last_dm_read_seq &&
+        left->mark_read_count == right->mark_read_count &&
+        left->persisted_dm_cursor_count ==
+            right->persisted_dm_cursor_count &&
+        left->persisted_dm_cursor_capacity ==
+            right->persisted_dm_cursor_capacity &&
+        left->accepted_sd_backend_generation ==
+            right->accepted_sd_backend_generation &&
+        left->sd_backend_generation == right->sd_backend_generation &&
+        left->persistence_revision == right->persistence_revision &&
+        left->persistence_commit_count ==
+            right->persistence_commit_count &&
+        left->persistence_fail_count == right->persistence_fail_count &&
+        left->persistence_last_error == right->persistence_last_error &&
+        left->loaded == right->loaded &&
+        left->persistence_dirty == right->persistence_dirty &&
+        left->sd_primary_required == right->sd_primary_required &&
+        left->sd_primary_dirty == right->sd_primary_dirty &&
+        left->sd_primary_reconcile_pending ==
+            right->sd_primary_reconcile_pending &&
+        left->nvs_fallback_dirty == right->nvs_fallback_dirty &&
+        left->clear_tombstone_pending ==
+            right->clear_tombstone_pending;
 }
 
 static void print_public_message_entry_json(const d1l_message_entry_t *e,
@@ -5902,20 +5938,67 @@ static void cmd_messages_dm_clear(void)
 
 static void cmd_messages_unread(void)
 {
-    d1l_read_state_stats_t stats = d1l_read_state_stats();
-    static d1l_read_state_dm_thread_t threads[8] EXT_RAM_BSS_ATTR;
-    size_t thread_count = d1l_read_state_copy_dm_threads(threads, 8);
+    const d1l_read_state_stats_t stats_before =
+        d1l_read_state_stats();
+    static d1l_read_state_dm_thread_t
+        threads[D1L_DM_STORE_CAPACITY + 1U] EXT_RAM_BSS_ATTR;
+    static d1l_read_state_persisted_dm_cursor_t
+        persisted_cursors[D1L_READ_STATE_DM_THREAD_CAPACITY]
+            EXT_RAM_BSS_ATTR;
+    const size_t thread_count = d1l_read_state_copy_dm_threads(
+        threads, sizeof(threads) / sizeof(threads[0]));
+    uint32_t cursor_generation = 0U;
+    const size_t persisted_cursor_count =
+        d1l_read_state_copy_persisted_dm_cursors(
+            persisted_cursors,
+            sizeof(persisted_cursors) / sizeof(persisted_cursors[0]),
+            &cursor_generation);
+    const d1l_read_state_stats_t stats = d1l_read_state_stats();
+    if (!read_state_stats_snapshot_equal(&stats_before, &stats) ||
+        thread_count != stats.dm_thread_count ||
+        persisted_cursor_count != stats.persisted_dm_cursor_count ||
+        cursor_generation != stats.accepted_sd_backend_generation) {
+        err_result("messages unread", "RETAINED_SNAPSHOT_CHANGED",
+                   "read cursor state changed during the bounded snapshot; retry");
+        return;
+    }
     ok_begin("messages unread");
-    printf(",\"public_unread\":%lu,\"dm_unread\":%lu,\"muted_dm_unread\":%lu,\"dm_thread_count\":%lu,\"last_public_read_seq\":%lu,\"last_dm_read_seq\":%lu,\"newest_public_rx_seq\":%lu,\"newest_dm_rx_seq\":%lu,\"mark_read_count\":%lu,\"dm_threads\":[",
+    printf(",\"public_unread\":%lu,\"dm_unread\":%lu,"
+           "\"muted_dm_unread\":%lu,\"dm_thread_count\":%lu,"
+           "\"persisted_dm_cursor_count\":%lu,\"cursor_capacity\":%u,"
+           "\"last_public_read_seq\":%lu,"
+           "\"last_dm_read_seq\":%lu,\"newest_public_rx_seq\":%lu,"
+           "\"newest_dm_rx_seq\":%lu,\"mark_read_count\":%lu,"
+           "\"persistence\":{\"loaded\":%s,\"dirty\":%s,"
+           "\"revision\":%llu,\"commits\":%lu,\"failures\":%lu,"
+           "\"last_error\":\"%s\",\"sd\":{\"required\":%s,"
+           "\"accepted_generation\":%lu,\"generation\":%lu,\"dirty\":%s,"
+           "\"reconcile_pending\":%s},\"nvs\":{\"dirty\":%s},"
+           "\"clear_tombstone_pending\":%s},\"dm_threads\":[",
            (unsigned long)stats.public_unread_count,
            (unsigned long)stats.dm_unread_count,
            (unsigned long)stats.muted_dm_unread_count,
            (unsigned long)stats.dm_thread_count,
+           (unsigned long)stats.persisted_dm_cursor_count,
+           (unsigned)D1L_READ_STATE_DM_THREAD_CAPACITY,
            (unsigned long)stats.last_public_read_seq,
            (unsigned long)stats.last_dm_read_seq,
            (unsigned long)stats.newest_public_rx_seq,
            (unsigned long)stats.newest_dm_rx_seq,
-           (unsigned long)stats.mark_read_count);
+           (unsigned long)stats.mark_read_count,
+           bool_json(stats.loaded),
+           bool_json(stats.persistence_dirty),
+           (unsigned long long)stats.persistence_revision,
+           (unsigned long)stats.persistence_commit_count,
+           (unsigned long)stats.persistence_fail_count,
+           esp_err_to_name(stats.persistence_last_error),
+           bool_json(stats.sd_primary_required),
+           (unsigned long)stats.accepted_sd_backend_generation,
+           (unsigned long)stats.sd_backend_generation,
+           bool_json(stats.sd_primary_dirty),
+           bool_json(stats.sd_primary_reconcile_pending),
+           bool_json(stats.nvs_fallback_dirty),
+           bool_json(stats.clear_tombstone_pending));
     for (size_t i = 0; i < thread_count; ++i) {
         const d1l_read_state_dm_thread_t *thread = &threads[i];
         printf("%s{\"fingerprint\":\"%s\",\"last_read_seq\":%lu,\"newest_rx_seq\":%lu,\"unread\":%lu,\"muted\":%s}",
@@ -5925,7 +6008,23 @@ static void cmd_messages_unread(void)
                (unsigned long)thread->unread_count,
                bool_json(thread->muted));
     }
-    printf("],\"persisted\":true,\"note\":\"Unread counters are derived from persisted RX rows; DM cursors are tracked per thread\"}\n");
+    printf("],\"persisted_dm_cursors\":[");
+    for (size_t i = 0; i < persisted_cursor_count; ++i) {
+        const d1l_read_state_persisted_dm_cursor_t *cursor =
+            &persisted_cursors[i];
+        printf("%s{\"fingerprint\":\"%s\",\"last_read_seq\":%lu}",
+               i ? "," : "", cursor->fingerprint,
+               (unsigned long)cursor->last_read_seq);
+    }
+    printf("],\"persisted\":%s,\"note\":\"Unread counters are derived from persisted RX rows; DM cursors are tracked per thread\"}\n",
+           bool_json(stats.loaded &&
+                     !stats.persistence_dirty &&
+                     stats.persistence_last_error == ESP_OK &&
+                     stats.sd_primary_required &&
+                     !stats.sd_primary_dirty &&
+                     !stats.sd_primary_reconcile_pending &&
+                     !stats.nvs_fallback_dirty &&
+                     !stats.clear_tombstone_pending));
 }
 
 static void cmd_messages_read(const char *line)
@@ -6157,12 +6256,26 @@ static void cmd_contacts(void)
         return;
     }
     ok_begin("contacts");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"persistence_revision\":%llu,\"persistence_dirty\":%s,\"persistence_last_error\":\"%s\",\"entries\":[",
+    printf(",\"count\":%u,\"capacity\":%u,\"next_seq\":%lu,"
+           "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+           "\"persistence\":{\"loaded\":%s,\"dirty\":%s,"
+           "\"revision\":%llu,\"commits\":%lu,\"coalesced\":%lu,"
+           "\"failures\":%lu,\"last_error\":\"%s\","
+           "\"sd\":{\"required\":%s,\"generation\":%lu,"
+           "\"reconcile_pending\":%s}},\"entries\":[",
            (unsigned)stats.count, (unsigned)stats.capacity,
+           (unsigned long)stats.next_seq,
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
-           (unsigned long long)stats.persistence_revision,
+           bool_json(stats.loaded),
            bool_json(stats.persistence_dirty),
-           esp_err_to_name(stats.persistence_last_error));
+           (unsigned long long)stats.persistence_revision,
+           (unsigned long)stats.persistence_commit_count,
+           (unsigned long)stats.persistence_coalesced_count,
+           (unsigned long)stats.persistence_fail_count,
+           esp_err_to_name(stats.persistence_last_error),
+           bool_json(stats.sd_primary_required),
+           (unsigned long)stats.sd_backend_generation,
+           bool_json(stats.sd_primary_reconcile_pending));
     for (size_t i = 0; i < copied; ++i) {
         const d1l_contact_entry_t *e = &entries[i];
         printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":",
@@ -6197,7 +6310,10 @@ static void cmd_contacts(void)
                bool_json(e->muted));
     }
     printf("],\"persisted\":%s,\"note\":\"Canonical contacts require a full-key signed advert or validated MeshCore URI import; heard-only placeholders cannot DM\"}\n",
-           bool_json(!stats.persistence_dirty &&
+           bool_json(stats.loaded &&
+                     !stats.persistence_dirty &&
+                     stats.sd_primary_required &&
+                     !stats.sd_primary_reconcile_pending &&
                      stats.persistence_last_error == ESP_OK));
 }
 

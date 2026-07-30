@@ -93,27 +93,240 @@ def write_json(path: Path, value: dict) -> Path:
 def core_flash_retained_results(
     public_key: str,
     *,
+    commit: str = COMMIT,
     identity_extra: dict | None = None,
 ) -> list[dict]:
     identity = d1l_identity_status(public_key)
     identity.update(identity_extra or {})
+    persistence = {
+        "loaded": True,
+        "dirty": False,
+        "revision": 1,
+        "commits": 1,
+        "failures": 0,
+        "stale_snapshots": 0,
+        "sd": {
+            "required": True,
+            "generation": 1,
+            "dirty": False,
+            "reconcile_pending": False,
+            "commits": 1,
+            "failures": 0,
+            "last_error": "ESP_OK",
+        },
+        "nvs": {
+            "dirty": False,
+            "commits": 0,
+            "failures": 0,
+            "last_error": "ESP_OK",
+        },
+    }
+    contacts = {
+        "schema": 1,
+        "cmd": "contacts",
+        "ok": True,
+        "count": 1,
+        "capacity": 16,
+        "next_seq": 8,
+        "total_written": 1,
+        "dropped_oldest": 0,
+        "persistence": {
+            "loaded": True,
+            "dirty": False,
+            "revision": 1,
+            "commits": 1,
+            "coalesced": 0,
+            "failures": 0,
+            "last_error": "ESP_OK",
+            "sd": {
+                "required": True,
+                "generation": 1,
+                "reconcile_pending": False,
+            },
+        },
+        "entries": [
+            {
+                "seq": 7,
+                "fingerprint": CONTACT_PUBLIC_KEY[:16],
+                "public_key": CONTACT_PUBLIC_KEY,
+                "alias": "Test peer",
+                "heard_name": "TestPeer",
+                "type": "repeater",
+                "verification_source": "signed_advert",
+                "verified_at_ms": 1000,
+                "signed_advert_timestamp": 100,
+                "canonical": True,
+                "can_dm": True,
+                "can_admin": True,
+                "favorite": False,
+                "muted": False,
+                "created_ms": 500,
+                "last_heard_ms": 1000,
+                "last_rssi_dbm": -60,
+                "last_snr_tenths": 70,
+                "out_path_known": True,
+                "out_path_len": 1,
+                "out_path_updated_ms": 1000,
+                "path_hash_bytes": 1,
+                "path_hops": "01",
+                "updated_ms": 1000,
+            }
+        ],
+        "persisted": True,
+    }
+    channels = {
+        "schema": 1,
+        "cmd": "channels",
+        "ok": True,
+        "count": 3,
+        "capacity": 8,
+        "revision": 4,
+        "active_channel_id": "0000000000000001",
+        "entries": [
+            {
+                "channel_id": "0000000000000001",
+                "name": "Public",
+                "source": "builtin",
+                "enabled": True,
+                "selected": True,
+                "unread": 0,
+                "newest_message_seq": 1,
+                "read_through_seq": 1,
+            },
+            {
+                "channel_id": "0000000000000002",
+                "name": "#bot",
+                "source": "builtin",
+                "enabled": True,
+                "selected": False,
+                "unread": 0,
+                "newest_message_seq": 0,
+                "read_through_seq": 0,
+            },
+            {
+                "channel_id": "0000000000000003",
+                "name": "#test",
+                "source": "builtin",
+                "enabled": True,
+                "selected": False,
+                "unread": 0,
+                "newest_message_seq": 0,
+                "read_through_seq": 0,
+            },
+        ],
+        "persisted": True,
+        "secret_material_redacted": True,
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+    dm_common = {
+        "schema": 1,
+        "cmd": "messages dm",
+        "ok": True,
+        "count": 1,
+        "capacity": 16,
+        "total_written": 1,
+        "dropped_oldest": 0,
+        "total_matches": 1,
+        "retained_count": 1,
+        "retained_epoch": 1,
+        "content_revision": 1,
+        "volatile_preview_present": False,
+        "volatile_preview_seq": 0,
+        "filtered": False,
+        "page_size": 8,
+        "persisted": True,
+        "persistence": persistence,
+    }
+    public_common = {
+        "schema": 1,
+        "cmd": "messages public",
+        "ok": True,
+        "count": 1,
+        "capacity": 16,
+        "retained_store_count": 1,
+        "retained_public_count": 1,
+        "volatile_preview_present": False,
+        "volatile_preview_seq": 0,
+        "total_written": 1,
+        "dropped_oldest": 0,
+        "history_counters_scope": "shared_all_channels",
+        "filtered": False,
+        "page_size": 8,
+        "total_matches": 1,
+        "retained_epoch": 1,
+        "content_revision": 1,
+        "persistence": persistence,
+        "persisted": True,
+    }
+    read_state = {
+        "schema": 1,
+        "cmd": "messages unread",
+        "ok": True,
+        "public_unread": 0,
+        "dm_unread": 0,
+        "muted_dm_unread": 0,
+        "dm_thread_count": 1,
+        "persisted_dm_cursor_count": 1,
+        "cursor_capacity": 16,
+        "last_public_read_seq": 1,
+        "last_dm_read_seq": 2,
+        "newest_public_rx_seq": 1,
+        "newest_dm_rx_seq": 2,
+        "mark_read_count": 3,
+        "persistence": {
+            "loaded": True,
+            "dirty": False,
+            "revision": 1,
+            "commits": 1,
+            "failures": 0,
+            "last_error": "ESP_OK",
+            "sd": {
+                "required": True,
+                "accepted_generation": 1,
+                "generation": 1,
+                "dirty": False,
+                "reconcile_pending": False,
+            },
+            "nvs": {"dirty": False},
+            "clear_tombstone_pending": False,
+        },
+        "dm_threads": [
+            {
+                "fingerprint": CONTACT_PUBLIC_KEY[:16],
+                "last_read_seq": 2,
+                "newest_rx_seq": 2,
+                "unread": 0,
+                "muted": False,
+            }
+        ],
+        "persisted_dm_cursors": [
+            {
+                "fingerprint": CONTACT_PUBLIC_KEY[:16],
+                "last_read_seq": 2,
+            }
+        ],
+        "persisted": True,
+    }
     return [
+        contacts,
+        channels,
         {
             "schema": 1,
             "cmd": "version",
             "ok": True,
-            "build_commit": COMMIT,
+            "build_commit": commit,
             "idf": "v5.5.4",
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
+            "sd_history_mode": "conditional",
         },
         {
             "schema": 1,
             "cmd": "health",
             "ok": True,
-            "build_commit": COMMIT,
+            "build_commit": commit,
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
+            "sd_history_mode": "conditional",
             "board_ready": True,
             "ui_ready": True,
         },
@@ -122,53 +335,106 @@ def core_flash_retained_results(
             "cmd": "settings get",
             "ok": True,
             "node_name": "DeskOS",
+            "role": "desk_companion",
+            "onboarding_complete": True,
+            "wifi_enabled": True,
+            "ble_companion_enabled": False,
+            "observer_enabled": False,
+            "high_contrast": False,
+            "night_mode": True,
             "path_hash_bytes": 2,
+            "timezone": {
+                "settings_ready": True,
+                "settings_error": "ESP_OK",
+                "schema_version": 1,
+                "offset_minutes": -300,
+            },
+            "map_location": {
+                "set": True,
+                "lat": 43.6532,
+                "lon": -79.3832,
+                "source": "manual",
+            },
+            "map_tiles": {"zoom": 12},
+            "radio": {
+                "frequency_hz": 910525000,
+                "bandwidth_khz": 62.5,
+                "sf": 7,
+                "cr": 5,
+                "tx_power_dbm": 22,
+                "rx_boost": True,
+                "tcxo": "auto",
+            },
         },
         {
             "schema": 1,
-            "cmd": "messages public",
+            "cmd": "wifi profiles",
             "ok": True,
-            "entries": [{"seq": 1, "text": "retained"}],
-        },
-        {
-            "schema": 1,
-            "cmd": "messages dm",
-            "ok": True,
-            "entries": [{"seq": 2, "text": "retained-dm"}],
-        },
-        {
-            "schema": 1,
-            "cmd": "contacts",
-            "ok": True,
-            "entries": [
+            "count": 1,
+            "active_profile": 1,
+            "capacity": 3,
+            "passwords_printed": False,
+            "profiles": [
                 {
-                    "seq": 7,
-                    "fingerprint": CONTACT_PUBLIC_KEY[:16],
-                    "public_key": CONTACT_PUBLIC_KEY,
-                    "alias": "Test peer",
-                    "heard_name": "TestPeer",
-                    "type": "repeater",
-                    "verification_source": "signed_advert",
-                    "verified_at_ms": 1000,
-                    "signed_advert_timestamp": 100,
-                    "canonical": True,
-                    "can_dm": True,
-                    "can_admin": True,
-                    "favorite": False,
-                    "muted": False,
-                    "created_ms": 500,
-                    "last_heard_ms": 1000,
-                    "last_rssi_dbm": -60,
-                    "last_snr_tenths": 70,
-                    "out_path_known": True,
-                    "out_path_len": 1,
-                    "out_path_updated_ms": 1000,
-                    "path_hash_bytes": 1,
-                    "path_hops": "01",
-                    "updated_ms": 1000,
+                    "index": 1,
+                    "active": True,
+                    "saved": True,
+                    "password_saved": True,
+                    "ssid": "TestWifi",
                 }
             ],
         },
+        {
+            **public_common,
+            "capture_command": "messages public",
+            "offset": 0,
+            "page_count": 1,
+            "has_older": False,
+            "next_offset": 0,
+            "entries": [
+                {
+                    "seq": 1,
+                    "text": "retained",
+                    "retained": True,
+                    "volatile_preview": False,
+                }
+            ],
+        },
+        {
+            **public_common,
+            "capture_command": "messages public offset 8",
+            "offset": 8,
+            "page_count": 0,
+            "has_older": False,
+            "next_offset": 8,
+            "entries": [],
+        },
+        {
+            **dm_common,
+            "capture_command": "messages dm",
+            "offset": 0,
+            "page_count": 1,
+            "has_older": False,
+            "next_offset": 0,
+            "entries": [
+                {
+                    "seq": 2,
+                    "text": "retained-dm",
+                    "retained": True,
+                    "volatile_preview": False,
+                }
+            ],
+        },
+        {
+            **dm_common,
+            "capture_command": "messages dm offset 8",
+            "offset": 8,
+            "page_count": 0,
+            "has_older": False,
+            "next_offset": 8,
+            "entries": [],
+        },
+        read_state,
         identity,
     ]
 
@@ -176,6 +442,7 @@ def core_flash_retained_results(
 def core_flash_gate_fixture(
     root: Path,
     *,
+    before_commit: str = COMMIT,
     before_key: str = D1L_PUBLIC_KEY,
     after_key: str = D1L_PUBLIC_KEY,
     before_identity_extra: dict | None = None,
@@ -191,9 +458,10 @@ def core_flash_gate_fixture(
         path=before_path,
         root=root,
         phase="pre_flash",
-        commit=COMMIT,
+        commit=before_commit,
         results=core_flash_retained_results(
             before_key,
+            commit=before_commit,
             identity_extra=before_identity_extra,
         ),
         d1l_target=target,
@@ -218,8 +486,9 @@ def core_flash_gate_fixture(
         "receipt": core_flash._relative_file_row(capture_path, root),
     }
     identity = d1l_identity_status()
-    version = core_flash_retained_results(D1L_PUBLIC_KEY)[0]
-    health = core_flash_retained_results(D1L_PUBLIC_KEY)[1]
+    retained_results = core_flash_retained_results(D1L_PUBLIC_KEY)
+    version = next(row for row in retained_results if row["cmd"] == "version")
+    health = next(row for row in retained_results if row["cmd"] == "health")
     receipt = {
         "schema": 2,
         "kind": "esp32_flash",
@@ -307,6 +576,7 @@ def core_flash_gate_fixture(
         "post_flash_capture_binding_ok": True,
         "post_flash_capture_error": None,
         "expected_firmware_commit": COMMIT,
+        "pre_flash_build_commit": before_commit,
         "device_build_commit": COMMIT,
         "firmware_identity_required": True,
         "firmware_identity_ok": True,
@@ -315,7 +585,7 @@ def core_flash_gate_fixture(
         "github_actions_run": RUN_ID,
         "workflow_run_attempt": RUN_ATTEMPT,
         "release_profile": "core_1_0",
-        "sd_history_mode": "disabled",
+        "sd_history_mode": "conditional",
         "expected_d1l_public_key": D1L_PUBLIC_KEY,
         "pre_flash_identity": identity,
         "post_flash_identity": identity,
@@ -329,8 +599,10 @@ def core_flash_gate_fixture(
             "github_actions_run": RUN_ID,
             "workflow_run_attempt": RUN_ATTEMPT,
             "release_profile": "core_1_0",
-            "sd_history_mode": "disabled",
-            "storage_authority": "nvs",
+            "sd_history_mode": "conditional",
+            "storage_authority": (
+                "sd_primary_live_only_without_sd"
+            ),
             "repository": "n30nex/SIGUI",
             "flash_files_match_actions": True,
         },
@@ -343,6 +615,7 @@ def core_flash_gate_fixture(
         "retained_state_before": before_row,
         "retained_state_after": after_row,
         "retained_state_preserved": True,
+        "retained_nonempty_baseline": True,
         "raw_flash_log": core_flash._relative_file_row(raw_log, root),
         "erase_flash": False,
         "public_rf_tx": False,
@@ -377,11 +650,6 @@ def core_flash_gate_from_fixture(
     )
     monkeypatch.setattr(
         audit,
-        "newest_commit_json",
-        lambda *_args, **_kwargs: receipt_path,
-    )
-    monkeypatch.setattr(
-        audit,
         "validate_capture_receipt",
         lambda **_kwargs: capture,
     )
@@ -393,6 +661,7 @@ def core_flash_gate_from_fixture(
         RUN_ID,
         RUN_ATTEMPT,
         d1l_serial_target.POSIX_D1L_TARGET,
+        receipt_path=receipt_path,
     )
 
 
@@ -416,6 +685,192 @@ def test_core_flash_gate_accepts_one_key_bound_retained_snapshot_pair(
     assert gate.details["retained_identity_binding_ok"] is True
     assert gate.details["post_flash_reset_contract_ok"] is True
     assert gate.details["post_flash_capture_contract_ok"] is True
+
+
+def test_core_flash_gate_binds_legacy_contract_to_same_exact_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(tmp_path)
+    different_receipt = write_json(
+        hardware_dir / f"esp32_flash_newer_{COMMIT}.json",
+        {"kind": "esp32_flash", "commit": COMMIT, "ok": True},
+    )
+    selected: list[Path | None] = []
+
+    def legacy_gate(*_args, receipt_path=None, **_kwargs):
+        selected.append(receipt_path)
+        return audit.CoreGate(
+            "legacy_flash",
+            receipt_path == different_receipt,
+            "legacy flash contract",
+        )
+
+    monkeypatch.setattr(audit, "esp32_flash_receipt_gate", legacy_gate)
+    monkeypatch.setattr(
+        audit,
+        "validate_capture_receipt",
+        lambda **_kwargs: capture,
+    )
+
+    gate = audit.core_flash_receipt_gate(
+        hardware_dir,
+        tmp_path / "artifacts" / "github" / RUN_ID,
+        tmp_path,
+        COMMIT,
+        RUN_ID,
+        RUN_ATTEMPT,
+        d1l_serial_target.POSIX_D1L_TARGET,
+        receipt_path=receipt_path,
+    )
+
+    assert selected == [receipt_path]
+    assert gate.ok is False
+    assert gate.details["core_flash_only_scope_ok"] is True
+    assert gate.details["legacy_receipt_contract_ok"] is False
+    assert gate.details["legacy_receipt_contract_required"] is True
+
+
+def test_core_flash_gate_accepts_compatible_predecessor_before_target_candidate(
+    tmp_path,
+    monkeypatch,
+):
+    predecessor = "b" * 40
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(
+        tmp_path,
+        before_commit=predecessor,
+    )
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is True
+    assert gate.details["pre_flash_build_commit"] == predecessor
+    assert gate.details["retained_before_ok"] is True
+    assert gate.details["retained_after_ok"] is True
+
+
+def test_core_flash_gate_recomputes_and_rejects_vacuous_empty_dm_baseline(
+    tmp_path,
+    monkeypatch,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(tmp_path)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    before_path = tmp_path / receipt["retained_state_before"]["path"]
+    before = json.loads(before_path.read_text(encoding="ascii"))
+    for result in before["results"]:
+        if result.get("cmd") == "messages dm":
+            result.update(
+                {
+                    "count": 0,
+                    "total_written": 0,
+                    "total_matches": 0,
+                    "retained_count": 0,
+                    "page_count": 0,
+                    "entries": [],
+                }
+            )
+    projection = core_flash.retained_state_projection(before["results"])
+    assert projection is not None
+    assert core_flash.retained_reflash_baseline_ready(projection) is False
+    before["projection"] = projection
+    before["projection_sha256"] = core_flash.projection_sha256(projection)
+    before_path.write_text(
+        json.dumps(before, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    receipt["retained_state_before"] = core_flash._relative_file_row(
+        before_path, tmp_path
+    )
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is False
+    assert gate.details["retained_before_ok"] is True
+    assert gate.details["non_erasing_retained_state_ok"] is False
+
+
+def test_core_flash_gate_recomputes_and_rejects_partial_dm_page(
+    tmp_path,
+    monkeypatch,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(tmp_path)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    before_path = tmp_path / receipt["retained_state_before"]["path"]
+    before = json.loads(before_path.read_text(encoding="ascii"))
+    for result in before["results"]:
+        if result.get("cmd") == "messages dm":
+            result.update(
+                {
+                    "count": 2,
+                    "total_written": 2,
+                    "total_matches": 2,
+                    "retained_count": 2,
+                }
+            )
+    before_path.write_text(
+        json.dumps(before, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    receipt["retained_state_before"] = core_flash._relative_file_row(
+        before_path, tmp_path
+    )
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is False
+    assert gate.details["retained_before_ok"] is False
+    assert gate.details["non_erasing_retained_state_ok"] is False
+
+
+def test_core_flash_gate_requires_explicit_nonempty_baseline_receipt_field(
+    tmp_path,
+    monkeypatch,
+):
+    hardware_dir, receipt_path, capture = core_flash_gate_fixture(tmp_path)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    del receipt["retained_nonempty_baseline"]
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+
+    gate = core_flash_gate_from_fixture(
+        monkeypatch,
+        tmp_path,
+        hardware_dir,
+        receipt_path,
+        capture,
+    )
+
+    assert gate.ok is False
+    assert gate.details["non_erasing_retained_state_ok"] is True
+    assert gate.details["core_flash_only_scope_ok"] is False
 
 
 @pytest.mark.parametrize(
@@ -3425,7 +3880,7 @@ def audit_args(tmp_path: Path) -> argparse.Namespace:
         github_run_dir=str(tmp_path / "github"),
         commit=COMMIT,
         d1l_port="COM12",
-        sd_history_mode="disabled",
+        sd_history_mode="conditional",
         hardware_dir=str(tmp_path / "hardware"),
         soak_dir=str(tmp_path / "soak"),
         actions_run_receipt=None,
@@ -3441,6 +3896,8 @@ def audit_args(tmp_path: Path) -> argparse.Namespace:
         sd_receipt=None,
         install_review=None,
         defect_receipt=None,
+        bounded_physical_receipt=None,
+        bounded_physical_evidence=None,
         out=None,
     )
 
@@ -3682,6 +4139,7 @@ def patch_all_gates(monkeypatch, tmp_path: Path, *, one_failure=False):
         "core_immutable_source_inputs_gate",
         "core_flash_receipt_gate",
         "physical_target_identity_gate",
+        "bounded_physical_acceptance_gate",
     ):
         monkeypatch.setattr(
             audit,
@@ -3725,6 +4183,182 @@ def patch_all_gates(monkeypatch, tmp_path: Path, *, one_failure=False):
         )
 
 
+def bounded_physical_report() -> dict:
+    checks = {
+        "package_checksum_tree_and_manifest": True,
+        "package_core_1_0_conditional": True,
+        "package_sd_primary_truth_and_preparation": True,
+        "package_exact_commit_run_attempt": True,
+        "actions_successful_main_push_exact_eight_artifacts_and_package": True,
+        "package_stable_pi_install_contract": True,
+        "package_production_only_public_surface": True,
+        "package_exact_app_artifact": True,
+        "one_bounded_physical_receipt": True,
+        "physical_evidence_sidecar_machine_sources": True,
+        "receipt_exact_package_binding": True,
+        "stable_pi_path_and_vid_pid": True,
+        "non_erasing_exact_app_flash": True,
+        "formats_sd_false_and_settings_preserved": True,
+        "bounded_gate_without_soak_or_duration_requirement": True,
+        "boot_advert_and_one_public_send": True,
+        "dm_ack": True,
+        "path_and_ping": True,
+        "repeater_login_and_query": True,
+        "authorized_map_download_and_cache_revisit": True,
+    }
+    return {
+        "schema": audit.rc1_release_audit.AUDIT_SCHEMA,
+        "kind": "d1l_rc1_release_gate_audit",
+        "ready_for_public_release": True,
+        "identity": {
+            "firmware_commit": COMMIT,
+            "actions_run": RUN_ID,
+            "actions_run_attempt": RUN_ATTEMPT,
+        },
+        "checks": checks,
+        "failures": [],
+    }
+
+
+def bounded_flash_binding_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    flash_receipt = write_json(
+        tmp_path / "esp32_flash_exact.json",
+        {"schema": 2, "kind": "esp32_flash", "commit": COMMIT},
+    )
+    source_dir = tmp_path / "physical.sources"
+    source_dir.mkdir()
+    bundled_flash = write_json(
+        source_dir / "flash.json",
+        json.loads(flash_receipt.read_text(encoding="utf-8")),
+    )
+    physical_evidence = write_json(
+        tmp_path / "physical.evidence.json",
+        {
+            "sources": {
+                "flash": {
+                    "path": "physical.sources/flash.json",
+                    "sha256": audit.sha256_file(bundled_flash),
+                    "kind": "esp32_flash",
+                }
+            }
+        },
+    )
+    return flash_receipt, physical_evidence
+
+
+def test_bounded_physical_acceptance_gate_requires_complete_exact_report(
+    tmp_path,
+    monkeypatch,
+):
+    report = bounded_physical_report()
+    monkeypatch.setattr(
+        audit.rc1_release_audit,
+        "audit",
+        lambda *_args, **_kwargs: report,
+    )
+    flash_receipt, physical_evidence = bounded_flash_binding_fixture(tmp_path)
+
+    gate = audit.bounded_physical_acceptance_gate(
+        package=tmp_path / "package",
+        actions_receipt=tmp_path / "actions.json",
+        flash_receipt=flash_receipt,
+        physical_receipt=tmp_path / "physical.json",
+        physical_evidence=physical_evidence,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert gate.ok is True
+    assert gate.details["failures"] == []
+    assert gate.details["flash_source_exact_receipt_binding_ok"] is True
+
+
+def test_bounded_physical_acceptance_gate_rejects_different_flash_source(
+    tmp_path,
+    monkeypatch,
+):
+    report = bounded_physical_report()
+    monkeypatch.setattr(
+        audit.rc1_release_audit,
+        "audit",
+        lambda *_args, **_kwargs: report,
+    )
+    flash_receipt, physical_evidence = bounded_flash_binding_fixture(tmp_path)
+    evidence = json.loads(physical_evidence.read_text(encoding="utf-8"))
+    different_flash = write_json(
+        tmp_path / "physical.sources" / "different_flash.json",
+        {"schema": 2, "kind": "esp32_flash", "commit": COMMIT, "old": True},
+    )
+    evidence["sources"]["flash"]["path"] = (
+        "physical.sources/different_flash.json"
+    )
+    evidence["sources"]["flash"]["sha256"] = audit.sha256_file(
+        different_flash
+    )
+    write_json(physical_evidence, evidence)
+
+    gate = audit.bounded_physical_acceptance_gate(
+        package=tmp_path / "package",
+        actions_receipt=tmp_path / "actions.json",
+        flash_receipt=flash_receipt,
+        physical_receipt=tmp_path / "physical.json",
+        physical_evidence=physical_evidence,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert gate.details["flash_source_exact_receipt_binding_ok"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("bounded_gate_without_soak_or_duration_requirement", False),
+        ("authorized_map_download_and_cache_revisit", False),
+        ("boot_advert_and_one_public_send", False),
+        ("dm_ack", False),
+        ("path_and_ping", False),
+        ("repeater_login_and_query", False),
+    ],
+)
+def test_bounded_physical_acceptance_gate_fails_closed_for_required_outcome(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+):
+    report = bounded_physical_report()
+    report["checks"][field] = value
+    report["ready_for_public_release"] = False
+    report["failures"] = [field]
+    monkeypatch.setattr(
+        audit.rc1_release_audit,
+        "audit",
+        lambda *_args, **_kwargs: report,
+    )
+    flash_receipt, physical_evidence = bounded_flash_binding_fixture(tmp_path)
+
+    gate = audit.bounded_physical_acceptance_gate(
+        package=tmp_path / "package",
+        actions_receipt=tmp_path / "actions.json",
+        flash_receipt=flash_receipt,
+        physical_receipt=tmp_path / "physical.json",
+        physical_evidence=physical_evidence,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert gate.ok is False
+    assert gate.details["failures"] == [field]
+
+
 def test_core_audit_ready_field_is_independent_and_full_remains_false(
     tmp_path, monkeypatch
 ):
@@ -3739,6 +4373,17 @@ def test_core_audit_ready_field_is_independent_and_full_remains_false(
         report["github_actions_run_attempt"] == report["workflow_run_attempt"]
     )
     assert "ready_for_public_release" not in report
+    assert {
+        row["id"] for row in report["not_required_for_closing"]
+    } == {
+        "core_ui_corruption",
+        "core_scroll_probe",
+        "manual_display_touch_core_review",
+        "core_reboot_persistence",
+        "sd_history_decision",
+        "core_90_minute_soak",
+        "core_install_recovery_review",
+    }
 
 
 def test_core_audit_preserves_exact_posix_target(tmp_path, monkeypatch):
@@ -3762,18 +4407,18 @@ def test_core_audit_fails_closed_when_one_core_gate_fails(
     assert report["p0_failed_count"] == 1
 
 
-def test_core_audit_fails_closed_when_protocol_migration_gate_fails(
+def test_core_audit_fails_closed_when_bounded_physical_gate_fails(
     tmp_path,
     monkeypatch,
 ):
     patch_all_gates(monkeypatch, tmp_path)
     monkeypatch.setattr(
         audit,
-        "protocol_migration_gate",
+        "bounded_physical_acceptance_gate",
         lambda *_args, **_kwargs: audit.CoreGate(
-            "protocol_timestamp_migration",
+            "bounded_flash_rf_protocol_map",
             False,
-            "protocol migration",
+            "bounded acceptance",
         ),
     )
 
@@ -3782,9 +4427,38 @@ def test_core_audit_fails_closed_when_protocol_migration_gate_fails(
     assert report["core_release_ready"] is False
     assert report["p0_failed_count"] == 1
     assert any(
-        gate["id"] == "protocol_timestamp_migration" and not gate["ok"]
+        gate["id"] == "bounded_flash_rf_protocol_map" and not gate["ok"]
         for gate in report["gates"]
     )
+
+
+def test_core_audit_does_not_invoke_not_required_legacy_gates(
+    tmp_path,
+    monkeypatch,
+):
+    patch_all_gates(monkeypatch, tmp_path)
+
+    def obsolete_gate_called(*_args, **_kwargs):
+        pytest.fail("not-required legacy closing gate was invoked")
+
+    for name in (
+        "physical_target_identity_gate",
+        "core_smoke_gate",
+        "core_ui_gate",
+        "core_scroll_gate",
+        "manual_review_gate",
+        "reboot_persistence_gate",
+        "protocol_migration_gate",
+        "rf_gate",
+        "sd_decision_gate",
+        "soak_gate",
+        "install_review_gate",
+    ):
+        monkeypatch.setattr(audit, name, obsolete_gate_called)
+
+    report = audit.build_audit(audit_args(tmp_path))
+
+    assert report["core_release_ready"] is True
 
 
 def test_core_audit_fails_closed_for_red_non_p0_gate(tmp_path, monkeypatch):
@@ -3803,10 +4477,10 @@ def test_core_audit_fails_closed_for_red_non_p0_gate(tmp_path, monkeypatch):
     assert report["p0_failed_count"] == 0
 
 
-def test_core_audit_rejects_conditional_final_sd_mode(tmp_path):
+def test_core_audit_rejects_retired_disabled_final_sd_mode(tmp_path):
     args = audit_args(tmp_path)
-    args.sd_history_mode = "conditional"
-    with pytest.raises(ValueError, match="disabled with NVS"):
+    args.sd_history_mode = "disabled"
+    with pytest.raises(ValueError, match="conditional SD-primary"):
         audit.build_audit(args)
 
 

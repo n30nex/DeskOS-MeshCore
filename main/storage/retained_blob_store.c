@@ -38,6 +38,8 @@
 #define D1L_RETAINED_SD_WRITE_TIMEOUT_MS 750U
 #define D1L_RETAINED_SD_READ_TIMEOUT_MS 750U
 #define D1L_RETAINED_NVS_MIGRATION_MAX_BYTES 8192U
+#define D1L_RETAINED_SD_BLOB_SUFFIX ".bin"
+#define D1L_RETAINED_SD_BLOB_BACKUP_SUFFIX ".bin.bak"
 
 typedef struct {
     d1l_retained_blob_store_id_t id;
@@ -119,7 +121,12 @@ static const d1l_retained_blob_store_config_t s_store_configs[] = {
         .nvs_namespace = D1L_RETAINED_READ_STATE_NAMESPACE,
         .sd_directory = D1L_RETAINED_READ_STATE_SD_DIR,
         .legacy_retired_key = "sd_read_v1",
-        .nvs_fallback_allowed = false,
+        /*
+         * Read cursors must survive a boot where the SD backend is not yet
+         * available.  Keeping the fallback enabled also makes an explicit
+         * clear durable until the next SD-generation reconciliation.
+         */
+        .nvs_fallback_allowed = true,
     },
 };
 
@@ -165,6 +172,14 @@ static esp_err_t sd_write_blob_with_lineage(
 static esp_err_t sd_erase_blob_with_lineage(
     const d1l_retained_blob_store_config_t *config, const char *key,
     uint32_t expected_generation);
+static esp_err_t sd_read_file_path(
+    const d1l_retained_blob_store_config_t *config,
+    const char *path,
+    uint32_t expected_generation,
+    void *dst,
+    size_t *len_inout,
+    bool *out_control_abort,
+    bool *out_file_invalid);
 static esp_err_t sd_media_lineage_ready(
     const d1l_retained_blob_store_config_t *config,
     uint32_t expected_backend_generation, bool *out_ready,
@@ -428,44 +443,50 @@ static esp_err_t sd_media_lineage_ready(
     }
 
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char backup_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     if (!build_sd_path(config, D1L_RETAINED_SD_LINEAGE_MARKER_KEY,
-                       ".bin", path, sizeof(path))) {
+                       D1L_RETAINED_SD_BLOB_SUFFIX,
+                       path, sizeof(path)) ||
+        !build_sd_path(config, D1L_RETAINED_SD_LINEAGE_MARKER_KEY,
+                       D1L_RETAINED_SD_BLOB_BACKUP_SUFFIX,
+                       backup_path, sizeof(backup_path))) {
         return ESP_ERR_INVALID_SIZE;
     }
-    d1l_rp2040_file_result_t stat = {0};
-    ret = d1l_rp2040_bridge_file_stat(
-        path, &stat, D1L_RETAINED_SD_READ_TIMEOUT_MS);
-    if (!store_backend_generation_matches(config,
-                                          expected_backend_generation)) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (ret == ESP_ERR_NOT_FOUND ||
-        (ret == ESP_OK && (!stat.exists || stat.is_directory ||
-                           stat.size != sizeof(
-                               d1l_factory_reset_sd_media_marker_t)))) {
-        return ESP_OK;
-    }
-    if (ret != ESP_OK) {
-        return ret;
-    }
+
     d1l_factory_reset_sd_media_marker_t marker = {0};
-    d1l_rp2040_file_result_t read_result = {0};
-    ret = d1l_rp2040_bridge_file_read(
-        path, 0U, (uint8_t *)&marker, sizeof(marker), &read_result,
-        D1L_RETAINED_SD_READ_TIMEOUT_MS);
-    if (!store_backend_generation_matches(config,
-                                          expected_backend_generation)) {
-        return ESP_ERR_INVALID_STATE;
-    }
+    size_t marker_len = sizeof(marker);
+    bool control_abort = false;
+    bool file_invalid = false;
+    ret = sd_read_file_path(
+        config, path, expected_backend_generation, &marker, &marker_len,
+        &control_abort, &file_invalid);
     if (ret == ESP_ERR_NOT_FOUND) {
+        /*
+         * RP2040 replace-rename first moves the old final to `<final>.bak`.
+         * A reset between that move and the temp-to-final rename can therefore
+         * leave the only valid lineage marker at the backup path.  Recovery is
+         * read-only and remains fenced by the exact onboard reset generation.
+         */
+        memset(&marker, 0, sizeof(marker));
+        marker_len = sizeof(marker);
+        control_abort = false;
+        file_invalid = false;
+        ret = sd_read_file_path(
+            config, backup_path, expected_backend_generation,
+            &marker, &marker_len, &control_abort, &file_invalid);
+    }
+    if (control_abort) {
+        return ret;
+    }
+    if (ret == ESP_ERR_NOT_FOUND || file_invalid) {
         return ESP_OK;
     }
     if (ret != ESP_OK) {
         return ret;
     }
-    const bool marker_matches = read_result.length == sizeof(marker) &&
+    const bool marker_matches = marker_len == sizeof(marker) &&
         d1l_factory_reset_sd_media_marker_matches(
-            &marker, read_result.length,
+            &marker, marker_len,
             (d1l_factory_reset_sd_store_t)config->id,
             *out_reset_generation);
     *out_marker_matches = marker_matches;
@@ -1425,29 +1446,102 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
         return ESP_ERR_NOT_FOUND;
     }
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
-    if (!build_sd_path(config, key, ".bin", path, sizeof(path))) {
+    if (!build_sd_path(config, key, D1L_RETAINED_SD_BLOB_SUFFIX,
+                       path, sizeof(path))) {
         return ESP_ERR_INVALID_ARG;
     }
 
+    const size_t requested_len = *len_inout;
+    bool primary_control_abort = false;
+    bool primary_file_invalid = false;
+    const esp_err_t primary_ret = sd_read_file_path(
+        config, path, backend.generation, dst, len_inout,
+        &primary_control_abort, &primary_file_invalid);
+    if (primary_ret == ESP_OK || primary_control_abort) {
+        return primary_ret;
+    }
+    if (primary_ret != ESP_ERR_NOT_FOUND) {
+        /*
+         * A present primary remains authoritative even when it is unreadable
+         * or too new for this decoder.  A stale backup can coexist after an
+         * earlier cleanup failure, so using it for arbitrary I/O/schema
+         * errors could silently roll retained user data backwards.  The
+         * replace transaction makes the backup authoritative only while the
+         * primary path is absent.
+         */
+        return primary_ret;
+    }
+
+    const size_t primary_len = *len_inout;
+    char backup_path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    if (!build_sd_path(config, key, D1L_RETAINED_SD_BLOB_BACKUP_SUFFIX,
+                       backup_path, sizeof(backup_path))) {
+        return primary_ret;
+    }
+
+    *len_inout = requested_len;
+    bool backup_control_abort = false;
+    bool backup_file_invalid = false;
+    const esp_err_t backup_ret = sd_read_file_path(
+        config, backup_path, backend.generation, dst, len_inout,
+        &backup_control_abort, &backup_file_invalid);
+    /* Store-specific decoders validate schema, bounds, and content invariants
+     * before accepting bytes returned from either path. */
+    if (backup_ret == ESP_OK || backup_control_abort) {
+        return backup_ret;
+    }
+
+    /* The backup is a read-only recovery source. If it is also unavailable or
+     * unreadable, retain the primary path's error and size semantics. */
+    *len_inout = primary_len;
+    return primary_ret;
+}
+
+static esp_err_t sd_read_file_path(
+    const d1l_retained_blob_store_config_t *config,
+    const char *path,
+    uint32_t expected_generation,
+    void *dst,
+    size_t *len_inout,
+    bool *out_control_abort,
+    bool *out_file_invalid)
+{
+    if (!config || !path || !dst || !len_inout || !out_control_abort ||
+        !out_file_invalid) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_control_abort = false;
+    *out_file_invalid = false;
+
     if (d1l_route_store_persistence_should_yield()) {
+        *out_control_abort = true;
         return ESP_ERR_NOT_FINISHED;
     }
+    if (!store_backend_generation_matches(config, expected_generation)) {
+        *out_control_abort = true;
+        return ESP_ERR_INVALID_STATE;
+    }
     d1l_rp2040_file_result_t stat = {0};
-    esp_err_t ret = d1l_rp2040_bridge_file_stat(path, &stat, D1L_RETAINED_SD_READ_TIMEOUT_MS);
-    if (!store_backend_generation_matches(config, backend.generation)) {
+    esp_err_t ret = d1l_rp2040_bridge_file_stat(
+        path, &stat, D1L_RETAINED_SD_READ_TIMEOUT_MS);
+    if (!store_backend_generation_matches(config, expected_generation)) {
+        *out_control_abort = true;
         return ESP_ERR_INVALID_STATE;
     }
     if (ret != ESP_OK) {
+        *out_control_abort = ret == ESP_ERR_NOT_FINISHED;
         return ret;
     }
     if (!stat.exists) {
         return ESP_ERR_NOT_FOUND;
     }
     if (stat.is_directory) {
+        *out_file_invalid = true;
         return ESP_ERR_INVALID_STATE;
     }
     if (stat.size > *len_inout) {
         *len_inout = stat.size;
+        *out_file_invalid = true;
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -1458,9 +1552,11 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
          * Foreground owners never see this cancellation because the
          * predicate is scoped to the background retained worker task. */
         if (d1l_route_store_persistence_should_yield()) {
+            *out_control_abort = true;
             return ESP_ERR_NOT_FINISHED;
         }
-        if (!store_backend_generation_matches(config, backend.generation)) {
+        if (!store_backend_generation_matches(config, expected_generation)) {
+            *out_control_abort = true;
             return ESP_ERR_INVALID_STATE;
         }
         const size_t remaining = stat.size - offset;
@@ -1470,17 +1566,21 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
         ret = d1l_rp2040_bridge_file_read(path, (uint32_t)offset,
                                           out + offset, chunk, &read_result,
                                           D1L_RETAINED_SD_READ_TIMEOUT_MS);
-        if (!store_backend_generation_matches(config, backend.generation)) {
+        if (!store_backend_generation_matches(config, expected_generation)) {
+            *out_control_abort = true;
             return ESP_ERR_INVALID_STATE;
         }
         if (ret != ESP_OK) {
+            *out_control_abort = ret == ESP_ERR_NOT_FINISHED;
             return ret;
         }
         if (read_result.length == 0 && !read_result.eof) {
+            *out_file_invalid = true;
             return ESP_FAIL;
         }
         offset += read_result.length;
         if (read_result.eof && offset < stat.size) {
+            *out_file_invalid = true;
             return ESP_FAIL;
         }
     }
@@ -1574,30 +1674,58 @@ static esp_err_t sd_erase_blob_for_generation(
 {
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char temp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char backup_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     if (!build_sd_path(config, key, ".bin", path, sizeof(path)) ||
-        !build_sd_path(config, key, ".tmp", temp_path, sizeof(temp_path))) {
+        !build_sd_path(config, key, ".tmp", temp_path, sizeof(temp_path)) ||
+        !build_sd_path(config, key, D1L_RETAINED_SD_BLOB_BACKUP_SUFFIX,
+                       backup_path, sizeof(backup_path))) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!store_backend_generation_matches(config, expected_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    d1l_rp2040_file_result_t result = {0};
-    esp_err_t ret = d1l_rp2040_bridge_file_delete(path, &result,
-                                                  D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
+    /* The replace-rename protocol may leave the previous committed value in
+     * .bin.bak. Remove that recovery candidate before the authoritative
+     * primary. If erase is interrupted at any earlier point, .bin remains
+     * authoritative and a later read cannot resurrect the backup. */
+    d1l_rp2040_file_result_t backup_result = {0};
+    esp_err_t ret = d1l_rp2040_bridge_file_delete(
+        backup_path, &backup_result, D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
+    if (ret == ESP_ERR_NOT_FOUND) {
+        ret = ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (!store_backend_generation_matches(config, expected_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_rp2040_file_result_t temp_result = {0};
+    ret = d1l_rp2040_bridge_file_delete(
+        temp_path, &temp_result, D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
+    if (ret == ESP_ERR_NOT_FOUND) {
+        ret = ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (!store_backend_generation_matches(config, expected_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Primary deletion is the final commit point of an explicit erase. */
+    d1l_rp2040_file_result_t primary_result = {0};
+    ret = d1l_rp2040_bridge_file_delete(
+        path, &primary_result, D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
     if (ret == ESP_ERR_NOT_FOUND) {
         ret = ESP_OK;
     }
     if (!store_backend_generation_matches(config, expected_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
-    d1l_rp2040_file_result_t temp_result = {0};
-    esp_err_t temp_ret = d1l_rp2040_bridge_file_delete(temp_path, &temp_result,
-                                                       D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
-    if (temp_ret == ESP_ERR_NOT_FOUND) {
-        temp_ret = ESP_OK;
-    }
-    return ret == ESP_OK ? temp_ret : ret;
+    return ret;
 }
 
 static bool sd_lineage_key_allowed(

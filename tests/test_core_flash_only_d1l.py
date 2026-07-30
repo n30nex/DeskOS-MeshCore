@@ -154,6 +154,166 @@ def retained_contact(**overrides) -> dict:
     return row
 
 
+def clean_sd_persistence() -> dict:
+    return {
+        "loaded": True,
+        "dirty": False,
+        "revision": 1,
+        "commits": 1,
+        "failures": 0,
+        "stale_snapshots": 0,
+        "sd": {
+            "required": True,
+            "generation": 27,
+            "dirty": False,
+            "reconcile_pending": False,
+            "commits": 1,
+            "failures": 0,
+            "last_error": "ESP_OK",
+        },
+        "nvs": {
+            "dirty": False,
+            "commits": 0,
+            "failures": 0,
+            "last_error": "ESP_OK",
+        },
+    }
+
+
+def public_page(offset: int, entries: list[dict]) -> dict:
+    return {
+        "schema": 1,
+        "cmd": "messages public",
+        "capture_command": (
+            "messages public"
+            if offset == 0
+            else f"messages public offset {offset}"
+        ),
+        "ok": True,
+        "count": 1,
+        "capacity": 16,
+        "retained_store_count": 1,
+        "retained_public_count": 1,
+        "volatile_preview_present": False,
+        "volatile_preview_seq": 0,
+        "total_written": 1,
+        "dropped_oldest": 0,
+        "history_counters_scope": "shared_all_channels",
+        "filtered": False,
+        "offset": offset,
+        "page_size": 8,
+        "page_count": len(entries),
+        "total_matches": 1,
+        "has_older": False,
+        "next_offset": offset,
+        "retained_epoch": 1,
+        "content_revision": 1,
+        "persistence": clean_sd_persistence(),
+        "entries": entries,
+        "persisted": True,
+    }
+
+
+def retained_channels() -> dict:
+    return {
+        "schema": 1,
+        "cmd": "channels",
+        "ok": True,
+        "count": 3,
+        "capacity": 8,
+        "revision": 4,
+        "active_channel_id": "0000000000000001",
+        "entries": [
+            {
+                "channel_id": "0000000000000001",
+                "name": "Public",
+                "source": "builtin",
+                "enabled": True,
+                "selected": True,
+                "unread": 0,
+                "newest_message_seq": 1,
+                "read_through_seq": 1,
+            },
+            {
+                "channel_id": "0000000000000002",
+                "name": "#bot",
+                "source": "builtin",
+                "enabled": True,
+                "selected": False,
+                "unread": 0,
+                "newest_message_seq": 0,
+                "read_through_seq": 0,
+            },
+            {
+                "channel_id": "0000000000000003",
+                "name": "#test",
+                "source": "builtin",
+                "enabled": True,
+                "selected": False,
+                "unread": 0,
+                "newest_message_seq": 0,
+                "read_through_seq": 0,
+            },
+        ],
+        "persisted": True,
+        "secret_material_redacted": True,
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+
+
+def retained_read_state() -> dict:
+    return {
+        "schema": 1,
+        "cmd": "messages unread",
+        "ok": True,
+        "public_unread": 0,
+        "dm_unread": 0,
+        "muted_dm_unread": 0,
+        "dm_thread_count": 1,
+        "persisted_dm_cursor_count": 1,
+        "cursor_capacity": 16,
+        "last_public_read_seq": 1,
+        "last_dm_read_seq": 2,
+        "newest_public_rx_seq": 1,
+        "newest_dm_rx_seq": 2,
+        "mark_read_count": 3,
+        "persistence": {
+            "loaded": True,
+            "dirty": False,
+            "revision": 1,
+            "commits": 1,
+            "failures": 0,
+            "last_error": "ESP_OK",
+            "sd": {
+                "required": True,
+                "accepted_generation": 27,
+                "generation": 27,
+                "dirty": False,
+                "reconcile_pending": False,
+            },
+            "nvs": {"dirty": False},
+            "clear_tombstone_pending": False,
+        },
+        "dm_threads": [
+            {
+                "fingerprint": CONTACT_PUBLIC_KEY[:16],
+                "last_read_seq": 2,
+                "newest_rx_seq": 2,
+                "unread": 0,
+                "muted": False,
+            }
+        ],
+        "persisted_dm_cursors": [
+            {
+                "fingerprint": CONTACT_PUBLIC_KEY[:16],
+                "last_read_seq": 2,
+            }
+        ],
+        "persisted": True,
+    }
+
+
 def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
     return [
         {
@@ -180,26 +340,196 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
             "cmd": "settings get",
             "ok": True,
             "node_name": name,
+            "role": "desk_companion",
+            "onboarding_complete": True,
+            "wifi_enabled": True,
+            "ble_companion_enabled": False,
+            "observer_enabled": False,
+            "high_contrast": False,
+            "night_mode": True,
             "path_hash_bytes": 2,
+            "timezone": {
+                "settings_ready": True,
+                "settings_error": "ESP_OK",
+                "schema_version": 1,
+                "offset_minutes": -300,
+            },
+            "map_location": {
+                "set": True,
+                "lat": 43.6532,
+                "lon": -79.3832,
+                "source": "manual",
+            },
+            "map_tiles": {"zoom": 12},
+            "radio": {
+                "frequency_hz": 910525000,
+                "bandwidth_khz": 62.5,
+                "sf": 7,
+                "cr": 5,
+                "tx_power_dbm": 22,
+                "rx_boost": True,
+                "tcxo": "auto",
+            },
         },
         {
             "schema": 1,
-            "cmd": "messages public",
+            "cmd": "wifi profiles",
             "ok": True,
-            "entries": [{"seq": 1, "text": "retained"}],
+            "count": 1,
+            "active_profile": 1,
+            "capacity": 3,
+            "passwords_printed": False,
+            "profiles": [
+                {
+                    "index": 1,
+                    "active": True,
+                    "saved": True,
+                    "password_saved": True,
+                    "ssid": "TestWifi",
+                }
+            ],
+        },
+        public_page(
+            0,
+            [
+                {
+                    "seq": 1,
+                    "text": "retained",
+                    "retained": True,
+                    "volatile_preview": False,
+                }
+            ],
+        ),
+        public_page(8, []),
+        {
+            "schema": 1,
+            "cmd": "messages dm",
+            "capture_command": "messages dm",
+            "ok": True,
+            "count": 1,
+            "capacity": 16,
+            "total_written": 1,
+            "dropped_oldest": 0,
+            "volatile_preview_present": False,
+            "volatile_preview_seq": 0,
+            "filtered": False,
+            "total_matches": 1,
+            "retained_count": 1,
+            "retained_epoch": 1,
+            "content_revision": 1,
+            "offset": 0,
+            "page_count": 1,
+            "page_size": 8,
+            "next_offset": 0,
+            "has_older": False,
+            "persisted": True,
+            "persistence": {
+                "loaded": True,
+                "dirty": False,
+                "revision": 1,
+                "commits": 1,
+                "failures": 0,
+                "stale_snapshots": 0,
+                "sd": {
+                    "required": True,
+                    "generation": 27,
+                    "dirty": False,
+                    "reconcile_pending": False,
+                    "commits": 1,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+                "nvs": {
+                    "dirty": False,
+                    "commits": 0,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+            },
+            "entries": [
+                {
+                    "seq": 2,
+                    "text": "retained-dm",
+                    "retained": True,
+                    "volatile_preview": False,
+                }
+            ],
         },
         {
             "schema": 1,
             "cmd": "messages dm",
+            "capture_command": "messages dm offset 8",
             "ok": True,
-            "entries": [{"seq": 2, "text": "retained-dm"}],
+            "count": 1,
+            "capacity": 16,
+            "total_written": 1,
+            "dropped_oldest": 0,
+            "volatile_preview_present": False,
+            "volatile_preview_seq": 0,
+            "filtered": False,
+            "total_matches": 1,
+            "retained_count": 1,
+            "retained_epoch": 1,
+            "content_revision": 1,
+            "offset": 8,
+            "page_count": 0,
+            "page_size": 8,
+            "next_offset": 8,
+            "has_older": False,
+            "persisted": True,
+            "persistence": {
+                "loaded": True,
+                "dirty": False,
+                "revision": 1,
+                "commits": 1,
+                "failures": 0,
+                "stale_snapshots": 0,
+                "sd": {
+                    "required": True,
+                    "generation": 27,
+                    "dirty": False,
+                    "reconcile_pending": False,
+                    "commits": 1,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+                "nvs": {
+                    "dirty": False,
+                    "commits": 0,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+            },
+            "entries": [],
         },
         {
             "schema": 1,
             "cmd": "contacts",
             "ok": True,
+            "count": 1,
+            "capacity": 16,
+            "next_seq": 8,
+            "total_written": 1,
+            "dropped_oldest": 0,
+            "persistence": {
+                "loaded": True,
+                "dirty": False,
+                "revision": 1,
+                "commits": 1,
+                "coalesced": 0,
+                "failures": 0,
+                "last_error": "ESP_OK",
+                "sd": {
+                    "required": True,
+                    "generation": 27,
+                    "reconcile_pending": False,
+                },
+            },
             "entries": [retained_contact()],
+            "persisted": True,
         },
+        retained_read_state(),
+        retained_channels(),
         {
             "schema": 1,
             "cmd": "identity status",
@@ -212,12 +542,533 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
     ]
 
 
+def empty_retained_state(commit: str = COMMIT) -> list[dict]:
+    state = retained_state(commit)
+    for public in (
+        row
+        for row in state
+        if row["cmd"] == "messages public"
+    ):
+        public.update(
+            {
+                "count": 0,
+                "retained_store_count": 0,
+                "retained_public_count": 0,
+                "total_written": 0,
+                "total_matches": 0,
+                "page_count": 0,
+                "entries": [],
+            }
+        )
+    for dm in (
+        row
+        for row in state
+        if row["cmd"] == "messages dm"
+    ):
+        dm.update(
+            {
+                "count": 0,
+                "total_written": 0,
+                "total_matches": 0,
+                "retained_count": 0,
+                "page_count": 0,
+                "entries": [],
+            }
+        )
+    contacts = next(row for row in state if row["cmd"] == "contacts")
+    contacts.update(
+        {
+            "count": 0,
+            "next_seq": 1,
+            "total_written": 0,
+            "entries": [],
+        }
+    )
+    read_state = next(
+        row for row in state if row["cmd"] == "messages unread"
+    )
+    read_state.update(
+        {
+            "dm_thread_count": 0,
+            "persisted_dm_cursor_count": 0,
+            "last_public_read_seq": 0,
+            "last_dm_read_seq": 0,
+            "newest_public_rx_seq": 0,
+            "newest_dm_rx_seq": 0,
+            "mark_read_count": 0,
+            "dm_threads": [],
+            "persisted_dm_cursors": [],
+        }
+    )
+    return state
+
+
+def test_retained_projection_carries_exact_clean_sd_dm_state():
+    projection = flash.retained_state_projection(retained_state())
+
+    assert projection is not None
+    assert projection["direct_messages_state"] == {
+        "count": 1,
+        "capacity": 16,
+        "retained_count": 1,
+        "total_written": 1,
+        "dropped_oldest": 0,
+        "retained_epoch": 1,
+        "content_revision": 1,
+    }
+    assert flash.retained_reflash_baseline_ready(projection) is True
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "count",
+        "capacity",
+        "retained_count",
+        "total_written",
+        "dropped_oldest",
+        "retained_epoch",
+        "content_revision",
+    ),
+)
+def test_retained_state_rejects_dm_count_or_metadata_drift(field):
+    before = flash.retained_state_projection(retained_state())
+    after = flash.retained_state_projection(retained_state())
+
+    assert before is not None
+    assert after is not None
+    after["direct_messages_state"][field] += 1
+    assert flash.retained_state_preserved(before, after) is False
+
+
+def test_retained_reflash_baseline_rejects_vacuous_empty_history():
+    empty = flash.retained_state_projection(empty_retained_state())
+
+    assert empty is not None
+    assert empty["public_messages"] == []
+    assert empty["direct_messages"] == []
+    assert empty["contacts"] == []
+    assert empty["direct_messages_state"]["retained_count"] == 0
+    assert flash.retained_reflash_baseline_ready(empty) is False
+
+
+def test_retained_projection_rejects_missing_older_dm_page_rows():
+    partial = retained_state()
+    pages = [
+        row for row in partial if row.get("cmd") == "messages dm"
+    ]
+    for page in pages:
+        page["count"] = 2
+        page["retained_count"] = 2
+        page["total_matches"] = 2
+        page["total_written"] = 2
+    pages[0]["has_older"] = True
+
+    assert flash.retained_state_projection(partial) is None
+
+
+def retained_state_with_dm_count(count: int) -> list[dict]:
+    state = retained_state()
+    pages = [
+        row for row in state if row.get("cmd") == "messages dm"
+    ]
+    entries = [
+        {
+            "seq": index + 1,
+            "text": f"retained-dm-{index + 1}",
+            "retained": True,
+            "volatile_preview": False,
+        }
+        for index in range(count)
+    ]
+    for page in pages:
+        offset = page["offset"]
+        page_entries = entries[offset : offset + flash.DM_RETAINED_PAGE_SIZE]
+        page.update(
+            {
+                "count": count,
+                "capacity": 16,
+                "total_written": count,
+                "dropped_oldest": 0,
+                "total_matches": count,
+                "retained_count": count,
+                "retained_epoch": 7,
+                "content_revision": 19,
+                "page_count": len(page_entries),
+                "has_older": count > offset + len(page_entries),
+                "next_offset": (
+                    offset + len(page_entries)
+                    if count > offset + len(page_entries)
+                    else offset
+                ),
+                "entries": page_entries,
+            }
+        )
+    return state
+
+
+def test_retained_projection_accepts_complete_fifteen_row_dm_history():
+    projection = flash.retained_state_projection(
+        retained_state_with_dm_count(15)
+    )
+
+    assert projection is not None
+    assert len(projection["direct_messages"]) == 15
+    assert projection["direct_messages_state"] == {
+        "count": 15,
+        "capacity": 16,
+        "retained_count": 15,
+        "total_written": 15,
+        "dropped_oldest": 0,
+        "retained_epoch": 7,
+        "content_revision": 19,
+    }
+    assert flash.retained_reflash_baseline_ready(projection) is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("filtered", True),
+        ("count", 14),
+        ("capacity", 15),
+        ("dropped_oldest", 1),
+        ("content_revision", 18),
+        ("volatile_preview_present", True),
+        ("volatile_preview_seq", 99),
+        ("has_older", False),
+        ("next_offset", 7),
+    ],
+)
+def test_retained_projection_rejects_tampered_dm_page_metadata(
+    field,
+    value,
+):
+    state = retained_state_with_dm_count(15)
+    first = next(
+        row
+        for row in state
+        if row.get("capture_command") == "messages dm"
+    )
+    first[field] = value
+
+    assert flash.retained_state_projection(state) is None
+
+
+def test_retained_projection_rejects_omitted_older_dm_row():
+    state = retained_state_with_dm_count(15)
+    older = next(
+        row
+        for row in state
+        if row.get("capture_command") == "messages dm offset 8"
+    )
+    older["entries"].pop()
+    older["page_count"] -= 1
+
+    assert flash.retained_state_projection(state) is None
+
+
+def retained_state_with_public_count(count: int) -> list[dict]:
+    state = retained_state()
+    pages = [
+        row for row in state if row.get("cmd") == "messages public"
+    ]
+    entries = [
+        {
+            "seq": index + 1,
+            "text": f"retained-public-{index + 1}",
+            "retained": True,
+            "volatile_preview": False,
+        }
+        for index in range(count)
+    ]
+    for page in pages:
+        offset = page["offset"]
+        page_entries = entries[
+            offset : offset + flash.PUBLIC_RETAINED_PAGE_SIZE
+        ]
+        page.update(
+            {
+                "count": count,
+                "retained_store_count": count,
+                "retained_public_count": count,
+                "total_written": count,
+                "total_matches": count,
+                "retained_epoch": 11,
+                "content_revision": 23,
+                "page_count": len(page_entries),
+                "has_older": count > offset + len(page_entries),
+                "next_offset": (
+                    offset + len(page_entries)
+                    if count > offset + len(page_entries)
+                    else offset
+                ),
+                "entries": page_entries,
+            }
+        )
+    return state
+
+
+def test_retained_projection_accepts_complete_sixteen_row_public_history():
+    projection = flash.retained_state_projection(
+        retained_state_with_public_count(16)
+    )
+
+    assert projection is not None
+    assert len(projection["public_messages"]) == 16
+    assert projection["public_messages_state"] == {
+        "count": 16,
+        "capacity": 16,
+        "retained_store_count": 16,
+        "retained_public_count": 16,
+        "total_written": 16,
+        "dropped_oldest": 0,
+        "retained_epoch": 11,
+        "content_revision": 23,
+    }
+
+
+def test_retained_projection_rejects_omitted_older_public_row():
+    state = retained_state_with_public_count(16)
+    older = next(
+        row
+        for row in state
+        if row.get("capture_command") == "messages public offset 8"
+    )
+    older["entries"].pop()
+    older["page_count"] -= 1
+
+    assert flash.retained_state_projection(state) is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("capacity", 15),
+        ("retained_epoch", 12),
+        ("content_revision", 22),
+        ("volatile_preview_present", True),
+        ("volatile_preview_seq", 99),
+        ("has_older", False),
+        ("next_offset", 7),
+    ],
+)
+def test_retained_projection_rejects_tampered_public_page_metadata(
+    field,
+    value,
+):
+    state = retained_state_with_public_count(16)
+    first = next(
+        row
+        for row in state
+        if row.get("capture_command") == "messages public"
+    )
+    first[field] = value
+
+    assert flash.retained_state_projection(state) is None
+
+
+@pytest.mark.parametrize(
+    ("command", "section", "field", "value"),
+    [
+        ("settings get", None, "onboarding_complete", False),
+        ("settings get", "timezone", "offset_minutes", -240),
+        ("settings get", "map_location", "lat", 44.0),
+        ("settings get", "map_tiles", "zoom", 13),
+        ("settings get", "radio", "frequency_hz", 915000000),
+        ("wifi profiles", "profiles", "ssid", "ChangedWifi"),
+    ],
+)
+def test_retained_state_rejects_setup_setting_loss(
+    command,
+    section,
+    field,
+    value,
+):
+    before = flash.retained_state_projection(retained_state())
+    changed = retained_state()
+    result = next(row for row in changed if row.get("cmd") == command)
+    if section == "profiles":
+        result["profiles"][0][field] = value
+    elif section is None:
+        result[field] = value
+    else:
+        result[section][field] = value
+    after = flash.retained_state_projection(changed)
+
+    assert before is not None
+    assert after is not None
+    assert flash.retained_state_preserved(before, after) is False
+
+
+def test_retained_projection_rejects_unready_settings_snapshot():
+    state = retained_state()
+    settings = next(
+        row for row in state if row.get("cmd") == "settings get"
+    )
+    settings["timezone"]["settings_ready"] = False
+    settings["timezone"]["settings_error"] = "ESP_FAIL"
+
+    assert flash.retained_state_projection(state) is None
+
+
+@pytest.mark.parametrize("command", ["settings get", "wifi profiles"])
+def test_retained_projection_rejects_secret_key_in_snapshot(command):
+    state = retained_state()
+    result = next(row for row in state if row.get("cmd") == command)
+    result["password"] = "must-never-enter-receipt"
+
+    assert flash.retained_state_projection(state) is None
+
+
+def test_retained_state_rejects_channel_metadata_or_cursor_loss():
+    before = flash.retained_state_projection(retained_state())
+    changed_metadata = retained_state()
+    next(
+        row for row in changed_metadata if row.get("cmd") == "channels"
+    )["entries"][1]["name"] = "#changed"
+    changed_cursor = retained_state()
+    next(
+        row for row in changed_cursor if row.get("cmd") == "channels"
+    )["entries"][0]["read_through_seq"] = 0
+
+    assert before is not None
+    metadata_projection = flash.retained_state_projection(changed_metadata)
+    cursor_projection = flash.retained_state_projection(changed_cursor)
+    assert metadata_projection is not None
+    assert cursor_projection is not None
+    assert flash.retained_state_preserved(before, metadata_projection) is False
+    assert flash.retained_state_preserved(before, cursor_projection) is False
+
+
+def test_retained_state_rejects_public_metadata_regression():
+    before = flash.retained_state_projection(
+        retained_state_with_public_count(16)
+    )
+    after = flash.retained_state_projection(
+        retained_state_with_public_count(16)
+    )
+    assert before is not None
+    assert after is not None
+    after["public_messages_state"]["retained_epoch"] += 1
+
+    assert flash.retained_state_preserved(before, after) is False
+
+
+def test_retained_projection_carries_full_persisted_read_cursor_state():
+    projection = flash.retained_state_projection(retained_state())
+
+    assert projection is not None
+    assert projection["read_state"] == {
+        "cursor_capacity": 16,
+        "last_public_read_seq": 1,
+        "last_dm_read_seq": 2,
+        "mark_read_count": 3,
+        "persisted_dm_cursors": {
+            CONTACT_PUBLIC_KEY[:16]: 2,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("last_field", "newest_field"),
+    [
+        ("last_public_read_seq", "newest_public_rx_seq"),
+        ("last_dm_read_seq", "newest_dm_rx_seq"),
+    ],
+)
+def test_retained_projection_accepts_cursor_after_rx_row_ages_out(
+    last_field,
+    newest_field,
+):
+    state = retained_state()
+    result = next(
+        row for row in state if row.get("cmd") == "messages unread"
+    )
+    result[last_field] = 7
+    result[newest_field] = 0
+
+    assert flash.retained_state_projection(state) is not None
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("persisted_dm_cursor_count",), 2),
+        (("cursor_capacity",), 15),
+        (("persisted",), False),
+        (("persistence", "loaded"), False),
+        (("persistence", "dirty"), True),
+        (("persistence", "failures"), 1),
+        (("persistence", "last_error"), "ESP_FAIL"),
+        (("persistence", "sd", "required"), False),
+        (("persistence", "sd", "generation"), 28),
+        (("persistence", "sd", "dirty"), True),
+        (("persistence", "sd", "reconcile_pending"), True),
+        (("persistence", "nvs", "dirty"), True),
+        (("persistence", "clear_tombstone_pending"), True),
+    ],
+)
+def test_retained_projection_rejects_unready_read_state_snapshot(path, value):
+    state = retained_state()
+    result = next(
+        row for row in state if row.get("cmd") == "messages unread"
+    )
+    target = result
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    assert flash.retained_state_projection(state) is None
+
+
+def test_retained_state_rejects_read_cursor_regression_or_loss():
+    before = flash.retained_state_projection(retained_state())
+    regressed_state = retained_state()
+    next(
+        row
+        for row in regressed_state
+        if row.get("cmd") == "messages unread"
+    )["last_dm_read_seq"] = 1
+    regressed = flash.retained_state_projection(regressed_state)
+    missing_state = retained_state()
+    missing_result = next(
+        row
+        for row in missing_state
+        if row.get("cmd") == "messages unread"
+    )
+    missing_result["persisted_dm_cursor_count"] = 0
+    missing_result["persisted_dm_cursors"] = []
+    missing = flash.retained_state_projection(missing_state)
+
+    assert before is not None
+    assert regressed is not None
+    assert missing is not None
+    assert flash.retained_state_preserved(before, regressed) is False
+    assert flash.retained_state_preserved(before, missing) is False
+
+
+def test_retained_state_allows_read_state_runtime_counters_to_reset():
+    before = flash.retained_state_projection(retained_state())
+    rebooted = retained_state()
+    result = next(
+        row for row in rebooted if row.get("cmd") == "messages unread"
+    )
+    result["persistence"].update({"revision": 0, "commits": 0})
+    after = flash.retained_state_projection(rebooted)
+
+    assert before is not None
+    assert after is not None
+    assert flash.retained_state_preserved(before, after) is True
+
+
 def test_retained_state_allows_live_contact_advert_refresh():
     before = flash.retained_state_projection(retained_state())
     refreshed = retained_state()
-    contact = next(
+    contact_result = next(
         row for row in refreshed if row.get("cmd") == "contacts"
-    )["entries"][0]
+    )
+    contact = contact_result["entries"][0]
     contact.update(
         {
             "seq": 9,
@@ -232,14 +1083,119 @@ def test_retained_state_allows_live_contact_advert_refresh():
             "path_hash_bytes": 2,
             "path_hops": "0102",
             "updated_ms": 2000,
+            "heard_name": "RefreshedPeer",
+            "type": "companion",
         }
     )
+    contact_result["next_seq"] = 10
+    contact_result["total_written"] = 2
+    contact_result["persistence"]["revision"] = 2
+    contact_result["persistence"]["commits"] = 2
     after = flash.retained_state_projection(refreshed)
 
     assert before is not None
     assert after is not None
     assert before != after
     assert flash.retained_state_preserved(before, after) is True
+
+
+def test_retained_state_allows_heard_only_contact_promotion():
+    before_state = retained_state()
+    before_result = next(
+        row for row in before_state if row.get("cmd") == "contacts"
+    )
+    contact = before_result["entries"][0]
+    contact.update(
+        {
+            "fingerprint": "2" * 16,
+            "public_key": "",
+            "verification_source": "heard_only",
+            "canonical": False,
+            "can_dm": False,
+            "can_admin": False,
+        }
+    )
+    before = flash.retained_state_projection(before_state)
+    promoted_state = json.loads(json.dumps(before_state))
+    promoted_result = next(
+        row for row in promoted_state if row.get("cmd") == "contacts"
+    )
+    promoted = promoted_result["entries"][0]
+    promoted.update(
+        {
+            "public_key": "2" * 64,
+            "verification_source": "signed_advert",
+            "canonical": True,
+            "can_dm": True,
+            "can_admin": True,
+            "heard_name": "PromotedPeer",
+            "type": "companion",
+        }
+    )
+    promoted_result["next_seq"] = 9
+    promoted_result["total_written"] = 2
+    after = flash.retained_state_projection(promoted_state)
+
+    assert before is not None
+    assert after is not None
+    assert flash.retained_state_preserved(before, after) is True
+
+
+def test_retained_state_preserves_heard_only_contact_placeholder():
+    before_state = retained_state()
+    before_result = next(
+        row for row in before_state if row.get("cmd") == "contacts"
+    )
+    before_result["entries"][0].update(
+        {
+            "fingerprint": "2" * 16,
+            "public_key": "",
+            "verification_source": "heard_only",
+            "canonical": False,
+            "can_dm": False,
+            "can_admin": False,
+        }
+    )
+    before = flash.retained_state_projection(before_state)
+    after_state = json.loads(json.dumps(before_state))
+    after = flash.retained_state_projection(after_state)
+    removed_state = json.loads(json.dumps(after_state))
+    removed_result = next(
+        row for row in removed_state if row.get("cmd") == "contacts"
+    )
+    removed_result["count"] = 0
+    removed_result["entries"] = []
+    removed = flash.retained_state_projection(removed_state)
+
+    assert before is not None
+    assert after is not None
+    assert removed is not None
+    assert flash.retained_state_preserved(before, after) is True
+    assert flash.retained_state_preserved(before, removed) is False
+
+
+def test_retained_projection_rejects_contact_fingerprint_collision():
+    state = retained_state()
+    result = next(row for row in state if row.get("cmd") == "contacts")
+    duplicate = retained_contact(
+        seq=8,
+        public_key="",
+        fingerprint=CONTACT_PUBLIC_KEY[:16],
+        verification_source="heard_only",
+        canonical=False,
+        can_dm=False,
+        can_admin=False,
+    )
+    result.update(
+        {
+            "count": 2,
+            "next_seq": 9,
+            "total_written": 2,
+            "entries": [result["entries"][0], duplicate],
+        }
+    )
+
+    assert flash.retained_state_projection(state) is None
 
 
 @pytest.mark.parametrize(
@@ -249,7 +1205,6 @@ def test_retained_state_allows_live_contact_advert_refresh():
         ("favorite", True),
         ("muted", True),
         ("created_ms", 501),
-        ("canonical", False),
     ],
 )
 def test_retained_state_rejects_contact_identity_or_user_state_loss(
@@ -269,12 +1224,38 @@ def test_retained_state_rejects_contact_identity_or_user_state_loss(
     assert flash.retained_state_preserved(before, after) is False
 
 
+def test_retained_projection_rejects_inconsistent_canonical_contact():
+    state = retained_state()
+    contact = next(
+        row for row in state if row.get("cmd") == "contacts"
+    )["entries"][0]
+    contact["canonical"] = False
+
+    assert flash.retained_state_projection(state) is None
+
+
+def test_retained_state_rejects_canonical_contact_full_key_replacement():
+    before = flash.retained_state_projection(retained_state())
+    changed = retained_state()
+    contact = next(
+        row for row in changed if row.get("cmd") == "contacts"
+    )["entries"][0]
+    contact["public_key"] = CONTACT_PUBLIC_KEY[:16] + ("3" * 48)
+    after = flash.retained_state_projection(changed)
+
+    assert before is not None
+    assert after is not None
+    assert flash.retained_state_preserved(before, after) is False
+
+
 def test_retained_state_rejects_missing_or_malformed_contact_identity():
     before = flash.retained_state_projection(retained_state())
     missing = retained_state()
-    next(row for row in missing if row.get("cmd") == "contacts")[
-        "entries"
-    ] = []
+    missing_result = next(
+        row for row in missing if row.get("cmd") == "contacts"
+    )
+    missing_result["count"] = 0
+    missing_result["entries"] = []
     malformed = retained_state()
     next(row for row in malformed if row.get("cmd") == "contacts")[
         "entries"
@@ -284,13 +1265,64 @@ def test_retained_state_rejects_missing_or_malformed_contact_identity():
     missing_projection = flash.retained_state_projection(missing)
     malformed_projection = flash.retained_state_projection(malformed)
     assert missing_projection is not None
-    assert malformed_projection is not None
+    assert malformed_projection is None
     assert (
         flash.retained_state_preserved(before, missing_projection) is False
     )
-    assert (
-        flash.retained_state_preserved(before, malformed_projection) is False
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("count",), 2),
+        (("capacity",), 15),
+        (("next_seq",), 7),
+        (("persisted",), False),
+        (("persistence", "loaded"), False),
+        (("persistence", "dirty"), True),
+        (("persistence", "failures"), 1),
+        (("persistence", "last_error"), "ESP_FAIL"),
+        (("persistence", "sd", "required"), False),
+        (("persistence", "sd", "generation"), 0),
+        (("persistence", "sd", "reconcile_pending"), True),
+    ],
+)
+def test_retained_projection_rejects_unready_contact_snapshot(path, value):
+    state = retained_state()
+    result = next(row for row in state if row.get("cmd") == "contacts")
+    target = result
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    assert flash.retained_state_projection(state) is None
+
+
+def test_retained_state_rejects_contact_counter_regression():
+    before = flash.retained_state_projection(retained_state())
+    after = flash.retained_state_projection(retained_state())
+
+    assert before is not None
+    assert after is not None
+    after["contacts_state"]["total_written"] = 0
+
+    assert flash.retained_state_preserved(before, after) is False
+
+
+def test_retained_state_allows_contact_runtime_counters_to_reset_on_reboot():
+    before = flash.retained_state_projection(retained_state())
+    rebooted = retained_state()
+    result = next(
+        row for row in rebooted if row.get("cmd") == "contacts"
     )
+    result["persistence"].update(
+        {"revision": 0, "commits": 0, "coalesced": 0}
+    )
+    after = flash.retained_state_projection(rebooted)
+
+    assert before is not None
+    assert after is not None
+    assert flash.retained_state_preserved(before, after) is True
 
 
 def target_kwargs():
@@ -1007,6 +2039,114 @@ def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
     assert closing["actions_capture_verification"]["ok"] is True
 
 
+def test_retained_reflash_refuses_empty_before_and_after_retry_baseline(
+    tmp_path, monkeypatch
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    flash_calls = []
+
+    def must_not_flash(*args, **kwargs):
+        flash_calls.append((args, kwargs))
+        return success_runner(*args, **kwargs)
+
+    with pytest.raises(
+        ValueError,
+        match="non-empty clean SD-primary DM witness",
+    ):
+        flash.run_core_flash_only(
+            root=tmp_path,
+            github_run_dir=run_dir,
+            package_dir=package,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            actions_capture_receipt=capture_receipt,
+            port="COM12",
+            serial_baud=115200,
+            flash_baud=460800,
+            serial_timeout=5.0,
+            flash_timeout=60,
+            settle_sec=0.0,
+            raw_log_path=raw_log,
+            flash_phase=flash.FLASH_PHASE_RETAINED_REFLASH,
+            **target_kwargs(),
+            flash_runner=must_not_flash,
+            retained_state_reader=lambda *_args: empty_retained_state(),
+        )
+
+    assert flash_calls == []
+
+
+def test_posix_retained_reflash_rejects_empty_baseline_before_flash_or_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    install_preflight_mocks(monkeypatch)
+    run_dir, package, capture_receipt, raw_log = fixture_paths(tmp_path)
+    handle = FakeSerialHandle()
+    calls = []
+    monkeypatch.setattr(
+        flash,
+        "resolve_core_target",
+        lambda *_args, **_kwargs: posix_target(),
+    )
+    by_command = {
+        row.get("capture_command", row["cmd"]): row
+        for row in empty_retained_state()
+    }
+
+    def sender(selected_handle, command, _timeout):
+        assert selected_handle is handle
+        assert selected_handle.closed is False
+        calls.append(("command", command, selected_handle))
+        return by_command[command]
+
+    kwargs = posix_run_kwargs(handle=handle, calls=calls)
+    kwargs["serial_command_sender"] = sender
+
+    with pytest.raises(
+        ValueError,
+        match="non-empty clean SD-primary DM witness",
+    ):
+        flash.run_core_flash_only(
+            root=tmp_path,
+            github_run_dir=run_dir,
+            package_dir=package,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            actions_capture_receipt=capture_receipt,
+            port=POSIX_PORT,
+            expected_d1l_public_key=PUBLIC_KEY,
+            serial_baud=115200,
+            flash_baud=460800,
+            serial_timeout=5.0,
+            flash_timeout=60,
+            settle_sec=90.0,
+            raw_log_path=raw_log,
+            flash_phase=flash.FLASH_PHASE_RETAINED_REFLASH,
+            posix_flash_runner=lambda *_args: pytest.fail(
+                "empty baseline must not flash"
+            ),
+            **kwargs,
+        )
+
+    assert [row[0] for row in calls] == [
+        "open",
+        *(["command"] * (len(flash.RETAINED_STATE_COMMANDS) + 1)),
+        "close",
+    ]
+    assert handle.closed is True
+    assert not raw_log.exists()
+    assert not raw_log.with_name(
+        raw_log.stem + "_retained_before.json"
+    ).exists()
+    assert not raw_log.with_name(
+        raw_log.stem + "_retained_after.json"
+    ).exists()
+
+
 def test_flash_preflight_fails_before_physical_action(
     tmp_path, monkeypatch
 ):
@@ -1403,7 +2543,8 @@ def test_posix_flash_closes_then_fresh_handle_resets_settles_and_captures(
         )
 
     after_by_command = {
-        row["cmd"]: row for row in retained_state()
+        row.get("capture_command", row["cmd"]): row
+        for row in retained_state()
     }
 
     def sender(selected_handle, command, _timeout):
@@ -1518,13 +2659,7 @@ def test_posix_flash_closes_then_fresh_handle_resets_settles_and_captures(
         "sleep",
         "resolve",
         "drain",
-        "command",
-        "command",
-        "command",
-        "command",
-        "command",
-        "command",
-        "command",
+        *("command" for _ in flash.RETAINED_STATE_COMMANDS),
         "close",
     ]
     assert calls[9] == ("reset", recovery_handle)

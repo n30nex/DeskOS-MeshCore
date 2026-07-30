@@ -653,6 +653,74 @@ static void test_replacement_generation_forces_read_before_write(void)
     assert(d1l_dm_store_stats().sd_backend_generation == 5U);
 }
 
+static void test_clean_store_observation_exposes_generation_reconciliation(void)
+{
+    reset_backend();
+    s_sd_enabled = true;
+    s_backend_generation = 7U;
+    seed_v3(&s_sd, 1U, 2U, "card-a");
+    seed_v3(&s_nvs, 1U, 2U, "card-a");
+    assert(d1l_dm_store_init() == ESP_OK);
+
+    d1l_dm_store_stats_t stats = d1l_dm_store_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_reconcile_pending);
+    const uint32_t reads_before_swap = s_sd_read_count;
+
+    /* A clean store has no ordinary write deadline to wake the retained
+     * worker. Its read-only observation must nevertheless expose an
+     * unsampled SD remove/reinsert generation as pending work. */
+    seed_v3(&s_sd, 1U, 4U, "card-b");
+    s_backend_generation = 9U;
+    stats = d1l_dm_store_stats();
+    assert(stats.sd_backend_generation == 9U);
+    assert(stats.persistence_dirty);
+    assert(stats.sd_primary_reconcile_pending);
+    assert(s_sd_read_count == reads_before_swap);
+
+    s_operation_count = 0U;
+    assert(d1l_dm_store_flush_if_due() == ESP_OK);
+    assert(s_sd_read_count == reads_before_swap + 1U);
+    assert(s_operation_count > 0U);
+    assert(s_operations[0] == OP_READ_SD);
+    assert(blob_contains(&s_sd, "card-b"));
+    assert(blob_contains(&s_nvs, "card-b"));
+    stats = d1l_dm_store_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_reconcile_pending);
+}
+
+static void test_clean_generation_change_rewrites_missing_sd_primary(void)
+{
+    reset_backend();
+    s_sd_enabled = true;
+    s_backend_generation = 11U;
+    seed_v3(&s_sd, 1U, 2U, "durable-before-swap");
+    seed_v3(&s_nvs, 1U, 2U, "durable-before-swap");
+    assert(d1l_dm_store_init() == ESP_OK);
+    assert(!d1l_dm_store_stats().persistence_dirty);
+
+    memset(&s_sd, 0, sizeof(s_sd));
+    s_backend_generation = 13U;
+    const d1l_dm_store_stats_t observed = d1l_dm_store_stats();
+    assert(observed.persistence_dirty);
+    assert(observed.sd_primary_reconcile_pending);
+
+    s_operation_count = 0U;
+    const uint32_t reads_before = s_sd_read_count;
+    const uint32_t writes_before = s_sd_write_count;
+    assert(d1l_dm_store_flush_if_due() == ESP_OK);
+    assert(s_sd_read_count == reads_before + 1U);
+    assert(s_sd_write_count == writes_before + 1U);
+    assert(s_operation_count >= 2U);
+    assert(s_operations[0] == OP_READ_SD);
+    assert(s_operations[1] == OP_WRITE_SD);
+    assert(blob_contains(&s_sd, "durable-before-swap"));
+    const d1l_dm_store_stats_t reconciled = d1l_dm_store_stats();
+    assert(!reconciled.persistence_dirty);
+    assert(!reconciled.sd_primary_reconcile_pending);
+}
+
 static void test_nvs_failure_after_sd_success_stays_retryable(void)
 {
     reset_backend();
@@ -3044,6 +3112,8 @@ int main(int argc, char **argv)
     assert(argc == 1);
     test_late_ready_merges_before_primary_write();
     test_replacement_generation_forces_read_before_write();
+    test_clean_store_observation_exposes_generation_reconciliation();
+    test_clean_generation_change_rewrites_missing_sd_primary();
     test_nvs_failure_after_sd_success_stays_retryable();
     test_read_failure_never_writes_sd_and_nvs_can_advance();
     test_corruption_and_generation_change_fail_closed();

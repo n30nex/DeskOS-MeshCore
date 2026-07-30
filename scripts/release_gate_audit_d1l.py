@@ -1494,8 +1494,13 @@ def esp32_flash_receipt_gate(
     commit: str | None,
     expected_run_id: str | None,
     expected_port: str,
+    receipt_path: Path | None = None,
 ) -> GateResult:
-    receipt = newest_commit_json(hardware_dir, commit, "esp32_flash_*.json")
+    receipt = (
+        Path(receipt_path)
+        if receipt_path is not None
+        else newest_commit_json(hardware_dir, commit, "esp32_flash_*.json")
+    )
     data = read_json(receipt)
     failures: list[str] = []
     if receipt is None:

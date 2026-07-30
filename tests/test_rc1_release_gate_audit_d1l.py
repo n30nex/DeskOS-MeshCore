@@ -402,6 +402,8 @@ def write_physical_evidence(receipt_path: Path) -> Path:
                     "source_inspection": False,
                 }
             )
+        elif role == "flash":
+            payload["retained_nonempty_baseline"] = True
         elif role in {"protocol", "map"}:
             payload.update(
                 {
@@ -638,6 +640,37 @@ def test_physical_sources_are_semantically_revalidated(
 
     assert result["ready_for_public_release"] is False
     assert "physical_evidence_sidecar_machine_sources" in result["failures"]
+
+
+@pytest.mark.parametrize("mutation", ["missing", "false"])
+def test_flash_source_requires_nonempty_retained_baseline_even_with_permissive_validator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+):
+    _, _, receipt_path, evidence_path = release_fixture(
+        tmp_path, monkeypatch
+    )
+    evidence = json.loads(evidence_path.read_text(encoding="ascii"))
+    flash_path = receipt_path.parent / evidence["sources"]["flash"]["path"]
+    flash = json.loads(flash_path.read_text(encoding="ascii"))
+    if mutation == "missing":
+        flash.pop("retained_nonempty_baseline")
+    else:
+        flash["retained_nonempty_baseline"] = False
+    write_json(flash_path, flash)
+    evidence["sources"]["flash"]["sha256"] = sha256(flash_path)
+    write_json(evidence_path, evidence)
+
+    ok, digest = audit.physical_evidence_contract(
+        physical_receipt=receipt_path,
+        physical_evidence=evidence_path,
+        receipt=json.loads(receipt_path.read_text(encoding="ascii")),
+        repository_root=tmp_path,
+    )
+
+    assert ok is False
+    assert digest is None
 
 
 def test_physical_source_validator_registry_must_be_complete(
