@@ -25,7 +25,7 @@ constexpr uint32_t FILE_PROTOCOL_VERSION = 1;
 
 constexpr uint8_t RP2040_ESP32_RX_PIN = 17;
 constexpr uint8_t RP2040_ESP32_TX_PIN = 16;
-constexpr uint32_t ESP32_BRIDGE_BAUD = 460800;
+constexpr uint32_t ESP32_BRIDGE_BAUD = 115200;
 
 constexpr uint8_t SD_CS_PIN = 13;
 constexpr uint8_t SD_DET_PIN = 7;
