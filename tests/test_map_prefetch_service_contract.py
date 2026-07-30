@@ -303,7 +303,7 @@ def test_background_https_wait_is_bounded_and_wake_cancelable():
 
     assert "d1l_map_tile_store_fetch_background(" in store_header
     assert "d1l_map_tile_store_fetch_background(" in prefetch
-    assert "D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000" in store
+    assert "D1L_MAP_TILE_HTTP_TIMEOUT_MS 5000" in store
     assert "D1L_MAP_TILE_BACKGROUND_HTTP_TIMEOUT_MS 5000" in store
     assert "D1L_MAP_TILE_HTTP_IO_SLICE_MS 250" in store
     assert "D1L_MAP_TILE_HTTP_TIMEOUT_MS" in foreground

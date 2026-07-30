@@ -530,6 +530,88 @@ def test_console_readiness_retries_a_command_lost_before_init(
     assert [command for command, _timeout in calls] == ["health", "health"]
 
 
+def test_read_only_timeout_is_retried_once_and_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    responses = [
+        {
+            "schema": 1,
+            "ok": False,
+            "cmd": "map provider status",
+            "code": "TIMEOUT",
+        },
+        provider_status(),
+    ]
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return responses.pop(0)
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    result = runner.send_checked(
+        object(),
+        "map provider status",
+        20.0,
+    )
+
+    assert result["ok"] is True
+    assert result["host_timeout_retries"] == 1
+    assert calls == [
+        ("map provider status", 20.0),
+        ("map provider status", runner.READ_ONLY_TIMEOUT_RETRY_SECONDS),
+    ]
+
+
+def test_read_only_timeout_is_never_retried_more_than_once(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    timeout = {
+        "schema": 1,
+        "ok": False,
+        "cmd": "ui status",
+        "code": "TIMEOUT",
+    }
+    calls = []
+
+    def send(_ser, command, command_timeout):
+        calls.append((command, command_timeout))
+        return dict(timeout)
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    result = runner.send_checked(object(), "ui status", 4.0)
+
+    assert result["ok"] is False
+    assert result["code"] == "TIMEOUT"
+    assert result["host_timeout_retries"] == 1
+    assert calls == [("ui status", 4.0), ("ui status", 4.0)]
+
+
+def test_mutating_command_timeout_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return {
+            "schema": 1,
+            "ok": False,
+            "cmd": "ui tab",
+            "code": "TIMEOUT",
+        }
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    result = runner.send_checked(object(), "ui tab map", 20.0)
+
+    assert result["ok"] is False
+    assert "host_timeout_retries" not in result
+    assert calls == [("ui tab map", 20.0)]
+
+
 def test_saved_wifi_readiness_polls_until_saved_profile_connects(
     monkeypatch: pytest.MonkeyPatch,
 ):

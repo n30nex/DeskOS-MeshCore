@@ -59,6 +59,7 @@ MIN_CACHE_BUDGET_MB = 256
 MAX_CACHE_BUDGET_MB = 24576
 CONSOLE_BAUD = 115200
 COMMAND_TIMEOUT_SECONDS = 20.0
+READ_ONLY_TIMEOUT_RETRY_SECONDS = 10.0
 BOOT_TIMEOUT_SECONDS = 45.0
 POLL_INTERVAL_SECONDS = 1.0
 PREFETCH_TIMEOUT_SECONDS = 180.0
@@ -87,6 +88,18 @@ COMMANDS = frozenset(
         "ui tab map",
         "ui tab packets",
         "ui tab settings",
+    }
+)
+READ_ONLY_COMMANDS = frozenset(
+    {
+        "version",
+        "health",
+        "crashlog",
+        "ui status",
+        "map center",
+        "map provider status",
+        "map tiles status",
+        "wifi status",
     }
 )
 UI_TABS = frozenset({"home", "messages", "nodes", "map", "packets", "settings"})
@@ -655,7 +668,27 @@ def send_checked(
             "command_not_allowlisted",
             f"refusing command outside Map acceptance allowlist: {command}",
         )
-    return send_console_command(ser, command, timeout)
+    result = send_console_command(ser, command, timeout)
+    if not (
+        command in READ_ONLY_COMMANDS
+        and type(result) is dict
+        and type(result.get("schema")) is int
+        and result.get("schema") == 1
+        and result.get("ok") is False
+        and result.get("cmd") == command
+        and result.get("code") == "TIMEOUT"
+    ):
+        return result
+
+    retried = send_console_command(
+        ser,
+        command,
+        min(timeout, READ_ONLY_TIMEOUT_RETRY_SECONDS),
+    )
+    if type(retried) is dict:
+        retried = dict(retried)
+        retried["host_timeout_retries"] = 1
+    return retried
 
 
 def wait_for_console_ready(
