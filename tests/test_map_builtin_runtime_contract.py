@@ -155,6 +155,213 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
     assert "d1l_map_tile_png_valid(buffer, result.bytes)" in fetch
 
 
+def test_same_generation_retry_resets_bounded_pass_progress_before_tile_io():
+    header = read("main/map/map_view_service.h")
+    service = read("main/map/map_view_service.c")
+    console = read("main/comms/usb_console.c")
+    run = body(
+        service,
+        "static void run_generation",
+        "void d1l_map_view_service_run_pending",
+    )
+    before_io = run.split("d1l_storage_status(&storage);", 1)[0]
+
+    assert "xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100))" in before_io
+    assert "if (!generation_visible_locked(generation))" in before_io
+    invalid_generation = before_io.split(
+        "if (!generation_visible_locked(generation))", 1
+    )[1].split("}", 1)[0]
+    assert "xSemaphoreGive(s_map.lock)" in invalid_generation
+    assert "return;" in invalid_generation
+
+    for field in (
+        "attempted_tiles",
+        "cache_hits",
+        "network_requests",
+        "downloaded_tiles",
+        "rendered_tiles",
+        "failed_tiles",
+        "decode_total_us",
+        "decode_max_us",
+        "decode_samples",
+        "retry_after_sec",
+    ):
+        assert f"s_map.status.{field} = 0U;" in before_io
+    assert "s_map.status.rate_limited = false;" in before_io
+    assert "D1L_MAP_VIEW_MAX_GENERATION_PASSES 3U" in header
+    backoff_guard = before_io.split(
+        "if (now_us < s_map.backoff_until_us)", 1
+    )[1].split("}", 1)[0]
+    assert "s_map.status.worker_running = false;" in backoff_guard
+    assert "s_map.status.rate_limited = true;" in backoff_guard
+    assert "s_map.status.retry_after_sec =" in backoff_guard
+    assert "xSemaphoreGive(s_map.lock);" in backoff_guard
+    assert "return;" in backoff_guard
+    assert before_io.index(
+        "if (now_us < s_map.backoff_until_us)"
+    ) < before_io.index(
+        "if (s_map.status.pass_attempts >="
+    ) < before_io.index(
+        "++s_map.status.pass_attempts;"
+    ) < before_io.index(
+        "s_map.status.attempted_tiles = 0U;"
+    )
+    assert "++s_map.status.pass_attempts;" in before_io
+    assert (
+        "s_map.status.pass_attempts >=\n"
+        "        D1L_MAP_VIEW_MAX_GENERATION_PASSES"
+    ) in before_io
+    for preserved in (
+        "s_map.status.generation =",
+        "s_map.status.planned_tiles =",
+        "s_map.status.frame_revision =",
+        "s_map.status.frame_ready =",
+        "s_map.status.pass_attempts = 0U;",
+    ):
+        assert preserved not in before_io
+    assert before_io.index("s_map.status.attempted_tiles = 0U;") < before_io.rindex(
+        "xSemaphoreGive(s_map.lock)"
+    )
+    assert run.index("s_map.status.attempted_tiles = 0U;") < run.index(
+        "d1l_map_tile_provider_refresh(&storage)"
+    ) < run.index(
+        "publish_initial_frame(plan, generation)"
+    ) < run.index(
+        "for (uint8_t i = 0;"
+    )
+    assert (
+        "if (publish_placeholder &&\n"
+        "        !publish_initial_frame(plan, generation))"
+    ) in run
+    assert "const bool publish_placeholder = !s_map.status.frame_ready;" in before_io
+    worker = body(
+        service,
+        "void d1l_map_view_service_run_pending",
+        "esp_err_t d1l_map_view_service_init",
+    )
+    bounded_guard = worker.split(
+        "if (s_map.status.pass_attempts >=", 1
+    )[1].split("plan = s_map.plan;", 1)[0]
+    assert "D1L_MAP_VIEW_MAX_GENERATION_PASSES" in bounded_guard
+    assert "s_map.status.worker_running = false;" in bounded_guard
+    assert "break;" in bounded_guard
+    assert worker.index("if (s_map.status.pass_attempts >=") < worker.index(
+        "run_generation(&plan, generation)"
+    )
+    assert '\\"pass_attempts\\":%u' in console
+    assert '\\"max_pass_attempts\\":%u' in console
+
+
+def test_product_map_status_retains_actionable_last_tile_failure_diagnostics():
+    header = read("main/map/map_view_service.h")
+    service = read("main/map/map_view_service.c")
+    console = read("main/comms/usb_console.c")
+    run = body(
+        service,
+        "static void run_generation",
+        "void d1l_map_view_service_run_pending",
+    )
+
+    for field in (
+        "last_failure_step",
+        "last_failure_detail_step",
+        "last_failure_error",
+        "last_failure_http_status",
+        "last_failure_retry_after_sec",
+        "last_failure_bytes",
+        "last_failure_content_type_valid",
+        "last_failure_png_valid",
+        "last_failure_checksum_verified",
+        "last_failure_cache_intent_recorded",
+        "last_failure_zoom",
+        "last_failure_x",
+        "last_failure_y",
+        "last_failure_file_ok",
+        "last_failure_file_response_truncated",
+        "last_failure_file_cancelled",
+        "last_failure_file_error",
+        "last_failure_file_size",
+        "last_failure_file_offset",
+        "last_failure_file_length",
+        "last_failure_file_op",
+        "last_failure_file_err",
+        "last_failure_file_note",
+    ):
+        assert field in header
+        assert field in console
+    assert "static void note_tile_failure" in service
+    assert "result->step[0] ? result->step : \"unknown\"" in service
+    assert "result->last_error" in service
+    assert "result->status_code" in service
+    assert "result->persistence_step" in service
+    assert run.index("note_tile_failure(generation, &tile_result)") < run.index(
+        "note_failure(generation, tile_result.step"
+    )
+    assert '\\"last_failure\\":{' in console
+    assert '\\"detail_step\\":' in console
+    assert '\\"file\\":{\\"ok\\":%s' in console
+    assert "esp_err_to_name(status.last_failure_error)" in console
+    assert "esp_err_to_name(status.last_failure_file_error)" in console
+    assert "status.last_failure_file_error != ESP_OK ?" in console
+
+
+def test_cache_persist_failure_preserves_specific_rp2040_file_diagnostics():
+    header = read("main/map/map_view_service.h")
+    store = read("main/storage/map_tile_store.c")
+    persist = body(
+        store,
+        "static esp_err_t persist_validated_tile",
+        "static esp_err_t map_tile_store_fetch_network",
+    )
+    fetch = body(
+        store,
+        "static esp_err_t map_tile_store_fetch_network",
+        "\nesp_err_t d1l_map_tile_store_fetch",
+    )
+
+    assert persist.index(
+        "d1l_rp2040_bridge_file_write_verified("
+    ) < persist.index(
+        "result->file = file;"
+    ) < persist.index(
+        'download_step(result, "cache_write", ret, &file);'
+    )
+    assert 'download_step(result, "cache_state", ret, NULL);' in persist
+    assert 'download_step(\n                result, "cache_commit", ret' in persist
+    for detail in (
+        '"cache_lock"',
+        '"cache_state"',
+        '"cache_write"',
+        '"cache_attribution"',
+        '"cache_room"',
+        '"cache_metadata"',
+        '"cache_intent"',
+        '"cache_tile_rename"',
+        '"cache_metadata_rename"',
+        '"cache_state_note"',
+        '"cache_state_write"',
+    ):
+        assert detail in store
+    assert "char persistence_step[32];" in read("main/storage/map_tile_store.h")
+    assert "char last_failure_detail_step[32];" in header
+    assert (
+        "append_cache_intent(&paths, state, &record, result)"
+        in store
+    )
+    assert "&result->file" in body(
+        store,
+        "static esp_err_t append_cache_intent",
+        "static esp_err_t rename_cache_metadata",
+    )
+    failure = fetch.split("if (persist_tile) {", 1)[1].split(
+        "background_fetch_finish(", 1
+    )[0]
+    assert "result.cancelled" in failure
+    assert "result.step[0] == '\\0'" in failure
+    assert '"cache_persist"' in failure
+    assert "result.last_error = ret;" in failure
+
+
 def test_wifi_shutdown_drains_owner_closed_http_client_before_driver_teardown():
     store = read("main/storage/map_tile_store.c")
     connectivity = read("main/comms/connectivity_manager.c")
@@ -378,7 +585,7 @@ def test_cache_commit_requires_valid_png_and_attribution_metadata_atomically():
         "static bool attribution_metadata_present",
     )
     assert commit.index("write_cache_metadata_tmp(result, &record)") < commit.index(
-        "append_cache_intent(&paths, state, &record)"
+        "append_cache_intent(&paths, state, &record, result)"
     ) < commit.index(
         "d1l_rp2040_bridge_file_rename("
     ) < commit.index("rename_cache_metadata(result)")

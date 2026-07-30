@@ -484,6 +484,19 @@ static void download_step(d1l_map_tile_download_result_t *result,
     }
 }
 
+static void persistence_step(
+    d1l_map_tile_download_result_t *result,
+    const char *step)
+{
+    if (!result) {
+        return;
+    }
+    snprintf(
+        result->persistence_step,
+        sizeof(result->persistence_step), "%s",
+        step ? step : "unknown");
+}
+
 #if D1L_ENABLE_QUALIFICATION_HOOKS
 static void result_step(d1l_map_tile_canary_result_t *result,
                         const char *step,
@@ -1072,7 +1085,7 @@ static esp_err_t write_cache_state(
 }
 
 static esp_err_t write_cache_metadata_tmp(
-    const d1l_map_tile_download_result_t *result,
+    d1l_map_tile_download_result_t *result,
     const d1l_map_tile_cache_record_t *record)
 {
     if (!result || !record ||
@@ -1093,6 +1106,7 @@ static esp_err_t write_cache_metadata_tmp(
     ret = d1l_rp2040_bridge_file_write(
         result->metadata_tmp_path, 0U, encoded, sizeof(encoded),
         true, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    result->file = file;
     if (ret == ESP_OK &&
         (file.length != sizeof(encoded) ||
          file.size != sizeof(encoded))) {
@@ -1119,41 +1133,40 @@ static esp_err_t write_cache_metadata_tmp(
 static esp_err_t append_cache_intent(
     const d1l_map_tile_cache_paths_t *paths,
     const d1l_map_tile_cache_state_t *state,
-    const d1l_map_tile_cache_record_t *record)
+    const d1l_map_tile_cache_record_t *record,
+    d1l_map_tile_download_result_t *result)
 {
-    if (!paths || !state || !record) {
+    if (!paths || !state || !record || !result) {
         return ESP_ERR_INVALID_ARG;
     }
     uint8_t encoded[D1L_MAP_TILE_CACHE_RECORD_BYTES];
     if (!d1l_map_tile_cache_record_encode(record, encoded)) {
         return ESP_ERR_INVALID_STATE;
     }
-    d1l_rp2040_file_result_t file = {0};
     const esp_err_t ret = d1l_rp2040_bridge_file_append(
-        paths->journal, encoded, sizeof(encoded), &file,
+        paths->journal, encoded, sizeof(encoded), &result->file,
         D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     memset(encoded, 0, sizeof(encoded));
     if (ret != ESP_OK) {
         return ret;
     }
-    return file.offset == state->tail_offset &&
-           file.length == D1L_MAP_TILE_CACHE_RECORD_BYTES &&
-           file.size ==
+    return result->file.offset == state->tail_offset &&
+           result->file.length == D1L_MAP_TILE_CACHE_RECORD_BYTES &&
+           result->file.size ==
                state->tail_offset + D1L_MAP_TILE_CACHE_RECORD_BYTES ?
         ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 static esp_err_t rename_cache_metadata(
-    const d1l_map_tile_download_result_t *result)
+    d1l_map_tile_download_result_t *result)
 {
     if (!result || result->metadata_path[0] == '\0' ||
         result->metadata_tmp_path[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
-    d1l_rp2040_file_result_t file = {0};
     return d1l_rp2040_bridge_file_rename(
         result->metadata_tmp_path, result->metadata_path, true,
-        &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+        &result->file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
 }
 
 static esp_err_t verify_tile_file_continue(
@@ -1801,6 +1814,7 @@ static esp_err_t commit_cache_tile(
             result, should_continue, continue_context)) {
         return ESP_ERR_INVALID_STATE;
     }
+    persistence_step(result, "cache_room");
     esp_err_t ret = prepare_cache_room(
         provider, storage, result->bytes, result,
         should_continue, continue_context);
@@ -1813,6 +1827,7 @@ static esp_err_t commit_cache_tile(
     }
     d1l_map_tile_cache_paths_t paths = {0};
     d1l_map_tile_cache_state_t *state = NULL;
+    persistence_step(result, "cache_state");
     ret = load_cache_state(
         provider, storage, &paths, &state);
     if (ret != ESP_OK) {
@@ -1836,6 +1851,7 @@ static esp_err_t commit_cache_tile(
             &record)) {
         return ESP_ERR_INVALID_STATE;
     }
+    persistence_step(result, "cache_metadata");
     ret = write_cache_metadata_tmp(result, &record);
     if (ret != ESP_OK) {
         return ret;
@@ -1851,33 +1867,41 @@ static esp_err_t commit_cache_tile(
      * the only recoverable copy.
      */
     result->cache_intent_recorded = true;
-    ret = append_cache_intent(&paths, state, &record);
+    persistence_step(result, "cache_intent");
+    ret = append_cache_intent(&paths, state, &record, result);
     if (ret != ESP_OK) {
+        persistence_step(result, "cache_intent_reconcile");
         return reconcile_cache_intent(
             provider, storage, result, &record,
             original_tail_offset, ret);
     }
+    persistence_step(result, "cache_tile_rename");
     ret = d1l_rp2040_bridge_file_rename(
         result->tmp_path, result->path, true, &result->file,
         D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK) {
+        persistence_step(result, "cache_tile_reconcile");
         return reconcile_cache_intent(
             provider, storage, result, &record,
             original_tail_offset, ret);
     }
     result->rename_replace = true;
+    persistence_step(result, "cache_metadata_rename");
     ret = rename_cache_metadata(result);
     if (ret != ESP_OK) {
+        persistence_step(result, "cache_metadata_reconcile");
         return reconcile_cache_intent(
             provider, storage, result, &record,
             original_tail_offset, ret);
     }
+    persistence_step(result, "cache_state_note");
     if (!d1l_map_tile_cache_state_note_commit(
             state, &record)) {
         return reconcile_cache_intent(
             provider, storage, result, &record,
             original_tail_offset, ESP_ERR_INVALID_STATE);
     }
+    persistence_step(result, "cache_state_write");
     ret = write_cache_state(&paths, state);
     if (ret != ESP_OK) {
         return reconcile_cache_intent(
@@ -1885,6 +1909,7 @@ static esp_err_t commit_cache_tile(
             original_tail_offset, ret);
     }
     result->cache_used_bytes = state->live_bytes;
+    persistence_step(result, "complete");
     return ESP_OK;
 }
 
@@ -2256,6 +2281,7 @@ static esp_err_t persist_validated_tile(
         result->bytes == 0U || !result->png_valid) {
         return ESP_ERR_INVALID_ARG;
     }
+    persistence_step(result, "cache_lock");
     esp_err_t ret = cache_transaction_take_cancelable(
         result, should_continue, continue_context);
     if (ret != ESP_OK) {
@@ -2264,10 +2290,12 @@ static esp_err_t persist_validated_tile(
     bool candidate_tmp_owned = false;
     d1l_map_tile_cache_paths_t paths = {0};
     d1l_map_tile_cache_state_t *state = NULL;
+    persistence_step(result, "cache_state");
     ret = load_cache_state(
         provider, storage, &paths, &state);
     if (ret != ESP_OK || !state) {
         ret = ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+        download_step(result, "cache_state", ret, NULL);
         goto persist_done;
     }
     if (!persistence_continue(
@@ -2305,6 +2333,7 @@ static esp_err_t persist_validated_tile(
         result->cache_hit = true;
         result->checksum_verified = true;
         result->attribution_saved = true;
+        persistence_step(result, "cache_reuse");
         ret = ESP_OK;
         goto persist_done;
     }
@@ -2317,16 +2346,19 @@ static esp_err_t persist_validated_tile(
     cleanup_partial(result);
     candidate_tmp_owned = true;
     result->checksum_verified = false;
+    persistence_step(result, "cache_write");
     d1l_rp2040_file_result_t file = {0};
     ret = d1l_rp2040_bridge_file_write_verified(
         result->tmp_path, buffer, result->bytes,
         result->content_crc32, should_continue,
         continue_context, &file,
         D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    result->file = file;
     if (file.cancelled) {
         result->cancelled = true;
     }
     if (ret != ESP_OK) {
+        download_step(result, "cache_write", ret, &file);
         goto persist_done;
     }
     result->write_tmp = true;
@@ -2336,6 +2368,7 @@ static esp_err_t persist_validated_tile(
         ret = ESP_ERR_INVALID_STATE;
         goto persist_done;
     }
+    persistence_step(result, "cache_attribution");
     ret = write_attribution_metadata(
         provider, result,
         should_continue, continue_context);
@@ -2345,6 +2378,10 @@ static esp_err_t persist_validated_tile(
         ret = commit_cache_tile(
             provider, storage, result,
             should_continue, continue_context);
+        if (ret != ESP_OK && !result->cancelled) {
+            download_step(
+                result, "cache_commit", ret, &result->file);
+        }
     } else if (ret == ESP_OK) {
         ret = ESP_ERR_INVALID_STATE;
     }
@@ -2751,13 +2788,16 @@ network_done:
             &provider, status, buffer, &result,
             map_network_continue, &continuation);
         if (ret != ESP_OK) {
-            download_step(
-                &result,
-                result.cancelled ?
-                    "cancelled" : "cache_persist",
-                result.cancelled ?
-                    ESP_ERR_INVALID_STATE : ret,
-                &result.file);
+            if (result.cancelled) {
+                download_step(
+                    &result, "cancelled",
+                    ESP_ERR_INVALID_STATE, &result.file);
+            } else if (result.step[0] == '\0') {
+                download_step(
+                    &result, "cache_persist", ret, &result.file);
+            } else {
+                result.last_error = ret;
+            }
         } else {
             download_step(&result, "ok", ESP_OK, &result.file);
             *out_len = result.bytes;

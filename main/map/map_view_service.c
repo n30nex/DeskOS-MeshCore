@@ -284,6 +284,67 @@ static void note_failure(uint32_t generation, const char *phase, const char *mes
     }
 }
 
+static void note_tile_failure(
+    uint32_t generation,
+    const d1l_map_tile_download_result_t *result)
+{
+    if (!result) {
+        return;
+    }
+    if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (s_map.status.generation == generation) {
+            snprintf(
+                s_map.status.last_failure_step,
+                sizeof(s_map.status.last_failure_step), "%s",
+                result->step[0] ? result->step : "unknown");
+            snprintf(
+                s_map.status.last_failure_detail_step,
+                sizeof(s_map.status.last_failure_detail_step), "%s",
+                result->persistence_step);
+            s_map.status.last_failure_error = result->last_error;
+            s_map.status.last_failure_http_status = result->status_code;
+            s_map.status.last_failure_retry_after_sec =
+                result->retry_after_sec;
+            s_map.status.last_failure_bytes =
+                result->bytes > UINT32_MAX ?
+                    UINT32_MAX : (uint32_t)result->bytes;
+            s_map.status.last_failure_content_type_valid =
+                result->content_type_valid;
+            s_map.status.last_failure_png_valid = result->png_valid;
+            s_map.status.last_failure_checksum_verified =
+                result->checksum_verified;
+            s_map.status.last_failure_cache_intent_recorded =
+                result->cache_intent_recorded;
+            s_map.status.last_failure_zoom = result->z;
+            s_map.status.last_failure_x = result->x;
+            s_map.status.last_failure_y = result->y;
+            s_map.status.last_failure_file_ok = result->file.ok;
+            s_map.status.last_failure_file_response_truncated =
+                result->file.response_truncated;
+            s_map.status.last_failure_file_cancelled =
+                result->file.cancelled;
+            s_map.status.last_failure_file_error =
+                result->file.last_error;
+            s_map.status.last_failure_file_size = result->file.size;
+            s_map.status.last_failure_file_offset = result->file.offset;
+            s_map.status.last_failure_file_length = result->file.length;
+            snprintf(
+                s_map.status.last_failure_file_op,
+                sizeof(s_map.status.last_failure_file_op), "%s",
+                result->file.op);
+            snprintf(
+                s_map.status.last_failure_file_err,
+                sizeof(s_map.status.last_failure_file_err), "%s",
+                result->file.err);
+            snprintf(
+                s_map.status.last_failure_file_note,
+                sizeof(s_map.status.last_failure_file_note), "%s",
+                result->file.note);
+        }
+        xSemaphoreGive(s_map.lock);
+    }
+}
+
 static void note_worker_stack(void)
 {
     const uint32_t free_bytes =
@@ -341,14 +402,66 @@ static bool rate_limit_active(uint32_t generation)
 
 static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
 {
+    /*
+     * A visible generation may be retried after a transient tile error. These
+     * counters describe one bounded pass, not the lifetime of the generation;
+     * reset them atomically before any provider, storage, network, or frame I/O.
+     * Keep the generation, plan, last published frame/revision, and retained
+     * failure detail intact until this pass proves a complete replacement.
+     */
+    if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return;
+    }
+    if (!generation_visible_locked(generation)) {
+        xSemaphoreGive(s_map.lock);
+        return;
+    }
+    /*
+     * A Retry-After window pauses this generation; it does not consume one of
+     * its bounded tile passes. The worker is polled while Map remains visible,
+     * so counting those polls would exhaust the retry budget before the
+     * provider permits another request.
+     */
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us < s_map.backoff_until_us) {
+        const int64_t remaining_us = s_map.backoff_until_us - now_us;
+        s_map.status.worker_running = false;
+        s_map.status.rate_limited = true;
+        s_map.status.retry_after_sec =
+            (uint32_t)((remaining_us + 999999LL) / 1000000LL);
+        set_message_locked("rate_limited", "Map service asked us to wait");
+        xSemaphoreGive(s_map.lock);
+        return;
+    }
+    if (s_map.status.pass_attempts >=
+        D1L_MAP_VIEW_MAX_GENERATION_PASSES) {
+        xSemaphoreGive(s_map.lock);
+        return;
+    }
+    const bool publish_placeholder = !s_map.status.frame_ready;
+    ++s_map.status.pass_attempts;
+    s_map.status.worker_running = true;
+    s_map.status.attempted_tiles = 0U;
+    s_map.status.cache_hits = 0U;
+    s_map.status.network_requests = 0U;
+    s_map.status.downloaded_tiles = 0U;
+    s_map.status.rendered_tiles = 0U;
+    s_map.status.failed_tiles = 0U;
+    s_map.status.decode_total_us = 0U;
+    s_map.status.decode_max_us = 0U;
+    s_map.status.decode_samples = 0U;
+    s_map.status.rate_limited = false;
+    s_map.status.retry_after_sec = 0U;
+    set_message_locked("preparing", "Preparing current map view");
+    xSemaphoreGive(s_map.lock);
+
     d1l_storage_status_t storage = {0};
     d1l_storage_status(&storage);
     const bool sd_ready = d1l_map_tile_store_sd_ready(&storage);
     d1l_connectivity_status_t initial_connectivity = {0};
     d1l_connectivity_status(&initial_connectivity);
     if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
-        if (s_map.status.generation == generation) {
-            s_map.status.worker_running = true;
+        if (generation_visible_locked(generation)) {
             s_map.status.sd_cache_ready = sd_ready;
             s_map.status.wifi_connected = initial_connectivity.wifi_connected;
             if (sd_ready) {
@@ -378,7 +491,8 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
         }
         xSemaphoreGive(s_map.lock);
     }
-    if (!publish_initial_frame(plan, generation)) {
+    if (publish_placeholder &&
+        !publish_initial_frame(plan, generation)) {
         return;
     }
 
@@ -438,6 +552,7 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
                     xSemaphoreGive(s_map.lock);
                 }
             } else {
+                note_tile_failure(generation, &tile_result);
                 if (tile_result.status_code == 429 || tile_result.status_code == 503) {
                     const uint32_t retry = tile_result.retry_after_sec > 0U ?
                                            tile_result.retry_after_sec :
@@ -518,7 +633,12 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
             if (s_map.status.rendered_tiles == s_map.status.planned_tiles) {
                 set_message_locked("ready", "Map ready");
             } else if (!s_map.status.rate_limited && s_map.status.failed_tiles > 0U) {
-                set_message_locked("partial", "Map partially loaded");
+                set_message_locked(
+                    "partial",
+                    s_map.status.pass_attempts >=
+                            D1L_MAP_VIEW_MAX_GENERATION_PASSES ?
+                        "Map partially loaded; reopen Map to retry" :
+                        "Map partially loaded; retrying");
             }
         }
         xSemaphoreGive(s_map.lock);
@@ -542,6 +662,12 @@ void d1l_map_view_service_run_pending(void)
             if (completed_frame_locked()) {
                 s_map.status.worker_running = false;
                 set_message_locked("ready", "Map ready");
+                xSemaphoreGive(s_map.lock);
+                break;
+            }
+            if (s_map.status.pass_attempts >=
+                D1L_MAP_VIEW_MAX_GENERATION_PASSES) {
+                s_map.status.worker_running = false;
                 xSemaphoreGive(s_map.lock);
                 break;
             }

@@ -64,6 +64,7 @@ typedef struct {
     char attribution_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char attribution_tmp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     char step[24];
+    char persistence_step[32];
     uint8_t z;
     uint32_t x;
     uint32_t y;
