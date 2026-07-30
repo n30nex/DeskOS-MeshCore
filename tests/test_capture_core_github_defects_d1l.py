@@ -129,7 +129,7 @@ class FakeGitHub:
                     "conclusion": "success",
                     "head_sha": COMMIT,
                     "head_branch": defects.RELEASE_BRANCH,
-                    "event": "workflow_dispatch",
+                    "event": "push",
                     "name": defects.WORKFLOW_NAME,
                     "path": defects.WORKFLOW_PATH,
                     "repository": {"full_name": defects.REPOSITORY},
@@ -176,6 +176,44 @@ def rewrite_raw(root: Path, row: dict, value: object) -> None:
     path.write_bytes(raw)
     row["size"] = len(raw)
     row["sha256"] = hashlib.sha256(raw).hexdigest()
+
+
+def actions_run_payload(*, branch: str = "main", event: str = "push") -> dict:
+    return {
+        "id": int(RUN_ID),
+        "run_attempt": RUN_ATTEMPT,
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": COMMIT,
+        "head_branch": branch,
+        "event": event,
+        "name": defects.WORKFLOW_NAME,
+        "path": defects.WORKFLOW_PATH,
+        "repository": {"full_name": defects.REPOSITORY},
+    }
+
+
+def test_actions_run_contract_accepts_exact_merged_main_push():
+    defects._validate_actions_run(
+        actions_run_payload(),
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+
+@pytest.mark.parametrize(
+    ("branch", "event"),
+    (("release/24h-core", "workflow_dispatch"), ("main", "workflow_dispatch")),
+)
+def test_actions_run_contract_rejects_non_main_push(branch: str, event: str):
+    with pytest.raises(ValueError, match="merged-main"):
+        defects._validate_actions_run(
+            actions_run_payload(branch=branch, event=event),
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+        )
 
 
 def audit_payload(*, package_ok: bool = True) -> dict:
@@ -247,13 +285,28 @@ def audit_payload(*, package_ok: bool = True) -> dict:
             "--core-scroll",
             "artifacts/hardware/com12/core_ui_scroll_candidate.json",
         ),
+        (
+            "bounded_receipt",
+            "--bounded-physical-receipt",
+            "artifacts/rc1-final/candidate/bounded.json",
+        ),
+        (
+            "bounded_evidence",
+            "--bounded-physical-evidence",
+            "artifacts/rc1-final/candidate/bounded.evidence.json",
+        ),
     ],
 )
 def test_core_audit_recompute_routes_required_receipts(
     tmp_path, monkeypatch, evidence_name, argument, receipt
 ):
     audit = audit_payload()
+    flash_receipt = (
+        "artifacts/rc1-final/candidate/"
+        "esp32_flash_retained_reflash_candidate.json"
+    )
     audit["evidence_paths"] = {
+        "flash_receipt": flash_receipt,
         evidence_name: receipt,
     }
     captured = {}
@@ -277,6 +330,10 @@ def test_core_audit_recompute_routes_required_receipts(
     result = defects._recompute_core_audit(tmp_path, audit)
 
     argv = captured["argv"]
+    hardware_index = argv.index("--hardware-dir")
+    assert Path(argv[hardware_index + 1]) == Path(
+        "artifacts/rc1-final/candidate"
+    )
     index = argv.index(argument)
     assert argv[index + 1] == receipt
     assert result == {"argv": argv}

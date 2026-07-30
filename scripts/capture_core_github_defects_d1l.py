@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 REPOSITORY = "n30nex/SIGUI"
-RELEASE_BRANCH = "release/24h-core"
+RELEASE_BRANCH = "main"
 WORKFLOW_NAME = "d1l-ci"
 WORKFLOW_PATH = ".github/workflows/d1l-ci.yml"
 CORE_RELEASE_PROFILE = "core_1_0"
@@ -71,6 +71,8 @@ AUDIT_EVIDENCE_ARGUMENTS = {
     "sd_receipt": "--sd-receipt",
     "install_review": "--install-review",
     "defect_receipt": "--defect-receipt",
+    "bounded_receipt": "--bounded-physical-receipt",
+    "bounded_evidence": "--bounded-physical-evidence",
 }
 ApiFetch = Callable[..., bytes]
 
@@ -263,13 +265,13 @@ def _validate_actions_run(
         and payload.get("conclusion") == "success"
         and exact_sha(payload.get("head_sha")) == commit
         and payload.get("head_branch") == RELEASE_BRANCH
-        and payload.get("event") == "workflow_dispatch"
+        and payload.get("event") == "push"
         and payload.get("name") == WORKFLOW_NAME
         and payload.get("path") == WORKFLOW_PATH
         and repository.get("full_name") == REPOSITORY
     ):
         raise ValueError(
-            "GitHub Actions run is not the exact successful Core candidate"
+            "GitHub Actions run is not the exact successful merged-main Core candidate"
         )
 
 
@@ -683,6 +685,9 @@ def _recompute_core_audit(
     evidence_paths = audit.get("evidence_paths")
     if not isinstance(evidence_paths, dict):
         raise ValueError("Core audit evidence_paths are missing")
+    flash_receipt = evidence_paths.get("flash_receipt")
+    if not isinstance(flash_receipt, str) or not flash_receipt:
+        raise ValueError("Core audit flash receipt path is missing")
     argv = [
         "--root",
         str(root),
@@ -698,6 +703,8 @@ def _recompute_core_audit(
         str(audit.get("d1l_port")),
         "--sd-history-mode",
         str(audit.get("sd_history_mode")),
+        "--hardware-dir",
+        str(Path(flash_receipt).parent),
     ]
     for evidence_name, argument in AUDIT_EVIDENCE_ARGUMENTS.items():
         value = evidence_paths.get(evidence_name)
