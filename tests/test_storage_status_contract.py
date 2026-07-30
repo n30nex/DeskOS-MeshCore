@@ -80,12 +80,17 @@ def test_storage_status_service_is_boot_safe_and_live_only_without_sd():
     assert "bsp_lcd_get_frame_buffer(&raw_fb1, &raw_fb2)" in splash
     assert "framebuffers[0][offset] = color" in splash
     assert "framebuffers[1][offset] = color" in splash
-    assert splash.index(
-        "bsp_lcd_flush_is_last_register(splash_flush_is_last)"
-    ) < splash.rindex("bsp_lcd_flush(")
-    assert splash.index(
-        "bsp_lcd_direct_mode_register(splash_direct_mode_copy)"
-    ) < splash.rindex("bsp_lcd_flush(")
+    direct_mode = splash.rsplit("#if CONFIG_LCD_LVGL_DIRECT_MODE", 1)[1].split(
+        "#else", 1
+    )[0]
+    assert "return bsp_lcd_flush(" not in direct_mode
+    assert "bsp_lcd_flush_is_last_register(" not in direct_mode
+    assert "bsp_lcd_direct_mode_register(" not in direct_mode
+    assert direct_mode.count("Cache_WriteBack_Addr(") == 2
+    assert "framebuffers[0], framebuffer_bytes" in direct_mode
+    assert "framebuffers[1], framebuffer_bytes" in direct_mode
+    assert "return ESP_OK;" in direct_mode
+    assert "waits forever on the BSP's VSYNC semaphore" in direct_mode
     assert app_main.index("D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
     assert "d1l_storage_status_note_rp2040(rp2040_ret)" in app_main
     assert "boot SD preparation failed" in app_main
