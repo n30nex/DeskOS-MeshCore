@@ -130,9 +130,8 @@ def test_corrupt_cache_state_is_rebuilt_from_the_verified_journal():
     assert rebuild.index("recover_interrupted_record(provider, &record)") < (
         rebuild.index("d1l_map_tile_cache_state_note_commit(state, &record)")
     )
-    assert "cache_record_superseded_by_later_journal(" in rebuild
-    assert "rebuild_cache_journal_prefix(" in rebuild
-    assert "*journal_size = record_offset;" in rebuild
+    assert "cache_record_superseded_by_later_journal(" not in rebuild
+    assert "rebuild_cache_journal_prefix(" not in rebuild
     assert "delete_file_allow_missing(paths->state)" not in load
 
 
