@@ -1492,7 +1492,8 @@ def mesh_owner_ready_snapshot(result: object) -> bool:
     if not isinstance(result, dict):
         return False
     runtime = result.get("runtime")
-    if not isinstance(runtime, dict):
+    dm_delivery = result.get("dm_delivery")
+    if not isinstance(runtime, dict) or not isinstance(dm_delivery, dict):
         return False
     return (
         result.get("ok") is True
@@ -1500,6 +1501,7 @@ def mesh_owner_ready_snapshot(result: object) -> bool:
         and result.get("state") == "ready"
         and result.get("radio_ready") is True
         and runtime.get("owner") == "meshcore_service"
+        and dm_delivery.get("active") is False
         and all(
             _nonnegative_int(runtime.get(field))
             and runtime.get(field) == 0
@@ -1564,6 +1566,16 @@ def send_controlled_peer_dm_after_mesh_owner_ready(
             "MeshCore owner did not become ready before controlled-peer inbound DM"
         )
     return sender()
+
+
+def require_mesh_send_dm_ok(result: object, *, phase: str) -> dict:
+    if isinstance(result, dict) and result.get("ok") is True:
+        return result
+    code = result.get("code") if isinstance(result, dict) else None
+    hint = result.get("hint") if isinstance(result, dict) else None
+    raise ValueError(
+        f"{phase} mesh send dm rejected: code={code!r}, hint={hint!r}"
+    )
 
 
 def read_json(path: Path) -> dict:
@@ -4843,10 +4855,13 @@ def _run_hardware_reserved(
                 raise ValueError(
                     "MeshCore owner did not become ready before outbound DM"
                 )
-            run_command(
-                ser,
-                f"mesh send dm {fingerprint} {outbound_text}",
-                max(timeout, 8.0),
+            require_mesh_send_dm_ok(
+                run_command(
+                    ser,
+                    f"mesh send dm {fingerprint} {outbound_text}",
+                    max(timeout, 8.0),
+                ),
+                phase="outbound",
             )
             time.sleep(2.0)
             run_command(ser, f"packets search {outbound_token}")
@@ -4937,10 +4952,13 @@ def _run_hardware_reserved(
                 direct_baseline_messages = run_command(
                     ser, f"messages dm {fingerprint}"
                 )
-                run_command(
-                    ser,
-                    f"mesh send dm {fingerprint} {direct_token}",
-                    max(timeout, 8.0),
+                require_mesh_send_dm_ok(
+                    run_command(
+                        ser,
+                        f"mesh send dm {fingerprint} {direct_token}",
+                        max(timeout, 8.0),
+                    ),
+                    phase="direct",
                 )
                 require_outbound_terminal_before_peer(
                     lambda: run_command(

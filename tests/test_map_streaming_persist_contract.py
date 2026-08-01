@@ -97,6 +97,57 @@ def test_bridge_verified_writer_is_one_bounded_fail_closed_session():
     assert "d1l_rp2040_bridge_file_read(" not in writer
 
 
+def test_verified_writer_yields_to_bridge_quiesce_with_bounded_abort():
+    bridge = read("main/hal/rp2040_bridge.c")
+    writer = function_body(
+        bridge, "esp_err_t d1l_rp2040_bridge_file_write_verified("
+    )
+    preempt_note = function_body(
+        bridge, "static void note_verified_put_quiesce_preempted("
+    )
+    quiesce_requested = function_body(
+        bridge, "static bool bridge_quiesce_requested_for_current("
+    )
+
+    assert "s_bridge_quiesce_requester != NULL" in quiesce_requested
+    assert "s_bridge_quiesce_requester != current" in quiesce_requested
+    assert "s_bridge_quiesce_owner != current" in quiesce_requested
+    assert "result->last_error = ESP_ERR_NOT_FINISHED" in preempt_note
+    assert "result->cancelled" not in preempt_note
+
+    loop = writer.index("for (size_t offset = 0U; offset < len;)")
+    first_preempt = writer.index(
+        "bridge_quiesce_requested_for_current()", loop
+    )
+    chunk = writer.index('"put_chunk"', first_preempt)
+    second_preempt = writer.index(
+        "bridge_quiesce_requested_for_current()", chunk
+    )
+    end = writer.index('"put_end"', second_preempt)
+    assert loop < first_preempt < chunk < second_preempt < end
+    assert writer.count("bridge_quiesce_requested_for_current()") == 2
+    assert writer.count("ret = ESP_ERR_NOT_FINISHED") == 2
+    assert writer.count("quiesce_preempted = true") == 2
+
+    assert "#define D1L_RP2040_QUIESCE_ABORT_TIMEOUT_MS 1000U" in bridge
+    cleanup = writer[writer.index("verified_put_done:") :]
+    compact_cleanup = " ".join(cleanup.split())
+    assert (
+        "quiesce_preempted && timeout_ms > "
+        "D1L_RP2040_QUIESCE_ABORT_TIMEOUT_MS ? "
+        "D1L_RP2040_QUIESCE_ABORT_TIMEOUT_MS : timeout_ms"
+        in compact_cleanup
+    )
+    assert (
+        "abort_verified_put_while_locked( &abort_result, abort_timeout_ms)"
+        in compact_cleanup
+    )
+    assert cleanup.index("abort_verified_put_while_locked(") < cleanup.index(
+        "give_bridge_lock()"
+    )
+    assert "out_result->last_error = ret" in cleanup
+
+
 def test_terminal_cleanup_truth_suppresses_only_redundant_abort():
     header = read("main/hal/rp2040_bridge.h")
     parser = read("main/hal/rp2040_file_reply.c")

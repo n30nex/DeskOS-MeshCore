@@ -90,3 +90,18 @@ def test_rc1_documentation_authority_is_small_and_fail_closed():
     )
     for path in archived_plans:
         assert "HISTORICAL RECORD — DO NOT EXECUTE" in read(path)[:700]
+
+
+def test_rc1_rf_runbook_uses_one_valid_controlled_peer_mode():
+    runbook = read("docs/RC1_RELEASE_EXECUTION_D1L.md")
+    rf_command = runbook.split(
+        '"$PY" scripts/rf_full_acceptance_d1l.py', 1
+    )[1].split('PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"', 1)[0]
+
+    assert '--peer-status "$PEER_STATUS"' in rf_command
+    assert '--peer-port "$PEER_DEVICE"' in rf_command
+    assert "--peer-control-socket" not in rf_command
+    assert "--peer-device" not in rf_command
+    assert "--peer-public-key" not in rf_command
+    assert "--timeout 120" in rf_command
+    assert "--wait-sec 300" in rf_command

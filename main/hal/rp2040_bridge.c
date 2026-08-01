@@ -33,6 +33,7 @@
 #define D1L_RP2040_PATH64_MAX (((D1L_RP2040_FILE_PATH_MAX + 2U) / 3U) * 4U)
 #define D1L_RP2040_DATA64_MAX (((D1L_RP2040_FILE_CHUNK_MAX + 2U) / 3U) * 4U)
 #define D1L_RP2040_BRIDGE_LOCK_GRACE_MS 15000U
+#define D1L_RP2040_QUIESCE_ABORT_TIMEOUT_MS 1000U
 
 static d1l_rp2040_status_t s_status = {
     .uart_ready = false,
@@ -44,6 +45,7 @@ static uint16_t s_file_request_id = 1;
 static StaticSemaphore_t s_bridge_mutex_storage;
 static SemaphoreHandle_t s_bridge_mutex;
 static TaskHandle_t s_bridge_quiesce_owner;
+static TaskHandle_t s_bridge_quiesce_requester;
 static portMUX_TYPE s_bridge_quiesce_owner_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void ensure_bridge_mutex(void)
@@ -53,8 +55,47 @@ static void ensure_bridge_mutex(void)
     }
 }
 
+static void give_bridge_lock(void);
+
+static bool bridge_lock_admitted(TaskHandle_t current)
+{
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    const bool admitted =
+        (s_bridge_quiesce_owner == NULL &&
+         s_bridge_quiesce_requester == NULL) ||
+        s_bridge_quiesce_owner == current ||
+        s_bridge_quiesce_requester == current;
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    return admitted;
+}
+
+static bool bridge_quiesce_requested_for_current(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    const bool requested =
+        s_bridge_quiesce_requester != NULL &&
+        s_bridge_quiesce_requester != current &&
+        s_bridge_quiesce_owner != current;
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    return requested;
+}
+
+static void clear_bridge_quiesce_requester(TaskHandle_t current)
+{
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    if (s_bridge_quiesce_requester == current) {
+        s_bridge_quiesce_requester = NULL;
+    }
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+}
+
 static esp_err_t take_bridge_lock(uint32_t timeout_ms)
 {
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    if (!bridge_lock_admitted(current)) {
+        return ESP_ERR_NOT_FINISHED;
+    }
     ensure_bridge_mutex();
     if (s_bridge_mutex == NULL) {
         return ESP_ERR_NO_MEM;
@@ -67,7 +108,14 @@ static esp_err_t take_bridge_lock(uint32_t timeout_ms)
     if (ticks == 0) {
         ticks = 1;
     }
-    return xSemaphoreTake(s_bridge_mutex, ticks) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+    if (xSemaphoreTake(s_bridge_mutex, ticks) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (!bridge_lock_admitted(current)) {
+        give_bridge_lock();
+        return ESP_ERR_NOT_FINISHED;
+    }
+    return ESP_OK;
 }
 
 static void give_bridge_lock(void)
@@ -97,18 +145,26 @@ esp_err_t d1l_rp2040_bridge_quiesce_begin(uint32_t timeout_ms)
         return ESP_ERR_INVALID_ARG;
     }
     const int64_t started_us = esp_timer_get_time();
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    bool request_registered = false;
     portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
-    const bool already_quiesced = s_bridge_quiesce_owner != NULL;
+    if (s_bridge_quiesce_owner == NULL &&
+        s_bridge_quiesce_requester == NULL) {
+        s_bridge_quiesce_requester = current;
+        request_registered = true;
+    }
     portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
-    if (already_quiesced) {
+    if (!request_registered) {
         return ESP_ERR_INVALID_STATE;
     }
     ensure_bridge_mutex();
     if (!s_bridge_mutex) {
+        clear_bridge_quiesce_requester(current);
         return ESP_ERR_NO_MEM;
     }
     TickType_t ticks = bridge_quiesce_remaining_ticks(started_us, timeout_ms);
     if (ticks == 0U || xSemaphoreTake(s_bridge_mutex, ticks) != pdTRUE) {
+        clear_bridge_quiesce_requester(current);
         return ESP_ERR_TIMEOUT;
     }
 
@@ -118,22 +174,36 @@ esp_err_t d1l_rp2040_bridge_quiesce_begin(uint32_t timeout_ms)
     if (uart_is_driver_installed(uart_port)) {
         ticks = bridge_quiesce_remaining_ticks(started_us, timeout_ms);
         if (ticks == 0U) {
+            clear_bridge_quiesce_requester(current);
             give_bridge_lock();
             return ESP_ERR_TIMEOUT;
         }
         const esp_err_t tx_idle_ret = uart_wait_tx_done(uart_port, ticks);
         if (tx_idle_ret != ESP_OK) {
+            clear_bridge_quiesce_requester(current);
             give_bridge_lock();
             return tx_idle_ret;
         }
     }
     if (bridge_quiesce_remaining_ticks(started_us, timeout_ms) == 0U) {
+        clear_bridge_quiesce_requester(current);
         give_bridge_lock();
         return ESP_ERR_TIMEOUT;
     }
+    bool promoted = false;
     portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
-    s_bridge_quiesce_owner = xTaskGetCurrentTaskHandle();
+    if (s_bridge_quiesce_owner == NULL &&
+        s_bridge_quiesce_requester == current) {
+        s_bridge_quiesce_owner = current;
+        s_bridge_quiesce_requester = NULL;
+        promoted = true;
+    }
     portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    if (!promoted) {
+        clear_bridge_quiesce_requester(current);
+        give_bridge_lock();
+        return ESP_ERR_INVALID_STATE;
+    }
     return ESP_OK;
 }
 
@@ -146,6 +216,7 @@ void d1l_rp2040_bridge_quiesce_end(void)
         return;
     }
     s_bridge_quiesce_owner = NULL;
+    s_bridge_quiesce_requester = NULL;
     portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
     give_bridge_lock();
 }
@@ -1398,6 +1469,18 @@ static void note_verified_put_cancelled(
     snprintf(result->note, sizeof(result->note), "cancelled");
 }
 
+static void note_verified_put_quiesce_preempted(
+    d1l_rp2040_file_result_t *result)
+{
+    if (!result) {
+        return;
+    }
+    result->ok = false;
+    result->last_error = ESP_ERR_NOT_FINISHED;
+    snprintf(result->err, sizeof(result->err), "quiesce_requested");
+    snprintf(result->note, sizeof(result->note), "quiesce_requested");
+}
+
 static esp_err_t abort_verified_put_while_locked(
     d1l_rp2040_file_result_t *out_result,
     uint32_t timeout_ms)
@@ -1473,6 +1556,7 @@ esp_err_t d1l_rp2040_bridge_file_write_verified(
     char expected_crc[9];
     crc32_hex(expected_crc32, expected_crc);
     bool session_maybe_active = false;
+    bool quiesce_preempted = false;
     d1l_rp2040_file_result_t step_result = {0};
 
     const uint16_t begin_id = next_file_request_id();
@@ -1504,6 +1588,12 @@ esp_err_t d1l_rp2040_bridge_file_write_verified(
     }
 
     for (size_t offset = 0U; offset < len;) {
+        if (bridge_quiesce_requested_for_current()) {
+            note_verified_put_quiesce_preempted(&step_result);
+            quiesce_preempted = true;
+            ret = ESP_ERR_NOT_FINISHED;
+            goto verified_put_done;
+        }
         if (!verified_put_continue(
                 should_continue, continue_context)) {
             note_verified_put_cancelled(&step_result);
@@ -1559,6 +1649,12 @@ esp_err_t d1l_rp2040_bridge_file_write_verified(
         offset += chunk_len;
     }
 
+    if (bridge_quiesce_requested_for_current()) {
+        note_verified_put_quiesce_preempted(&step_result);
+        quiesce_preempted = true;
+        ret = ESP_ERR_NOT_FINISHED;
+        goto verified_put_done;
+    }
     if (!verified_put_continue(
             should_continue, continue_context)) {
         note_verified_put_cancelled(&step_result);
@@ -1595,9 +1691,13 @@ verified_put_done:
     if (ret != ESP_OK && session_maybe_active) {
         const bool cancelled = step_result.cancelled;
         d1l_rp2040_file_result_t abort_result = {0};
+        const uint32_t abort_timeout_ms =
+            quiesce_preempted &&
+                    timeout_ms > D1L_RP2040_QUIESCE_ABORT_TIMEOUT_MS ?
+                D1L_RP2040_QUIESCE_ABORT_TIMEOUT_MS : timeout_ms;
         const esp_err_t abort_ret =
             abort_verified_put_while_locked(
-                &abort_result, timeout_ms);
+                &abort_result, abort_timeout_ms);
         if (abort_ret == ESP_OK) {
             step_result.removed = abort_result.removed;
         } else {

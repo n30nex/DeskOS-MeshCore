@@ -80,6 +80,14 @@ def mesh_owner_status(owner_maintenance_runs: int, heartbeat: int = 7) -> dict:
         "cmd": "mesh status",
         "state": "ready",
         "radio_ready": True,
+        "dm_delivery": {
+            "session_id": 0,
+            "revision": 0,
+            "state": "not_applicable",
+            "state_id": 0,
+            "last_error": "ESP_OK",
+            "active": False,
+        },
         "runtime": {
             "owner": "meshcore_service",
             "command_queue_depth": 0,
@@ -813,6 +821,42 @@ def test_wait_for_mesh_owner_ready_accepts_advancing_maintenance():
         sleep=sleeps.append,
     )
     assert sleeps == [0.25]
+
+
+def test_wait_for_mesh_owner_ready_rejects_active_dm_delivery():
+    active = mesh_owner_status(41, heartbeat=9)
+    active["dm_delivery"].update(
+        {
+            "session_id": 17,
+            "revision": 4,
+            "state": "awaiting_ack",
+            "state_id": 5,
+            "active": True,
+        }
+    )
+
+    assert not rf_accept.wait_for_mesh_owner_ready(
+        lambda: active,
+        timeout_sec=0.0,
+        poll_sec=0.25,
+    )
+
+
+@pytest.mark.parametrize("phase", ["outbound", "direct"])
+def test_mesh_send_dm_rejection_preserves_code_and_hint(phase):
+    result = {
+        "ok": False,
+        "cmd": "mesh send dm",
+        "code": "ESP_ERR_INVALID_STATE",
+        "hint": "DM is unavailable or another delivery is active",
+    }
+
+    with pytest.raises(ValueError) as error:
+        rf_accept.require_mesh_send_dm_ok(result, phase=phase)
+
+    assert phase in str(error.value)
+    assert result["code"] in str(error.value)
+    assert result["hint"] in str(error.value)
 
 
 def test_wait_for_mesh_owner_ready_timeout_is_bounded():

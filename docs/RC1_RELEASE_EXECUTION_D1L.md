@@ -134,16 +134,14 @@ MAP="$EVIDENCE_DIR/map-acceptance.json"
 RF="$EVIDENCE_DIR/rf-full-acceptance.json"
 "$PY" scripts/rf_full_acceptance_d1l.py \
   --port "$PORT" \
+  --baud 115200 \
   --peer-status "$PEER_STATUS" \
   --peer-port "$PEER_DEVICE" \
-  --peer-control-socket "$PEER_CONTROL_SOCKET" \
-  --peer-device "$PEER_DEVICE" \
-  --peer-public-key "$PEER_PUBLIC_KEY" \
   --fingerprint "$PEER_FINGERPRINT" \
   --d1l-public-key "$D1L_PUBLIC_KEY" \
   --token "rc1-${SHA:0:8}" \
-  --timeout 60 \
-  --wait-sec 90 \
+  --timeout 120 \
+  --wait-sec 300 \
   --poll-sec 3 \
   --commit "$SHA" \
   --github-run-id "$RUN" \

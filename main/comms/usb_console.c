@@ -34,6 +34,7 @@
 #include "hal/rp2040_bridge.h"
 #include "hal/sx1262_indicator.h"
 #include "mesh/contact_store.h"
+#include "mesh/dm_delivery_state.h"
 #include "mesh/dm_store.h"
 #include "mesh/mesh_inspector.h"
 #include "mesh/message_store.h"
@@ -2456,6 +2457,8 @@ static void cmd_radio_set_rxboost(const char *line)
 static void cmd_mesh_status(void)
 {
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
+    const d1l_dm_delivery_state_t dm_delivery_state =
+        (d1l_dm_delivery_state_t)status.dm_delivery_state;
     const bool user_trace_available =
         d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE);
     ok_begin("mesh status");
@@ -2484,6 +2487,16 @@ static void cmd_mesh_status(void)
            d1l_meshcore_route_selection_reason_name(
                (d1l_meshcore_route_selection_reason_t)status.dm_route_last_reason),
            (unsigned long)status.dm_route_last_path_age_ms);
+    printf(
+        ",\"dm_delivery\":{\"session_id\":%" PRIu64
+        ",\"revision\":%lu,\"state\":\"%s\",\"state_id\":%u,"
+        "\"last_error\":\"%s\",\"active\":%s}",
+        status.dm_delivery_session_id,
+        (unsigned long)status.dm_delivery_revision,
+        d1l_dm_delivery_state_name(dm_delivery_state),
+        (unsigned)status.dm_delivery_state,
+        esp_err_to_name(status.dm_delivery_last_error),
+        bool_json(status.dm_delivery_active));
     printf(
         ",\"public_tx_history\":{\"pending\":%s,\"retries\":%lu,"
         "\"failures\":%lu}",

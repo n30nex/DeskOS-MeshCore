@@ -114,36 +114,84 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
     bridge_quiesce_end = bridge.split(
         "void d1l_rp2040_bridge_quiesce_end", 1
     )[1].split("static esp_err_t pulse_rp2040_reset", 1)[0]
+    assert "static TaskHandle_t s_bridge_quiesce_requester;" in bridge
     assert "return ESP_ERR_INVALID_ARG" in bridge_quiesce
     assert "return ESP_ERR_INVALID_STATE" in bridge_quiesce
     assert "const int64_t started_us = esp_timer_get_time();" in bridge_quiesce
+    assert "s_bridge_quiesce_owner == NULL" in bridge_quiesce
+    assert "s_bridge_quiesce_requester == NULL" in bridge_quiesce
+    assert "s_bridge_quiesce_requester = current" in bridge_quiesce
+    assert bridge_quiesce.count(
+        "clear_bridge_quiesce_requester(current);"
+    ) == 6
     assert "xSemaphoreTake(s_bridge_mutex, ticks)" in bridge_quiesce
     assert "uart_is_driver_installed(uart_port)" in bridge_quiesce
     assert "uart_wait_tx_done(uart_port, ticks)" in bridge_quiesce
     assert "D1L_RP2040_BRIDGE_LOCK_GRACE_MS" not in bridge_quiesce
+    requester_registration = bridge_quiesce.index(
+        "s_bridge_quiesce_requester = current"
+    )
+    lock_take = bridge_quiesce.index("xSemaphoreTake(s_bridge_mutex, ticks)")
+    tx_idle = bridge_quiesce.index("uart_wait_tx_done(uart_port, ticks)")
+    owner_promotion = bridge_quiesce.index("s_bridge_quiesce_owner = current")
+    requester_release = bridge_quiesce.index(
+        "s_bridge_quiesce_requester = NULL", owner_promotion
+    )
+    assert requester_registration < lock_take < tx_idle < owner_promotion < requester_release
     assert bridge_quiesce.index("xSemaphoreTake(s_bridge_mutex, ticks)") < bridge_quiesce.index(
         "uart_wait_tx_done(uart_port, ticks)"
-    ) < bridge_quiesce.index(
-        "s_bridge_quiesce_owner = xTaskGetCurrentTaskHandle()"
-    )
+    ) < owner_promotion
     assert bridge_quiesce.count(
         "bridge_quiesce_remaining_ticks(started_us, timeout_ms)"
     ) == 3
+    no_mutex_failure = bridge_quiesce.split(
+        "if (!s_bridge_mutex)", 1
+    )[1].split("TickType_t ticks", 1)[0]
+    assert no_mutex_failure.index(
+        "clear_bridge_quiesce_requester(current)"
+    ) < no_mutex_failure.index("return ESP_ERR_NO_MEM")
+    lock_failure = bridge_quiesce.split(
+        "if (ticks == 0U || xSemaphoreTake(s_bridge_mutex, ticks) != pdTRUE)", 1
+    )[1].split("/* esp_restart_noos", 1)[0]
+    assert lock_failure.index(
+        "clear_bridge_quiesce_requester(current)"
+    ) < lock_failure.index("return ESP_ERR_TIMEOUT")
+    uart_budget_failure = bridge_quiesce.split(
+        "if (uart_is_driver_installed(uart_port))", 1
+    )[1].split("const esp_err_t tx_idle_ret", 1)[0]
+    assert uart_budget_failure.index(
+        "clear_bridge_quiesce_requester(current)"
+    ) < uart_budget_failure.index("give_bridge_lock()") < uart_budget_failure.index(
+        "return ESP_ERR_TIMEOUT"
+    )
     tx_idle_failure = bridge_quiesce.split(
         "if (tx_idle_ret != ESP_OK)", 1
     )[1].split(
         "if (bridge_quiesce_remaining_ticks", 1
     )[0]
-    assert tx_idle_failure.index("give_bridge_lock()") < tx_idle_failure.index(
+    assert tx_idle_failure.index(
+        "clear_bridge_quiesce_requester(current)"
+    ) < tx_idle_failure.index("give_bridge_lock()") < tx_idle_failure.index(
         "return tx_idle_ret"
     )
     final_deadline_failure = bridge_quiesce.split(
         "if (bridge_quiesce_remaining_ticks(started_us, timeout_ms) == 0U)", 1
     )[1].split("portENTER_CRITICAL", 1)[0]
-    assert final_deadline_failure.index("give_bridge_lock()") < final_deadline_failure.index(
+    assert final_deadline_failure.index(
+        "clear_bridge_quiesce_requester(current)"
+    ) < final_deadline_failure.index("give_bridge_lock()") < final_deadline_failure.index(
         "return ESP_ERR_TIMEOUT"
     )
+    promotion_failure = bridge_quiesce.split(
+        "if (!promoted)", 1
+    )[1].split("return ESP_OK", 1)[0]
+    assert promotion_failure.index(
+        "clear_bridge_quiesce_requester(current)"
+    ) < promotion_failure.index("give_bridge_lock()") < promotion_failure.index(
+        "return ESP_ERR_INVALID_STATE"
+    )
     assert "s_bridge_quiesce_owner != current" in bridge_quiesce_end
+    assert "s_bridge_quiesce_requester = NULL" in bridge_quiesce_end
     assert bridge_quiesce_end.index("s_bridge_quiesce_owner = NULL") < bridge_quiesce_end.index(
         "give_bridge_lock()"
     )

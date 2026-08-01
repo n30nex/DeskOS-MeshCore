@@ -95,6 +95,88 @@ def test_dm_command_is_authorized_owned_and_persisted_before_radio_admission():
     assert "ret != ESP_ERR_NOT_FINISHED" in admission
 
 
+def test_dm_transition_retries_a_won_retained_flush_before_radio_failure():
+    source = read("main/mesh/meshcore_service.c")
+    retry = body(
+        source,
+        "static esp_err_t meshcore_service_retry_dm_transition_persistence",
+        "static esp_err_t transition_pending_dm_tx",
+    )
+    transition = body(
+        source,
+        "static esp_err_t transition_pending_dm_tx",
+        "typedef enum {\n    D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE",
+    )
+
+    assert "D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS" in retry
+    assert "D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS" in retry
+    assert "vTaskDelay(retry_delay)" in retry
+    assert "ret = d1l_dm_store_flush();" in retry
+    assert "ret != ESP_ERR_NOT_FINISHED" in retry
+
+    transition_at = transition.index("d1l_dm_store_transition_delivery(")
+    retry_gate_at = transition.index(
+        "ret == ESP_ERR_NOT_FINISHED && outcome.changed"
+    )
+    retry_at = transition.index(
+        "meshcore_service_retry_dm_transition_persistence()"
+    )
+    publish_at = transition.index(
+        "const bool publish_to_owner = "
+        "outcome.changed || outcome.persistence_retry;"
+    )
+    assert transition_at < retry_gate_at < retry_at < publish_at
+    assert "outcome.durable = ret == ESP_OK" in transition
+    assert "outcome.error = ret" in transition
+
+
+def test_owner_maintenance_terminalizes_only_idle_non_ack_dm_orphans():
+    source = read("main/mesh/meshcore_service.c")
+    orphan = body(
+        source,
+        "static void meshcore_service_terminalize_idle_dm_orphan",
+        "static void meshcore_service_run_owner_maintenance",
+    )
+    maintenance = body(
+        source,
+        "static void meshcore_service_run_owner_maintenance",
+        "static void meshcore_service_handle_radio_rx_done",
+    )
+
+    for guard in (
+        "!owner->active",
+        "owner->state == D1L_DM_DELIVERY_AWAITING_ACK",
+        "s_pending_dm_tx.ack_persistence_pending",
+        "d1l_meshcore_ack_completion_suppresses_rf_retry(",
+        "s_tx_busy",
+        "d1l_mesh_tx_operation_identity_valid(&s_active_radio_tx)",
+    ):
+        assert guard in orphan
+
+    queued = orphan.index("case D1L_DM_DELIVERY_QUEUED:")
+    waiting = orphan.index("case D1L_DM_DELIVERY_WAITING_RADIO:")
+    retry_tx = orphan.index("case D1L_DM_DELIVERY_RETRY_TX:")
+    failed_queue = orphan.index("D1L_DM_DELIVERY_FAILED_QUEUE", retry_tx)
+    tx_active = orphan.index("case D1L_DM_DELIVERY_TX_ACTIVE:")
+    failed_radio = orphan.index("D1L_DM_DELIVERY_FAILED_RADIO", tx_active)
+    tx_done = orphan.index("case D1L_DM_DELIVERY_TX_DONE:")
+    retry_wait = orphan.index("case D1L_DM_DELIVERY_RETRY_WAIT:")
+    failed_timeout = orphan.index("D1L_DM_DELIVERY_FAILED_TIMEOUT", retry_wait)
+    assert queued < waiting < retry_tx < failed_queue < tx_active < failed_radio
+    assert tx_done < retry_wait < failed_timeout
+
+    transition_at = orphan.index("transition_pending_dm_tx(")
+    terminal_gate_at = orphan.index("d1l_dm_delivery_state_terminal(")
+    clear_at = orphan.index("clear_pending_dm_tx();")
+    assert transition_at < terminal_gate_at < clear_at
+    assert "case D1L_DM_DELIVERY_AWAITING_ACK:" not in orphan
+
+    busy_gate_at = maintenance.index("if (s_tx_busy) {")
+    cleanup_at = maintenance.index("meshcore_service_terminalize_idle_dm_orphan();")
+    history_at = maintenance.index("maintain_pending_channel_history(now_ms)")
+    assert busy_gate_at < cleanup_at < history_at
+
+
 def test_outbound_dm_bounds_retained_worker_handoff_before_radio():
     source = read("main/mesh/meshcore_service.c")
     handler = body(
@@ -206,6 +288,75 @@ def test_dm_console_reports_transient_storage_admission_truthfully():
     assert "ret == ESP_ERR_NOT_FINISHED" in command
     assert "DM storage is busy; message was not transmitted, retry" in command
     assert "DM requires a promoted contact with a retained public key" not in command
+
+
+def test_mesh_status_exposes_compact_dm_delivery_owner():
+    console = read("main/comms/usb_console.c")
+    service = read("main/mesh/meshcore_service.c")
+    header = read("main/mesh/meshcore_service.h")
+    command = body(
+        console,
+        "static void cmd_mesh_status",
+        "static void cmd_companion_status",
+    )
+    clear = body(
+        service,
+        "static void clear_pending_dm_tx",
+        "static void record_dm_delivery_status",
+    )
+    record = body(
+        service,
+        "static void record_dm_delivery_status",
+        "static bool begin_pending_dm_tx",
+    )
+
+    assert '\\"dm_delivery\\"' in command
+    for field in (
+        "session_id",
+        "revision",
+        "state",
+        "state_id",
+        "last_error",
+        "active",
+    ):
+        assert f'\\\"{field}\\\"' in command
+    assert "bool dm_delivery_active;" in header
+    assert "bool_json(status.dm_delivery_active)" in command
+    assert "d1l_dm_delivery_state_terminal(dm_delivery_state)" not in command
+    assert "s_status.dm_delivery_active = false;" in clear
+    assert (
+        "s_status.dm_delivery_active = s_pending_dm_tx.delivery.active;"
+        in record
+    )
+
+
+def test_terminal_ack_with_deferred_finalization_remains_status_active():
+    service = read("main/mesh/meshcore_service.c")
+    console = read("main/comms/usb_console.c")
+    ack = body(
+        service,
+        "static d1l_rx_ack_result_t record_dm_ack",
+        "static void parse_rx_ack_packet",
+    )
+    reconcile = body(
+        service,
+        "static void reconcile_pending_dm_ack_persistence",
+        "static esp_err_t record_detached_dm_queue_failure",
+    )
+    status = body(
+        console,
+        "static void cmd_mesh_status",
+        "static void cmd_companion_status",
+    )
+
+    deferred = ack.split(
+        "if (finalize_pending_dm_ack_completion())", 1
+    )[1].split("return D1L_RX_ACK_ACCEPTED_PENDING;", 1)[0]
+    assert "s_pending_dm_tx.ack_persistence_pending = true;" in deferred
+    assert "clear_pending_dm_tx();" not in deferred
+    assert "owner->state == D1L_DM_DELIVERY_ACKNOWLEDGED" in reconcile
+    assert "bool_json(status.dm_delivery_active)" in status
+    assert "d1l_dm_delivery_state_terminal(dm_delivery_state)" not in status
 
 
 def test_dm_contact_provenance_gate_has_zero_unproven_side_effects():
