@@ -114,7 +114,7 @@ static void test_quarantine_keeps_unknown_bytes_charged(void)
     assert(d1l_map_tile_cache_state_note_commit(&state, &first));
     assert(d1l_map_tile_cache_state_note_commit(&state, &second));
 
-    assert(d1l_map_tile_cache_state_quarantine_head(&state));
+    assert(d1l_map_tile_cache_state_quarantine_head(&state, 0U));
     assert(state.head_offset == D1L_MAP_TILE_CACHE_RECORD_BYTES);
     assert(state.live_bytes == 90U);
     assert(!d1l_map_tile_cache_state_has_room(&state, 100U, 20U));
@@ -123,7 +123,13 @@ static void test_quarantine_keeps_unknown_bytes_charged(void)
     assert(state.head_offset == state.tail_offset);
     assert(state.live_bytes == 60U);
     assert(d1l_map_tile_cache_state_has_room(&state, 100U, 20U));
-    assert(!d1l_map_tile_cache_state_quarantine_head(&state));
+    assert(!d1l_map_tile_cache_state_quarantine_head(&state, 0U));
+
+    d1l_map_tile_cache_state_init(&state);
+    assert(d1l_map_tile_cache_state_note_commit(&state, &first));
+    assert(d1l_map_tile_cache_state_quarantine_head(&state, 100U));
+    assert(state.head_offset == state.tail_offset);
+    assert(state.live_bytes == 160U);
 }
 
 static void test_quarantine_record_is_checksummed_and_reconstructible(void)

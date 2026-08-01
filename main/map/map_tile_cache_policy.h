@@ -81,7 +81,8 @@ bool d1l_map_tile_cache_state_note_evict(
     d1l_map_tile_cache_state_t *state,
     const d1l_map_tile_cache_record_t *oldest_record);
 bool d1l_map_tile_cache_state_quarantine_head(
-    d1l_map_tile_cache_state_t *state);
+    d1l_map_tile_cache_state_t *state,
+    uint64_t additional_charge_bytes);
 bool d1l_map_tile_cache_recovery_plan(
     bool final_tile_valid,
     bool temporary_tile_valid,

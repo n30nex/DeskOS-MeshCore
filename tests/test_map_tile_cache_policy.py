@@ -164,10 +164,12 @@ def test_corrupt_cache_state_is_rebuilt_from_the_verified_journal():
     assert "cache_record_files_absent(" in rebuild
     assert "cache_record_superseded_by_later_journal(" in rebuild
     assert "const bool evicted_prefix =" in rebuild
-    assert "Unresolved records stay charged; quarantine only advances FIFO." in rebuild
-    assert "if (!recovered && evicted_prefix)" in rebuild
+    assert "const esp_err_t recovery_error = ret;" in rebuild
+    assert "return recovery_error;" in rebuild
+    assert "Interior holes stay charged until FIFO reaches them." in rebuild
+    assert "if (!recovered && evicted_prefix &&" in rebuild
     assert rebuild.index("d1l_map_tile_cache_state_note_commit") < (
-        rebuild.index("d1l_map_tile_cache_state_quarantine_head")
+        rebuild.index("d1l_map_tile_cache_state_note_evict")
     )
     assert "allow_metadata_rebuild &&" in recover
     assert "cache_integrity_recoverable(final_metadata_ret)" in recover
@@ -189,8 +191,9 @@ def test_corrupt_cache_state_is_rebuilt_from_the_verified_journal():
     assert "recover_interrupted_record(provider, &record, false)" in recover_tail
     assert "provider, &record, true" in recover_tail
     assert "cache_record_superseded_by_later_journal(" in recover_tail
-    assert "if (!recovered && evicted_prefix)" in recover_tail
-    assert "d1l_map_tile_cache_state_quarantine_head(state)" in recover_tail
+    assert "if (superseded && evicted_prefix" in recover_tail
+    assert "d1l_map_tile_cache_state_note_evict(state, &record)" in recover_tail
+    assert "d1l_map_tile_cache_state_quarantine_head(state, 0U)" in recover_tail
     assert "cache_record_matches_tile(" in superseded
     assert "read_cache_metadata(\n        result.metadata_tmp_path" in superseded
     assert "verify_tile_file(result.path, &later)" in superseded
@@ -225,7 +228,8 @@ def test_corrupt_fifo_entry_is_atomically_quarantined_and_traced():
     ]
 
     assert "state->head_offset += D1L_MAP_TILE_CACHE_RECORD_BYTES;" in state_quarantine
-    assert "live_bytes" not in state_quarantine
+    assert "state->live_bytes > UINT64_MAX - additional_charge_bytes" in state_quarantine
+    assert "state->live_bytes += additional_charge_bytes;" in state_quarantine
     assert "d1l_map_tile_cache_record_init_quarantine" in policy
     assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in journal_rewrite
     assert "d1l_rp2040_bridge_file_rename(" in journal_rewrite
@@ -241,12 +245,54 @@ def test_corrupt_fifo_entry_is_atomically_quarantined_and_traced():
         repair_head.index("if (ret == ESP_ERR_INVALID_CRC)") :
         repair_head.index("if (ret != ESP_OK)")
     ]
-    for stage in ("cache_journal_validate", "cache_journal_repair",
+    for stage in ("cache_control_recover", "cache_journal_validate",
+                  "cache_journal_repair",
                   "cache_state_rebuild", "cache_head_repair",
                   "cache_tail_recover"):
         assert f'"{stage}"' in load
     assert store.count("download_step(result, s_cache_recovery_stage") == 1
     assert store.count("&result, s_cache_recovery_stage") == 1
+
+
+def test_cache_control_replace_gap_recovers_only_committed_backup():
+    store = read("main/storage/map_tile_store.c")
+    recover = store[
+        store.index("static esp_err_t promote_missing_cache_control_backup") :
+        store.index("static esp_err_t read_cache_metadata")
+    ]
+    rewrite = store[
+        store.index("static esp_err_t rebuild_cache_journal(") :
+        store.index("static esp_err_t rebuild_cache_journal_prefix")
+    ]
+
+    assert '"cache-journal.v1.bak"' in store
+    assert '"cache-state.v1.bak"' in store
+    assert "if (!file_result_missing(ret, &canonical))" in recover
+    assert recover.index("return ESP_OK;") < recover.index(
+        "d1l_rp2040_bridge_file_stat(\n        backup_path"
+    )
+    assert "Repair temps can be structurally valid prefixes" in recover
+    assert "journal_tmp" not in recover
+    assert "state_tmp" not in recover
+    assert "validate_cache_state_file(backup_path)" in recover
+    assert "backup.size != D1L_MAP_TILE_CACHE_STATE_BYTES" in recover
+    assert "if (ret == ESP_ERR_INVALID_CRC)" in recover
+    assert "backup_path, canonical_path, false" in recover
+    assert recover.count("cache_backend_generation_matches(") >= 2
+    assert "!cache_backend_generation_matches(backend_generation) ?" in recover
+    assert rewrite.index("paths->journal_backup") < rewrite.index(
+        "paths->journal_tmp"
+    ) < rewrite.index("paths->journal)")
+
+    repair_head = store[
+        store.index("static esp_err_t repair_cache_head") :
+        store.index("static esp_err_t recover_cache_tail")
+    ]
+    assert "state->head_offset /" in repair_head
+    assert "record.sequence != expected_sequence" in repair_head
+    assert repair_head.index("record.sequence != expected_sequence") < (
+        repair_head.index("quarantine_cache_journal_record(")
+    )
 
 
 def test_fresh_tile_miss_precedes_global_cache_recovery():

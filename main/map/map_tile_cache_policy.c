@@ -279,15 +279,18 @@ bool d1l_map_tile_cache_state_note_evict(
 }
 
 bool d1l_map_tile_cache_state_quarantine_head(
-    d1l_map_tile_cache_state_t *state)
+    d1l_map_tile_cache_state_t *state,
+    uint64_t additional_charge_bytes)
 {
     if (!state_valid(state) ||
         state->head_offset >= state->tail_offset ||
         state->head_offset >
-            UINT32_MAX - D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+            UINT32_MAX - D1L_MAP_TILE_CACHE_RECORD_BYTES ||
+        state->live_bytes > UINT64_MAX - additional_charge_bytes) {
         return false;
     }
     state->head_offset += D1L_MAP_TILE_CACHE_RECORD_BYTES;
+    state->live_bytes += additional_charge_bytes;
     return true;
 }
 
