@@ -130,6 +130,22 @@ def test_dm_transition_retries_a_won_retained_flush_before_radio_failure():
     assert "outcome.error = ret" in transition
 
 
+def test_dm_quiesce_retries_transient_storage_manager_ownership():
+    source = read("main/mesh/meshcore_service.c")
+    quiesce = body(
+        source,
+        "static esp_err_t meshcore_service_begin_dm_retained_quiesce",
+        "static esp_err_t meshcore_service_retry_dm_transition_persistence",
+    )
+
+    assert "D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS" in quiesce
+    assert "D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS" in quiesce
+    assert "d1l_route_store_worker_quiesce_begin(remaining_ms)" in quiesce
+    assert "ret != ESP_ERR_INVALID_STATE" in quiesce
+    assert "return ESP_ERR_TIMEOUT" in quiesce
+    assert "vTaskDelay(retry_delay)" in quiesce
+
+
 def test_owner_maintenance_terminalizes_only_idle_non_ack_dm_orphans():
     source = read("main/mesh/meshcore_service.c")
     orphan = body(
@@ -186,7 +202,7 @@ def test_outbound_dm_bounds_retained_worker_handoff_before_radio():
     )
 
     assert '#include "mesh/route_store_worker.h"' in source
-    quiesce_at = handler.index("d1l_route_store_worker_quiesce_begin(")
+    quiesce_at = handler.index("meshcore_service_begin_dm_retained_quiesce()")
     append_at = handler.index("d1l_dm_store_append_tx(")
     success_release_at = handler.index(
         "d1l_route_store_worker_quiesce_end();", append_at
@@ -204,10 +220,6 @@ def test_outbound_dm_bounds_retained_worker_handoff_before_radio():
         < radio_at
         < cleanup_label_at
         < cleanup_release_at
-    )
-    assert (
-        "D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS"
-        in handler[quiesce_at:append_at]
     )
     assert "ESP_ERR_NOT_FINISHED" in handler[quiesce_at:append_at]
     assert "return " not in handler[append_at:success_release_at]
@@ -228,7 +240,7 @@ def test_direct_dm_flood_retry_bounds_retained_worker_handoff_before_radio():
         "static esp_err_t meshcore_service_validate_room_post_session",
     )
 
-    quiesce_at = retry.index("d1l_route_store_worker_quiesce_begin(")
+    quiesce_at = retry.index("meshcore_service_begin_dm_retained_quiesce()")
     retry_wait_at = retry.index("D1L_DM_DELIVERY_RETRY_WAIT", quiesce_at)
     retry_transition_at = retry.index(
         "transition_pending_dm_retry(", retry_wait_at
@@ -262,10 +274,6 @@ def test_direct_dm_flood_retry_bounds_retained_worker_handoff_before_radio():
         < radio_at
         < cleanup_label_at
         < cleanup_release_at
-    )
-    assert (
-        "D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS"
-        in retry[quiesce_at:retry_wait_at]
     )
     assert "return " not in retry[retry_wait_at:success_release_at]
     assert retry[retry_wait_at:success_release_at].count(

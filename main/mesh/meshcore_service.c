@@ -1572,6 +1572,34 @@ static bool begin_pending_dm_tx(
     return true;
 }
 
+static esp_err_t meshcore_service_begin_dm_retained_quiesce(void)
+{
+    const uint64_t started_us = (uint64_t)esp_timer_get_time();
+    const uint64_t timeout_us =
+        (uint64_t)D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS * 1000ULL;
+    TickType_t retry_delay =
+        pdMS_TO_TICKS(D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS);
+    if (retry_delay == 0U) {
+        retry_delay = 1U;
+    }
+
+    for (;;) {
+        const uint64_t now_us = (uint64_t)esp_timer_get_time();
+        const uint64_t elapsed_us = now_us - started_us;
+        if (elapsed_us >= timeout_us) {
+            return ESP_ERR_TIMEOUT;
+        }
+        const uint32_t remaining_ms = (uint32_t)(
+            (timeout_us - elapsed_us + 999ULL) / 1000ULL);
+        const esp_err_t ret =
+            d1l_route_store_worker_quiesce_begin(remaining_ms);
+        if (ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
+        vTaskDelay(retry_delay);
+    }
+}
+
 static esp_err_t meshcore_service_retry_dm_transition_persistence(void)
 {
     const uint64_t retry_started_us = (uint64_t)esp_timer_get_time();
@@ -5789,8 +5817,7 @@ static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)
      * in-flight background flush can reject the retry before attempt 1 is
      * published and leave a recoverable direct miss terminal at attempt 0.
      */
-    ret = d1l_route_store_worker_quiesce_begin(
-        D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS);
+    ret = meshcore_service_begin_dm_retained_quiesce();
     if (ret != ESP_OK) {
         fail_pending_dm_ack_timeout(ret);
         return ret;
@@ -6002,8 +6029,7 @@ static esp_err_t meshcore_service_handle_send_dm(
      * persistence mutex.  The existing worker quiesce deadline also gives an
      * in-flight SD operation time to observe persistence_should_yield().
      */
-    ret = d1l_route_store_worker_quiesce_begin(
-        D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS);
+    ret = meshcore_service_begin_dm_retained_quiesce();
     if (ret != ESP_OK) {
         return ret == ESP_ERR_TIMEOUT || ret == ESP_ERR_INVALID_STATE ?
             ESP_ERR_NOT_FINISHED : ret;
