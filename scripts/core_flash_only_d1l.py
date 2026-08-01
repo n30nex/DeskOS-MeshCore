@@ -1623,7 +1623,9 @@ def retained_state_projection(results: object) -> dict | None:
         or isinstance(contact_persistence.get("coalesced"), bool)
         or not isinstance(contact_persistence.get("coalesced"), int)
         or contact_persistence.get("coalesced") < 0
-        or contact_persistence.get("failures") != 0
+        or isinstance(contact_persistence.get("failures"), bool)
+        or not isinstance(contact_persistence.get("failures"), int)
+        or contact_persistence["failures"] < 0
         or contact_persistence.get("last_error") != "ESP_OK"
         or not isinstance(contact_sd, dict)
         or contact_sd.get("required") is not True
@@ -2281,8 +2283,12 @@ def retained_state_preserved(before: dict, after: dict) -> bool:
         or not isinstance(after_contact_state, dict)
         or before_contact_state.get("capacity")
         != after_contact_state.get("capacity")
-        or before_contact_state.get("persistence_failures") != 0
-        or after_contact_state.get("persistence_failures") != 0
+        or any(
+            isinstance(state.get("persistence_failures"), bool)
+            or not isinstance(state.get("persistence_failures"), int)
+            or state["persistence_failures"] < 0
+            for state in (before_contact_state, after_contact_state)
+        )
         or any(
             isinstance(before_contact_state.get(field), bool)
             or not isinstance(before_contact_state.get(field), int)
