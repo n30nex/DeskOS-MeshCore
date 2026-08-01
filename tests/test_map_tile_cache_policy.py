@@ -109,6 +109,10 @@ def test_cache_identity_uses_stable_sd_backend_generation():
 
 def test_corrupt_cache_state_is_rebuilt_from_the_verified_journal():
     store = read("main/storage/map_tile_store.c")
+    rebuild = store[
+        store.index("static esp_err_t rebuild_cache_state_from_journal") :
+        store.index("static esp_err_t load_cache_state_for_generation")
+    ]
     load = store[
         store.index("static esp_err_t load_cache_state_for_generation") :
         store.index("static esp_err_t prepare_cache_room")
@@ -123,6 +127,12 @@ def test_corrupt_cache_state_is_rebuilt_from_the_verified_journal():
     assert load.index("rebuild_cache_state_from_journal(") < load.index(
         "write_cache_state(paths, &loaded)"
     )
+    assert rebuild.index("recover_interrupted_record(provider, &record)") < (
+        rebuild.index("d1l_map_tile_cache_state_note_commit(state, &record)")
+    )
+    assert "cache_record_superseded_by_later_journal(" in rebuild
+    assert "rebuild_cache_journal_prefix(" in rebuild
+    assert "*journal_size = record_offset;" in rebuild
     assert "delete_file_allow_missing(paths->state)" not in load
 
 
