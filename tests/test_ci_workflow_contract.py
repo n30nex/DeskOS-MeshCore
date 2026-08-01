@@ -58,7 +58,6 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
         assert forbidden not in host
     assert not re.search(r"\bCOM\d+\b", host, re.IGNORECASE)
 
-    sd_gate = "if: needs.change-filter.outputs.include_sd_bridge == 'true'"
     assert "needs: change-filter" in host
     assert SETUP_PYTHON_ACTION_PIN in host
     assert 'python-version: "3.13.6"' in host
@@ -75,31 +74,32 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
         < host.index("name: Checksum exact host build inputs")
         < host.index("name: Host tests")
     )
-    assert "python -m pytest tests -q" in host
-    assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in host
-    assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in host
-    assert "python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage" in host
-    assert "python ./scripts/smoke_d1l.py --dry-run" in host
-    assert "python ./scripts/ui_corruption_probe_d1l.py --dry-run --rounds 20" in host
+    assert host.count("python -m pytest tests -q") == 1
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --out artifacts/ui-sim" in host
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario large-mesh --out artifacts/ui-sim-large" in host
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario storage-states --out artifacts/ui-sim-storage" in host
+    assert "python ./scripts/smoke_d1l.py --dry-run" not in host
+    assert "python ./scripts/ui_corruption_probe_d1l.py --dry-run" not in host
     assert "ui_tab_abuse_d1l.py" not in host
-    assert "python ./scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache" in host
-    assert "python ./tools/ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready" in host
+    assert "python ./scripts/scroll_probe_d1l.py --dry-run" not in host
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --out artifacts/ui-sim-map-ready" in host
+    assert "shell: bash" in host
     assert "soak_d1l.py" not in host
     assert "storage_active_soak_d1l.py" not in host
     assert "--active-public-text test" not in host
-    assert "python ./scripts/sd_file_canary_d1l.py --dry-run" in host
-    assert "python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run" in host
-    assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run" in host
-    assert "python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run --token ci-dry-run" in host
-    assert "python ./scripts/sd_export_canary_d1l.py --dry-run --token ci-dry-run" in host
-    assert "python ./scripts/sd_diagnostic_export_d1l.py --dry-run --token ci-dry-run" in host
-    assert "python ./scripts/sd_data_export_d1l.py --dry-run --token ci-dry-run" in host
-    assert "python ./scripts/rp2040_sd_bridge_preflight_d1l.py --dry-run --artifact-dir artifacts/rp2040-sd-bridge" in host
-    assert "python ./scripts/sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all" in host
-    assert host.count(sd_gate) >= 9
+    assert "sd_file_canary_d1l.py --dry-run" not in host
+    assert "sd_retained_history_acceptance_d1l.py --dry-run" not in host
+    assert "sd_map_tile_canary_d1l.py --dry-run" not in host
+    assert "sd_reboot_remount_acceptance_d1l.py --dry-run" not in host
+    assert "sd_export_canary_d1l.py --dry-run" not in host
+    assert "sd_diagnostic_export_d1l.py --dry-run" not in host
+    assert "sd_data_export_d1l.py --dry-run" not in host
+    assert "rp2040_sd_bridge_preflight_d1l.py --dry-run" not in host
+    assert "sd_boot_prepare_acceptance_d1l.py --dry-run" not in host
     assert "python -m pytest -q tests/test_checksum_manifest.py tests/test_package_release_d1l.py" in host
     assert "python ./scripts/verify_checksums.py artifacts" not in host
-    assert "python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json" in host
+    assert "python ./scripts/completion_ledger.py" not in host
+    assert "python ./scripts/release_gate_audit_d1l.py" not in host
     assert "core_release_gate_audit_d1l.py" not in host
 
 

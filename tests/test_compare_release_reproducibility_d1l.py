@@ -54,8 +54,9 @@ def write_source_tree(root: Path) -> None:
         "docs/DESKOS_MESHCORE_FEATURE_PARITY.md",
         "docs/KNOWN_LIMITATIONS.md",
         "docs/D1L_SD_CARD_GUIDED_INSTALL.md",
+        "docs/ADMIN_REMOTE_CLI_ALLOWLIST.md",
         "docs/ATTRIBUTIONS.md",
-        "docs/release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md",
+        "docs/RC1_SCOPE.md",
     ):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)

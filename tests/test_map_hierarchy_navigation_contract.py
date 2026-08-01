@@ -136,6 +136,7 @@ def test_map_probe_rejects_clear_setup_action():
 def test_map_docs_define_the_bounded_interactive_policy_and_probe_safety():
     guide = read("docs/USER_GUIDE_D1L.md")
     test_plan = read("docs/TEST_PLAN_D1L.md").split("## Historical", 1)[0]
+    roadmap = read("docs/ROADMAP.md")
     attributions = read("docs/ATTRIBUTIONS.md")
 
     assert "visible current-view 3×3" in guide
@@ -150,7 +151,7 @@ def test_map_docs_define_the_bounded_interactive_policy_and_probe_safety():
     assert "at most 60%" in guide
     assert "at least 8 GiB" in guide
     assert "(c) OpenStreetMap contributors" in guide
-    assert "one authorized-provider" in test_plan
-    assert "Map download followed by offline cache revisit" in test_plan
+    assert "one Map source" in " ".join(test_plan.split())
+    assert "Authorized fresh tile download plus cache revisit from SD" in roadmap
     assert "example manifest intentionally uses a non-routable placeholder" in attributions
     assert "must not be pointed at OpenStreetMap Standard" in attributions

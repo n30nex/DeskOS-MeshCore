@@ -146,7 +146,7 @@ REQUIRED_TOOLCHAIN_MATERIALS = (
 REQUIRED_INPUT_MATERIALS = (
     "SIGUI source",
     ".github/workflows/d1l-ci.yml",
-    "docs/COMPLETION_LEDGER.yaml",
+    "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml",
     "partitions_d1l.csv",
     "third_party/MeshCore",
     "third_party/sensecap_indicator_esp32",

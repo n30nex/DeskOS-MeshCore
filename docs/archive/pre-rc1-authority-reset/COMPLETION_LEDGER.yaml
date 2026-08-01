@@ -1,4 +1,5 @@
 {
+  "historical_warning": "HISTORICAL RECORD — DO NOT EXECUTE. This document predates the RC1 authority reset and is retained only for provenance. See docs/RC1_SCOPE.md and docs/ROADMAP.md.",
   "schema_version": 1,
   "snapshot_at": "2026-07-18T16:23:32Z",
   "project": "SIGUI / MeshCore DeskOS D1L",

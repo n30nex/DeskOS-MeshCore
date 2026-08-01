@@ -629,7 +629,7 @@ def test_core_conditional_package_is_production_only(
     assert "## 1. Prepare the microSD card" in guide
     assert "## 2. Flash the RP2040 SD-bridge side" in guide
     assert "## 4. Flash the ESP32 main GUI side" in guide
-    assert "# DeskOS D1L 1.0 - Windows and Linux Install" in guide
+    assert "# DeskOS D1L 1.0 RC1 Candidate - Windows and Linux Install" in guide
     assert "Run the read-only RC1 test" not in guide
     assert verify_checksum_tree(package) is True
 
@@ -721,6 +721,75 @@ def test_production_surface_rejects_internal_artifact_names(tmp_path):
         package_release_d1l.validate_production_package_surface(tmp_path)
 
 
+def test_core_package_links_and_conditional_storage_authority_are_consistent(
+    tmp_path, monkeypatch
+):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    write_fake_config(tmp_path)
+    rp2040 = write_fake_rp2040_artifacts(tmp_path)
+    bridge_dir = rp2040 / "rp2040-sd-bridge-firmware"
+    (bridge_dir / "rp2040-sd-bridge-firmware.uf2").rename(
+        bridge_dir / "deskos_sd_bridge.ino.uf2"
+    )
+    for name, content in {
+        "deskos_sd_bridge.ino.bin": b"BIN",
+        "deskos_sd_bridge.ino.elf": b"ELF",
+        "deskos_sd_bridge.ino.map": b"MAP",
+        "build-inputs.json": b"{}\n",
+        "sdfat-no-usb-patch.json": b"{}\n",
+    }.items():
+        (bridge_dir / name).write_bytes(content)
+    package_release_d1l.write_sha256sums(bridge_dir)
+    prepare = tmp_path / "scripts" / "prepare_deskos_sd.py"
+    prepare.write_text(
+        (ROOT / "scripts" / "prepare_deskos_sd.py").read_text(encoding="ascii"),
+        encoding="ascii",
+    )
+    sd_manifest = tmp_path / "sdcard" / "deskos" / "manifest.json"
+    sd_manifest.parent.mkdir(parents=True)
+    sd_manifest.write_text('{"schema":1}\n', encoding="ascii")
+
+    commit = "e" * 40
+    monkeypatch.setenv("GITHUB_SHA", commit)
+    monkeypatch.setenv("GITHUB_RUN_ID", "456789012")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/SIGUI")
+    monkeypatch.setenv("GITHUB_WORKFLOW", "d1l-ci")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    install_fake_source_identity(monkeypatch, commit)
+
+    manifest = package_release_d1l.create_release_package(
+        root=tmp_path,
+        build_dir=build,
+        out_dir=tmp_path / "release",
+        package_name="core-authority",
+        full_size=0x20000,
+        rp2040_artifact_root=rp2040,
+        release_profile="core_1_0",
+        sd_history_mode="conditional",
+    )
+    package = tmp_path / "release" / "core-authority"
+    packaged_docs = {row["path"] for row in manifest["release_docs"]}
+    assert "docs/ADMIN_REMOTE_CLI_ALLOWLIST.md" in packaged_docs
+    assert "docs/RC1_SCOPE.md" in packaged_docs
+
+    user_guide = (package / "docs" / "USER_GUIDE_D1L.md").read_text(
+        encoding="ascii"
+    )
+    for target in re.findall(r"\]\(([^)#][^)]*)\)", user_guide):
+        assert (package / "docs" / target).is_file(), target
+
+    release_readme = (package / "README_RELEASE.md").read_text(encoding="ascii")
+    assert manifest["storage_authority"] == "sd_primary_live_only_without_sd"
+    normalized_readme = " ".join(release_readme.split())
+    assert "SD is primary" in normalized_readme
+    assert "Without required media, operation is visibly live-only" in normalized_readme
+    assert "retained history is not redirected into default NVS" in normalized_readme
+    assert "When disabled, retained Core data uses NVS" not in release_readme
+
+
 def test_production_surface_rejects_debug_binary_metadata(tmp_path):
     debug_file = tmp_path / "firmware" / "deskos.elf"
     debug_file.parent.mkdir()
@@ -753,9 +822,11 @@ def test_public_release_stages_only_production_zip_and_outer_checksums():
         "ASSET_SUMS",
     ]
     release_command = release_doc.split(
-        "gh release create v1.0.0", 1
+        "gh release create v1.0.0-rc.1", 1
     )[1].split("test \"$(gh release view", 1)[0]
     assert "--generate-notes" not in release_command
+    assert "--prerelease" in release_command
+    assert "--latest=false" in release_command
     assert "START_HERE.md" in release_command
     for internal_marker in (
         "START_HERE_RC1",

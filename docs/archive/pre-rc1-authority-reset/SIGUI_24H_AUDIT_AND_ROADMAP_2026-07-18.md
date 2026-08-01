@@ -1,3 +1,9 @@
+HISTORICAL RECORD — DO NOT EXECUTE
+
+This document predates the RC1 authority reset. It is retained only for
+provenance. It cannot create work, tests, evidence requirements, or release
+gates. See `docs/RC1_SCOPE.md` and `docs/ROADMAP.md`.
+
 # SIGUI Repository Audit and 24-Hour Core Production Release Roadmap
 
 > **SUPERSEDED HISTORICAL AUDIT/EXECUTION PLAN — DO NOT EXECUTE.**

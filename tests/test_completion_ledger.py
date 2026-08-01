@@ -13,8 +13,9 @@ from scripts.completion_ledger import (
 )
 
 
-LEDGER_PATH = Path("docs/COMPLETION_LEDGER.yaml")
-STATUS_PATH = Path("docs/COMPLETION_STATUS.md")
+ARCHIVE = Path("docs/archive/pre-rc1-authority-reset")
+LEDGER_PATH = ARCHIVE / "COMPLETION_LEDGER.yaml"
+STATUS_PATH = ARCHIVE / "COMPLETION_STATUS.md"
 WP01_COMMIT = "092293f2311a24c9899bc9bf343ab014c4ba0411"
 
 
@@ -59,11 +60,14 @@ def reset_wp02_before_merge(ledger: dict) -> dict:
     return item
 
 
-def test_repository_ledger_validates_and_status_is_current():
+def test_archived_repository_ledger_remains_readable_and_historical():
     ledger = load_ledger(LEDGER_PATH)
 
     assert validate_ledger(ledger) == []
-    assert STATUS_PATH.read_text(encoding="utf-8") == render_status(ledger)
+    assert "HISTORICAL RECORD — DO NOT EXECUTE" in STATUS_PATH.read_text(
+        encoding="utf-8"
+    )
+    assert "HISTORICAL RECORD — DO NOT EXECUTE" in render_status(ledger)
 
 
 def test_completion_reporting_is_recomputed_and_does_not_waive_release_gates():

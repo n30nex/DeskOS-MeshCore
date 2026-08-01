@@ -91,7 +91,7 @@ def write_sd_preparation(package: Path) -> dict:
 def write_user_install(package: Path) -> dict:
     payloads = {
         "START_HERE.md": (
-            "# DeskOS D1L 1.0 - Windows and Linux Install\n"
+            "# DeskOS D1L 1.0 RC1 Candidate - Windows and Linux Install\n"
             f"commit {COMMIT}\n"
             "GitHub Actions run and attempt: see `manifest.json`\n"
             "prepare_sd_card.ps1 prepare_sd_card.sh\n"

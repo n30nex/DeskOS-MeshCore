@@ -113,14 +113,18 @@ def write_fake_notices(root: Path) -> None:
     (root / "THIRD_PARTY_NOTICES.md").write_text("third party notices\n", encoding="ascii")
     (root / "docs" / "ATTRIBUTIONS.md").write_text("attributions\n", encoding="ascii")
     (root / "docs" / "SOURCE_AUDIT_AND_ATTRIBUTION.md").write_text("source audit\n", encoding="ascii")
-    (root / "docs" / "USER_GUIDE_D1L.md").write_text("user guide\n", encoding="ascii")
+    (root / "docs" / "USER_GUIDE_D1L.md").write_text(
+        "user guide\n[allowlist](ADMIN_REMOTE_CLI_ALLOWLIST.md)\n",
+        encoding="ascii",
+    )
     (root / "docs" / "DESKOS_MESHCORE_FEATURE_PARITY.md").write_text("feature parity\n", encoding="ascii")
     (root / "docs" / "KNOWN_LIMITATIONS.md").write_text("limitations\n", encoding="ascii")
     (root / "docs" / "D1L_SD_CARD_GUIDED_INSTALL.md").write_text("sd setup\n", encoding="ascii")
-    release_docs = root / "docs" / "release"
-    release_docs.mkdir(exist_ok=True)
-    (release_docs / "SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md").write_text(
-        "product contract\n", encoding="ascii"
+    (root / "docs" / "ADMIN_REMOTE_CLI_ALLOWLIST.md").write_text(
+        "admin allowlist\n", encoding="ascii"
+    )
+    (root / "docs" / "RC1_SCOPE.md").write_text(
+        "RC1 candidate scope\n", encoding="ascii"
     )
     overlay = root / "overlays" / "meshcore_ed25519_defined"
     overlay.mkdir(parents=True, exist_ok=True)
@@ -462,8 +466,9 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         "docs/DESKOS_MESHCORE_FEATURE_PARITY.md",
         "docs/KNOWN_LIMITATIONS.md",
         "docs/D1L_SD_CARD_GUIDED_INSTALL.md",
+        "docs/ADMIN_REMOTE_CLI_ALLOWLIST.md",
         "docs/ATTRIBUTIONS.md",
-        "docs/SIGUI_CORE_1_0_PRODUCT_CONTRACT.md",
+        "docs/RC1_SCOPE.md",
     ]
     assert [item["name"] for item in manifest["rp2040_artifacts"]] == [
         "rp2040-sd-bridge-firmware",
@@ -578,7 +583,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     for source_name in (
         ".github/d1l-build-inputs.json",
         "requirements/ci-host-windows.txt",
-        "docs/COMPLETION_LEDGER.yaml",
+        "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml",
     ):
         assert any(item["fileName"] == f"./source/{source_name}" for item in sbom["files"])
     for contract_name in package_release_d1l.PACKAGE_METADATA_CONTRACTS:
@@ -637,7 +642,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert {
         ".github/d1l-build-inputs.json",
         "requirements/ci-host-windows.txt",
-        "docs/COMPLETION_LEDGER.yaml",
+        "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml",
     }.issubset(material_names)
     assert verify_sha256_manifest(package_dir / "SHA256SUMS.txt")
     for artifact in manifest["rp2040_artifacts"]:
@@ -649,7 +654,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
     assert (
         "`docs/` contains the current RC1 user guide, feature-parity matrix, "
-        "limitations, SD-card setup, attributions, and product contract."
+        "limitations, SD-card setup, admin allowlist, attributions, and RC1 scope."
         in normalized_readme
     )
     assert "`notices/` contains the project license" in readme

@@ -322,7 +322,7 @@ def test_remaining_wp05_fuzz_targets_are_pinned_and_fail_closed(
     assert "decrypted[index] == 0x3cU" in decrypt_fuzz
 
     workflow = read(".github/workflows/d1l-ci.yml")
-    assert "Run remaining production WP-05 fuzz targets" in workflow
+    assert "Run remaining production fuzz targets" in workflow
     assert "python ./scripts/meshcore_remaining_fuzz_d1l.py" in workflow
     assert "--cc clang-18" in workflow
     assert "--cxx clang++-18" in workflow

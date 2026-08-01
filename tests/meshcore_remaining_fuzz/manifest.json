@@ -41,7 +41,7 @@
     }
   },
   "source_pins": {
-    ".github/workflows/d1l-ci.yml": "63c4e82fa4d878a65d02acb0efb39dbcfc035f44fb3c4d9306c8cc98c6594d10",
+    ".github/workflows/d1l-ci.yml": "99a390adbdedebb5a375f2d158feff61c2a56800fa5c5795c3ed7fe98b48b2f9",
     "main/CMakeLists.txt": "3a721189ecd11c2e46c2fbcfd6b2cf6579195bd431a70e2a72b32f8e29f12a55",
     "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
     "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",
@@ -73,7 +73,7 @@
     "tests/native/meshcore_crypto_test.c": "a397b7a7d28053984993cc146fea05849544af5f315c9644eca2214c16db769e",
     "tests/native/meshcore_route_selection_test.c": "6c318ccab70eed048687ecf6fb728cc2d3a01fbacb358ce0eac7b9dc55c7f988",
     "tests/native/settings_envelope_test.c": "158353ab42c51142e05bb3b0f180aafdc12167ece20372a4a50cc2ae6924cd7a",
-    "tests/test_meshcore_conformance_contract.py": "ea036116d75d55ca51b85101108772e3269803d2ffa9436943fdc58d3b6179f4",
+    "tests/test_meshcore_conformance_contract.py": "7a253390d86f4bd8f53dc300b43ca47f4363c9200cf3a59000a8ffbcb9a1a798",
     "tests/test_meshcore_public_rf_contract.py": "ab92fb1fdf66502c32667a6346e0f4383e794867a74d22da2151bf7334404658",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"

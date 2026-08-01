@@ -1,3 +1,9 @@
+HISTORICAL RECORD — DO NOT EXECUTE
+
+This document predates the RC1 authority reset. It is retained only for
+provenance. It cannot create work, tests, evidence requirements, or release
+gates. See `docs/RC1_SCOPE.md` and `docs/ROADMAP.md`.
+
 # MeshCore DeskOS D1L Core 1.0 Product Contract
 
 **Contract ID:** `core_1_0`

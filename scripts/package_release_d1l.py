@@ -85,7 +85,9 @@ UPDATE_SIGNING_PUBLIC_KEY_HEX = (
 )
 BUILD_INPUTS_SOURCE = Path(".github/d1l-build-inputs.json")
 HOST_REQUIREMENTS_SOURCE = Path("requirements/ci-host-windows.txt")
-COMPLETION_LEDGER_SOURCE = Path("docs/COMPLETION_LEDGER.yaml")
+COMPLETION_LEDGER_SOURCE = Path(
+    "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml"
+)
 PACKAGE_METADATA_CONTRACTS = {
     "build_inputs": {
         "prefix": "build_inputs",
@@ -114,15 +116,15 @@ RELEASE_DOC_SPECS = [
     ),
     ("docs/KNOWN_LIMITATIONS.md", "KNOWN_LIMITATIONS.md"),
     ("docs/D1L_SD_CARD_GUIDED_INSTALL.md", "D1L_SD_CARD_GUIDED_INSTALL.md"),
+    ("docs/ADMIN_REMOTE_CLI_ALLOWLIST.md", "ADMIN_REMOTE_CLI_ALLOWLIST.md"),
     ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
-    (
-        "docs/release/SIGUI_CORE_1_0_PRODUCT_CONTRACT_2026-07-18.md",
-        "SIGUI_CORE_1_0_PRODUCT_CONTRACT.md",
-    ),
+    ("docs/RC1_SCOPE.md", "RC1_SCOPE.md"),
 ]
 PRODUCTION_RELEASE_DOC_SPECS = [
     ("docs/USER_GUIDE_D1L.md", "USER_GUIDE_D1L.md"),
     ("docs/D1L_SD_CARD_GUIDED_INSTALL.md", "D1L_SD_CARD_GUIDED_INSTALL.md"),
+    ("docs/ADMIN_REMOTE_CLI_ALLOWLIST.md", "ADMIN_REMOTE_CLI_ALLOWLIST.md"),
+    ("docs/RC1_SCOPE.md", "RC1_SCOPE.md"),
     ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
 ]
 NOTICE_FILE_SPECS = [
@@ -151,7 +153,6 @@ PRODUCTION_FORBIDDEN_READER_PATTERNS = (
     # qualification prose while allowing that exact hashtag in instructions.
     re.compile(r"(?<!#)\btests?\b", re.IGNORECASE),
     re.compile(r"\bsmoke\b", re.IGNORECASE),
-    re.compile(r"\bRC[12]\b", re.IGNORECASE),
     re.compile(r"\brelease[-_ ]evidence\b", re.IGNORECASE),
     re.compile(r"\brelease[-_ ]gate\b", re.IGNORECASE),
     re.compile(r"\bdry[-_ ]run\b", re.IGNORECASE),
@@ -735,8 +736,8 @@ def package_inventory_payloads(
                     for capability in truth["unavailable_capabilities"]
                 ],
                 "note": (
-                    "Core profile capability truth generated from the immutable "
-                    "Core 1.0 product contract. Full-feature ledger capability "
+                    "Core profile capability truth generated from the compiled "
+                    "core_1_0 contract. Archived ledger capability "
                     "claims are intentionally not projected into this package."
                 ),
             }
@@ -1666,13 +1667,13 @@ def write_production_user_install_bundle(
 
     guide = package_dir / "START_HERE.md"
     guide.write_text(
-        f"""# DeskOS D1L 1.0 - Windows and Linux Install
+        f"""# DeskOS D1L 1.0 RC1 Candidate - Windows and Linux Install
 
-This is the production DeskOS D1L 1.0 package:
+This is the DeskOS D1L 1.0 RC1 candidate package:
 
 - firmware commit: `{source_commit}`
 - GitHub Actions run and attempt: see `manifest.json` and `README_RELEASE.md`
-- release profile: DeskOS D1L 1.0
+- release profile: `{CORE_RELEASE_PROFILE}`
 - SD history mode: `{sd_history_mode}`
 
 Do not mix files from another download or run these tools from inside an
@@ -2855,11 +2856,11 @@ def write_supported_features(
         sd_text = (
             "SD is the primary retained-data store when the paired bridge and "
             "prepared FAT32 card and authorized NRCan provider are ready. "
-            "First setup and later startup readiness stay covered until that "
-            "required media is available."
+            "Without required media, operation is visibly live-only and retained "
+            "history is not redirected into default NVS."
         )
     path.write_text(
-        f"""# MeshCore DeskOS D1L Core 1.0 Supported Features
+        f"""# MeshCore DeskOS D1L 1.0 RC1 Candidate Supported Features
 
 Release profile: `{CORE_RELEASE_PROFILE}`
 
@@ -2883,8 +2884,8 @@ SD history mode: `{sd_history_mode}`
 
 Unavailable capabilities are intentionally hidden or rejected before side
 effects. BLE companion transport, signed update/recovery, advanced QR sharing,
-    and the on-device USB recovery service are not part of Core 1.0. The package
-still contains a checksum-verified host-side factory recovery image.
+and the on-device USB recovery service are not part of the RC1 candidate. The
+package still contains a checksum-verified host-side factory recovery image.
 
 ## Current known limitations
 
@@ -2892,7 +2893,7 @@ still contains a checksum-verified host-side factory recovery image.
   primary and missing/unusable media produces visible live-only operation.
 - Signed OTA/SD update and the on-device USB recovery service are unavailable.
   A checksum-verified host-side factory recovery image remains in the package.
-- This package contains the Core 1.0 product surface only.
+- This package contains the bounded RC1 candidate product surface only.
 
 ## Support and reporting
 
@@ -2922,7 +2923,7 @@ def write_core_install_recovery_guide(
     docs_dir.mkdir(parents=True, exist_ok=True)
     path = docs_dir / "CORE_INSTALL_RECOVERY.md"
     path.write_text(
-        f"""# MeshCore DeskOS D1L Core 1.0 Install and Recovery
+        f"""# MeshCore DeskOS D1L 1.0 RC1 Candidate Install and Recovery
 
 Firmware commit: `{source_commit}`
 
@@ -2947,7 +2948,7 @@ SD history mode: `{sd_history_mode}`
 5. The generated entrypoint verifies every file against `SHA256SUMS.txt` and
    rejects missing, extra, linked, duplicate, or mismatched files.
 6. Read `SUPPORTED_FEATURES.md`. BLE companion transport, signed OTA/recovery,
-   and advanced QR sharing are unavailable in DeskOS D1L 1.0.
+   and advanced QR sharing are unavailable in the RC1 candidate.
 7. Never format an SD card on the device.
 8. Prepare a FAT32 card with `scripts/prepare_deskos_sd.py`; the checked-in
    payload under `sdcard/` includes the required authorized NRCan provider
@@ -2994,8 +2995,8 @@ $OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
 & (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port $OperatorPort
 ```
 
-Core 1.0 supports USB install/recovery only; it does not support OTA or signed
-SD update.
+The RC1 candidate supports USB install/recovery only; it does not support OTA
+or signed SD update.
 """,
         encoding="ascii",
     )
@@ -3059,15 +3060,15 @@ def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -
                 "RP2040 artifacts in this package."
                 if sd_mode == "supported_optional"
                 else (
-                    "SD is primary when the paired bridge and prepared FAT32 "
-                    "card plus authorized NRCan provider are ready. First "
-                    "setup and later startup readiness wait for that required "
-                    "media."
+                    "SD is primary when the paired bridge, prepared FAT32 card, "
+                    "and authorized NRCan provider are ready. Without required "
+                    "media, operation is visibly live-only and retained history "
+                    "is not redirected into default NVS."
                 )
             )
         )
         readme.write_text(
-            f"""# {PROJECT} Core 1.0 Release Package
+            f"""# {PROJECT} 1.0 RC1 Candidate Package
 
 Package: `{package_name}`
 
@@ -3083,7 +3084,7 @@ SD history mode: `{sd_mode}`
 
 {sd_note}
 
-Start with `START_HERE.md` for the complete Windows or Linux production install:
+Start with `START_HERE.md` for the complete Windows or Linux candidate install:
 prepare the FAT32 card, flash the RP2040 bridge, and flash the ESP32 GUI.
 
 `SUPPORTED_FEATURES.md` is the authoritative package capability summary.
@@ -3098,7 +3099,7 @@ prepare the FAT32 card, flash the RP2040 bridge, and flash the ESP32 GUI.
 
 Unavailable means hidden or rejected before side effects. BLE companion
 transport, signed OTA/recovery, advanced QR sharing, and the on-device USB
-recovery service are not part of Core 1.0. The package still
+recovery service are not part of the RC1 candidate. The package still
 contains a checksum-verified host-side factory recovery image.
 
 ## SHA-256 values
@@ -3173,14 +3174,13 @@ copying:
 Read `docs/CORE_INSTALL_RECOVERY.md` before recovery. The full 8MB recovery image
 requires an explicit typed confirmation and can overwrite retained state.
 Recovery remains Windows-only; no POSIX full-flash wrapper is included.
-USB install/recovery is the only supported update path in Core 1.0.
+USB install/recovery is the only supported update path in the RC1 candidate.
 
 Never format an SD card on the device.
 
 ## Current known limitations
 
-- SD history is `{sd_mode}`. When disabled, retained Core data uses NVS and no
-  RP2040 payload is included.
+- {sd_note}
 - Only the supported matrix above is available; Full Feature remains
   unreleased.
 - Installation and recovery are USB-only; OTA and signed SD update are
@@ -3325,7 +3325,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 - `update/d1l-update.bin` is the application image for development update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
 - `docs/` contains the current RC1 user guide, feature-parity matrix,
-  limitations, SD-card setup, attributions, and product contract.
+  limitations, SD-card setup, admin allowlist, attributions, and RC1 scope.
 - `notices/` contains the project license, third-party notices, source audit notes, attributions, and the verbatim orlp Ed25519 zlib license for public distribution.
 - `evidence/` contains deterministic projections of current-commit MeshCore wire-envelope and signed-advert runtime receipts when supplied by CI. Their manifest entries bind the raw Actions receipt hashes; neither projection alone closes WP-04 or issue #65.
 - `{manifest['build_inputs']['path']}` records the exact build-input lock copied into package metadata.
