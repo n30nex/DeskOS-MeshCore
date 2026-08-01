@@ -1562,6 +1562,66 @@ static esp_err_t recover_cache_tail(
     return ESP_OK;
 }
 
+static esp_err_t cache_path_absent(
+    const char *path,
+    bool *absent)
+{
+    if (!path || !path[0] || !absent) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_rp2040_file_result_t file = {0};
+    const esp_err_t ret = d1l_rp2040_bridge_file_stat(
+        path, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (file_result_missing(ret, &file)) {
+        *absent = true;
+        return ESP_OK;
+    }
+    if (ret != ESP_OK || !file.ok) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    *absent = false;
+    return ESP_OK;
+}
+
+static esp_err_t cache_record_files_absent(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_map_tile_cache_record_t *record,
+    bool *absent)
+{
+    if (!provider || !record || !absent) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_map_tile_download_result_t result = {
+        .z = record->zoom,
+        .x = record->x,
+        .y = record->y,
+    };
+    if (!tile_result_paths(provider, &result)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const char *paths[] = {
+        result.path,
+        result.tmp_path,
+        result.metadata_path,
+        result.metadata_tmp_path,
+    };
+    for (size_t index = 0U;
+         index < sizeof(paths) / sizeof(paths[0]); ++index) {
+        bool path_absent = false;
+        const esp_err_t ret = cache_path_absent(
+            paths[index], &path_absent);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (!path_absent) {
+            *absent = false;
+            return ESP_OK;
+        }
+    }
+    *absent = true;
+    return ESP_OK;
+}
+
 static esp_err_t rebuild_cache_state_from_journal(
     const d1l_map_tile_provider_t *provider,
     const d1l_map_tile_cache_paths_t *paths,
@@ -1584,10 +1644,27 @@ static esp_err_t rebuild_cache_state_from_journal(
             return ESP_ERR_INVALID_STATE;
         }
         ret = recover_interrupted_record(provider, &record);
-        if (ret != ESP_OK) {
-            return ret;
+        const bool recovered = ret == ESP_OK;
+        if (!recovered) {
+            if (ret != ESP_ERR_NOT_FOUND ||
+                state->head_offset != state->tail_offset) {
+                return ret;
+            }
+            bool files_absent = false;
+            const esp_err_t absent_ret = cache_record_files_absent(
+                provider, &record, &files_absent);
+            if (absent_ret != ESP_OK) {
+                return absent_ret;
+            }
+            if (!files_absent) {
+                return ret;
+            }
         }
         if (!d1l_map_tile_cache_state_note_commit(state, &record)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (!recovered &&
+            !d1l_map_tile_cache_state_note_evict(state, &record)) {
             return ESP_ERR_INVALID_STATE;
         }
     }
