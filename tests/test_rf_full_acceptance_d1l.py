@@ -99,6 +99,19 @@ def mesh_owner_status(owner_maintenance_runs: int, heartbeat: int = 7) -> dict:
     }
 
 
+def dm_store_status(*, dirty: bool) -> dict:
+    return {
+        "ok": True,
+        "cmd": "messages dm",
+        "persisted": not dirty,
+        "persistence": {
+            "loaded": True,
+            "dirty": dirty,
+        },
+        "entries": [],
+    }
+
+
 def test_rf_full_acceptance_dry_run_is_dm_only():
     report = rf_accept.dry_run_report(
         port="COM12",
@@ -120,6 +133,23 @@ def test_rf_full_acceptance_dry_run_is_dm_only():
     assert "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out" in report["commands"]
     assert "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct" in report["commands"]
     assert not any(command.startswith("mesh send public ") for command in report["commands"])
+
+
+def test_listener_dry_run_omits_nonlistener_direct_stage():
+    report = rf_accept.dry_run_report(
+        port="COM12",
+        peer_status_path=Path("peer-status.json"),
+        peer_port=rf_accept.RADIO_LISTENER_PORT,
+        fingerprint="0BF0A701D5AE2DB6",
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="rf_listener",
+        send_outbound=True,
+    )
+
+    assert not any(
+        command.endswith("rf_listener_direct")
+        for command in report["commands"]
+    )
 
 
 def test_entry_fingerprint_evidence_matches_all_present_fields_case_insensitively():
@@ -879,6 +909,35 @@ def test_wait_for_mesh_owner_ready_timeout_is_bounded():
     assert sleeps == [0.25]
 
 
+def test_wait_for_dm_store_ready_returns_the_clean_snapshot():
+    dirty = dm_store_status(dirty=True)
+    clean = dm_store_status(dirty=False)
+    snapshots = iter([dirty, clean])
+    clock = iter([0.0, 0.1])
+    sleeps = []
+
+    assert rf_accept.wait_for_dm_store_ready(
+        snapshots.__next__,
+        timeout_sec=1.0,
+        poll_sec=0.25,
+        monotonic=clock.__next__,
+        sleep=sleeps.append,
+    ) == clean
+    assert sleeps == [0.25]
+
+
+def test_wait_for_dm_store_ready_times_out_closed_while_dirty():
+    clock = iter([0.0, 0.5])
+
+    assert rf_accept.wait_for_dm_store_ready(
+        lambda: dm_store_status(dirty=True),
+        timeout_sec=0.5,
+        poll_sec=0.25,
+        monotonic=clock.__next__,
+        sleep=lambda _seconds: None,
+    ) is None
+
+
 def test_controlled_peer_send_waits_for_advancing_mesh_owner():
     events = []
     blocked = mesh_owner_status(40, heartbeat=9)
@@ -1102,15 +1161,26 @@ def test_outbound_terminal_waits_for_both_flags_and_times_out_closed():
 
 def test_hardware_direct_send_waits_for_terminal_ack_before_snapshot():
     source = Path(rf_accept.__file__).read_text(encoding="utf-8")
-    start = source.index(
-        'direct_baseline_messages = run_command('
+    baseline_at = source.index(
+        'direct_baseline_messages = wait_for_dm_store_ready('
     )
+    owner_at = source.rindex(
+        "if not wait_for_mesh_owner_ready(", 0, baseline_at
+    )
+    route_call = 'run_command(ser, f"routes trace {fingerprint}")'
+    route_at = source.rindex(route_call, 0, owner_at)
     end = source.index(
         'run_command(ser, f"packets search {direct_token}")',
-        start,
+        baseline_at,
     )
-    direct_stage = source[start:end]
+    direct_stage = source[baseline_at:end]
 
+    send_at = source.index(
+        'f"mesh send dm {fingerprint} {direct_token}"', baseline_at
+    )
+    assert route_at < owner_at < baseline_at < send_at
+    assert route_call not in source[owner_at:baseline_at]
+    assert "min(timeout, 15.0)" in direct_stage
     assert "require_outbound_terminal_before_peer(" in direct_stage
     assert "baseline_messages=direct_baseline_messages" in direct_stage
     assert "outbound_text=direct_token" in direct_stage

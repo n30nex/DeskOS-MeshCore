@@ -1545,6 +1545,41 @@ def wait_for_mesh_owner_ready(
         sleep(min(interval, remaining))
 
 
+def dm_store_ready_snapshot(result: object) -> bool:
+    if not isinstance(result, dict):
+        return False
+    persistence = result.get("persistence")
+    return bool(
+        result.get("ok") is True
+        and result.get("cmd") == "messages dm"
+        and result.get("persisted") is True
+        and isinstance(persistence, dict)
+        and persistence.get("loaded") is True
+        and persistence.get("dirty") is False
+    )
+
+
+def wait_for_dm_store_ready(
+    messages_reader: Callable[[], dict],
+    *,
+    timeout_sec: float,
+    poll_sec: float,
+    max_wait_sec: float = CONTROLLED_PEER_SETTLE_MAX_WAIT_SEC,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict | None:
+    deadline = monotonic() + max(0.0, min(timeout_sec, max_wait_sec))
+    interval = min(max(0.25, poll_sec), 1.0)
+    while True:
+        messages = messages_reader()
+        if dm_store_ready_snapshot(messages):
+            return messages
+        remaining = deadline - monotonic()
+        if remaining <= 0.0:
+            return None
+        sleep(min(interval, remaining))
+
+
 def send_controlled_peer_dm_after_mesh_owner_ready(
     *,
     status_reader: Callable[[], dict],
@@ -3753,6 +3788,7 @@ def dry_run_report(
         require_local_peer_hostname()
     pinned_config = local_config or remote_config
     local_mode = local_config is not None
+    listener_mode = pinned_config is not None or peer_port == RADIO_LISTENER_PORT
     outbound_token = f"{token}_out"
     inbound_token = f"{token}_in"
     direct_token = f"{token}_direct"
@@ -3773,11 +3809,16 @@ def dry_run_report(
             [
                 "packets",
                 f"routes trace {fingerprint}",
-                f"mesh send dm {fingerprint} {direct_token}",
-                f"packets search {direct_token}",
-                f"messages dm {fingerprint}",
             ]
         )
+        if not listener_mode:
+            commands.extend(
+                [
+                    f"mesh send dm {fingerprint} {direct_token}",
+                    f"packets search {direct_token}",
+                ]
+            )
+        commands.append(f"messages dm {fingerprint}")
     commands.extend(["packets", f"routes trace {fingerprint}", "health"])
     if pinned_config is not None:
         controlled_peer = controlled_peer_report_row(
@@ -4948,10 +4989,19 @@ def _run_hardware_reserved(
                     raise ValueError(
                         "MeshCore owner did not become ready before direct DM"
                     )
-                run_command(ser, f"routes trace {fingerprint}")
-                direct_baseline_messages = run_command(
-                    ser, f"messages dm {fingerprint}"
+                direct_baseline_messages = wait_for_dm_store_ready(
+                    lambda: run_command(
+                        ser,
+                        f"messages dm {fingerprint}",
+                        min(timeout, 15.0),
+                    ),
+                    timeout_sec=wait_sec,
+                    poll_sec=poll_sec,
                 )
+                if direct_baseline_messages is None:
+                    raise ValueError(
+                        "DM retained storage did not become durable before direct DM"
+                    )
                 require_mesh_send_dm_ok(
                     run_command(
                         ser,

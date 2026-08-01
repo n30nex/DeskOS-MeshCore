@@ -135,7 +135,7 @@
     "main/map/map_viewport_truth_transition.h": "4de9fd54634d0f3481a5069895e72357bee55593ead88d44db526c98f37bc66e",
     "main/mesh/advert_data.c": "b046f34629d8f04fbf680cc8b517958162c5401acb991d5bb3231c75f3ac6818",
     "main/mesh/meshcore_lifetime.h": "b480f554ac3979e3caefdd1d815a334e0de47bddc8f21c7ac8305d4643fba535",
-    "main/mesh/meshcore_service.c": "6b5af66a00d0abfcb14648fb81ed8591f3aa0f355c203059befe50d4598371ba",
+    "main/mesh/meshcore_service.c": "b9ab565d0956714c45420bcdcae6488ea8298cbab67b8498cfe6a667cf087dac",
     "main/mesh/node_store.c": "78a787f3a085937c6a0fa9c327d5260927ad3c9892cd219a63955e2314680292",
     "main/mesh/node_store.h": "4182df086de1b0b925a3f84f6d41dd4bf582ea5ecbaa23e46183d119461d70a1",
     "main/platform/time_service.c": "ef1602a22a9cc97580877bd42867ba04524e5a5697c8e14f7e955c268badc7b9",
