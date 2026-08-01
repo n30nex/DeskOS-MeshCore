@@ -757,6 +757,7 @@ static bool s_cache_state_loaded;
 static char s_cache_state_source[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
 static uint32_t s_cache_state_capacity_kb;
 static uint32_t s_cache_state_backend_generation;
+static const char *s_cache_recovery_stage = "cache_state";
 
 static esp_err_t cache_backend_generation(uint32_t *generation)
 {
@@ -915,6 +916,7 @@ static bool cache_records_equal(
            left->size == right->size &&
            left->content_crc32 == right->content_crc32 &&
            left->zoom == right->zoom &&
+           left->quarantined == right->quarantined &&
            left->x == right->x &&
            left->y == right->y;
 }
@@ -925,7 +927,7 @@ static bool cache_record_matches_tile(
     uint32_t x,
     uint32_t y)
 {
-    return record && record->zoom == z &&
+    return record && !record->quarantined && record->zoom == z &&
            record->x == x && record->y == y;
 }
 
@@ -1392,12 +1394,15 @@ static esp_err_t recover_interrupted_record(
     return ESP_OK;
 }
 
-static esp_err_t rebuild_cache_journal_prefix(
+static esp_err_t rebuild_cache_journal(
     const d1l_map_tile_cache_paths_t *paths,
-    uint32_t valid_prefix_bytes)
+    uint32_t valid_prefix_bytes,
+    bool quarantine_corrupt_records)
 {
     if (!paths ||
-        valid_prefix_bytes % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U) {
+        valid_prefix_bytes % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U ||
+        D1L_RP2040_FILE_CHUNK_MAX %
+                D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U) {
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t ret = delete_file_allow_missing(paths->journal_tmp);
@@ -1419,6 +1424,29 @@ static esp_err_t rebuild_cache_journal_prefix(
         if (ret != ESP_OK) {
             goto rebuild_failed;
         }
+        if (quarantine_corrupt_records) {
+            for (uint32_t local = 0U; local < chunk;
+                 local += D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+                const uint32_t record_offset = offset + local;
+                const uint32_t expected_sequence =
+                    record_offset / D1L_MAP_TILE_CACHE_RECORD_BYTES + 1U;
+                d1l_map_tile_cache_record_t record = {0};
+                if (d1l_map_tile_cache_record_decode(
+                        &encoded[local], &record) &&
+                    record.sequence == expected_sequence) {
+                    continue;
+                }
+                if (!d1l_map_tile_cache_record_init_quarantine(
+                        expected_sequence,
+                        /* Rebuild must never undercharge an unknown tile. */
+                        D1L_MAP_TILE_DOWNLOAD_MAX_BYTES, &record) ||
+                    !d1l_map_tile_cache_record_encode(
+                        &record, &encoded[local])) {
+                    ret = ESP_ERR_INVALID_STATE;
+                    goto rebuild_failed;
+                }
+            }
+        }
         ret = d1l_rp2040_bridge_file_write(
             paths->journal_tmp, offset, encoded, chunk,
             offset == 0U, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
@@ -1435,6 +1463,21 @@ static esp_err_t rebuild_cache_journal_prefix(
             memcmp(encoded, verify, chunk) != 0) {
             ret = ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret;
             goto rebuild_failed;
+        }
+        if (quarantine_corrupt_records) {
+            for (uint32_t local = 0U; local < chunk;
+                 local += D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+                const uint32_t expected_sequence =
+                    (offset + local) /
+                        D1L_MAP_TILE_CACHE_RECORD_BYTES + 1U;
+                d1l_map_tile_cache_record_t record = {0};
+                if (!d1l_map_tile_cache_record_decode(
+                        &verify[local], &record) ||
+                    record.sequence != expected_sequence) {
+                    ret = ESP_ERR_INVALID_CRC;
+                    goto rebuild_failed;
+                }
+            }
         }
         offset += (uint32_t)chunk;
     }
@@ -1453,6 +1496,37 @@ rebuild_failed:
     memset(verify, 0, sizeof(verify));
     (void)delete_file_allow_missing(paths->journal_tmp);
     return ret;
+}
+
+static esp_err_t rebuild_cache_journal_prefix(
+    const d1l_map_tile_cache_paths_t *paths,
+    uint32_t valid_prefix_bytes)
+{
+    return rebuild_cache_journal(
+        paths, valid_prefix_bytes, false);
+}
+
+static esp_err_t quarantine_cache_journal_record(
+    const d1l_map_tile_cache_paths_t *paths,
+    uint32_t journal_size,
+    uint32_t record_offset)
+{
+    if (!paths ||
+        record_offset % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U ||
+        journal_size < D1L_MAP_TILE_CACHE_RECORD_BYTES ||
+        record_offset >
+            journal_size - D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = rebuild_cache_journal(
+        paths, journal_size, true);
+    d1l_map_tile_cache_record_t repaired = {0};
+    if (ret == ESP_OK) {
+        ret = read_cache_record(
+            paths->journal, record_offset, &repaired);
+    }
+    return ret == ESP_OK && !repaired.quarantined ?
+        ESP_ERR_INVALID_CRC : ret;
 }
 
 static uint32_t cache_next_sequence(uint32_t sequence)
@@ -1554,8 +1628,27 @@ static esp_err_t repair_cache_head(
         d1l_map_tile_cache_record_t record = {0};
         esp_err_t ret = read_cache_record(
             paths->journal, state->head_offset, &record);
+        if (ret == ESP_ERR_INVALID_CRC) {
+            ret = quarantine_cache_journal_record(
+                paths, journal_size, state->head_offset);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+            if (!d1l_map_tile_cache_state_quarantine_head(state)) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            changed = true;
+            continue;
+        }
         if (ret != ESP_OK) {
             return ret;
+        }
+        if (record.quarantined) {
+            if (!d1l_map_tile_cache_state_quarantine_head(state)) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            changed = true;
+            continue;
         }
         d1l_map_tile_download_result_t result = {
             .z = record.zoom,
@@ -1631,7 +1724,11 @@ static esp_err_t repair_cache_head(
                 return absent_ret;
             }
             if (!absent && !metadata_matches) {
-                return ret;
+                if (!d1l_map_tile_cache_state_quarantine_head(state)) {
+                    return ESP_ERR_INVALID_STATE;
+                }
+                changed = true;
+                continue;
             }
             if (metadata_matches) {
                 const char *owned_paths[] = {
@@ -1680,11 +1777,24 @@ static esp_err_t recover_cache_tail(
         if (record.sequence != state->next_sequence) {
             return ESP_ERR_INVALID_STATE;
         }
-        ret = recover_interrupted_record(provider, &record, false);
-        bool superseded = false;
         const bool evicted_prefix =
             state->head_offset == state->tail_offset;
-        if (ret != ESP_OK) {
+        if (record.quarantined) {
+            if (!d1l_map_tile_cache_state_note_commit(state, &record) ||
+                (evicted_prefix &&
+                 !d1l_map_tile_cache_state_quarantine_head(state))) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            ret = write_cache_state(paths, state);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+            continue;
+        }
+        ret = recover_interrupted_record(provider, &record, false);
+        bool recovered = ret == ESP_OK;
+        bool superseded = false;
+        if (!recovered) {
             if (!cache_integrity_recoverable(ret)) {
                 return ret;
             }
@@ -1699,7 +1809,8 @@ static esp_err_t recover_cache_tail(
             if (latest) {
                 ret = recover_interrupted_record(
                     provider, &record, true);
-                if (ret != ESP_OK) {
+                recovered = ret == ESP_OK;
+                if (!recovered && !cache_integrity_recoverable(ret)) {
                     return ret;
                 }
             } else {
@@ -1707,8 +1818,8 @@ static esp_err_t recover_cache_tail(
                     cache_record_superseded_by_later_journal(
                         provider, paths, &record, record_offset,
                         journal_size, &superseded);
-                if (superseded_ret != ESP_OK || !superseded) {
-                    return superseded_ret == ESP_OK ? ret : superseded_ret;
+                if (superseded_ret != ESP_OK) {
+                    return superseded_ret;
                 }
             }
         }
@@ -1716,9 +1827,13 @@ static esp_err_t recover_cache_tail(
                 state, &record)) {
             return ESP_ERR_INVALID_STATE;
         }
-        if (superseded && evicted_prefix &&
-            !d1l_map_tile_cache_state_note_evict(state, &record)) {
-            return ESP_ERR_INVALID_STATE;
+        if (!recovered && evicted_prefix) {
+            const bool advanced = superseded ?
+                d1l_map_tile_cache_state_note_evict(state, &record) :
+                d1l_map_tile_cache_state_quarantine_head(state);
+            if (!advanced) {
+                return ESP_ERR_INVALID_STATE;
+            }
         }
         ret = write_cache_state(paths, state);
         if (ret != ESP_OK) {
@@ -1894,11 +2009,18 @@ static esp_err_t rebuild_cache_state_from_journal(
         if (record.sequence != state->next_sequence) {
             return ESP_ERR_INVALID_STATE;
         }
-        ret = recover_interrupted_record(provider, &record, false);
-        bool recovered = ret == ESP_OK;
-        const esp_err_t recovery_error = ret;
         const bool evicted_prefix =
             state->head_offset == state->tail_offset;
+        if (record.quarantined) {
+            if (!d1l_map_tile_cache_state_note_commit(state, &record) ||
+                (evicted_prefix &&
+                 !d1l_map_tile_cache_state_quarantine_head(state))) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            continue;
+        }
+        ret = recover_interrupted_record(provider, &record, false);
+        bool recovered = ret == ESP_OK;
         if (!recovered) {
             if (!cache_integrity_recoverable(ret)) {
                 return ret;
@@ -1923,7 +2045,7 @@ static esp_err_t rebuild_cache_state_from_journal(
                     ret = recover_interrupted_record(
                         provider, &record, true);
                     recovered = ret == ESP_OK;
-                    if (!recovered) {
+                    if (!recovered && !cache_integrity_recoverable(ret)) {
                         return ret;
                     }
                 } else {
@@ -1936,17 +2058,18 @@ static esp_err_t rebuild_cache_state_from_journal(
                     }
                 }
             }
-            if (!recovered && !proven_evicted) {
-                return recovery_error;
-            }
         }
         if (!d1l_map_tile_cache_state_note_commit(state, &record)) {
             return ESP_ERR_INVALID_STATE;
         }
-        /* Interior holes stay charged until FIFO reaches them. */
-        if (!recovered && evicted_prefix &&
-            !d1l_map_tile_cache_state_note_evict(state, &record)) {
-            return ESP_ERR_INVALID_STATE;
+        /* Unresolved records stay charged; quarantine only advances FIFO. */
+        if (!recovered && evicted_prefix) {
+            const bool advanced = proven_evicted ?
+                d1l_map_tile_cache_state_note_evict(state, &record) :
+                d1l_map_tile_cache_state_quarantine_head(state);
+            if (!advanced) {
+                return ESP_ERR_INVALID_STATE;
+            }
         }
     }
     return ESP_OK;
@@ -1996,10 +2119,12 @@ static esp_err_t load_cache_state_for_generation(
     d1l_map_tile_cache_state_t **state,
     uint32_t backend_generation)
 {
+    s_cache_recovery_stage = "cache_preflight";
     if (!provider || !storage || !paths || !state ||
         !cache_control_paths(provider, paths)) {
         return ESP_ERR_INVALID_ARG;
     }
+    s_cache_recovery_stage = "cache_generation";
     if (!cache_backend_generation_matches(backend_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -2017,6 +2142,7 @@ static esp_err_t load_cache_state_for_generation(
         return ESP_OK;
     }
 
+    s_cache_recovery_stage = "cache_state_read";
     d1l_map_tile_cache_state_t loaded = {0};
     d1l_rp2040_file_result_t state_file = {0};
     bool rebuild_state = false;
@@ -2052,6 +2178,8 @@ static esp_err_t load_cache_state_for_generation(
     }
 
     uint32_t journal_size = 0U;
+    s_cache_recovery_stage = rebuild_state ?
+        "cache_journal_validate" : "cache_journal_repair";
     ret = rebuild_state ?
         validate_cache_journal_for_rebuild(paths, &journal_size) :
         repair_cache_journal(paths, &loaded, &journal_size);
@@ -2059,24 +2187,29 @@ static esp_err_t load_cache_state_for_generation(
         return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
     }
     if (rebuild_state) {
+        s_cache_recovery_stage = "cache_state_rebuild";
         ret = rebuild_cache_state_from_journal(
             provider, paths, journal_size, &loaded);
         if (ret != ESP_OK) {
             return ret;
         }
     }
+    s_cache_recovery_stage = "cache_head_repair";
     ret = repair_cache_head(
         provider, paths, journal_size, &loaded);
     if (ret == ESP_OK && !rebuild_state) {
+        s_cache_recovery_stage = "cache_tail_recover";
         ret = recover_cache_tail(
             provider, paths, journal_size, &loaded);
     }
     if (ret == ESP_OK && rebuild_state) {
+        s_cache_recovery_stage = "cache_state_write";
         ret = write_cache_state(paths, &loaded);
     }
     if (ret != ESP_OK) {
         return ret;
     }
+    s_cache_recovery_stage = "cache_generation";
     if (!cache_backend_generation_matches(backend_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -2098,6 +2231,7 @@ static esp_err_t load_cache_state(
     d1l_map_tile_cache_state_t **state)
 {
     uint32_t backend_generation = 0U;
+    s_cache_recovery_stage = "cache_backend";
     const esp_err_t ret =
         cache_backend_generation(&backend_generation);
     return ret == ESP_OK ?
@@ -2141,6 +2275,15 @@ static esp_err_t prepare_cache_room(
         if (!persistence_continue(
                 result, should_continue, continue_context)) {
             return ESP_ERR_INVALID_STATE;
+        }
+        ret = repair_cache_head(
+            provider, &paths, state->tail_offset, state);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (d1l_map_tile_cache_state_has_room(
+                state, budget_bytes, required_bytes)) {
+            break;
         }
         if (state->head_offset >= state->tail_offset) {
             return ESP_ERR_NO_MEM;
@@ -2530,7 +2673,7 @@ static esp_err_t map_tile_store_read_locked(
         backend_generation);
     if (ret != ESP_OK || !cache_state) {
         download_step(
-            &result, "cache_state",
+            &result, s_cache_recovery_stage,
             ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret, NULL);
         *out_result = result;
         return result.last_error;
@@ -2743,7 +2886,8 @@ static esp_err_t persist_validated_tile(
         provider, storage, &paths, &state);
     if (ret != ESP_OK || !state) {
         ret = ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
-        download_step(result, "cache_state", ret, NULL);
+        persistence_step(result, s_cache_recovery_stage);
+        download_step(result, s_cache_recovery_stage, ret, NULL);
         goto persist_done;
     }
     if (!persistence_continue(

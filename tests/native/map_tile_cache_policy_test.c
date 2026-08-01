@@ -41,6 +41,7 @@ static void test_record_and_state_checksums_reject_damage(void)
     assert(original.size == decoded_record.size);
     assert(original.content_crc32 == decoded_record.content_crc32);
     assert(original.zoom == decoded_record.zoom);
+    assert(!decoded_record.quarantined);
     assert(original.x == decoded_record.x);
     assert(original.y == decoded_record.y);
     encoded_record[20] ^= 1U;
@@ -102,6 +103,55 @@ static void test_invalid_coordinates_and_overflow_fail_closed(void)
     assert(!d1l_map_tile_cache_state_has_room(&state, 10U, 1U));
 }
 
+static void test_quarantine_keeps_unknown_bytes_charged(void)
+{
+    d1l_map_tile_cache_state_t state = {0};
+    d1l_map_tile_cache_state_init(&state);
+    const d1l_map_tile_cache_record_t first =
+        record(1U, 60U, 8U, 1U, 2U);
+    const d1l_map_tile_cache_record_t second =
+        record(2U, 30U, 9U, 3U, 4U);
+    assert(d1l_map_tile_cache_state_note_commit(&state, &first));
+    assert(d1l_map_tile_cache_state_note_commit(&state, &second));
+
+    assert(d1l_map_tile_cache_state_quarantine_head(&state));
+    assert(state.head_offset == D1L_MAP_TILE_CACHE_RECORD_BYTES);
+    assert(state.live_bytes == 90U);
+    assert(!d1l_map_tile_cache_state_has_room(&state, 100U, 20U));
+
+    assert(d1l_map_tile_cache_state_note_evict(&state, &second));
+    assert(state.head_offset == state.tail_offset);
+    assert(state.live_bytes == 60U);
+    assert(d1l_map_tile_cache_state_has_room(&state, 100U, 20U));
+    assert(!d1l_map_tile_cache_state_quarantine_head(&state));
+}
+
+static void test_quarantine_record_is_checksummed_and_reconstructible(void)
+{
+    d1l_map_tile_cache_record_t quarantine = {0};
+    assert(d1l_map_tile_cache_record_init_quarantine(
+        7U, 196U * 1024U, &quarantine));
+    assert(quarantine.quarantined);
+    assert(quarantine.size == 196U * 1024U);
+
+    uint8_t encoded[D1L_MAP_TILE_CACHE_RECORD_BYTES];
+    assert(d1l_map_tile_cache_record_encode(&quarantine, encoded));
+    assert(encoded[9] == 1U);
+    d1l_map_tile_cache_record_t decoded = {0};
+    assert(d1l_map_tile_cache_record_decode(encoded, &decoded));
+    assert(decoded.quarantined);
+    assert(decoded.sequence == quarantine.sequence);
+    assert(decoded.size == quarantine.size);
+    encoded[9] = 2U;
+    const uint32_t unknown_flag_crc =
+        d1l_map_tile_cache_crc32(encoded, 28U);
+    encoded[28] = (uint8_t)unknown_flag_crc;
+    encoded[29] = (uint8_t)(unknown_flag_crc >> 8U);
+    encoded[30] = (uint8_t)(unknown_flag_crc >> 16U);
+    encoded[31] = (uint8_t)(unknown_flag_crc >> 24U);
+    assert(!d1l_map_tile_cache_record_decode(encoded, &decoded));
+}
+
 static void test_every_atomic_interruption_window_has_one_safe_plan(void)
 {
     d1l_map_tile_cache_recovery_plan_t plan = {0};
@@ -161,6 +211,8 @@ int main(void)
     test_record_and_state_checksums_reject_damage();
     test_budget_evicts_oldest_records_only();
     test_invalid_coordinates_and_overflow_fail_closed();
+    test_quarantine_keeps_unknown_bytes_charged();
+    test_quarantine_record_is_checksummed_and_reconstructible();
     test_every_atomic_interruption_window_has_one_safe_plan();
     test_journal_repair_keeps_only_valid_complete_prefix();
     return 0;

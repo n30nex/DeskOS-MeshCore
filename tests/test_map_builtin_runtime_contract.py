@@ -326,7 +326,8 @@ def test_cache_persist_failure_preserves_specific_rp2040_file_diagnostics():
     ) < persist.index(
         'download_step(result, "cache_write", ret, &file);'
     )
-    assert 'download_step(result, "cache_state", ret, NULL);' in persist
+    assert "persistence_step(result, s_cache_recovery_stage);" in persist
+    assert "download_step(result, s_cache_recovery_stage, ret, NULL);" in persist
     assert 'download_step(\n                result, "cache_commit", ret' in persist
     for detail in (
         '"cache_lock"',
