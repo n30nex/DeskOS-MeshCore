@@ -244,7 +244,122 @@ test "$(gh release view v1.0.0-rc.1 --repo n30nex/SIGUI --json isDraft --jq .isD
 test "$(gh release view v1.0.0-rc.1 --repo n30nex/SIGUI --json isPrerelease --jq .isPrerelease)" = true
 ```
 
-## 10. Failure handling
+## 10. Stable v1.0.0 promotion
+
+Stable `v1.0.0` is a byte-identical promotion of the accepted public
+`v1.0.0-rc.1` assets. Do not rebuild, repackage, rename, or rerun hardware.
+The RC asset filename and internal candidate wording remain unchanged so the
+stable release distributes the exact audited bytes. A later documentation-only
+commit on `main` does not change the tag target: both tags must peel to `$SHA`.
+
+```bash
+RC_TAG=v1.0.0-rc.1
+STABLE_TAG=v1.0.0
+RELEASE_DIR="$ROOT/artifacts/release/$RC_TAG"
+PACKAGE_ASSET="$RELEASE_DIR/MeshCore-DeskOS-D1L-v1.0.0-rc.1.zip"
+ASSET_SUMS="$RELEASE_DIR/SHA256SUMS.txt"
+EVIDENCE_DIR="$ROOT/artifacts/rc1-final/$SHA"
+AUDIT="$EVIDENCE_DIR/rc1-release-audit-${SHA}.json"
+
+test -f "$PACKAGE_ASSET"
+test -f "$ASSET_SUMS"
+test "$(jq -r .ready_for_public_release "$AUDIT")" = true
+test "$(jq -r .identity.firmware_commit "$AUDIT")" = "$SHA"
+test "$(jq -r '.failures | length' "$AUDIT")" -eq 0
+
+git fetch origin main --tags
+git merge-base --is-ancestor "$SHA" origin/main
+test "$(git ls-remote origin "refs/tags/${RC_TAG}^{}" | cut -f1)" = "$SHA"
+test "$(gh release view "$RC_TAG" --repo n30nex/SIGUI --json isDraft --jq .isDraft)" = false
+test "$(gh release view "$RC_TAG" --repo n30nex/SIGUI --json isPrerelease --jq .isPrerelease)" = true
+
+mapfile -t RC_ASSET_NAMES < <(
+  gh release view "$RC_TAG" --repo n30nex/SIGUI --json assets --jq '.assets[].name' | sort
+)
+test "${#RC_ASSET_NAMES[@]}" -eq 2
+test "${RC_ASSET_NAMES[0]}" = MeshCore-DeskOS-D1L-v1.0.0-rc.1.zip
+test "${RC_ASSET_NAMES[1]}" = SHA256SUMS.txt
+
+PROMOTION_ROOT="$(mktemp -d)"
+RC_PUBLIC_DIR="$PROMOTION_ROOT/rc"
+RC_EXTRACT_DIR="$PROMOTION_ROOT/rc-extracted"
+STABLE_PUBLIC_DIR="$PROMOTION_ROOT/stable"
+STABLE_EXTRACT_DIR="$PROMOTION_ROOT/stable-extracted"
+mkdir -p "$RC_PUBLIC_DIR" "$RC_EXTRACT_DIR" "$STABLE_PUBLIC_DIR" "$STABLE_EXTRACT_DIR"
+
+gh release download "$RC_TAG" \
+  --repo n30nex/SIGUI \
+  --dir "$RC_PUBLIC_DIR" \
+  --pattern 'MeshCore-DeskOS-D1L-v1.0.0-rc.1.zip' \
+  --pattern 'SHA256SUMS.txt'
+
+RC_PUBLIC_ZIP="$RC_PUBLIC_DIR/MeshCore-DeskOS-D1L-v1.0.0-rc.1.zip"
+RC_PUBLIC_SUMS="$RC_PUBLIC_DIR/SHA256SUMS.txt"
+test "$(find "$RC_PUBLIC_DIR" -maxdepth 1 -type f | wc -l)" -eq 2
+(cd "$RC_PUBLIC_DIR" && sha256sum --check SHA256SUMS.txt)
+cmp -- "$PACKAGE_ASSET" "$RC_PUBLIC_ZIP"
+cmp -- "$ASSET_SUMS" "$RC_PUBLIC_SUMS"
+
+unzip -q "$RC_PUBLIC_ZIP" -d "$RC_EXTRACT_DIR"
+RC_PUBLIC_PACKAGE="$RC_EXTRACT_DIR/d1l-release-${SHA}"
+test -f "$RC_PUBLIC_PACKAGE/manifest.json"
+"$PY" scripts/verify_checksums.py "$RC_PUBLIC_PACKAGE"
+test "$(jq -r .app_version "$RC_PUBLIC_PACKAGE/manifest.json")" = 1.0.0
+test "$(jq -r .release_profile "$RC_PUBLIC_PACKAGE/manifest.json")" = core_1_0
+test "$(jq -r .firmware_commit "$RC_PUBLIC_PACKAGE/manifest.json")" = "$SHA"
+
+test -z "$(git ls-remote --tags origin "refs/tags/$STABLE_TAG")"
+! gh release view "$STABLE_TAG" --repo n30nex/SIGUI >/dev/null 2>&1
+git tag -a "$STABLE_TAG" "$SHA" -m "MeshCore DeskOS D1L 1.0.0"
+git push origin "refs/tags/$STABLE_TAG"
+test "$(git ls-remote origin "refs/tags/${STABLE_TAG}^{}" | cut -f1)" = "$SHA"
+
+STABLE_RELEASE_ASSETS=(
+  "$RC_PUBLIC_ZIP"
+  "$RC_PUBLIC_SUMS"
+)
+
+gh release create "$STABLE_TAG" "${STABLE_RELEASE_ASSETS[@]}" \
+  --repo n30nex/SIGUI \
+  --verify-tag \
+  --target "$SHA" \
+  --title "MeshCore DeskOS D1L 1.0.0" \
+  --latest \
+  --notes "Stable byte-identical promotion of v1.0.0-rc.1. The RC asset filename and internal candidate wording are intentionally retained so these are the exact audited bytes. Extract the package fully and start with START_HERE.md."
+
+test "$(gh release view "$STABLE_TAG" --repo n30nex/SIGUI --json tagName --jq .tagName)" = "$STABLE_TAG"
+test "$(gh release view "$STABLE_TAG" --repo n30nex/SIGUI --json isDraft --jq .isDraft)" = false
+test "$(gh release view "$STABLE_TAG" --repo n30nex/SIGUI --json isPrerelease --jq .isPrerelease)" = false
+test "$(gh api repos/n30nex/SIGUI/releases/latest --jq .tag_name)" = "$STABLE_TAG"
+
+mapfile -t STABLE_ASSET_NAMES < <(
+  gh release view "$STABLE_TAG" --repo n30nex/SIGUI --json assets --jq '.assets[].name' | sort
+)
+test "${#STABLE_ASSET_NAMES[@]}" -eq 2
+test "${STABLE_ASSET_NAMES[0]}" = MeshCore-DeskOS-D1L-v1.0.0-rc.1.zip
+test "${STABLE_ASSET_NAMES[1]}" = SHA256SUMS.txt
+
+gh release download "$STABLE_TAG" \
+  --repo n30nex/SIGUI \
+  --dir "$STABLE_PUBLIC_DIR" \
+  --pattern 'MeshCore-DeskOS-D1L-v1.0.0-rc.1.zip' \
+  --pattern 'SHA256SUMS.txt'
+
+STABLE_PUBLIC_ZIP="$STABLE_PUBLIC_DIR/MeshCore-DeskOS-D1L-v1.0.0-rc.1.zip"
+STABLE_PUBLIC_SUMS="$STABLE_PUBLIC_DIR/SHA256SUMS.txt"
+test "$(find "$STABLE_PUBLIC_DIR" -maxdepth 1 -type f | wc -l)" -eq 2
+(cd "$STABLE_PUBLIC_DIR" && sha256sum --check SHA256SUMS.txt)
+cmp -- "$RC_PUBLIC_ZIP" "$STABLE_PUBLIC_ZIP"
+cmp -- "$RC_PUBLIC_SUMS" "$STABLE_PUBLIC_SUMS"
+
+unzip -q "$STABLE_PUBLIC_ZIP" -d "$STABLE_EXTRACT_DIR"
+STABLE_PUBLIC_PACKAGE="$STABLE_EXTRACT_DIR/d1l-release-${SHA}"
+test -f "$STABLE_PUBLIC_PACKAGE/manifest.json"
+"$PY" scripts/verify_checksums.py "$STABLE_PUBLIC_PACKAGE"
+test "$(jq -r .firmware_commit "$STABLE_PUBLIC_PACKAGE/manifest.json")" = "$SHA"
+```
+
+## 11. Failure handling
 
 Any nonzero source, checksum mismatch, candidate mismatch, missing artifact,
 wrong stable identity, or audit value other than exact `true` stops publication.

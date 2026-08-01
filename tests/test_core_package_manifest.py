@@ -839,6 +839,70 @@ def test_public_release_stages_only_production_zip_and_outer_checksums():
         assert internal_marker not in release_command
 
 
+def test_stable_release_promotes_the_public_rc_assets_byte_identically():
+    release_doc = (
+        ROOT / "docs" / "RC1_RELEASE_EXECUTION_D1L.md"
+    ).read_text(encoding="utf-8")
+    stable = release_doc.split(
+        "## 10. Stable v1.0.0 promotion", 1
+    )[1].split("## 11. Failure handling", 1)[0]
+
+    assets = re.search(
+        r"STABLE_RELEASE_ASSETS=\(\n(?P<body>.*?)\n\)",
+        stable,
+        flags=re.DOTALL,
+    )
+    assert assets is not None
+    assert re.findall(r'"\$(\w+)"', assets.group("body")) == [
+        "RC_PUBLIC_ZIP",
+        "RC_PUBLIC_SUMS",
+    ]
+
+    for required in (
+        'test "$(jq -r .ready_for_public_release "$AUDIT")" = true',
+        'test "$(jq -r .identity.firmware_commit "$AUDIT")" = "$SHA"',
+        'git ls-remote origin "refs/tags/${RC_TAG}^{}"',
+        'gh release download "$RC_TAG"',
+        'cmp -- "$PACKAGE_ASSET" "$RC_PUBLIC_ZIP"',
+        'cmp -- "$ASSET_SUMS" "$RC_PUBLIC_SUMS"',
+        '"$PY" scripts/verify_checksums.py "$RC_PUBLIC_PACKAGE"',
+        'git tag -a "$STABLE_TAG" "$SHA"',
+        'git ls-remote origin "refs/tags/${STABLE_TAG}^{}"',
+        'gh release download "$STABLE_TAG"',
+        'cmp -- "$RC_PUBLIC_ZIP" "$STABLE_PUBLIC_ZIP"',
+        'cmp -- "$RC_PUBLIC_SUMS" "$STABLE_PUBLIC_SUMS"',
+        '"$PY" scripts/verify_checksums.py "$STABLE_PUBLIC_PACKAGE"',
+    ):
+        assert required in stable
+
+    assert stable.count("MeshCore-DeskOS-D1L-v1.0.0-rc.1.zip") >= 4
+    assert "byte-identical promotion" in stable
+    stable_command = stable.split(
+        'gh release create "$STABLE_TAG"', 1
+    )[1].split('test "$(gh release view', 1)[0]
+    assert '--verify-tag' in stable_command
+    assert '--target "$SHA"' in stable_command
+    assert '--latest' in stable_command
+    assert '--latest=false' not in stable_command
+    assert '--prerelease' not in stable_command
+    assert '--generate-notes' not in stable_command
+    assert '--fail-on-no-commits' not in stable_command
+    assert "START_HERE.md" in stable_command
+
+    for forbidden in (
+        "capture_core_actions_run_d1l.py",
+        "package_release_d1l.py",
+        "core_flash_only_d1l.py",
+        "rc1_map_acceptance_d1l.py",
+        "rf_full_acceptance_d1l.py",
+        "produce_rc1_protocol_acceptance_d1l.py",
+        "produce_rc1_bounded_physical_receipt_d1l.py",
+        "rc1_release_gate_audit_d1l.py",
+    ):
+        assert forbidden not in stable
+    assert re.search(r"(?m)^\s*(?:cp|mv|zip)\s", stable) is None
+
+
 def test_rc1_conditional_capability_truth_matches_production_surface():
     truth = package_release_d1l.core_capability_truth("conditional")
 
