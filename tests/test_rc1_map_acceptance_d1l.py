@@ -531,6 +531,59 @@ def test_console_readiness_retries_a_command_lost_before_init(
     assert [command for command, _timeout in calls] == ["health", "health"]
 
 
+def test_product_reboot_reopen_uses_reset_safe_control_line_order(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    opens = []
+
+    class ExistingPath:
+        def __init__(self, _value):
+            pass
+
+        def exists(self):
+            return True
+
+    class ResetSensitiveSerial:
+        def __init__(self):
+            self.is_open = True
+            self.dtr = False
+            self.rts = False
+
+        def close(self):
+            self.is_open = False
+
+        def open(self):
+            opens.append((self.dtr, self.rts))
+            if self.dtr is not True or self.rts is not False:
+                raise RuntimeError("unsafe cached DTR/RTS open")
+            self.is_open = True
+
+        def reset_input_buffer(self):
+            pass
+
+    monkeypatch.setattr(runner, "Path", ExistingPath)
+    monkeypatch.setattr(
+        runner,
+        "wait_for_console_ready",
+        lambda *_args, **_kwargs: {**health(), "boot_nonce": 43},
+    )
+    ser = ResetSensitiveSerial()
+
+    result = runner.reopen_after_product_reboot(
+        ser,
+        previous_boot_nonce=42,
+        timeout=1.0,
+        command_timeout=0.1,
+        interval=0,
+    )
+
+    assert result["boot_nonce"] == 43
+    assert opens == [(True, False)]
+    assert ser.is_open is True
+    assert ser.dtr is False
+    assert ser.rts is False
+
+
 def test_read_only_timeout_is_retried_once_and_recorded(
     monkeypatch: pytest.MonkeyPatch,
 ):
