@@ -107,6 +107,41 @@ def test_cache_identity_uses_stable_sd_backend_generation():
     assert "load_cache_state_for_generation(" in wrapper
 
 
+def test_corrupt_cache_state_is_rebuilt_from_the_verified_journal():
+    store = read("main/storage/map_tile_store.c")
+    rebuild = store[
+        store.index("static esp_err_t rebuild_cache_state_from_journal") :
+        store.index("static esp_err_t load_cache_state_for_generation")
+    ]
+    load = store[
+        store.index("static esp_err_t load_cache_state_for_generation") :
+        store.index("static esp_err_t prepare_cache_room")
+    ]
+
+    assert "rebuild_cache_state_from_journal(" in store
+    assert "bool rebuild_state = false;" in load
+    assert "rebuild_state = true;" in load
+    assert load.index("repair_cache_journal(") < load.index(
+        "rebuild_cache_state_from_journal("
+    )
+    assert load.index("rebuild_cache_state_from_journal(") < load.index(
+        "write_cache_state(paths, &loaded)"
+    )
+    assert rebuild.index("recover_interrupted_record(provider, &record)") < (
+        rebuild.index("d1l_map_tile_cache_state_note_commit(state, &record)")
+    )
+    assert "cache_record_files_absent(" in rebuild
+    assert "cache_record_superseded_by_later_journal(" in rebuild
+    assert "state->head_offset != state->tail_offset" in rebuild
+    assert rebuild.index("d1l_map_tile_cache_state_note_commit") < (
+        rebuild.index("d1l_map_tile_cache_state_note_evict")
+    )
+    assert "rebuild_cache_journal_prefix(" not in rebuild
+    assert "validate_cache_journal_for_rebuild(" in load
+    assert "ret = rebuild_state ?" in load
+    assert "delete_file_allow_missing(paths->state)" not in load
+
+
 def test_fresh_tile_miss_precedes_global_cache_recovery():
     store = read("main/storage/map_tile_store.c")
     cached = store[
