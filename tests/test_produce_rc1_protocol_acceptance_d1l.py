@@ -1214,6 +1214,94 @@ def test_console_readiness_retries_a_command_lost_before_init(
     assert [command for command, _timeout in calls] == ["health", "health"]
 
 
+def test_protocol_poll_retries_exact_console_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    responses = iter((
+        {"schema": 1, "ok": False, "code": "TIMEOUT"},
+        {"schema": 1, "ok": True, "state": "received"},
+    ))
+    monkeypatch.setattr(
+        runner, "send_console_command", lambda *_args: next(responses)
+    )
+
+    def read_status():
+        return runner.checked_console_command(
+            object(), "routes telemetry 024999DEDFD26763", 0.1
+        )
+
+    result = runner.poll(
+        read_status,
+        lambda row: row.get("state") == "received",
+        timeout=1.0,
+        interval=0.0,
+        label="read-only status",
+    )
+
+    assert result["state"] == "received"
+
+
+def test_protocol_poll_never_retries_timeout_with_reboot_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls = 0
+
+    def send(*_args):
+        nonlocal calls
+        calls += 1
+        return {
+            "schema": 1,
+            "ok": False,
+            "code": "TIMEOUT",
+            "ignored_boot_help_seen": True,
+        }
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    with pytest.raises(runner.ProtocolAcceptanceError, match="device rebooted"):
+        runner.poll(
+            lambda: runner.checked_console_command(
+                object(), "repeater ping status", 0.1
+            ),
+            lambda _row: True,
+            timeout=1.0,
+            interval=0.0,
+            label="ping status",
+        )
+
+    assert calls == 1
+
+
+def test_protocol_poll_does_not_start_retry_without_attempt_budget(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    clock = [0.0]
+    calls = 0
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        runner.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
+    )
+
+    def read_status():
+        nonlocal calls
+        calls += 1
+        clock[0] += 0.2
+        raise runner.RetryableConsoleTimeout(
+            "serial command timed out", attempt_timeout=0.75
+        )
+
+    with pytest.raises(runner.ProtocolAcceptanceError, match="timed out waiting"):
+        runner.poll(
+            read_status,
+            lambda _row: False,
+            timeout=1.0,
+            interval=0.1,
+            label="bounded status",
+        )
+
+    assert calls == 1
+
+
 def test_runner_is_pi_only_stable_by_id_and_self_validating():
     source = Path(runner.__file__).read_text(encoding="utf-8")
 

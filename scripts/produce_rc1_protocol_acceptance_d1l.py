@@ -128,6 +128,14 @@ class ProtocolAcceptanceError(RuntimeError):
     """A fail-closed protocol acceptance error."""
 
 
+class RetryableConsoleTimeout(ProtocolAcceptanceError):
+    """A read-only console poll timed out before returning JSON."""
+
+    def __init__(self, message: str, *, attempt_timeout: float):
+        super().__init__(message)
+        self.attempt_timeout = attempt_timeout
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -635,12 +643,22 @@ def poll(
     deadline = time.monotonic() + timeout
     last: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        last = function()
+        try:
+            last = function()
+        except RetryableConsoleTimeout as exc:
+            last = {"schema": 1, "ok": False, "code": "TIMEOUT"}
+            remaining = deadline - time.monotonic()
+            if remaining < exc.attempt_timeout:
+                break
+            time.sleep(min(interval, remaining))
+            if deadline - time.monotonic() < exc.attempt_timeout:
+                break
+            continue
         if response_booted(last):
             raise ProtocolAcceptanceError(f"device rebooted while polling {label}")
         if predicate(last):
             return last
-        time.sleep(interval)
+        time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
     raise ProtocolAcceptanceError(f"timed out waiting for {label}: {last}")
 
 
@@ -751,6 +769,16 @@ def checked_console_command(
 ) -> dict[str, Any]:
     result = send_console_command(ser, value, timeout)
     if result.get("ok") is not True:
+        label = failure_label if failure_label is not None else value
+        if response_booted(result):
+            raise ProtocolAcceptanceError(
+                f"device rebooted during serial command: {label}"
+            )
+        if result.get("code") == "TIMEOUT":
+            raise RetryableConsoleTimeout(
+                f"serial command timed out: {label}",
+                attempt_timeout=timeout,
+            )
         if failure_label is not None:
             raise ProtocolAcceptanceError(
                 f"serial command failed: {failure_label}"
