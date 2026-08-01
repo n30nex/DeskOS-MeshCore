@@ -125,8 +125,14 @@ bool d1l_map_tile_cache_state_decode(
 static bool record_valid(const d1l_map_tile_cache_record_t *record)
 {
     if (!record || record->sequence == 0U ||
-        record->size == 0U ||
-        record->zoom > D1L_MAP_TILE_CACHE_MAX_ZOOM) {
+        record->size == 0U) {
+        return false;
+    }
+    if (record->quarantined) {
+        return record->zoom == 0U && record->x == 0U &&
+               record->y == 0U && record->content_crc32 == 0U;
+    }
+    if (record->zoom > D1L_MAP_TILE_CACHE_MAX_ZOOM) {
         return false;
     }
     const uint32_t limit = 1UL << record->zoom;
@@ -160,6 +166,26 @@ bool d1l_map_tile_cache_record_init(
     return true;
 }
 
+bool d1l_map_tile_cache_record_init_quarantine(
+    uint32_t sequence,
+    uint32_t charged_bytes,
+    d1l_map_tile_cache_record_t *record)
+{
+    if (!record) {
+        return false;
+    }
+    const d1l_map_tile_cache_record_t candidate = {
+        .sequence = sequence,
+        .size = charged_bytes,
+        .quarantined = true,
+    };
+    if (!record_valid(&candidate)) {
+        return false;
+    }
+    *record = candidate;
+    return true;
+}
+
 bool d1l_map_tile_cache_record_encode(
     const d1l_map_tile_cache_record_t *record,
     uint8_t output[D1L_MAP_TILE_CACHE_RECORD_BYTES])
@@ -171,6 +197,7 @@ bool d1l_map_tile_cache_record_encode(
     put_u32(&output[0], D1L_MAP_TILE_CACHE_RECORD_MAGIC);
     put_u32(&output[4], record->sequence);
     output[8] = record->zoom;
+    output[9] = record->quarantined ? 1U : 0U;
     put_u32(&output[12], record->x);
     put_u32(&output[16], record->y);
     put_u32(&output[20], record->size);
@@ -189,12 +216,13 @@ bool d1l_map_tile_cache_record_decode(
         get_u32(&input[0]) != D1L_MAP_TILE_CACHE_RECORD_MAGIC ||
         get_u32(&input[28]) !=
             d1l_map_tile_cache_crc32(input, 28U) ||
-        input[9] != 0U || input[10] != 0U || input[11] != 0U) {
+        input[9] > 1U || input[10] != 0U || input[11] != 0U) {
         return false;
     }
     d1l_map_tile_cache_record_t decoded = {
         .sequence = get_u32(&input[4]),
         .zoom = input[8],
+        .quarantined = input[9] == 1U,
         .x = get_u32(&input[12]),
         .y = get_u32(&input[16]),
         .size = get_u32(&input[20]),
@@ -247,6 +275,22 @@ bool d1l_map_tile_cache_state_note_evict(
     }
     state->head_offset += D1L_MAP_TILE_CACHE_RECORD_BYTES;
     state->live_bytes -= oldest_record->size;
+    return true;
+}
+
+bool d1l_map_tile_cache_state_quarantine_head(
+    d1l_map_tile_cache_state_t *state,
+    uint64_t additional_charge_bytes)
+{
+    if (!state_valid(state) ||
+        state->head_offset >= state->tail_offset ||
+        state->head_offset >
+            UINT32_MAX - D1L_MAP_TILE_CACHE_RECORD_BYTES ||
+        state->live_bytes > UINT64_MAX - additional_charge_bytes) {
+        return false;
+    }
+    state->head_offset += D1L_MAP_TILE_CACHE_RECORD_BYTES;
+    state->live_bytes += additional_charge_bytes;
     return true;
 }
 

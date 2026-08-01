@@ -34,8 +34,10 @@
 #define D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U
 #define D1L_MAP_TILE_CACHE_JOURNAL_NAME "cache-journal.v1"
 #define D1L_MAP_TILE_CACHE_JOURNAL_TMP_NAME "cache-journal-repair.tmp"
+#define D1L_MAP_TILE_CACHE_JOURNAL_BACKUP_NAME "cache-journal.v1.bak"
 #define D1L_MAP_TILE_CACHE_STATE_NAME "cache-state.v1"
 #define D1L_MAP_TILE_CACHE_STATE_TMP_NAME "cache-state.tmp"
+#define D1L_MAP_TILE_CACHE_STATE_BACKUP_NAME "cache-state.v1.bak"
 #define D1L_MAP_TILE_STORE_TRANSACTION_TIMEOUT_MS 30000U
 
 typedef struct {
@@ -744,8 +746,10 @@ static void cleanup_partial(const d1l_map_tile_download_result_t *result)
 typedef struct {
     char journal[D1L_RP2040_FILE_PATH_MAX + 1U];
     char journal_tmp[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char journal_backup[D1L_RP2040_FILE_PATH_MAX + 1U];
     char state[D1L_RP2040_FILE_PATH_MAX + 1U];
     char state_tmp[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char state_backup[D1L_RP2040_FILE_PATH_MAX + 1U];
 } d1l_map_tile_cache_paths_t;
 
 static StaticSemaphore_t s_cache_transaction_mutex_storage;
@@ -757,6 +761,7 @@ static bool s_cache_state_loaded;
 static char s_cache_state_source[D1L_MAP_PROVIDER_SOURCE_ID_MAX + 1U];
 static uint32_t s_cache_state_capacity_kb;
 static uint32_t s_cache_state_backend_generation;
+static const char *s_cache_recovery_stage = "cache_state";
 
 static esp_err_t cache_backend_generation(uint32_t *generation)
 {
@@ -890,6 +895,10 @@ static bool cache_control_paths(
         paths->journal_tmp, sizeof(paths->journal_tmp),
         "map/tiles/%s/%s", directory,
         D1L_MAP_TILE_CACHE_JOURNAL_TMP_NAME);
+    const int journal_backup = snprintf(
+        paths->journal_backup, sizeof(paths->journal_backup),
+        "map/tiles/%s/%s", directory,
+        D1L_MAP_TILE_CACHE_JOURNAL_BACKUP_NAME);
     const int state = snprintf(
         paths->state, sizeof(paths->state),
         "map/tiles/%s/%s", directory,
@@ -898,12 +907,18 @@ static bool cache_control_paths(
         paths->state_tmp, sizeof(paths->state_tmp),
         "map/tiles/%s/%s", directory,
         D1L_MAP_TILE_CACHE_STATE_TMP_NAME);
-    return journal > 0 && journal_tmp > 0 &&
-           state > 0 && state_tmp > 0 &&
+    const int state_backup = snprintf(
+        paths->state_backup, sizeof(paths->state_backup),
+        "map/tiles/%s/%s", directory,
+        D1L_MAP_TILE_CACHE_STATE_BACKUP_NAME);
+    return journal > 0 && journal_tmp > 0 && journal_backup > 0 &&
+           state > 0 && state_tmp > 0 && state_backup > 0 &&
            (size_t)journal < sizeof(paths->journal) &&
            (size_t)journal_tmp < sizeof(paths->journal_tmp) &&
+           (size_t)journal_backup < sizeof(paths->journal_backup) &&
            (size_t)state < sizeof(paths->state) &&
-           (size_t)state_tmp < sizeof(paths->state_tmp);
+           (size_t)state_tmp < sizeof(paths->state_tmp) &&
+           (size_t)state_backup < sizeof(paths->state_backup);
 }
 
 static bool cache_records_equal(
@@ -915,6 +930,7 @@ static bool cache_records_equal(
            left->size == right->size &&
            left->content_crc32 == right->content_crc32 &&
            left->zoom == right->zoom &&
+           left->quarantined == right->quarantined &&
            left->x == right->x &&
            left->y == right->y;
 }
@@ -925,7 +941,7 @@ static bool cache_record_matches_tile(
     uint32_t x,
     uint32_t y)
 {
-    return record && record->zoom == z &&
+    return record && !record->quarantined && record->zoom == z &&
            record->x == x && record->y == y;
 }
 
@@ -995,6 +1011,122 @@ static esp_err_t read_cache_record(
     }
     return d1l_map_tile_cache_record_decode(encoded, record) ?
         ESP_OK : ESP_ERR_INVALID_CRC;
+}
+
+static esp_err_t validate_cache_state_file(const char *path)
+{
+    if (!path || path[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t encoded[D1L_MAP_TILE_CACHE_STATE_BYTES];
+    d1l_map_tile_cache_state_t state = {0};
+    esp_err_t ret = read_file_exact(
+        path, 0U, encoded, sizeof(encoded));
+    if (ret == ESP_OK &&
+        !d1l_map_tile_cache_state_decode(encoded, &state)) {
+        ret = ESP_ERR_INVALID_CRC;
+    }
+    memset(encoded, 0, sizeof(encoded));
+    memset(&state, 0, sizeof(state));
+    return ret;
+}
+
+static esp_err_t promote_missing_cache_control_backup(
+    const char *canonical_path,
+    const char *backup_path,
+    bool validate_state,
+    uint32_t backend_generation)
+{
+    if (!canonical_path || canonical_path[0] == '\0' ||
+        !backup_path || backup_path[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_rp2040_file_result_t canonical = {0};
+    esp_err_t ret = d1l_rp2040_bridge_file_stat(
+        canonical_path, &canonical, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (!file_result_missing(ret, &canonical)) {
+        if (ret != ESP_OK || !canonical.ok || !canonical.exists ||
+            canonical.is_directory) {
+            return ret == ESP_OK ? ESP_ERR_INVALID_SIZE : ret;
+        }
+        /* A present canonical remains authoritative, even if stale backup
+         * cleanup was interrupted. Never roll it backwards. */
+        return ESP_OK;
+    }
+
+    d1l_rp2040_file_result_t backup = {0};
+    ret = d1l_rp2040_bridge_file_stat(
+        backup_path, &backup, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (file_result_missing(ret, &backup)) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK || !backup.ok || !backup.exists ||
+        backup.is_directory) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_SIZE : ret;
+    }
+    if (validate_state) {
+        if (backup.size != D1L_MAP_TILE_CACHE_STATE_BYTES) {
+            /* A replace gap can preserve the corrupt state that triggered a
+             * journal rebuild. It is not recoverable authority; leave the
+             * canonical absent so the journal rebuild path can run. */
+            return ESP_OK;
+        }
+        ret = validate_cache_state_file(backup_path);
+        if (ret == ESP_ERR_INVALID_CRC) {
+            return ESP_OK;
+        }
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    if (!cache_backend_generation_matches(backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_rp2040_file_result_t renamed = {0};
+    ret = d1l_rp2040_bridge_file_rename(
+        backup_path, canonical_path, false, &renamed,
+        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (!cache_backend_generation_matches(backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    memset(&canonical, 0, sizeof(canonical));
+    ret = d1l_rp2040_bridge_file_stat(
+        canonical_path, &canonical, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+    if (ret != ESP_OK || !canonical.ok || !canonical.exists ||
+        canonical.is_directory ||
+        (validate_state &&
+         canonical.size != D1L_MAP_TILE_CACHE_STATE_BYTES)) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_SIZE : ret;
+    }
+    return validate_state ?
+        validate_cache_state_file(canonical_path) : ESP_OK;
+}
+
+static esp_err_t recover_missing_cache_control_files(
+    const d1l_map_tile_cache_paths_t *paths,
+    uint32_t backend_generation)
+{
+    if (!paths) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    /* Repair temps can be structurally valid prefixes after a power cut, so
+     * they are never authoritative. The replace protocol's backup is the
+     * only committed recovery source while the canonical path is absent. */
+    esp_err_t ret = promote_missing_cache_control_backup(
+        paths->journal, paths->journal_backup, false,
+        backend_generation);
+    if (ret == ESP_OK) {
+        ret = promote_missing_cache_control_backup(
+            paths->state, paths->state_backup, true,
+            backend_generation);
+    }
+    return ret == ESP_OK &&
+           !cache_backend_generation_matches(backend_generation) ?
+        ESP_ERR_INVALID_STATE : ret;
 }
 
 static esp_err_t read_cache_metadata(
@@ -1392,31 +1524,85 @@ static esp_err_t recover_interrupted_record(
     return ESP_OK;
 }
 
-static esp_err_t rebuild_cache_journal_prefix(
+static esp_err_t rebuild_cache_journal(
     const d1l_map_tile_cache_paths_t *paths,
-    uint32_t valid_prefix_bytes)
+    uint32_t valid_prefix_bytes,
+    bool quarantine_corrupt_records,
+    uint32_t backend_generation)
 {
     if (!paths ||
-        valid_prefix_bytes % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U) {
+        valid_prefix_bytes % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U ||
+        D1L_RP2040_FILE_CHUNK_MAX %
+                D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = delete_file_allow_missing(paths->journal_tmp);
-    if (ret != ESP_OK) {
-        return ret;
+    if (!cache_backend_generation_matches(backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
     }
     if (valid_prefix_bytes == 0U) {
-        return delete_file_allow_missing(paths->journal);
+        /* A stale replace backup must not resurrect an explicitly emptied
+         * journal. Preserve the authoritative primary until backup and temp
+         * cleanup have both completed. */
+        esp_err_t ret = delete_file_allow_missing(paths->journal_backup);
+        if (ret != ESP_OK ||
+            !cache_backend_generation_matches(backend_generation)) {
+            return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+        }
+        ret = delete_file_allow_missing(paths->journal_tmp);
+        if (ret != ESP_OK ||
+            !cache_backend_generation_matches(backend_generation)) {
+            return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+        }
+        ret = delete_file_allow_missing(paths->journal);
+        return cache_backend_generation_matches(backend_generation) ?
+            ret : ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = delete_file_allow_missing(paths->journal_tmp);
+    if (ret != ESP_OK ||
+        !cache_backend_generation_matches(backend_generation)) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
     }
     uint8_t encoded[D1L_RP2040_FILE_CHUNK_MAX];
     uint8_t verify[D1L_RP2040_FILE_CHUNK_MAX];
     d1l_rp2040_file_result_t file = {0};
     for (uint32_t offset = 0U; offset < valid_prefix_bytes;) {
+        if (!cache_backend_generation_matches(backend_generation)) {
+            ret = ESP_ERR_INVALID_STATE;
+            goto rebuild_failed;
+        }
         const uint32_t remaining = valid_prefix_bytes - offset;
         const size_t chunk =
             remaining < sizeof(encoded) ? remaining : sizeof(encoded);
         ret = read_file_exact(
             paths->journal, offset, encoded, chunk);
         if (ret != ESP_OK) {
+            goto rebuild_failed;
+        }
+        if (quarantine_corrupt_records) {
+            for (uint32_t local = 0U; local < chunk;
+                 local += D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+                const uint32_t record_offset = offset + local;
+                const uint32_t expected_sequence =
+                    record_offset / D1L_MAP_TILE_CACHE_RECORD_BYTES + 1U;
+                d1l_map_tile_cache_record_t record = {0};
+                if (d1l_map_tile_cache_record_decode(
+                        &encoded[local], &record) &&
+                    record.sequence == expected_sequence) {
+                    continue;
+                }
+                if (!d1l_map_tile_cache_record_init_quarantine(
+                        expected_sequence,
+                        /* Rebuild must never undercharge an unknown tile. */
+                        D1L_MAP_TILE_DOWNLOAD_MAX_BYTES, &record) ||
+                    !d1l_map_tile_cache_record_encode(
+                        &record, &encoded[local])) {
+                    ret = ESP_ERR_INVALID_STATE;
+                    goto rebuild_failed;
+                }
+            }
+        }
+        if (!cache_backend_generation_matches(backend_generation)) {
+            ret = ESP_ERR_INVALID_STATE;
             goto rebuild_failed;
         }
         ret = d1l_rp2040_bridge_file_write(
@@ -1436,23 +1622,78 @@ static esp_err_t rebuild_cache_journal_prefix(
             ret = ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret;
             goto rebuild_failed;
         }
+        if (quarantine_corrupt_records) {
+            for (uint32_t local = 0U; local < chunk;
+                 local += D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+                const uint32_t expected_sequence =
+                    (offset + local) /
+                        D1L_MAP_TILE_CACHE_RECORD_BYTES + 1U;
+                d1l_map_tile_cache_record_t record = {0};
+                if (!d1l_map_tile_cache_record_decode(
+                        &verify[local], &record) ||
+                    record.sequence != expected_sequence) {
+                    ret = ESP_ERR_INVALID_CRC;
+                    goto rebuild_failed;
+                }
+            }
+        }
         offset += (uint32_t)chunk;
     }
     memset(encoded, 0, sizeof(encoded));
     memset(verify, 0, sizeof(verify));
+    if (!cache_backend_generation_matches(backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     ret = d1l_rp2040_bridge_file_rename(
         paths->journal_tmp, paths->journal, true, &file,
         D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK &&
+        cache_backend_generation_matches(backend_generation)) {
         (void)delete_file_allow_missing(paths->journal_tmp);
     }
-    return ret;
+    return cache_backend_generation_matches(backend_generation) ?
+        ret : ESP_ERR_INVALID_STATE;
 
 rebuild_failed:
     memset(encoded, 0, sizeof(encoded));
     memset(verify, 0, sizeof(verify));
-    (void)delete_file_allow_missing(paths->journal_tmp);
+    if (cache_backend_generation_matches(backend_generation)) {
+        (void)delete_file_allow_missing(paths->journal_tmp);
+    }
     return ret;
+}
+
+static esp_err_t rebuild_cache_journal_prefix(
+    const d1l_map_tile_cache_paths_t *paths,
+    uint32_t valid_prefix_bytes,
+    uint32_t backend_generation)
+{
+    return rebuild_cache_journal(
+        paths, valid_prefix_bytes, false, backend_generation);
+}
+
+static esp_err_t quarantine_cache_journal_record(
+    const d1l_map_tile_cache_paths_t *paths,
+    uint32_t journal_size,
+    uint32_t record_offset,
+    uint32_t backend_generation)
+{
+    if (!paths ||
+        record_offset % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U ||
+        journal_size < D1L_MAP_TILE_CACHE_RECORD_BYTES ||
+        record_offset >
+            journal_size - D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = rebuild_cache_journal(
+        paths, journal_size, true, backend_generation);
+    d1l_map_tile_cache_record_t repaired = {0};
+    if (ret == ESP_OK) {
+        ret = read_cache_record(
+            paths->journal, record_offset, &repaired);
+    }
+    return ret == ESP_OK && !repaired.quarantined ?
+        ESP_ERR_INVALID_CRC : ret;
 }
 
 static uint32_t cache_next_sequence(uint32_t sequence)
@@ -1463,7 +1704,8 @@ static uint32_t cache_next_sequence(uint32_t sequence)
 static esp_err_t repair_cache_journal(
     const d1l_map_tile_cache_paths_t *paths,
     const d1l_map_tile_cache_state_t *state,
-    uint32_t *size)
+    uint32_t *size,
+    uint32_t backend_generation)
 {
     if (!paths || !state || !size) {
         return ESP_ERR_INVALID_ARG;
@@ -1473,8 +1715,8 @@ static esp_err_t repair_cache_journal(
     const esp_err_t ret = d1l_rp2040_bridge_file_stat(
         paths->journal, &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (file_result_missing(ret, &file)) {
-        (void)delete_file_allow_missing(paths->journal_tmp);
-        return ESP_OK;
+        return state->tail_offset == 0U ?
+            ESP_OK : ESP_ERR_INVALID_STATE;
     }
     if (ret != ESP_OK || !file.ok || !file.exists ||
         file.is_directory) {
@@ -1515,12 +1757,21 @@ static esp_err_t repair_cache_journal(
     }
     if (plan.rebuild) {
         const esp_err_t rebuild_ret = rebuild_cache_journal_prefix(
-            paths, plan.valid_prefix_bytes);
+            paths, plan.valid_prefix_bytes, backend_generation);
         if (rebuild_ret != ESP_OK) {
             return rebuild_ret;
         }
     } else {
-        (void)delete_file_allow_missing(paths->journal_tmp);
+        if (!cache_backend_generation_matches(backend_generation)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        const esp_err_t cleanup_ret =
+            delete_file_allow_missing(paths->journal_tmp);
+        if (cleanup_ret != ESP_OK ||
+            !cache_backend_generation_matches(backend_generation)) {
+            return cleanup_ret == ESP_OK ?
+                ESP_ERR_INVALID_STATE : cleanup_ret;
+        }
     }
     *size = plan.valid_prefix_bytes;
     return ESP_OK;
@@ -1543,19 +1794,56 @@ static esp_err_t repair_cache_head(
     const d1l_map_tile_provider_t *provider,
     const d1l_map_tile_cache_paths_t *paths,
     uint32_t journal_size,
-    d1l_map_tile_cache_state_t *state)
+    d1l_map_tile_cache_state_t *state,
+    uint32_t backend_generation)
 {
     if (!provider || !paths || !state ||
         state->tail_offset > journal_size) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!cache_backend_generation_matches(backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     bool changed = false;
     while (state->head_offset < state->tail_offset) {
+        if (!cache_backend_generation_matches(backend_generation)) {
+            return ESP_ERR_INVALID_STATE;
+        }
         d1l_map_tile_cache_record_t record = {0};
         esp_err_t ret = read_cache_record(
             paths->journal, state->head_offset, &record);
+        if (ret == ESP_OK) {
+            const uint32_t expected_sequence =
+                state->head_offset /
+                    D1L_MAP_TILE_CACHE_RECORD_BYTES + 1U;
+            if (record.sequence != expected_sequence) {
+                ret = ESP_ERR_INVALID_CRC;
+            }
+        }
+        if (ret == ESP_ERR_INVALID_CRC) {
+            ret = quarantine_cache_journal_record(
+                paths, journal_size, state->head_offset,
+                backend_generation);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+            if (!d1l_map_tile_cache_state_quarantine_head(
+                    state, D1L_MAP_TILE_DOWNLOAD_MAX_BYTES)) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            changed = true;
+            continue;
+        }
         if (ret != ESP_OK) {
             return ret;
+        }
+        if (record.quarantined) {
+            if (!d1l_map_tile_cache_state_quarantine_head(
+                    state, record.size)) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            changed = true;
+            continue;
         }
         d1l_map_tile_download_result_t result = {
             .z = record.zoom,
@@ -1634,6 +1922,10 @@ static esp_err_t repair_cache_head(
                 return ret;
             }
             if (metadata_matches) {
+                if (!cache_backend_generation_matches(
+                        backend_generation)) {
+                    return ESP_ERR_INVALID_STATE;
+                }
                 const char *owned_paths[] = {
                     result.path,
                     result.tmp_path,
@@ -1642,7 +1934,11 @@ static esp_err_t repair_cache_head(
                 };
                 for (size_t index = 0U;
                      index < sizeof(owned_paths) /
-                         sizeof(owned_paths[0]); ++index) {
+                          sizeof(owned_paths[0]); ++index) {
+                    if (!cache_backend_generation_matches(
+                            backend_generation)) {
+                        return ESP_ERR_INVALID_STATE;
+                    }
                     ret = delete_file_allow_missing(owned_paths[index]);
                     if (ret != ESP_OK) {
                         return ret;
@@ -1656,7 +1952,11 @@ static esp_err_t repair_cache_head(
         }
         changed = true;
     }
-    return changed ? write_cache_state(paths, state) : ESP_OK;
+    if (!changed) {
+        return ESP_OK;
+    }
+    return cache_backend_generation_matches(backend_generation) ?
+        write_cache_state(paths, state) : ESP_ERR_INVALID_STATE;
 }
 
 static esp_err_t recover_cache_tail(
@@ -1680,10 +1980,22 @@ static esp_err_t recover_cache_tail(
         if (record.sequence != state->next_sequence) {
             return ESP_ERR_INVALID_STATE;
         }
-        ret = recover_interrupted_record(provider, &record, false);
-        bool superseded = false;
         const bool evicted_prefix =
             state->head_offset == state->tail_offset;
+        if (record.quarantined) {
+            if (!d1l_map_tile_cache_state_note_commit(state, &record) ||
+                (evicted_prefix &&
+                 !d1l_map_tile_cache_state_quarantine_head(state, 0U))) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            ret = write_cache_state(paths, state);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+            continue;
+        }
+        ret = recover_interrupted_record(provider, &record, false);
+        bool superseded = false;
         if (ret != ESP_OK) {
             if (!cache_integrity_recoverable(ret)) {
                 return ret;
@@ -1894,11 +2206,19 @@ static esp_err_t rebuild_cache_state_from_journal(
         if (record.sequence != state->next_sequence) {
             return ESP_ERR_INVALID_STATE;
         }
+        const bool evicted_prefix =
+            state->head_offset == state->tail_offset;
+        if (record.quarantined) {
+            if (!d1l_map_tile_cache_state_note_commit(state, &record) ||
+                (evicted_prefix &&
+                 !d1l_map_tile_cache_state_quarantine_head(state, 0U))) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            continue;
+        }
         ret = recover_interrupted_record(provider, &record, false);
         bool recovered = ret == ESP_OK;
         const esp_err_t recovery_error = ret;
-        const bool evicted_prefix =
-            state->head_offset == state->tail_offset;
         if (!recovered) {
             if (!cache_integrity_recoverable(ret)) {
                 return ret;
@@ -1996,12 +2316,20 @@ static esp_err_t load_cache_state_for_generation(
     d1l_map_tile_cache_state_t **state,
     uint32_t backend_generation)
 {
+    s_cache_recovery_stage = "cache_preflight";
     if (!provider || !storage || !paths || !state ||
         !cache_control_paths(provider, paths)) {
         return ESP_ERR_INVALID_ARG;
     }
+    s_cache_recovery_stage = "cache_generation";
     if (!cache_backend_generation_matches(backend_generation)) {
         return ESP_ERR_INVALID_STATE;
+    }
+    s_cache_recovery_stage = "cache_control_recover";
+    const esp_err_t control_ret = recover_missing_cache_control_files(
+        paths, backend_generation);
+    if (control_ret != ESP_OK) {
+        return control_ret;
     }
     /*
      * manager_attempt counts routine health polls, not mounted media changes.
@@ -2017,6 +2345,7 @@ static esp_err_t load_cache_state_for_generation(
         return ESP_OK;
     }
 
+    s_cache_recovery_stage = "cache_state_read";
     d1l_map_tile_cache_state_t loaded = {0};
     d1l_rp2040_file_result_t state_file = {0};
     bool rebuild_state = false;
@@ -2052,31 +2381,39 @@ static esp_err_t load_cache_state_for_generation(
     }
 
     uint32_t journal_size = 0U;
+    s_cache_recovery_stage = rebuild_state ?
+        "cache_journal_validate" : "cache_journal_repair";
     ret = rebuild_state ?
         validate_cache_journal_for_rebuild(paths, &journal_size) :
-        repair_cache_journal(paths, &loaded, &journal_size);
+        repair_cache_journal(
+            paths, &loaded, &journal_size, backend_generation);
     if (ret != ESP_OK || loaded.tail_offset > journal_size) {
         return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
     }
     if (rebuild_state) {
+        s_cache_recovery_stage = "cache_state_rebuild";
         ret = rebuild_cache_state_from_journal(
             provider, paths, journal_size, &loaded);
         if (ret != ESP_OK) {
             return ret;
         }
     }
+    s_cache_recovery_stage = "cache_head_repair";
     ret = repair_cache_head(
-        provider, paths, journal_size, &loaded);
+        provider, paths, journal_size, &loaded, backend_generation);
     if (ret == ESP_OK && !rebuild_state) {
+        s_cache_recovery_stage = "cache_tail_recover";
         ret = recover_cache_tail(
             provider, paths, journal_size, &loaded);
     }
     if (ret == ESP_OK && rebuild_state) {
+        s_cache_recovery_stage = "cache_state_write";
         ret = write_cache_state(paths, &loaded);
     }
     if (ret != ESP_OK) {
         return ret;
     }
+    s_cache_recovery_stage = "cache_generation";
     if (!cache_backend_generation_matches(backend_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -2098,6 +2435,7 @@ static esp_err_t load_cache_state(
     d1l_map_tile_cache_state_t **state)
 {
     uint32_t backend_generation = 0U;
+    s_cache_recovery_stage = "cache_backend";
     const esp_err_t ret =
         cache_backend_generation(&backend_generation);
     return ret == ESP_OK ?
@@ -2132,6 +2470,12 @@ static esp_err_t prepare_cache_room(
         required_bytes > budget_bytes) {
         return ESP_ERR_NO_MEM;
     }
+    uint32_t eviction_backend_generation = 0U;
+    ret = cache_backend_generation(&eviction_backend_generation);
+    if (ret != ESP_OK || !s_cache_state_loaded ||
+        s_cache_state_backend_generation != eviction_backend_generation) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
     while (!d1l_map_tile_cache_state_has_room(
                state, budget_bytes, required_bytes)) {
         /*
@@ -2141,6 +2485,16 @@ static esp_err_t prepare_cache_room(
         if (!persistence_continue(
                 result, should_continue, continue_context)) {
             return ESP_ERR_INVALID_STATE;
+        }
+        ret = repair_cache_head(
+            provider, &paths, state->tail_offset, state,
+            eviction_backend_generation);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (d1l_map_tile_cache_state_has_room(
+                state, budget_bytes, required_bytes)) {
+            break;
         }
         if (state->head_offset >= state->tail_offset) {
             return ESP_ERR_NO_MEM;
@@ -2166,11 +2520,19 @@ static esp_err_t prepare_cache_room(
             read_cache_metadata(metadata_path, &metadata);
         if (metadata_ret == ESP_OK &&
             cache_records_equal(&record, &metadata)) {
+            if (!cache_backend_generation_matches(
+                    eviction_backend_generation)) {
+                return ESP_ERR_INVALID_STATE;
+            }
             ret = d1l_rp2040_bridge_file_delete(tile_path,
                 &result->file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
             if (!file_result_missing(ret, &result->file) &&
                 ret != ESP_OK) {
                 return ret;
+            }
+            if (!cache_backend_generation_matches(
+                    eviction_backend_generation)) {
+                return ESP_ERR_INVALID_STATE;
             }
             ret = d1l_rp2040_bridge_file_delete(metadata_path,
                 &result->file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
@@ -2182,7 +2544,15 @@ static esp_err_t prepare_cache_room(
                    metadata_ret != ESP_OK) {
             return metadata_ret;
         }
+        if (!cache_backend_generation_matches(
+                eviction_backend_generation)) {
+            return ESP_ERR_INVALID_STATE;
+        }
         (void)delete_file_allow_missing(oldest.tmp_path);
+        if (!cache_backend_generation_matches(
+                eviction_backend_generation)) {
+            return ESP_ERR_INVALID_STATE;
+        }
         (void)delete_file_allow_missing(oldest.metadata_tmp_path);
         if (!d1l_map_tile_cache_state_note_evict(
                 state, &record)) {
@@ -2530,7 +2900,7 @@ static esp_err_t map_tile_store_read_locked(
         backend_generation);
     if (ret != ESP_OK || !cache_state) {
         download_step(
-            &result, "cache_state",
+            &result, s_cache_recovery_stage,
             ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret, NULL);
         *out_result = result;
         return result.last_error;
@@ -2743,7 +3113,8 @@ static esp_err_t persist_validated_tile(
         provider, storage, &paths, &state);
     if (ret != ESP_OK || !state) {
         ret = ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
-        download_step(result, "cache_state", ret, NULL);
+        persistence_step(result, s_cache_recovery_stage);
+        download_step(result, s_cache_recovery_stage, ret, NULL);
         goto persist_done;
     }
     if (!persistence_continue(
