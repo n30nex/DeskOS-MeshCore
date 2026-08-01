@@ -1562,6 +1562,31 @@ static esp_err_t recover_cache_tail(
     return ESP_OK;
 }
 
+static esp_err_t rebuild_cache_state_from_journal(
+    const d1l_map_tile_cache_paths_t *paths,
+    uint32_t journal_size,
+    d1l_map_tile_cache_state_t *state)
+{
+    if (!paths || !state ||
+        journal_size % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_map_tile_cache_state_init(state);
+    while (state->tail_offset < journal_size) {
+        d1l_map_tile_cache_record_t record = {0};
+        const esp_err_t ret = read_cache_record(
+            paths->journal, state->tail_offset, &record);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (record.sequence != state->next_sequence ||
+            !d1l_map_tile_cache_state_note_commit(state, &record)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+    return ESP_OK;
+}
+
 static esp_err_t load_cache_state_for_generation(
     const d1l_map_tile_provider_t *provider,
     const d1l_storage_status_t *storage,
@@ -1592,27 +1617,36 @@ static esp_err_t load_cache_state_for_generation(
 
     d1l_map_tile_cache_state_t loaded = {0};
     d1l_rp2040_file_result_t state_file = {0};
+    bool rebuild_state = false;
     esp_err_t ret = d1l_rp2040_bridge_file_stat(
         paths->state, &state_file,
         D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (file_result_missing(ret, &state_file)) {
         d1l_map_tile_cache_state_init(&loaded);
+        rebuild_state = true;
     } else {
         if (ret != ESP_OK || !state_file.ok ||
-            !state_file.exists || state_file.is_directory ||
-            state_file.size != D1L_MAP_TILE_CACHE_STATE_BYTES) {
+            !state_file.exists || state_file.is_directory) {
             return ret == ESP_OK ? ESP_ERR_INVALID_SIZE : ret;
         }
-        uint8_t encoded[D1L_MAP_TILE_CACHE_STATE_BYTES];
-        ret = read_file_exact(
-            paths->state, 0U, encoded, sizeof(encoded));
-        if (ret != ESP_OK ||
-            !d1l_map_tile_cache_state_decode(
-                encoded, &loaded)) {
+        if (state_file.size != D1L_MAP_TILE_CACHE_STATE_BYTES) {
+            d1l_map_tile_cache_state_init(&loaded);
+            rebuild_state = true;
+        } else {
+            uint8_t encoded[D1L_MAP_TILE_CACHE_STATE_BYTES];
+            ret = read_file_exact(
+                paths->state, 0U, encoded, sizeof(encoded));
+            if (ret != ESP_OK) {
+                memset(encoded, 0, sizeof(encoded));
+                return ret;
+            }
+            if (!d1l_map_tile_cache_state_decode(
+                    encoded, &loaded)) {
+                d1l_map_tile_cache_state_init(&loaded);
+                rebuild_state = true;
+            }
             memset(encoded, 0, sizeof(encoded));
-            return ret == ESP_OK ? ESP_ERR_INVALID_CRC : ret;
         }
-        memset(encoded, 0, sizeof(encoded));
     }
 
     uint32_t journal_size = 0U;
@@ -1620,11 +1654,21 @@ static esp_err_t load_cache_state_for_generation(
     if (ret != ESP_OK || loaded.tail_offset > journal_size) {
         return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
     }
+    if (rebuild_state) {
+        ret = rebuild_cache_state_from_journal(
+            paths, journal_size, &loaded);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
     ret = repair_cache_head(
         provider, paths, &loaded);
-    if (ret == ESP_OK) {
+    if (ret == ESP_OK && !rebuild_state) {
         ret = recover_cache_tail(
             provider, paths, journal_size, &loaded);
+    }
+    if (ret == ESP_OK && rebuild_state) {
+        ret = write_cache_state(paths, &loaded);
     }
     if (ret != ESP_OK) {
         return ret;
