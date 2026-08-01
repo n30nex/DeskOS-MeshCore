@@ -144,7 +144,7 @@ jobs:
           python ./tools/ui_simulator.py --release-profile core_1_0 --out artifacts/ui-sim
           python ./tools/ui_simulator.py --release-profile core_1_0 --scenario large-mesh --out artifacts/ui-sim-large
           python ./tools/ui_simulator.py --release-profile core_1_0 --scenario storage-states --out artifacts/ui-sim-storage
-          python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready
+          python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --out artifacts/ui-sim-map-ready
 
       - name: Checksum contract tests
         run: python -m pytest -q tests/test_checksum_manifest.py tests/test_package_release_d1l.py

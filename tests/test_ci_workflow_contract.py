@@ -82,7 +82,7 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python ./scripts/ui_corruption_probe_d1l.py --dry-run" not in host
     assert "ui_tab_abuse_d1l.py" not in host
     assert "python ./scripts/scroll_probe_d1l.py --dry-run" not in host
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready" in host
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --out artifacts/ui-sim-map-ready" in host
     assert "shell: bash" in host
     assert "soak_d1l.py" not in host
     assert "storage_active_soak_d1l.py" not in host
