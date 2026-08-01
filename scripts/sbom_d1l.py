@@ -64,7 +64,7 @@ REQUIRED_SOURCE_INPUTS = (
     "dependencies.lock",
     "docs/ATTRIBUTIONS.md",
     "docs/BUILD_PROVENANCE_D1L.md",
-    "docs/COMPLETION_LEDGER.yaml",
+    "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml",
     "docs/SOURCE_AUDIT_AND_ATTRIBUTION.md",
     "main/CMakeLists.txt",
     "overlays/meshcore_ed25519_defined/README.md",

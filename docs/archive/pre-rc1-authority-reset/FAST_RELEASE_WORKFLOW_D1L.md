@@ -1,3 +1,9 @@
+HISTORICAL RECORD — DO NOT EXECUTE
+
+This document predates the RC1 authority reset. It is retained only for
+provenance. It cannot create work, tests, evidence requirements, or release
+gates. See `docs/RC1_SCOPE.md` and `docs/ROADMAP.md`.
+
 # Fast D1L Release Workflow
 
 This is the authoritative fast path for DeskOS 1.0 / RC1. The candidate is

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Evidence-based public release gate audit for MeshCore DeskOS D1L."""
+"""Legacy full-feature audit retained for historical evidence inspection.
+
+DEPRECATED: this script is not the RC1 release predicate. RC1 readiness is
+declared only by ``scripts/rc1_release_gate_audit_d1l.py``.
+"""
 
 from __future__ import annotations
 

@@ -81,13 +81,10 @@ def test_release_docs_match_no_format_sd_policy():
 
     combined = "\n".join(read(rel) for rel in release_docs).lower()
     for phrase in [
-        "users prepare fat32 sd cards on a computer",
-        "no device-side sd formatting path",
+        "fat32",
+        "never formats",
         "nvs fallback",
-        "non-fat32",
-        "official seeed smoke",
-        "filecanary",
-        "retained-canary",
-        "fat32 matrix",
+        "live-only",
+        "conditional",
     ]:
         assert phrase in combined

@@ -747,43 +747,37 @@ def test_active_release_docs_require_reduced_bounded_gate_without_soak():
             "docs/TEST_PLAN_D1L.md",
         )
     ]
+    release_docs.append(
+        (ROOT / "docs/RC1_RELEASE_EXECUTION_D1L.md").read_text(encoding="utf-8")
+    )
     active = "\n".join(release_docs)
 
-    assert "reduced bounded same-artifact gate" in active
-    assert "commands and four fresh evidence roles" in active
+    assert "Four sources match final candidate" in active
+    assert "`bounded_gate_without_soak_or_duration_requirement`" in active
     assert "No soak" in active
     assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active
-    assert "VID:PID 1a86:7523" in active
+    assert "ID_VENDOR_ID=1a86" in active
+    assert "ID_MODEL_ID=7523" in active
     assert "100-cycle" not in active
     assert "500-cycle tab-abuse" not in active
     assert "500-cycle tab abuse" not in active
 
 
-def test_active_release_docs_retain_completed_ui_acceptance_without_rerun():
+def test_active_release_docs_keep_ui_in_scope_without_an_extra_gate():
     roadmap = (ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8").split(
         "## Historical", 1
     )[0]
-    checklist = (ROOT / "docs/RELEASE_CHECKLIST.md").read_text(
-        encoding="utf-8"
-    ).split("## Historical", 1)[0]
+    scope = (ROOT / "docs/RC1_SCOPE.md").read_text(encoding="utf-8")
     test_plan = (ROOT / "docs/TEST_PLAN_D1L.md").read_text(
         encoding="utf-8"
     ).split("## Historical", 1)[0]
+    workflow = (ROOT / ".github/workflows/d1l-ci.yml").read_text(encoding="utf-8")
 
-    assert "operator-completed physical display/touch/keyboard/scroll" in roadmap
-    assert "completed UI" in roadmap
-    assert "without rerunning" in roadmap
-    assert "completed UI-navigation" in checklist
-    assert "not rerun" in checklist
-    assert (
-        "operator accepted the physical display/touch/keyboard/scroll"
-        in checklist
-    )
-    assert "completed physical display/touch/keyboard/scroll" in test_plan
-    assert "automated 12-surface navigation" in test_plan
-    assert "without rerunning" in test_plan
-    assert "same exact commit" in test_plan
-    assert "No soak" in test_plan
+    assert "D1L board, display, touch, backlight, Home, and core navigation" in scope
+    assert "| R1 | Freeze exact main package |" in roadmap
+    assert "| R6 | Aggregate and release |" in roadmap
+    assert "No timed idle, endurance, traffic, listening, or soak gate" in test_plan
+    assert "--release-profile core_1_0" in workflow
 
 
 def test_smoke_knows_ui_console_commands():

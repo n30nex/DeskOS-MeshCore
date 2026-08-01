@@ -110,7 +110,7 @@ def test_source_sbom_is_deterministic_and_bound_to_exact_identities(tmp_path):
     assert {
         "./source/.github/d1l-build-inputs.json",
         "./source/requirements/ci-host-windows.txt",
-        "./source/docs/COMPLETION_LEDGER.yaml",
+        "./source/docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml",
         "./source/overlays/meshcore_ed25519_defined/fe.c",
         "./source/scripts/validate_ed25519_defined_overlay.py",
         "./source/tests/meshcore_signed_advert_runtime/manifest.json",
@@ -130,7 +130,7 @@ def test_source_sbom_is_deterministic_and_bound_to_exact_identities(tmp_path):
         ".github/d1l-build-inputs.json",
         "requirements/ci-host-windows.txt",
         "dependencies.lock",
-        "docs/COMPLETION_LEDGER.yaml",
+        "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml",
         "overlays/meshcore_ed25519_defined/license.txt",
         "scripts/validate_ed25519_defined_overlay.py",
     ),

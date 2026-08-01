@@ -1,3 +1,9 @@
+HISTORICAL RECORD — DO NOT EXECUTE
+
+This document predates the RC1 authority reset. It is retained only for
+provenance. It cannot create work, tests, evidence requirements, or release
+gates. See `docs/RC1_SCOPE.md` and `docs/ROADMAP.md`.
+
 # Codex Goal Prompt For Iterative D1L Release Work
 
 > **SUPERSEDED AGENT PROMPT — DO NOT COPY OR EXECUTE.**

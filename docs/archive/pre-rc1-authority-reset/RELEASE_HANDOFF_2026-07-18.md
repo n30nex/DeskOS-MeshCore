@@ -1,3 +1,9 @@
+HISTORICAL RECORD — DO NOT EXECUTE
+
+This document predates the RC1 authority reset. It is retained only for
+provenance. It cannot create work, tests, evidence requirements, or release
+gates. See `docs/RC1_SCOPE.md` and `docs/ROADMAP.md`.
+
 # SIGUI production-release handoff — 2026-07-18
 
 > **SUPERSEDED HISTORICAL HANDOFF — NOT CURRENT STATUS OR RELEASE AUTHORITY.**

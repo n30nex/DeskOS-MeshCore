@@ -955,14 +955,13 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "setup confirm" not in retained_runner
     assert "COM11" not in retained_runner
     assert "COM29" not in retained_runner
-    assert "exactly four fresh evidence sources: flash, RF, protocol and Map" in active_plan
-    assert "SD write/reboot/remount" in active_plan
-    assert "prepared-card remove/reinsert cycle forward as" in active_plan
-    assert "context only; it is not a fresh receipt or outcome" in active_plan
-    assert "No soak" in active_plan
-    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active_plan
-    assert "ID_VENDOR_ID=1a86" in active_plan
-    assert "ID_MODEL_ID=7523" in active_plan
+    normalized_plan = " ".join(active_plan.split())
+    assert "Run the four RC1 sources once" in normalized_plan
+    assert "one non-erasing flash source" in normalized_plan
+    assert "one RF source" in normalized_plan
+    assert "one protocol source" in normalized_plan
+    assert "one Map source" in normalized_plan
+    assert "No timed idle, endurance, traffic, listening, or soak gate" in normalized_plan
     assert "does not send RF" in install_guide
     assert "does not silently redirect persistent histories to" in install_guide
     assert "NVS" in install_guide
@@ -1054,11 +1053,10 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "EXPORT_CANARY_START_ID" in protocol
     assert "DIAGNOSTIC_EXPORT_START_ID" in protocol
     assert "DATA_EXPORT_START_ID" in protocol
-    assert "python ./scripts/sd_export_canary_d1l.py --dry-run --token ci-dry-run" in workflow
-    assert "python ./scripts/sd_diagnostic_export_d1l.py --dry-run --token ci-dry-run" in workflow
-    assert "python ./scripts/sd_data_export_d1l.py --dry-run --token ci-dry-run" in workflow
-    assert "sd_export_canary_d1l.py" in docs
-    assert "sd_data_export_d1l.py" in docs
+    assert "python ./scripts/sd_export_canary_d1l.py --dry-run" not in workflow
+    assert "python ./scripts/sd_diagnostic_export_d1l.py --dry-run" not in workflow
+    assert "python ./scripts/sd_data_export_d1l.py --dry-run" not in workflow
+    assert "full host suite once" in " ".join(docs.split())
 
 
 def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
@@ -1155,9 +1153,9 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "map_tile_canary_transcript" in protocol
     assert "map_tile_check_transcript" in protocol
     assert "MAP_TILE_CANARY_START_ID" in protocol
-    assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run" in workflow
-    assert "python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run --token ci-dry-run" in workflow
-    assert "sd_map_tile_canary_d1l.py" in docs
+    assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run" not in workflow
+    assert "python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run" not in workflow
+    assert "one Map source" in " ".join(docs.split())
     assert "esp_http_client" in cmake
 
 
@@ -1170,7 +1168,7 @@ def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():
     assert ".FUNC_SDSPI_EN =       (0)" in board
     assert "return ESP_ERR_NOT_SUPPORTED" in bsp_sd
     assert ".format_if_mount_failed = false" in bsp_sd
-    assert "FAT32 SD/RP2040 primary history" in readme
+    assert "conditional SD-primary retained history" in readme
 
 
 def test_sd_validation_docs_do_not_require_public_rf_or_reserved_ports():
@@ -1190,19 +1188,20 @@ def test_docs_define_sd_primary_storage_and_live_only_degraded_mode():
     user_guide = read("docs/USER_GUIDE_D1L.md")
     limitations = read("docs/KNOWN_LIMITATIONS.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
+    scope = read("docs/RC1_SCOPE.md")
+    runbook = read("docs/RC1_RELEASE_EXECUTION_D1L.md")
 
-    for doc in (readme, user_guide, limitations, checklist):
+    for doc in (readme, user_guide, limitations, checklist, scope):
         assert "core_1_0" in doc
         assert "conditional" in doc
-        assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in doc
-        assert "1a86:7523" in doc
+    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in runbook
 
     for doc in (readme, user_guide, limitations):
         assert "SD" in doc
         assert "primary" in doc
         assert "live-only" in doc
-        assert "default NVS" in doc
+        assert "default NVS" in doc.replace("-", " ")
 
-    assert "SD-primary retained data" in checklist
+    assert "`package_sd_primary_truth_and_preparation`" in checklist
     assert "without silent default-NVS fallback" in checklist
     assert "No soak is required" in checklist

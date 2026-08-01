@@ -135,7 +135,7 @@ def test_ui_console_and_smoke_expose_routes():
     app_source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     console = read("main/comms/usb_console.c")
-    roadmap = read("docs/ROADMAP.md")
+    scope = read("docs/RC1_SCOPE.md")
     assert "recent_routes" in app_header
     assert "route_total_written" in app_header
     assert "d1l_route_store_copy_recent" in app_source
@@ -169,7 +169,9 @@ def test_ui_console_and_smoke_expose_routes():
     assert '\\"telemetry_requested\\":true' in console
     assert "routes" in SMOKE_COMMANDS
     assert "routes trace 0BF0A701D5AE2DB6" in SMOKE_COMMANDS
-    assert "routes clear" in roadmap
+    assert "PATH" in scope
+    assert "route" in scope
+    assert "user trace" in scope
 
 
 def test_usb_console_keeps_large_preview_buffers_off_main_stack():

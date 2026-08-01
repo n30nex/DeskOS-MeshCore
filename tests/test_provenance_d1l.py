@@ -181,7 +181,10 @@ def test_statement_is_deterministic_and_binds_subjects_materials_and_builder(tmp
     assert "dependencies.lock" in material_names
     assert ".github/d1l-build-inputs.json" in material_names
     assert "requirements/ci-host-windows.txt" in material_names
-    assert "docs/COMPLETION_LEDGER.yaml" in material_names
+    assert (
+        "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml"
+        in material_names
+    )
     assert "partitions_d1l.csv" in material_names
     assert "scripts/provenance_d1l.py" in material_names
 
@@ -192,7 +195,7 @@ def test_statement_is_deterministic_and_binds_subjects_materials_and_builder(tmp
         ".github/d1l-build-inputs.json",
         "requirements/ci-host-windows.txt",
         "dependencies.lock",
-        "docs/COMPLETION_LEDGER.yaml",
+        "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml",
     ),
 )
 def test_provenance_requires_every_release_inventory_lock(tmp_path, relative):

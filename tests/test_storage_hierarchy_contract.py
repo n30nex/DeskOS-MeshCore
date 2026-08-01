@@ -332,18 +332,17 @@ def test_release_docs_define_current_storage_and_map_acceptance():
     guide = read("docs/USER_GUIDE_D1L.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
     test_plan = read("docs/TEST_PLAN_D1L.md").split("## Historical", 1)[0]
+    scope = read("docs/RC1_SCOPE.md")
+    runbook = read("docs/RC1_RELEASE_EXECUTION_D1L.md")
 
-    for doc in (readme, guide, checklist, test_plan):
+    for doc in (readme, guide, checklist, scope):
         assert "core_1_0" in doc
         assert "conditional" in doc
-        assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in doc
+    assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in runbook
 
     assert "SD as the primary store" in guide
     assert "Degraded mode keeps basic live RF" in guide
-    assert "SD-primary retained data" in checklist
-    assert "authorized Map download/offline revisit" in checklist
-    assert "automated 12-surface navigation receipt" in checklist
-    assert "one consolidated physical" not in checklist.split(
-        "## Historical", 1
-    )[0]
+    assert "`package_sd_primary_truth_and_preparation`" in checklist
+    assert "`authorized_map_download_and_cache_revisit`" in checklist
+    assert "four RC1 sources once" in test_plan
     assert "No soak is required" in checklist

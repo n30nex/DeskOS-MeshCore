@@ -2413,16 +2413,15 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     )
     assert ".github/d1l-build-inputs.json" in workflow
     assert "python -m pip install --disable-pip-version-check --require-hashes" in workflow
-    assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in workflow
-    assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in workflow
-    assert "python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage" in workflow
-    assert "python ./tools/ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready" in workflow
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --out artifacts/ui-sim" in workflow
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario large-mesh --out artifacts/ui-sim-large" in workflow
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario storage-states --out artifacts/ui-sim-storage" in workflow
+    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready" in workflow
     assert "focused source checks" in active_test_plan
     assert "simulator images" in active_test_plan
     assert "alone do not pass" in active_test_plan
-    assert "automated 12-surface navigation receipt" in active_roadmap
-    assert "operator accepted the physical display/touch/keyboard/scroll" in active_checklist
-    assert "automated 12-surface navigation receipt" in active_checklist
-    assert "one consolidated physical" not in active_roadmap
-    assert "one consolidated physical" not in active_checklist
+    assert "| D0 | Authority reset |" in active_roadmap
+    assert "| R6 | Aggregate and release |" in active_roadmap
+    assert "`one_bounded_physical_receipt`" in active_checklist
+    assert "`authorized_map_download_and_cache_revisit`" in active_checklist
     assert "No soak is required" in active_checklist
