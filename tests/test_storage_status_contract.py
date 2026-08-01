@@ -616,6 +616,29 @@ def test_rp2040_bridge_serializes_uart_transactions():
     assert "xSemaphoreTake(s_bridge_mutex" in source
     assert "xSemaphoreGive(s_bridge_mutex)" in source
 
+    admission = source.split(
+        "static bool bridge_lock_admitted", 1
+    )[1].split("static bool bridge_quiesce_requested_for_current", 1)[0]
+    assert "s_bridge_quiesce_owner == NULL" in admission
+    assert "s_bridge_quiesce_requester == NULL" in admission
+    assert "s_bridge_quiesce_owner == current" in admission
+    assert "s_bridge_quiesce_requester == current" in admission
+
+    take_body = source.split(
+        "static esp_err_t take_bridge_lock", 1
+    )[1].split("static void give_bridge_lock(void)\n{", 1)[0]
+    first_admission = take_body.index("bridge_lock_admitted(current)")
+    semaphore_take = take_body.index("xSemaphoreTake(s_bridge_mutex, ticks)")
+    second_admission = take_body.index(
+        "bridge_lock_admitted(current)", first_admission + 1
+    )
+    assert first_admission < semaphore_take < second_admission
+    acquire_race = take_body[second_admission:]
+    assert acquire_race.index("give_bridge_lock()") < acquire_race.index(
+        "return ESP_ERR_NOT_FINISHED"
+    )
+    assert take_body.count("return ESP_ERR_NOT_FINISHED") == 2
+
     exchange_body = source.split("static esp_err_t exchange_prefixed_line_internal", 1)[1].split(
         "static esp_err_t exchange_prefixed_line(", 1
     )[0]

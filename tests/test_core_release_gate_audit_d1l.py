@@ -3109,6 +3109,14 @@ def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
                 "cmd": "mesh status",
                 "state": "ready",
                 "radio_ready": True,
+                "dm_delivery": {
+                    "session_id": 0,
+                    "revision": 0,
+                    "state": "not_applicable",
+                    "state_id": 0,
+                    "last_error": "ESP_OK",
+                    "active": False,
+                },
                 "runtime": {
                     "owner": "meshcore_service",
                     "command_queue_depth": 0,
@@ -3126,6 +3134,14 @@ def write_remote_rf_receipt(tmp_path: Path, *, local: bool = False) -> Path:
                 "cmd": "mesh status",
                 "state": "ready",
                 "radio_ready": True,
+                "dm_delivery": {
+                    "session_id": 0,
+                    "revision": 0,
+                    "state": "not_applicable",
+                    "state_id": 0,
+                    "last_error": "ESP_OK",
+                    "active": False,
+                },
                 "runtime": {
                     "owner": "meshcore_service",
                     "command_queue_depth": 0,

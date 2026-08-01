@@ -1511,6 +1511,9 @@ static bool retain_pending_dm_ack_receipt(
 static void clear_pending_dm_tx(void)
 {
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+    status_lock();
+    s_status.dm_delivery_active = false;
+    status_unlock();
 }
 
 static void record_dm_delivery_status(uint64_t session_id,
@@ -1522,6 +1525,7 @@ static void record_dm_delivery_status(uint64_t session_id,
     s_status.dm_delivery_session_id = session_id;
     s_status.dm_delivery_revision = revision;
     s_status.dm_delivery_state = (uint8_t)state;
+    s_status.dm_delivery_active = s_pending_dm_tx.delivery.active;
     s_status.dm_delivery_last_error = error;
     status_unlock();
 }
@@ -1568,6 +1572,29 @@ static bool begin_pending_dm_tx(
     return true;
 }
 
+static esp_err_t meshcore_service_retry_dm_transition_persistence(void)
+{
+    const uint64_t retry_started_us = (uint64_t)esp_timer_get_time();
+    const uint64_t retry_timeout_us =
+        (uint64_t)D1L_MESHCORE_DM_PERSIST_RETRY_TIMEOUT_MS * 1000ULL;
+    TickType_t retry_delay =
+        pdMS_TO_TICKS(D1L_MESHCORE_DM_PERSIST_RETRY_INTERVAL_MS);
+    if (retry_delay == 0U) {
+        retry_delay = 1U;
+    }
+
+    esp_err_t ret = ESP_ERR_NOT_FINISHED;
+    while ((uint64_t)esp_timer_get_time() - retry_started_us <
+           retry_timeout_us) {
+        vTaskDelay(retry_delay);
+        ret = d1l_dm_store_flush();
+        if (ret != ESP_ERR_NOT_FINISHED) {
+            return ret;
+        }
+    }
+    return ret;
+}
+
 static esp_err_t transition_pending_dm_tx(
     d1l_dm_delivery_state_t next_state,
     d1l_dm_delivery_reason_t reason, esp_err_t error)
@@ -1585,6 +1612,19 @@ static esp_err_t transition_pending_dm_tx(
     esp_err_t ret = d1l_dm_store_transition_delivery(
         session_id, expected_state, expected_revision, next_state,
         reason, error, &outcome);
+    /*
+     * An inbound ACK can leave the retained worker finishing the preceding
+     * revision just as a reply DM advances QUEUED -> WAITING_RADIO. The row
+     * transition has already won in RAM when that flush reports
+     * ESP_ERR_NOT_FINISHED; retry only its durability handoff before deciding
+     * that radio admission failed. This keeps an immediate reply from being
+     * stranded as a durable FAILED_QUEUE row without ever reaching RF.
+     */
+    if (ret == ESP_ERR_NOT_FINISHED && outcome.changed) {
+        ret = meshcore_service_retry_dm_transition_persistence();
+        outcome.durable = ret == ESP_OK;
+        outcome.error = ret;
+    }
     const bool publish_to_owner = outcome.changed || outcome.persistence_retry;
     if (publish_to_owner) {
         if (!d1l_dm_delivery_owner_apply(
@@ -5034,6 +5074,56 @@ static void meshcore_service_handle_radio_tx_watchdog(void)
     meshcore_service_handle_radio_tx_timeout(&event);
 }
 
+static void meshcore_service_terminalize_idle_dm_orphan(void)
+{
+    d1l_dm_delivery_owner_t *owner = &s_pending_dm_tx.delivery;
+    if (!owner->active ||
+        owner->state == D1L_DM_DELIVERY_AWAITING_ACK ||
+        s_pending_dm_tx.ack_persistence_pending ||
+        d1l_meshcore_ack_completion_suppresses_rf_retry(
+            &s_pending_dm_tx.ack_completion) ||
+        s_tx_busy ||
+        d1l_mesh_tx_operation_identity_valid(&s_active_radio_tx)) {
+        return;
+    }
+
+    d1l_dm_delivery_state_t failure_state;
+    d1l_dm_delivery_reason_t failure_reason;
+    esp_err_t failure_error;
+    switch (owner->state) {
+    case D1L_DM_DELIVERY_QUEUED:
+    case D1L_DM_DELIVERY_WAITING_RADIO:
+    case D1L_DM_DELIVERY_RETRY_TX:
+        failure_state = D1L_DM_DELIVERY_FAILED_QUEUE;
+        failure_reason = D1L_DM_DELIVERY_REASON_QUEUE_REJECTED;
+        failure_error = ESP_ERR_INVALID_STATE;
+        break;
+    case D1L_DM_DELIVERY_TX_ACTIVE:
+        failure_state = D1L_DM_DELIVERY_FAILED_RADIO;
+        failure_reason = D1L_DM_DELIVERY_REASON_RADIO_ERROR;
+        failure_error = ESP_ERR_INVALID_STATE;
+        break;
+    case D1L_DM_DELIVERY_TX_DONE:
+    case D1L_DM_DELIVERY_RETRY_WAIT:
+        failure_state = D1L_DM_DELIVERY_FAILED_TIMEOUT;
+        failure_reason = D1L_DM_DELIVERY_REASON_ACK_TIMEOUT;
+        failure_error = ESP_ERR_TIMEOUT;
+        break;
+    default:
+        return;
+    }
+
+    const esp_err_t ret = transition_pending_dm_tx(
+        failure_state, failure_reason, failure_error);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "idle DM owner terminalization failed: %s",
+                 esp_err_to_name(ret));
+    }
+    if (owner->active && d1l_dm_delivery_state_terminal(owner->state)) {
+        clear_pending_dm_tx();
+    }
+}
+
 static void meshcore_service_run_owner_maintenance(void)
 {
     (void)d1l_mesh_runtime_counter_increment_saturating(
@@ -5057,6 +5147,7 @@ static void meshcore_service_run_owner_maintenance(void)
         }
         return;
     }
+    meshcore_service_terminalize_idle_dm_orphan();
     if (maintain_pending_channel_history(now_ms)) {
         /* Never enter synchronous reconciliation on the same owner pass that
          * admits or waits on fresh Public terminal history. */
