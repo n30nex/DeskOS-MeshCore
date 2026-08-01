@@ -109,8 +109,35 @@ def test_cache_identity_uses_stable_sd_backend_generation():
 
 def test_corrupt_cache_state_is_rebuilt_from_the_verified_journal():
     store = read("main/storage/map_tile_store.c")
+    latest = store[
+        store.index("static esp_err_t cache_record_is_latest_coordinate") :
+        store.index("static esp_err_t recover_interrupted_record")
+    ]
+    recover = store[
+        store.index("static esp_err_t recover_interrupted_record") :
+        store.index("static esp_err_t rebuild_cache_journal_prefix")
+    ]
     rebuild = store[
         store.index("static esp_err_t rebuild_cache_state_from_journal") :
+        store.index("static esp_err_t load_cache_state_for_generation")
+    ]
+    repair_head = store[
+        store.index("static esp_err_t repair_cache_head") :
+        store.index("static esp_err_t recover_cache_tail")
+    ]
+    recover_tail = store[
+        store.index("static esp_err_t recover_cache_tail") :
+        store.index("static esp_err_t cache_path_absent")
+    ]
+    superseded = store[
+        store.index(
+            "static esp_err_t cache_record_superseded_by_later_journal",
+            store.index("static esp_err_t cache_path_absent"),
+        ) :
+        store.index("static esp_err_t rebuild_cache_state_from_journal")
+    ]
+    journal = store[
+        store.index("static esp_err_t validate_cache_journal_for_rebuild") :
         store.index("static esp_err_t load_cache_state_for_generation")
     ]
     load = store[
@@ -127,16 +154,49 @@ def test_corrupt_cache_state_is_rebuilt_from_the_verified_journal():
     assert load.index("rebuild_cache_state_from_journal(") < load.index(
         "write_cache_state(paths, &loaded)"
     )
-    assert rebuild.index("recover_interrupted_record(provider, &record)") < (
+    assert rebuild.index("recover_interrupted_record(provider, &record, false)") < (
         rebuild.index("d1l_map_tile_cache_state_note_commit(state, &record)")
     )
+    assert "cache_record_is_latest_coordinate(" in rebuild
     assert "cache_record_files_absent(" in rebuild
     assert "cache_record_superseded_by_later_journal(" in rebuild
-    assert "state->head_offset != state->tail_offset" in rebuild
+    assert "const bool evicted_prefix =" in rebuild
+    assert "const esp_err_t recovery_error = ret;" in rebuild
+    assert "return recovery_error;" in rebuild
+    assert "Interior holes stay charged until FIFO reaches them." in rebuild
+    assert "!recovered && evicted_prefix &&" in rebuild
     assert rebuild.index("d1l_map_tile_cache_state_note_commit") < (
         rebuild.index("d1l_map_tile_cache_state_note_evict")
     )
+    assert "allow_metadata_rebuild &&" in recover
+    assert "cache_integrity_recoverable(final_metadata_ret)" in recover
+    assert "cache_integrity_recoverable(temporary_metadata_ret)" in recover
+    assert "final_tile_ret == ESP_OK ||" in recover
+    assert "temporary_tile_ret == ESP_OK && temporary_metadata_matches" in recover
+    assert "if (temporary_metadata_matches)" in recover
+    assert "return reason == ESP_OK ? ESP_ERR_INVALID_CRC : reason;" in recover
+    assert recover.index("allow_metadata_rebuild &&") < recover.index(
+        "write_cache_metadata_tmp(&result, record)"
+    )
+    assert "cache_record_matches_tile(" in latest
+    assert "content_crc32" not in latest
+    assert "cache_record_is_latest_coordinate(" in repair_head
+    assert repair_head.index("cache_record_files_absent(") < repair_head.index(
+        "cache_record_is_latest_coordinate("
+    )
+    assert "recover_interrupted_record(\n                provider, &record, latest)" in repair_head
+    assert "recover_interrupted_record(provider, &record, false)" in recover_tail
+    assert "provider, &record, true" in recover_tail
+    assert "cache_record_superseded_by_later_journal(" in recover_tail
+    assert "superseded && evicted_prefix &&" in recover_tail
+    assert "cache_record_matches_tile(" in superseded
+    assert "read_cache_metadata(\n        result.metadata_tmp_path" in superseded
+    assert "verify_tile_file(result.path, &later)" in superseded
+    assert "verify_tile_file(result.tmp_path, &later)" in superseded
+    assert "cache_records_equal(\n                     &temporary_metadata, &later)" in superseded
+    assert "discard_corrupt_cache_record" not in store
     assert "rebuild_cache_journal_prefix(" not in rebuild
+    assert "rebuild_cache_journal_prefix(" not in journal
     assert "validate_cache_journal_for_rebuild(" in load
     assert "ret = rebuild_state ?" in load
     assert "delete_file_allow_missing(paths->state)" not in load

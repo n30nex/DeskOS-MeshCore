@@ -1247,9 +1247,50 @@ static esp_err_t verify_tile_file(
         path, record, NULL, NULL, NULL);
 }
 
+static bool cache_integrity_recoverable(esp_err_t error)
+{
+    return error == ESP_ERR_NOT_FOUND ||
+           error == ESP_ERR_INVALID_CRC ||
+           error == ESP_ERR_INVALID_SIZE;
+}
+
+static esp_err_t cache_record_is_latest_coordinate(
+    const d1l_map_tile_cache_paths_t *paths,
+    const d1l_map_tile_cache_record_t *record,
+    uint32_t record_offset,
+    uint32_t journal_size,
+    bool *latest)
+{
+    if (!paths || !record || !latest || journal_size == 0U ||
+        record_offset % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U ||
+        record_offset >= journal_size ||
+        journal_size % D1L_MAP_TILE_CACHE_RECORD_BYTES != 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *latest = true;
+    for (uint32_t offset =
+             record_offset + D1L_MAP_TILE_CACHE_RECORD_BYTES;
+         offset < journal_size;
+         offset += D1L_MAP_TILE_CACHE_RECORD_BYTES) {
+        d1l_map_tile_cache_record_t later = {0};
+        const esp_err_t ret = read_cache_record(
+            paths->journal, offset, &later);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (cache_record_matches_tile(
+                &later, record->zoom, record->x, record->y)) {
+            *latest = false;
+            return ESP_OK;
+        }
+    }
+    return ESP_OK;
+}
+
 static esp_err_t recover_interrupted_record(
     const d1l_map_tile_provider_t *provider,
-    const d1l_map_tile_cache_record_t *record)
+    const d1l_map_tile_cache_record_t *record,
+    bool allow_metadata_rebuild)
 {
     if (!provider || !record) {
         return ESP_ERR_INVALID_ARG;
@@ -1278,13 +1319,43 @@ static esp_err_t recover_interrupted_record(
         verify_tile_file(result.path, record);
     const esp_err_t temporary_tile_ret =
         verify_tile_file(result.tmp_path, record);
+    const bool temporary_tile_owned =
+        temporary_tile_ret == ESP_OK && temporary_metadata_matches;
     d1l_map_tile_cache_recovery_plan_t recovery = {0};
     if (!d1l_map_tile_cache_recovery_plan(
             final_tile_ret == ESP_OK,
-            temporary_tile_ret == ESP_OK,
+            temporary_tile_owned,
             final_metadata_matches,
             temporary_metadata_matches,
             &recovery)) {
+        if (allow_metadata_rebuild &&
+            !final_metadata_matches &&
+            !temporary_metadata_matches &&
+            cache_integrity_recoverable(final_metadata_ret) &&
+            cache_integrity_recoverable(temporary_metadata_ret) &&
+            (final_tile_ret == ESP_OK ||
+             temporary_tile_ret == ESP_OK)) {
+            esp_err_t ret = ESP_OK;
+            if (final_tile_ret != ESP_OK) {
+                d1l_rp2040_file_result_t file = {0};
+                ret = d1l_rp2040_bridge_file_rename(
+                    result.tmp_path, result.path, true, &file,
+                    D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
+                if (ret != ESP_OK) {
+                    return ret;
+                }
+            }
+            ret = write_cache_metadata_tmp(&result, record);
+            if (ret == ESP_OK) {
+                ret = rename_cache_metadata(&result);
+            }
+            if (ret != ESP_OK) {
+                return ret;
+            }
+            (void)delete_file_allow_missing(result.tmp_path);
+            (void)delete_file_allow_missing(result.metadata_tmp_path);
+            return ESP_OK;
+        }
         if (!final_metadata_matches &&
             !temporary_metadata_matches) {
             const esp_err_t reason =
@@ -1293,8 +1364,10 @@ static esp_err_t recover_interrupted_record(
             return reason == ESP_OK ?
                 ESP_ERR_INVALID_CRC : reason;
         }
-        return temporary_tile_ret != ESP_ERR_NOT_FOUND ?
-            temporary_tile_ret : final_tile_ret;
+        const esp_err_t reason =
+            temporary_tile_ret != ESP_ERR_NOT_FOUND ?
+                temporary_tile_ret : final_tile_ret;
+        return reason == ESP_OK ? ESP_ERR_INVALID_CRC : reason;
     }
     esp_err_t ret = ESP_OK;
     if (recovery.rename_tile) {
@@ -1312,8 +1385,10 @@ static esp_err_t recover_interrupted_record(
             return ret;
         }
     }
-    (void)delete_file_allow_missing(result.tmp_path);
-    (void)delete_file_allow_missing(result.metadata_tmp_path);
+    if (temporary_metadata_matches) {
+        (void)delete_file_allow_missing(result.tmp_path);
+        (void)delete_file_allow_missing(result.metadata_tmp_path);
+    }
     return ESP_OK;
 }
 
@@ -1451,12 +1526,27 @@ static esp_err_t repair_cache_journal(
     return ESP_OK;
 }
 
+static esp_err_t cache_record_files_absent(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_map_tile_cache_record_t *record,
+    bool *absent);
+
+static esp_err_t cache_record_superseded_by_later_journal(
+    const d1l_map_tile_provider_t *provider,
+    const d1l_map_tile_cache_paths_t *paths,
+    const d1l_map_tile_cache_record_t *record,
+    uint32_t record_offset,
+    uint32_t journal_size,
+    bool *superseded);
+
 static esp_err_t repair_cache_head(
     const d1l_map_tile_provider_t *provider,
     const d1l_map_tile_cache_paths_t *paths,
+    uint32_t journal_size,
     d1l_map_tile_cache_state_t *state)
 {
-    if (!provider || !paths || !state) {
+    if (!provider || !paths || !state ||
+        state->tail_offset > journal_size) {
         return ESP_ERR_INVALID_ARG;
     }
     bool changed = false;
@@ -1486,36 +1576,79 @@ static esp_err_t repair_cache_head(
         if (tile_ret != ESP_OK && !tile_missing) {
             return tile_ret;
         }
-        if (metadata_ret == ESP_OK &&
-            cache_records_equal(&record, &metadata) &&
+        const bool metadata_matches =
+            metadata_ret == ESP_OK &&
+            cache_records_equal(&record, &metadata);
+        if (metadata_matches &&
             tile_ret == ESP_OK && tile.ok && tile.exists &&
             !tile.is_directory && tile.size == record.size) {
             break;
         }
-        if (metadata_ret == ESP_OK &&
-            cache_records_equal(&record, &metadata) &&
-            tile_missing) {
-            ret = delete_file_allow_missing(result.metadata_path);
+        if (metadata_ret == ESP_ERR_NOT_FOUND && tile_missing) {
+            bool absent = false;
+            ret = cache_record_files_absent(
+                provider, &record, &absent);
             if (ret != ESP_OK) {
                 return ret;
             }
-        } else if (metadata_ret == ESP_OK &&
-                   cache_records_equal(&record, &metadata) &&
-                   !tile_missing) {
-            ret = delete_file_allow_missing(result.path);
+            if (absent) {
+                if (!d1l_map_tile_cache_state_note_evict(
+                        state, &record)) {
+                    return ESP_ERR_INVALID_STATE;
+                }
+                changed = true;
+                continue;
+            }
+        }
+        bool latest = false;
+        ret = cache_record_is_latest_coordinate(
+            paths, &record, state->head_offset,
+            journal_size, &latest);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (!latest) {
+            bool superseded = false;
+            ret = cache_record_superseded_by_later_journal(
+                provider, paths, &record, state->head_offset,
+                journal_size, &superseded);
+            if (ret != ESP_OK || !superseded) {
+                return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+            }
+        } else {
+            ret = recover_interrupted_record(
+                provider, &record, latest);
             if (ret == ESP_OK) {
-                ret = delete_file_allow_missing(
-                    result.metadata_path);
+                break;
             }
-            if (ret != ESP_OK) {
+            if (!cache_integrity_recoverable(ret)) {
                 return ret;
             }
-        } else if (metadata_ret == ESP_ERR_NOT_FOUND &&
-                   !tile_missing) {
-            return ESP_ERR_INVALID_STATE;
-        } else if (metadata_ret != ESP_OK &&
-                   metadata_ret != ESP_ERR_NOT_FOUND) {
-            return metadata_ret;
+            bool absent = false;
+            const esp_err_t absent_ret = cache_record_files_absent(
+                provider, &record, &absent);
+            if (absent_ret != ESP_OK) {
+                return absent_ret;
+            }
+            if (!absent && !metadata_matches) {
+                return ret;
+            }
+            if (metadata_matches) {
+                const char *owned_paths[] = {
+                    result.path,
+                    result.tmp_path,
+                    result.metadata_path,
+                    result.metadata_tmp_path,
+                };
+                for (size_t index = 0U;
+                     index < sizeof(owned_paths) /
+                         sizeof(owned_paths[0]); ++index) {
+                    ret = delete_file_allow_missing(owned_paths[index]);
+                    if (ret != ESP_OK) {
+                        return ret;
+                    }
+                }
+            }
         }
         if (!d1l_map_tile_cache_state_note_evict(
                 state, &record)) {
@@ -1537,21 +1670,54 @@ static esp_err_t recover_cache_tail(
         return ESP_ERR_INVALID_ARG;
     }
     while (state->tail_offset < journal_size) {
+        const uint32_t record_offset = state->tail_offset;
         d1l_map_tile_cache_record_t record = {0};
         esp_err_t ret = read_cache_record(
-            paths->journal, state->tail_offset, &record);
+            paths->journal, record_offset, &record);
         if (ret != ESP_OK) {
             return ret;
         }
         if (record.sequence != state->next_sequence) {
             return ESP_ERR_INVALID_STATE;
         }
-        ret = recover_interrupted_record(provider, &record);
+        ret = recover_interrupted_record(provider, &record, false);
+        bool superseded = false;
+        const bool evicted_prefix =
+            state->head_offset == state->tail_offset;
         if (ret != ESP_OK) {
-            return ret;
+            if (!cache_integrity_recoverable(ret)) {
+                return ret;
+            }
+            bool latest = false;
+            const esp_err_t latest_ret =
+                cache_record_is_latest_coordinate(
+                    paths, &record, record_offset,
+                    journal_size, &latest);
+            if (latest_ret != ESP_OK) {
+                return latest_ret;
+            }
+            if (latest) {
+                ret = recover_interrupted_record(
+                    provider, &record, true);
+                if (ret != ESP_OK) {
+                    return ret;
+                }
+            } else {
+                const esp_err_t superseded_ret =
+                    cache_record_superseded_by_later_journal(
+                        provider, paths, &record, record_offset,
+                        journal_size, &superseded);
+                if (superseded_ret != ESP_OK || !superseded) {
+                    return superseded_ret == ESP_OK ? ret : superseded_ret;
+                }
+            }
         }
         if (!d1l_map_tile_cache_state_note_commit(
                 state, &record)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (superseded && evicted_prefix &&
+            !d1l_map_tile_cache_state_note_evict(state, &record)) {
             return ESP_ERR_INVALID_STATE;
         }
         ret = write_cache_state(paths, state);
@@ -1622,14 +1788,6 @@ static esp_err_t cache_record_files_absent(
     return ESP_OK;
 }
 
-static bool cache_rebuild_integrity_error(esp_err_t error)
-{
-    return error == ESP_ERR_NOT_FOUND ||
-           error == ESP_ERR_INVALID_CRC ||
-           error == ESP_ERR_INVALID_SIZE ||
-           error == ESP_ERR_INVALID_STATE;
-}
-
 static esp_err_t cache_record_superseded_by_later_journal(
     const d1l_map_tile_provider_t *provider,
     const d1l_map_tile_cache_paths_t *paths,
@@ -1653,15 +1811,19 @@ static esp_err_t cache_record_superseded_by_later_journal(
     d1l_map_tile_cache_record_t metadata = {0};
     const esp_err_t metadata_ret = read_cache_metadata(
         result.metadata_path, &metadata);
-    if (metadata_ret == ESP_ERR_NOT_FOUND ||
-        metadata_ret == ESP_ERR_INVALID_CRC ||
-        metadata_ret == ESP_ERR_INVALID_SIZE) {
-        return ESP_OK;
-    }
-    if (metadata_ret != ESP_OK) {
+    d1l_map_tile_cache_record_t temporary_metadata = {0};
+    const esp_err_t temporary_metadata_ret = read_cache_metadata(
+        result.metadata_tmp_path, &temporary_metadata);
+    const bool metadata_unavailable =
+        cache_integrity_recoverable(metadata_ret);
+    if (metadata_ret != ESP_OK && !metadata_unavailable) {
         return metadata_ret;
     }
-    if (cache_records_equal(record, &metadata) ||
+    if (temporary_metadata_ret != ESP_OK &&
+        !cache_integrity_recoverable(temporary_metadata_ret)) {
+        return temporary_metadata_ret;
+    }
+    if (metadata_ret == ESP_OK &&
         !cache_record_matches_tile(
             &metadata, record->zoom, record->x, record->y)) {
         return ESP_OK;
@@ -1676,9 +1838,35 @@ static esp_err_t cache_record_superseded_by_later_journal(
         if (ret != ESP_OK) {
             return ret;
         }
-        if (cache_records_equal(&metadata, &later)) {
+        if (!cache_record_matches_tile(
+                &later, record->zoom, record->x, record->y)) {
+            continue;
+        }
+        if (metadata_ret == ESP_OK &&
+            cache_records_equal(&metadata, &later)) {
             *superseded = true;
             return ESP_OK;
+        }
+        const esp_err_t final_ret =
+            verify_tile_file(result.path, &later);
+        const esp_err_t temporary_ret =
+            verify_tile_file(result.tmp_path, &later);
+        if (final_ret == ESP_OK || temporary_ret == ESP_OK) {
+            if (metadata_unavailable ||
+                (temporary_metadata_ret == ESP_OK &&
+                 cache_records_equal(
+                     &temporary_metadata, &later))) {
+                *superseded = true;
+                return ESP_OK;
+            }
+            continue;
+        }
+        if ((!cache_integrity_recoverable(final_ret) &&
+             final_ret != ESP_OK) ||
+            (!cache_integrity_recoverable(temporary_ret) &&
+             temporary_ret != ESP_OK)) {
+            return !cache_integrity_recoverable(final_ret) ?
+                final_ret : temporary_ret;
         }
     }
     return ESP_OK;
@@ -1706,11 +1894,13 @@ static esp_err_t rebuild_cache_state_from_journal(
         if (record.sequence != state->next_sequence) {
             return ESP_ERR_INVALID_STATE;
         }
-        ret = recover_interrupted_record(provider, &record);
-        const bool recovered = ret == ESP_OK;
+        ret = recover_interrupted_record(provider, &record, false);
+        bool recovered = ret == ESP_OK;
+        const esp_err_t recovery_error = ret;
+        const bool evicted_prefix =
+            state->head_offset == state->tail_offset;
         if (!recovered) {
-            if (!cache_rebuild_integrity_error(ret) ||
-                state->head_offset != state->tail_offset) {
+            if (!cache_integrity_recoverable(ret)) {
                 return ret;
             }
             bool proven_evicted = false;
@@ -1722,22 +1912,39 @@ static esp_err_t rebuild_cache_state_from_journal(
                 }
             }
             if (!proven_evicted) {
-                const esp_err_t superseded_ret =
-                    cache_record_superseded_by_later_journal(
-                        provider, paths, &record, record_offset,
-                        journal_size, &proven_evicted);
-                if (superseded_ret != ESP_OK) {
-                    return superseded_ret;
+                bool latest = false;
+                ret = cache_record_is_latest_coordinate(
+                    paths, &record, record_offset,
+                    journal_size, &latest);
+                if (ret != ESP_OK) {
+                    return ret;
+                }
+                if (latest) {
+                    ret = recover_interrupted_record(
+                        provider, &record, true);
+                    recovered = ret == ESP_OK;
+                    if (!recovered) {
+                        return ret;
+                    }
+                } else {
+                    const esp_err_t superseded_ret =
+                        cache_record_superseded_by_later_journal(
+                            provider, paths, &record, record_offset,
+                            journal_size, &proven_evicted);
+                    if (superseded_ret != ESP_OK) {
+                        return superseded_ret;
+                    }
                 }
             }
-            if (!proven_evicted) {
-                return ret;
+            if (!recovered && !proven_evicted) {
+                return recovery_error;
             }
         }
         if (!d1l_map_tile_cache_state_note_commit(state, &record)) {
             return ESP_ERR_INVALID_STATE;
         }
-        if (!recovered &&
+        /* Interior holes stay charged until FIFO reaches them. */
+        if (!recovered && evicted_prefix &&
             !d1l_map_tile_cache_state_note_evict(state, &record)) {
             return ESP_ERR_INVALID_STATE;
         }
@@ -1859,7 +2066,7 @@ static esp_err_t load_cache_state_for_generation(
         }
     }
     ret = repair_cache_head(
-        provider, paths, &loaded);
+        provider, paths, journal_size, &loaded);
     if (ret == ESP_OK && !rebuild_state) {
         ret = recover_cache_tail(
             provider, paths, journal_size, &loaded);
