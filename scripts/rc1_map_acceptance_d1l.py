@@ -1151,6 +1151,21 @@ def wait_for_ui_tab(
     )
 
 
+def reopen_serial_reset_safe(ser: Any) -> None:
+    """Reopen a cached pySerial handle without pulsing the ESP32 reset line."""
+    if getattr(ser, "is_open", False):
+        return
+    ser.dtr = True
+    ser.rts = False
+    try:
+        ser.open()
+        ser.dtr = False
+    except BaseException:
+        if getattr(ser, "is_open", False):
+            ser.close()
+        raise
+
+
 def reopen_after_product_reboot(
     ser: Any,
     *,
@@ -1161,13 +1176,14 @@ def reopen_after_product_reboot(
 ) -> dict[str, Any]:
     """Reopen only the stable D1L endpoint and prove a new production boot."""
 
-    ser.close()
+    if getattr(ser, "is_open", False):
+        ser.close()
     deadline = time.monotonic() + timeout
     last_error: BaseException | None = None
     while time.monotonic() < deadline:
         if Path(POSIX_D1L_TARGET).exists():
             try:
-                ser.open()
+                reopen_serial_reset_safe(ser)
                 ser.reset_input_buffer()
                 remaining = max(0.05, deadline - time.monotonic())
                 health = wait_for_console_ready(
