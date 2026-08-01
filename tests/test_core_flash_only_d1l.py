@@ -1280,7 +1280,6 @@ def test_retained_state_rejects_missing_or_malformed_contact_identity():
         (("persisted",), False),
         (("persistence", "loaded"), False),
         (("persistence", "dirty"), True),
-        (("persistence", "failures"), 1),
         (("persistence", "last_error"), "ESP_FAIL"),
         (("persistence", "sd", "required"), False),
         (("persistence", "sd", "generation"), 0),
@@ -1296,6 +1295,30 @@ def test_retained_projection_rejects_unready_contact_snapshot(path, value):
     target[path[-1]] = value
 
     assert flash.retained_state_projection(state) is None
+
+
+@pytest.mark.parametrize("failures", [-1, True, "6"])
+def test_retained_projection_rejects_malformed_contact_failure_history(
+    failures,
+):
+    state = retained_state()
+    result = next(row for row in state if row.get("cmd") == "contacts")
+    result["persistence"]["failures"] = failures
+
+    assert flash.retained_state_projection(state) is None
+
+
+def test_retained_state_accepts_recovered_contact_failure_history():
+    state = retained_state()
+    result = next(row for row in state if row.get("cmd") == "contacts")
+    result["persistence"]["failures"] = 6
+    before = flash.retained_state_projection(state)
+    after = flash.retained_state_projection(retained_state())
+
+    assert before is not None
+    assert before["contacts_state"]["persistence_failures"] == 6
+    assert after is not None
+    assert flash.retained_state_preserved(before, after) is True
 
 
 def test_retained_state_rejects_contact_counter_regression():
