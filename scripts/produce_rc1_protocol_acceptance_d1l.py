@@ -1199,81 +1199,15 @@ def execute(
                 nested(peer_resolution, "response", "result", "last_advert"),
                 minimum=1,
             )
-        _step(
-            steps,
-            "public_tx_authorization",
-            "operator flag --authorize-public-tx",
-            {
-                "schema": 1,
-                "ok": True,
-                "authorized": True,
-                "source": "cli_flag",
-                "bounded_public_tx_count": 1,
-            },
-        )
-        public_send = _step(
-            steps,
-            "public_send",
-            f"mesh send public {public_out_token}",
-            command(f"mesh send public {public_out_token}"),
-        )
-        public_tx_record = poll(
-            lambda: command(f"packets search {public_out_token}"),
-            lambda result: (
-                isinstance(result.get("entries"), list)
-                and any(
-                    isinstance(row, dict)
-                    and row.get("direction") == "tx"
-                    and row.get("kind") in {"public_text", "channel_text"}
-                    and public_out_token in str(row.get("note") or "")
-                    for row in result["entries"]
-                )
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="retained Public TX",
-        )
-        _step(
-            steps,
-            "public_tx_record",
-            f"packets search {public_out_token}",
-            public_tx_record,
-        )
         before_public = peer_counter(
             before, "rx_channel_total", peer_status_schema
         )
         if before_public is None:
             raise ProtocolAcceptanceError("controlled peer lacks rx_channel_total")
-        peer_after_public = poll(
-            peer_status,
-            lambda result: (
-                peer_session_identity(result, peer_status_schema)
-                == peer_session_identity(before, peer_status_schema)
-                and peer_counter(
-                    result, "rx_channel_total", peer_status_schema
-                )
-                == before_public + 1
-                and peer_public_sender_matches(
-                    result,
-                    status_schema=peer_status_schema,
-                    d1l_public_key=str(identity.get("public_key") or ""),
-                    d1l_node_name=str(identity.get("node_name") or ""),
-                    resolved_advert_timestamp=resolved_advert_timestamp,
-                )
-            ),
-            timeout=rf_timeout,
-            interval=poll_interval,
-            label="controlled-peer Public receive",
-        )
-        _step(
-            steps,
-            "peer_after_public",
-            "controlled-peer status capture",
-            peer_after_public,
-        )
-        if public_send.get("text") != public_out_token:
-            raise ProtocolAcceptanceError("Public send response did not echo the exact token")
-
+        # Prove inbound Public retention and every remaining local health check
+        # before the sole D1L Public transmit. Once that transmit is queued, no
+        # further serial command is allowed: a failed post-Public local read
+        # would make a safe retry impossible.
         peer_public_send = control_sender(
             peer_socket_path,
             request_id=f"rc1-public-{nonce}",
@@ -1308,20 +1242,72 @@ def execute(
             steps, "health_after", "health", command("health")
         )
         _step(steps, "crashlog", "crashlog", command("crashlog"))
+        d1l_target_after = resolve_target(
+            POSIX_D1L_TARGET,
+            port_lister=port_lister,
+            platform_name="posix",
+        )
+        validate_snapshot(d1l_target_after, POSIX_D1L_TARGET)
+        if (
+            d1l_target["stable_identity_sha256"]
+            != d1l_target_after["stable_identity_sha256"]
+        ):
+            raise ProtocolAcceptanceError(
+                "D1L serial identity changed during acceptance"
+            )
+        if health_before.get("boot_nonce") != health_after.get("boot_nonce"):
+            raise ProtocolAcceptanceError("D1L rebooted during protocol acceptance")
 
-    d1l_target_after = resolve_target(
-        POSIX_D1L_TARGET,
-        port_lister=port_lister,
-        platform_name="posix",
+        _step(
+            steps,
+            "public_tx_authorization",
+            "operator flag --authorize-public-tx",
+            {
+                "schema": 1,
+                "ok": True,
+                "authorized": True,
+                "source": "cli_flag",
+                "bounded_public_tx_count": 1,
+            },
+        )
+        public_send = _step(
+            steps,
+            "public_send",
+            f"mesh send public {public_out_token}",
+            command(f"mesh send public {public_out_token}"),
+        )
+        if public_send.get("text") != public_out_token:
+            raise ProtocolAcceptanceError(
+                "Public send response did not echo the exact token"
+            )
+
+    # External peer observation is the only operation after the terminal D1L
+    # Public command. Never reopen the D1L serial port for this candidate.
+    peer_after_public = poll(
+        peer_status,
+        lambda result: (
+            peer_session_identity(result, peer_status_schema)
+            == peer_session_identity(before, peer_status_schema)
+            and peer_counter(result, "rx_channel_total", peer_status_schema)
+            == before_public + 1
+            and peer_public_sender_matches(
+                result,
+                status_schema=peer_status_schema,
+                d1l_public_key=str(identity.get("public_key") or ""),
+                d1l_node_name=str(identity.get("node_name") or ""),
+                resolved_advert_timestamp=resolved_advert_timestamp,
+            )
+        ),
+        timeout=rf_timeout,
+        interval=poll_interval,
+        label="controlled-peer Public receive",
     )
-    validate_snapshot(d1l_target_after, POSIX_D1L_TARGET)
-    if (
-        d1l_target["stable_identity_sha256"]
-        != d1l_target_after["stable_identity_sha256"]
-    ):
-        raise ProtocolAcceptanceError("D1L serial identity changed during acceptance")
-    if health_before.get("boot_nonce") != health_after.get("boot_nonce"):
-        raise ProtocolAcceptanceError("D1L rebooted during protocol acceptance")
+    _step(
+        steps,
+        "peer_after_public",
+        "controlled-peer status capture",
+        peer_after_public,
+    )
 
     transcript = {
         "schema": SCHEMA,

@@ -119,7 +119,9 @@ format, and preserved settings. A failed source stops the run.
 
 The flash above is source R2. Run Map before the RF and protocol sources because
 Map performs a normal reboot. Protocol is last because it authorizes the one
-bounded Public send.
+bounded Public send. The D1L Public send is terminal: every local serial,
+health, crashlog, identity, and inbound-retention check completes first, and
+only the controlled peer receipt is observed afterward.
 
 ```bash
 MAP="$EVIDENCE_DIR/map-acceptance.json"
