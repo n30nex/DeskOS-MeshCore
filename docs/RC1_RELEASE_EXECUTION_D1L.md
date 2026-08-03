@@ -246,7 +246,64 @@ test "$(gh release view v1.0.0-rc.1 --repo n30nex/SIGUI --json isDraft --jq .isD
 test "$(gh release view v1.0.0-rc.1 --repo n30nex/SIGUI --json isPrerelease --jq .isPrerelease)" = true
 ```
 
-## 10. Failure handling
+## 10. Stable byte-for-byte promotion
+
+Stable promotion is a separate, explicit maintainer action after the RC1 audit
+and prerelease verification above. It does not rebuild or repackage firmware.
+The stable ZIP must be byte-identical to the audited RC1 ZIP, and both tags must
+peel to the exact accepted commit.
+
+```bash
+set -euo pipefail
+
+test "$(jq -r .ready_for_public_release "$AUDIT")" = true
+git fetch origin main --tags
+test "$(git rev-parse origin/main)" = "$SHA"
+test "$(git rev-parse 'v1.0.0-rc.1^{commit}')" = "$SHA"
+test "$(gh release view v1.0.0-rc.1 --repo n30nex/SIGUI --json isDraft --jq .isDraft)" = false
+test "$(gh release view v1.0.0-rc.1 --repo n30nex/SIGUI --json isPrerelease --jq .isPrerelease)" = true
+test -z "$(git ls-remote --tags origin refs/tags/v1.0.0)"
+if gh release view v1.0.0 --repo n30nex/SIGUI >/dev/null 2>&1; then
+  echo "Refusing to replace an existing v1.0.0 release" >&2
+  exit 1
+fi
+
+STABLE_DIR="$ROOT/artifacts/release/v1.0.0"
+test ! -e "$STABLE_DIR"
+mkdir -p "$STABLE_DIR"
+STABLE_ASSET="$STABLE_DIR/MeshCore-DeskOS-D1L-v1.0.0.zip"
+STABLE_SUMS="$STABLE_DIR/SHA256SUMS.txt"
+cp -- "$PACKAGE_ASSET" "$STABLE_ASSET"
+cmp --silent "$PACKAGE_ASSET" "$STABLE_ASSET"
+(cd "$STABLE_DIR" && sha256sum "$(basename "$STABLE_ASSET")" > SHA256SUMS.txt && sha256sum --check SHA256SUMS.txt)
+
+git tag -a v1.0.0 "$SHA" -m "MeshCore DeskOS D1L 1.0.0"
+git push origin refs/tags/v1.0.0
+
+gh release create v1.0.0 "$STABLE_ASSET" "$STABLE_SUMS" \
+  --repo n30nex/SIGUI \
+  --verify-tag \
+  --target "$SHA" \
+  --title "MeshCore DeskOS D1L 1.0.0" \
+  --latest \
+  --notes "Stable DeskOS 1.0 for SenseCAP Indicator D1L. Extract the package fully and start with START_HERE.md."
+
+test "$(git rev-parse 'v1.0.0^{commit}')" = "$SHA"
+test "$(gh release view v1.0.0 --repo n30nex/SIGUI --json tagName --jq .tagName)" = v1.0.0
+test "$(gh release view v1.0.0 --repo n30nex/SIGUI --json isDraft --jq .isDraft)" = false
+test "$(gh release view v1.0.0 --repo n30nex/SIGUI --json isPrerelease --jq .isPrerelease)" = false
+
+VERIFY_DIR="$(mktemp -d "$ROOT/artifacts/release/v1.0.0-verify.XXXXXX")"
+gh release download v1.0.0 \
+  --repo n30nex/SIGUI \
+  --dir "$VERIFY_DIR" \
+  --pattern 'MeshCore-DeskOS-D1L-v1.0.0.zip' \
+  --pattern 'SHA256SUMS.txt'
+(cd "$VERIFY_DIR" && sha256sum --check SHA256SUMS.txt)
+cmp --silent "$PACKAGE_ASSET" "$VERIFY_DIR/MeshCore-DeskOS-D1L-v1.0.0.zip"
+```
+
+## 11. Failure handling
 
 Any nonzero source, checksum mismatch, candidate mismatch, missing artifact,
 wrong stable identity, or audit value other than exact `true` stops publication.

@@ -839,6 +839,30 @@ def test_public_release_stages_only_production_zip_and_outer_checksums():
         assert internal_marker not in release_command
 
 
+def test_stable_promotion_is_exact_fail_closed_and_byte_identical():
+    release_doc = (
+        ROOT / "docs" / "RC1_RELEASE_EXECUTION_D1L.md"
+    ).read_text(encoding="utf-8")
+    stable = release_doc.split("## 10. Stable byte-for-byte promotion", 1)[1]
+
+    assert "set -euo pipefail" in stable
+    assert "jq -r .ready_for_public_release" in stable
+    assert "v1.0.0-rc.1^{commit}" in stable
+    assert "test -z \"$(git ls-remote --tags origin refs/tags/v1.0.0)\"" in stable
+    assert "Refusing to replace an existing v1.0.0 release" in stable
+    assert 'cmp --silent "$PACKAGE_ASSET" "$STABLE_ASSET"' in stable
+    assert "gh release create v1.0.0" in stable
+    assert "--verify-tag" in stable
+    assert "--latest" in stable
+    assert "--generate-notes" not in stable
+    assert "gh release download v1.0.0" in stable
+    assert 'sha256sum --check SHA256SUMS.txt' in stable
+    assert (
+        'cmp --silent "$PACKAGE_ASSET" '
+        '"$VERIFY_DIR/MeshCore-DeskOS-D1L-v1.0.0.zip"'
+    ) in stable
+
+
 def test_rc1_conditional_capability_truth_matches_production_surface():
     truth = package_release_d1l.core_capability_truth("conditional")
 
