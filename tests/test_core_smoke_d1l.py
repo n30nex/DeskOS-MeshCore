@@ -263,16 +263,38 @@ def test_core_smoke_plan_never_closes_or_transmits_public_rf():
         command.startswith("mesh send public ")
         for command in plan["supported_commands"]
     )
-    assert not any(
-        command.startswith(("wifi ", "ble ", "map "))
-        for command in plan["supported_commands"]
-    )
+    mutation_commands = {
+        command for command, _feature in core_smoke.UNAVAILABLE_MUTATION_PROBES
+    }
+    assert mutation_commands.isdisjoint(plan["supported_commands"])
 
 
 def test_production_smoke_uses_no_qualification_only_display_or_touch_hooks():
     assert "display test" not in core_smoke.CORE_SMOKE_COMMANDS
     assert "touch test" not in core_smoke.CORE_SMOKE_COMMANDS
     assert "touch raw" in core_smoke.CORE_SMOKE_COMMANDS
+
+
+def test_production_smoke_covers_core_status_surfaces():
+    assert {
+        "map center",
+        "companion status",
+        "wifi status",
+        "wifi scan",
+        "ble status",
+        "rp2040 status",
+        "storage map-policy",
+        "storage setup",
+        "messages unread",
+        "channels",
+        "contacts export",
+        "roomservers",
+        "repeaters",
+        "admin status",
+        "terminal status",
+        "observer status",
+        "update status",
+    }.issubset(core_smoke.CORE_SMOKE_COMMANDS)
 
 
 def test_core_smoke_mutation_plan_matches_profile_and_disabled_sd():
