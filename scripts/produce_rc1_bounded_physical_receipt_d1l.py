@@ -184,7 +184,6 @@ PROTOCOL_OPERATIONS = frozenset(
         "peer_before",
         "public_tx_authorization",
         "public_send",
-        "public_tx_record",
         "peer_after_public",
         "peer_public_send",
         "public_receive",
@@ -791,7 +790,6 @@ def validate_protocol(
     )
     public_tx_authorization = _response(steps, "public_tx_authorization")
     public_send = _response(steps, "public_send")
-    public_tx_record = _response(steps, "public_tx_record")
     after_public = _response(steps, "peer_after_public")
     peer_public_send = _response(steps, "peer_public_send")
     public_receive = _response(steps, "public_receive")
@@ -885,19 +883,6 @@ def validate_protocol(
         else None
     )
 
-    public_tx_rows = (
-        public_tx_record.get("entries")
-        if isinstance(public_tx_record.get("entries"), list)
-        else []
-    )
-    matching_public_tx_rows = [
-        row
-        for row in public_tx_rows
-        if isinstance(row, dict)
-        and row.get("direction") == "tx"
-        and row.get("kind") in {"public_text", "channel_text"}
-        and public_out_token in str(row.get("note") or "")
-    ]
     public_rx_entry = _unique_message(
         public_receive, text=public_in_token, direction="rx"
     )
@@ -1073,8 +1058,15 @@ def validate_protocol(
         < steps["ping_request"]["sequence"]
         < steps["ping_result"]["sequence"]
         < steps["peer_before"]["sequence"]
+        < steps["peer_public_send"]["sequence"]
+        < steps["public_receive"]["sequence"]
+        < steps["health_after"]["sequence"]
+        < steps["crashlog"]["sequence"]
         < steps["public_tx_authorization"]["sequence"]
         < steps["public_send"]["sequence"]
+        < steps["peer_after_public"]["sequence"]
+        and steps["peer_after_public"]["sequence"] == len(steps)
+        and steps["public_send"]["sequence"] == len(steps) - 1
         and steps["public_tx_authorization"]["command"]
         == "operator flag --authorize-public-tx"
         and public_tx_authorization
@@ -1091,11 +1083,6 @@ def validate_protocol(
         and public_send.get("text") == public_out_token
         and steps["public_send"]["command"]
         == f"mesh send public {public_out_token}"
-        and public_tx_record.get("ok") is True
-        and public_tx_record.get("cmd") == "packets search"
-        and steps["public_tx_record"]["command"]
-        == f"packets search {public_out_token}"
-        and len(matching_public_tx_rows) == 1
         and before_public_count is not None
         and after_public_count == before_public_count + 1
         and str(

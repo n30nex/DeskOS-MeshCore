@@ -1,4 +1,6 @@
+import ast
 import hashlib
+import inspect
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,14 +46,13 @@ OPERATIONS = (
     "ping_request",
     "ping_result",
     "peer_before",
-    "public_tx_authorization",
-    "public_send",
-    "public_tx_record",
-    "peer_after_public",
     "peer_public_send",
     "public_receive",
     "health_after",
     "crashlog",
+    "public_tx_authorization",
+    "public_send",
+    "peer_after_public",
 )
 
 
@@ -259,18 +260,6 @@ def protocol_transcript() -> dict:
             "queued": True,
             "text": PUBLIC_OUT,
         },
-        "public_tx_record": {
-            "schema": 1,
-            "ok": True,
-            "cmd": "packets search",
-            "entries": [
-                {
-                    "direction": "tx",
-                    "kind": "channel_text",
-                    "note": PUBLIC_OUT,
-                }
-            ],
-        },
         "peer_after_public": peer_capture(
             channel=11, dm=5, sender=IDENTITY_KEY[:12].upper()
         ),
@@ -364,7 +353,6 @@ def protocol_transcript() -> dict:
         "peer_before": "controlled-peer status capture",
         "public_tx_authorization": "operator flag --authorize-public-tx",
         "public_send": f"mesh send public {PUBLIC_OUT}",
-        "public_tx_record": f"packets search {PUBLIC_OUT}",
         "peer_after_public": "controlled-peer status capture",
         "peer_public_send": "controlled-peer radio.send_channel",
         "public_receive": f"messages public search {PUBLIC_IN}",
@@ -438,7 +426,7 @@ def test_machine_transcript_closes_the_protocol_gate(
     }
 
 
-def test_admin_path_and_ping_all_precede_public_send():
+def test_all_fallible_local_checks_precede_terminal_public_send():
     transcript = protocol_transcript()
     steps = {
         row["operation"]: row
@@ -457,9 +445,16 @@ def test_admin_path_and_ping_all_precede_public_send():
         < steps["ping_request"]["sequence"]
         < steps["ping_result"]["sequence"]
         < steps["peer_before"]["sequence"]
+        < steps["peer_public_send"]["sequence"]
+        < steps["public_receive"]["sequence"]
+        < steps["health_after"]["sequence"]
+        < steps["crashlog"]["sequence"]
         < steps["public_tx_authorization"]["sequence"]
         < steps["public_send"]["sequence"]
+        < steps["peer_after_public"]["sequence"]
     )
+    assert steps["public_send"]["sequence"] == len(steps) - 1
+    assert steps["peer_after_public"]["sequence"] == len(steps)
     assert steps["path_request"]["command"] == f"routes probe {ADMIN_FP}"
     assert steps["path_request"]["response"]["fingerprint"] == ADMIN_FP
     assert (
@@ -471,6 +466,25 @@ def test_admin_path_and_ping_all_precede_public_send():
     assert steps["ping_request"]["response"]["fingerprint"] == ADMIN_FP
 
 
+def test_runner_issues_no_serial_command_after_terminal_public_send():
+    tree = ast.parse(inspect.getsource(runner.execute))
+    serial_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "command"
+    ]
+    public_calls = [
+        node
+        for node in serial_calls
+        if node.args and "mesh send public" in ast.unparse(node.args[0])
+    ]
+
+    assert len(public_calls) == 1
+    assert public_calls[0].lineno == max(node.lineno for node in serial_calls)
+
+
 def test_protocol_rejects_legacy_public_before_admin_order(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -480,12 +494,13 @@ def test_protocol_rejects_legacy_public_before_admin_order(
     }
     public_operations = (
         "peer_before",
-        "public_tx_authorization",
-        "public_send",
-        "public_tx_record",
-        "peer_after_public",
         "peer_public_send",
         "public_receive",
+        "health_after",
+        "crashlog",
+        "public_tx_authorization",
+        "public_send",
+        "peer_after_public",
     )
     legacy_order = [
         operation
