@@ -60,14 +60,16 @@ EXPECTED_IDF_VERSION = "v5.5.4"
 SD_HISTORY_MODES = frozenset({"disabled", "conditional", "supported_optional"})
 
 # Read-only or bounded local operations that are part of the Core product.
-# This list intentionally contains no Public transmit command.
+# This list intentionally contains no Public transmit command. Production
+# profiles compile qualification-only display/touch commands out, so hardware
+# admission uses the always-available board, I2C, and raw-touch diagnostics;
+# visible pixels, backlight, and touch interaction remain a manual UI review.
 CORE_SMOKE_COMMANDS = (
     "board",
     "settings get",
     "settings onboarding status",
     "i2c",
-    "display test",
-    "touch test",
+    "touch raw",
     "button",
     "ui status",
     "radiohw",

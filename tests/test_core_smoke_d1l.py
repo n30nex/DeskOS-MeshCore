@@ -269,6 +269,12 @@ def test_core_smoke_plan_never_closes_or_transmits_public_rf():
     )
 
 
+def test_production_smoke_uses_no_qualification_only_display_or_touch_hooks():
+    assert "display test" not in core_smoke.CORE_SMOKE_COMMANDS
+    assert "touch test" not in core_smoke.CORE_SMOKE_COMMANDS
+    assert "touch raw" in core_smoke.CORE_SMOKE_COMMANDS
+
+
 def test_core_smoke_mutation_plan_matches_profile_and_disabled_sd():
     conditional = core_smoke.mutation_probe_plan("conditional")
     disabled = core_smoke.mutation_probe_plan("disabled")
