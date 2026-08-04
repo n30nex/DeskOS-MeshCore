@@ -455,7 +455,8 @@ def test_online_foreground_transition_has_a_fixed_physical_deadline():
         ROOT / "scripts/rc1_map_acceptance_d1l.py"
     ).read_text(encoding="utf-8")
 
-    assert runner.FOREGROUND_TRANSITION_TIMEOUT_SECONDS == 120.0
+    assert runner.FOREGROUND_TRANSITION_TIMEOUT_SECONDS == 240.0
+    assert runner.OFFLINE_VIEW_TIMEOUT_SECONDS == 240.0
     assert (
         "timeout=min(\n"
         "                    offline_timeout,\n"
