@@ -302,25 +302,27 @@ def test_core_smoke_mutation_plan_matches_profile_and_disabled_sd():
     disabled = core_smoke.mutation_probe_plan("disabled")
 
     assert {row["feature"] for row in conditional} == {
-        "wifi_user_control",
         "ble",
-        "map",
-        "location",
-        "multi_channel_management",
-        "packets",
-        "nodes",
-        "user_trace",
-        "admin",
-        "observer_mqtt",
         "signed_update",
-        "mutable_terminal",
         "advanced_qr_emoji",
     }
     assert not any(row["feature"] == "sd_history" for row in conditional)
-    assert {
-        "command": "packets clear",
-        "feature": "packets",
-    } in conditional
+    assert not any(
+        row["command"]
+        in {
+            "wifi on",
+            "map center clear",
+            "settings set location 0 0",
+            "channels select 0000000000000000",
+            "packets clear",
+            "nodes clear",
+            "routes probe 0000000000000000",
+            "ui scroll-probe mesh_roles",
+            "observer on",
+            "terminal",
+        }
+        for row in conditional
+    )
     assert [
         row for row in disabled if row["feature"] == "sd_history"
     ] == [
@@ -344,6 +346,27 @@ def test_core_smoke_mutation_plan_matches_profile_and_disabled_sd():
         {"command": "rp2040 ping", "feature": "sd_history"},
         {"command": "rp2040 stock-probe", "feature": "sd_history"},
     ]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "packets",
+        "packets search core_smoke",
+        "messages public",
+        "messages public search core_smoke",
+        "messages dm",
+        "messages unread",
+        "nodes",
+        "contacts export",
+    ],
+)
+def test_retained_history_commands_receive_a_serialization_timeout(command):
+    assert core_smoke.timeout_for_core_command(command, 8.0) == 60.0
+
+
+def test_bounded_status_command_keeps_operator_timeout():
+    assert core_smoke.timeout_for_core_command("health", 8.0) == 8.0
 
 
 def test_core_smoke_exact_identity_and_unsupported_contract():

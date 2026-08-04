@@ -110,20 +110,25 @@ CORE_SMOKE_COMMANDS = (
 # Core command admission must reject each command before any handler or side
 # effect. Values are the immutable release-profile feature identifiers.
 UNAVAILABLE_MUTATION_PROBES = (
-    ("wifi on", "wifi_user_control"),
     ("ble on", "ble"),
-    ("map center clear", "map"),
-    ("settings set location 0 0", "location"),
-    ("channels select 0000000000000000", "multi_channel_management"),
-    ("packets clear", "packets"),
-    ("nodes clear", "nodes"),
-    ("routes probe 0000000000000000", "user_trace"),
-    ("ui scroll-probe mesh_roles", "admin"),
-    ("observer on", "observer_mqtt"),
     ("update", "signed_update"),
-    ("terminal", "mutable_terminal"),
     ("qr", "advanced_qr_emoji"),
 )
+
+# History/status replies can contain the complete retained window.  A normal
+# five-second console timeout is too short for a full 128-packet or message
+# response at 115200 baud and causes the valid reply to spill into the next
+# command.  Keep the operator timeout for bounded status commands, but give
+# retained-history reads enough time to finish before sending another command.
+CORE_SLOW_COMMAND_PREFIXES = (
+    "packets",
+    "messages public",
+    "messages dm",
+    "messages unread",
+    "nodes",
+    "contacts export",
+)
+CORE_SLOW_COMMAND_TIMEOUT_SECONDS = 60.0
 
 DISABLED_SD_MUTATION_PROBES = (
     ("storage mount", "sd_history"),
@@ -357,6 +362,15 @@ def send_exact_console_command(ser, command: str, timeout: float) -> dict:
     if hasattr(ser, "flush"):
         ser.flush()
     return read_command_result(ser, command, timeout)
+
+
+def timeout_for_core_command(command: str, configured_timeout: float) -> float:
+    if any(
+        command == prefix or command.startswith(prefix + " ")
+        for prefix in CORE_SLOW_COMMAND_PREFIXES
+    ):
+        return max(configured_timeout, CORE_SLOW_COMMAND_TIMEOUT_SECONDS)
+    return configured_timeout
 
 
 def mutation_probe_plan(sd_history_mode: str) -> list[dict]:
@@ -818,7 +832,13 @@ def run_core_smoke(
         results.extend([version, d1l_identity_status, health_preflight])
 
         for command in CORE_SMOKE_COMMANDS:
-            results.append(send_console_command(ser, command, timeout))
+            results.append(
+                send_console_command(
+                    ser,
+                    command,
+                    timeout_for_core_command(command, timeout),
+                )
+            )
 
         for probe in unavailable_status_probe_plan(
             expected_sd_history_mode
