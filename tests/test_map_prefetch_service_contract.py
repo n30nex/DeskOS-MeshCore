@@ -167,6 +167,39 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     )[1].split("static bool visible_map_active", 1)[0]
 
 
+def test_background_prefetch_resumes_after_natural_marker_generation_changes():
+    service = read("main/map/map_prefetch_service.c")
+    run_plan = service.split("static void run_plan(", 1)[1].split(
+        "static __attribute__((noinline)) void run_prefetch_pass", 1
+    )[0]
+    identity = service.split("static bool resume_identity_equal", 1)[1].split(
+        "static void note_resume_progress", 1
+    )[0]
+
+    assert "static uint64_t s_resume_index;" in service
+    assert "left->marker_generation" not in identity
+    assert "left->storage_backend_generation" not in identity
+    assert "left->source_id" in identity
+    assert "left->center_lat_e7" in identity
+    assert "left->viewport_lat_e6" in identity
+    assert "const uint64_t start_index" in run_plan
+    assert "s_resume_index % plan->total_tiles" in run_plan
+    assert "for (uint64_t offset = 0U; offset < plan->total_tiles; ++offset)" in run_plan
+    assert "(start_index + offset) % plan->total_tiles" in run_plan
+    assert run_plan.count("note_resume_progress(index, plan->total_tiles);") == 2
+    cached = run_plan.split("if (ret == ESP_OK && cached)", 1)[1].split(
+        "if (ret == ESP_ERR_NOT_FINISHED)", 1
+    )[0]
+    downloaded = run_plan.split("if (ret == ESP_OK) {", 1)[1].split(
+        "if (result.cancelled ||", 1
+    )[0]
+    assert "note_resume_progress" in cached
+    assert "note_resume_progress" in downloaded
+    assert run_plan.index("status->complete = true;") < run_plan.index(
+        "s_resume_index = 0U;", run_plan.index("status->complete = true;")
+    )
+
+
 def test_map_https_paths_share_one_measured_internal_worker_stack():
     prefetch = read("main/map/map_prefetch_service.c")
     prefetch_header = read("main/map/map_prefetch_service.h")
