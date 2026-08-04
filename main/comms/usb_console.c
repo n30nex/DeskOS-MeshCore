@@ -67,7 +67,13 @@ static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
 static const uint32_t D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS = 15000U;
 #endif
-static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U;
+/* A background retained-store write can already own the SD/UART bridge when
+ * reboot admission begins.  The force-flush call must first wait for that
+ * synchronous callback and then commit any newly dirty store.  Fifteen
+ * seconds was shorter than an observed live-RF node/history pass, causing a
+ * safe but user-visible reboot cancellation even though the worker completed
+ * cleanly moments later. */
+static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 60000U;
 /* The default ESP-IDF console writes directly to UART0 without installing the
  * UART driver. Give the final reboot receipt enough bounded wire time before
  * the already-quiesced system reset. The receipt is under 300 bytes (under

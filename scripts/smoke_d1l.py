@@ -77,7 +77,10 @@ HOST_CONSOLE_EVIDENCE_FIELDS = frozenset(
     }
 )
 
-REBOOT_MIN_TIMEOUT_SECONDS = 20.0
+# Firmware admits one shared 60-second deadline for storage-manager, retained
+# worker, bridge, and connectivity quiescence.  Leave bounded wire/host margin
+# so a valid late reboot receipt cannot be misclassified as a serial timeout.
+REBOOT_MIN_TIMEOUT_SECONDS = 75.0
 
 
 def parse_jsonl_line(line: str) -> dict | None:
