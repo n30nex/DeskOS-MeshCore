@@ -484,6 +484,31 @@ def provider_plan_signature(result: dict[str, Any]) -> tuple[object, ...]:
     )
 
 
+def provider_identity_signature(result: dict[str, Any]) -> tuple[object, ...]:
+    """Return provider, location, and storage facts that cannot drift in-run."""
+    location = result["device_location"]
+    prefetch = result["prefetch"]
+    sd = result["sd"]
+    return (
+        result.get("source_id"),
+        result.get("attribution"),
+        result.get("license_url"),
+        result.get("provider_max_zoom"),
+        result.get("minimum_request_interval_ms"),
+        result.get("average_tile_bytes"),
+        result.get("cache_budget_mb"),
+        location.get("set"),
+        location.get("lat_e7"),
+        location.get("lon_e7"),
+        location.get("source"),
+        sd.get("backend"),
+        sd.get("capacity_kb"),
+        result.get("node_radius_km"),
+        prefetch.get("source_id"),
+        prefetch.get("cache_budget_mb"),
+    )
+
+
 def transient_network_failure(
     result: object,
     *,
@@ -1036,6 +1061,7 @@ def wait_for_fresh_download(
     """Wait through bounded provider backoff for one successful fresh tile."""
     transient_observed = False
     reset_observed = False
+    identity_signature = provider_identity_signature(baseline)
     baseline_signature = provider_plan_signature(baseline)
     baseline_downloaded = int(baseline["prefetch"]["downloaded_tiles"])
     while True:
@@ -1071,11 +1097,30 @@ def wait_for_fresh_download(
                 )
             except AcceptanceFailure:
                 raise
-            if provider_plan_signature(clean) != baseline_signature:
+            if provider_identity_signature(clean) != identity_signature:
                 raise AcceptanceFailure(
-                    "prefetch_plan_changed",
-                    "provider or node plan changed during online acceptance",
+                    "prefetch_identity_changed",
+                    "provider, location, or storage identity changed during online acceptance",
                 )
+            if provider_plan_signature(clean) != baseline_signature:
+                # Signed node adverts naturally rebuild the bounded marker plan.
+                # Adopt only a fully valid, clean plan, then require a later poll
+                # of that exact plan to prove fresh network and download progress.
+                baseline = clean
+                baseline_signature = provider_plan_signature(clean)
+                baseline_downloaded = int(
+                    clean["prefetch"]["downloaded_tiles"]
+                )
+                transient_observed = False
+                reset_observed = False
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AcceptanceFailure(
+                        "prefetch_timeout",
+                        "no fresh authorized background tile completed in time",
+                    )
+                time.sleep(min(interval, remaining))
+                continue
             current_downloaded = int(
                 clean["prefetch"]["downloaded_tiles"]
             )
