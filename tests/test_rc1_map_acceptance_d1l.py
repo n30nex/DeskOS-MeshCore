@@ -924,6 +924,80 @@ def test_fresh_download_rejects_changed_transient_plan(
     assert caught.value.code == "prefetch_plan_changed"
 
 
+def test_fresh_download_adopts_clean_live_node_plan_then_requires_progress(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    adopted = provider_status(network_requests=0, downloaded_tiles=0)
+    adopted["node_markers"].update(
+        {"generation": 10, "seen": 3, "included": 2, "outside_radius": 1}
+    )
+    adopted["prefetch"].update(
+        {
+            "total_tiles": 120,
+            "estimated_bytes": 7_864_320,
+        }
+    )
+    progressed = copy.deepcopy(adopted)
+    progressed["network_requests"] = 1
+    progressed["downloaded_tiles"] = 1
+    progressed["prefetch"].update(
+        {
+            "visited_tiles": 1,
+            "network_requests": 1,
+            "downloaded_tiles": 1,
+            "downloaded_bytes": 65_536,
+            "cache_used_bytes": 65_536,
+        }
+    )
+    responses = [adopted, progressed]
+    calls = []
+
+    def send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return responses.pop(0)
+
+    monkeypatch.setattr(runner, "send_console_command", send)
+
+    result = runner.wait_for_fresh_download(
+        object(),
+        baseline,
+        location=LOCATION,
+        deadline=time.monotonic() + 1.0,
+        command_timeout=0.1,
+        interval=0,
+    )
+
+    assert result["node_markers"]["generation"] == 10
+    assert result["prefetch"]["downloaded_tiles"] == 1
+    assert len(calls) == 2
+
+
+def test_fresh_download_rejects_provider_identity_change(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = provider_status(network_requests=4, downloaded_tiles=7)
+    changed = provider_status(network_requests=5, downloaded_tiles=8)
+    changed["attribution"] = "Different licensed provider"
+    monkeypatch.setattr(
+        runner,
+        "send_console_command",
+        lambda _ser, _command, _timeout: changed,
+    )
+
+    with pytest.raises(runner.AcceptanceFailure) as caught:
+        runner.wait_for_fresh_download(
+            object(),
+            baseline,
+            location=LOCATION,
+            deadline=time.monotonic() + 1.0,
+            command_timeout=0.1,
+            interval=0,
+        )
+
+    assert caught.value.code == "prefetch_identity_changed"
+
+
 def test_fresh_download_recovers_when_zeroed_backoff_poll_is_missed(
     monkeypatch: pytest.MonkeyPatch,
 ):
