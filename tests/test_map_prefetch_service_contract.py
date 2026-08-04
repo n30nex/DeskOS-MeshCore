@@ -165,6 +165,10 @@ def test_background_service_is_sd_wifi_location_and_visible_map_gated():
     assert "ulTaskNotifyTake(" in service.split(
         "static void task_pause_after_network_tile(void)", 1
     )[1].split("static bool visible_map_active", 1)[0]
+    continuation = service.split(
+        "static bool prefetch_continue", 1
+    )[1].split("static bool prefetch_plan_stale", 1)[0]
+    assert "d1l_node_store_marker_generation()" not in continuation
 
 
 def test_background_prefetch_resumes_after_natural_marker_generation_changes():
@@ -182,6 +186,8 @@ def test_background_prefetch_resumes_after_natural_marker_generation_changes():
     assert "left->source_id" in identity
     assert "left->center_lat_e7" in identity
     assert "left->viewport_lat_e6" in identity
+    assert "static bool prefetch_plan_stale" in service
+    assert run_plan.count("prefetch_plan_stale(&mutable_continuation)") == 3
     assert "const uint64_t start_index" in run_plan
     assert "s_resume_index % plan->total_tiles" in run_plan
     assert "for (uint64_t offset = 0U; offset < plan->total_tiles; ++offset)" in run_plan
