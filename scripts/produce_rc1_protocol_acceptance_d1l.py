@@ -681,11 +681,62 @@ def authenticate_admin_session(
             and result.get("session_secret_exposed") is False
         )
 
-    for attempt in range(2):
-        login_request = command(
-            login_wire_command,
-            failure_label=redacted_login_command,
+    def exact_timed_out(result: dict[str, Any]) -> bool:
+        return bool(
+            result.get("ok") is True
+            and result.get("cmd") == "admin status"
+            and result.get("state") == "timed_out"
+            and str(result.get("fingerprint") or "").upper()
+            == admin_fingerprint
+            and result.get("last_error") == "ESP_ERR_TIMEOUT"
+            and result.get("credential_exposed") is False
+            and result.get("session_secret_exposed") is False
         )
+
+    for attempt in range(2):
+        try:
+            login_request = command(
+                login_wire_command,
+                failure_label=redacted_login_command,
+            )
+        except RetryableConsoleTimeout as exc:
+            terminal_status = command("admin status")
+            if response_booted(terminal_status):
+                raise ProtocolAcceptanceError(
+                    "device rebooted while recovering admin login response"
+                ) from exc
+            if authenticated(terminal_status):
+                return (
+                    {
+                        "schema": 1,
+                        "ok": True,
+                        "cmd": "admin login",
+                        "state": "authenticated",
+                        "role": terminal_status.get("role"),
+                        "fingerprint": terminal_status.get("fingerprint"),
+                        "credential_exposed": False,
+                        "session_secret_exposed": False,
+                        "login_tx_queued": terminal_status.get(
+                            "login_tx_queued"
+                        ),
+                        "host_console_timeout_recovered": True,
+                        "recovery_source_command": "admin status",
+                        "original_response_received": False,
+                    },
+                    terminal_status,
+                )
+            if attempt != 0 or not exact_timed_out(terminal_status):
+                raise ProtocolAcceptanceError(
+                    "admin login response timed out without exact authenticated "
+                    "or retryable timed_out status"
+                ) from exc
+            print(
+                "bounded admin login retry after exact timed_out state",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(interval)
+            continue
         try:
             login_status = poll_function(
                 lambda: command("admin status"),
@@ -707,17 +758,7 @@ def authenticate_admin_session(
                 ) from exc
             if authenticated(terminal_status):
                 return login_request, terminal_status
-            retryable_timeout = bool(
-                terminal_status.get("ok") is True
-                and terminal_status.get("cmd") == "admin status"
-                and terminal_status.get("state") == "timed_out"
-                and str(terminal_status.get("fingerprint") or "").upper()
-                == admin_fingerprint
-                and terminal_status.get("last_error") == "ESP_ERR_TIMEOUT"
-                and terminal_status.get("credential_exposed") is False
-                and terminal_status.get("session_secret_exposed") is False
-            )
-            if attempt != 0 or not retryable_timeout:
+            if attempt != 0 or not exact_timed_out(terminal_status):
                 raise
             print(
                 "bounded admin login retry after exact timed_out state",

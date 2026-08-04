@@ -882,6 +882,33 @@ def validate_protocol(
         if admin_contact is not None
         else None
     )
+    normal_login_request = bool(
+        login_request.get("ok") is True
+        and login_request.get("cmd") == "admin login"
+        and login_request.get("state") == "login_pending"
+        and login_request.get("host_console_timeout_recovered") is not True
+        and _fingerprint(login_request.get("fingerprint"))
+        == admin_fingerprint
+        and login_request.get("credential_exposed") is False
+        and login_request.get("session_secret_exposed") is False
+        and _integer(login_request.get("login_tx_queued"), minimum=1)
+        is not None
+    )
+    recovered_login_request = bool(
+        login_request.get("ok") is True
+        and login_request.get("cmd") == "admin login"
+        and login_request.get("state") == "authenticated"
+        and login_request.get("role") == "repeater"
+        and _fingerprint(login_request.get("fingerprint"))
+        == admin_fingerprint
+        and login_request.get("credential_exposed") is False
+        and login_request.get("session_secret_exposed") is False
+        and _integer(login_request.get("login_tx_queued"), minimum=1)
+        is not None
+        and login_request.get("host_console_timeout_recovered") is True
+        and login_request.get("recovery_source_command") == "admin status"
+        and login_request.get("original_response_received") is False
+    )
 
     public_rx_entry = _unique_message(
         public_receive, text=public_in_token, direction="rx"
@@ -1145,15 +1172,7 @@ def validate_protocol(
         and len(path_matches) == 1
         and steps["path_result"]["command"]
         == f"routes telemetry {admin_fingerprint}"
-        and login_request.get("ok") is True
-        and login_request.get("cmd") == "admin login"
-        and login_request.get("state") == "login_pending"
-        and _fingerprint(login_request.get("fingerprint"))
-        == admin_fingerprint
-        and login_request.get("credential_exposed") is False
-        and login_request.get("session_secret_exposed") is False
-        and _integer(login_request.get("login_tx_queued"), minimum=1)
-        is not None
+        and (normal_login_request or recovered_login_request)
         and login_status.get("ok") is True
         and login_status.get("cmd") == "admin status"
         and login_status.get("state") == "authenticated"

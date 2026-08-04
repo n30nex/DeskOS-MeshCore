@@ -426,6 +426,58 @@ def test_machine_transcript_closes_the_protocol_gate(
     }
 
 
+def test_machine_transcript_accepts_explicit_login_console_timeout_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    transcript = protocol_transcript()
+    login = next(
+        row["response"]
+        for row in transcript["steps"]
+        if row["operation"] == "admin_login_request"
+    )
+    login.clear()
+    login.update(
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "admin login",
+            "state": "authenticated",
+            "role": "repeater",
+            "fingerprint": ADMIN_FP.lower(),
+            "credential_exposed": False,
+            "session_secret_exposed": False,
+            "login_tx_queued": 1,
+            "host_console_timeout_recovered": True,
+            "recovery_source_command": "admin status",
+            "original_response_received": False,
+        }
+    )
+
+    assert validate(transcript, monkeypatch)["repeater_login"] is True
+
+
+def test_machine_transcript_rejects_unmarked_login_timeout_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    transcript = protocol_transcript()
+    login = next(
+        row["response"]
+        for row in transcript["steps"]
+        if row["operation"] == "admin_login_request"
+    )
+    login.update(
+        {
+            "state": "authenticated",
+            "role": "repeater",
+            "host_console_timeout_recovered": True,
+            "recovery_source_command": "admin status",
+        }
+    )
+
+    with pytest.raises(gate.EvidenceError):
+        validate(transcript, monkeypatch)
+
+
 def test_all_fallible_local_checks_precede_terminal_public_send():
     transcript = protocol_transcript()
     steps = {
@@ -1079,6 +1131,64 @@ def test_admin_session_accepts_late_authenticated_terminal_without_retry():
 
     assert status["state"] == "authenticated"
     assert [value for value, _label in calls] == [wire, "admin status"]
+
+
+def test_admin_session_recovers_login_command_timeout_from_authenticated_status():
+    wire = f"admin login {ADMIN_FP} private-login"
+    calls = []
+
+    def command(value, *, failure_label=None):
+        calls.append((value, failure_label))
+        if value.startswith("admin login "):
+            raise runner.RetryableConsoleTimeout(
+                "serial command timed out: redacted",
+                attempt_timeout=1.0,
+            )
+        assert value == "admin status"
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": "admin status",
+            "state": "authenticated",
+            "role": "repeater",
+            "fingerprint": ADMIN_FP.lower(),
+            "credential_exposed": False,
+            "session_secret_exposed": False,
+            "login_tx_queued": 3,
+        }
+
+    def poll_function(*_args, **_kwargs):
+        raise AssertionError("authenticated recovery must not poll or retry")
+
+    login, status = runner.authenticate_admin_session(
+        command,
+        login_wire_command=wire,
+        redacted_login_command=f"admin login {ADMIN_FP} <redacted>",
+        admin_fingerprint=ADMIN_FP,
+        timeout=1.0,
+        interval=0.0,
+        poll_function=poll_function,
+    )
+
+    assert status["state"] == "authenticated"
+    assert login == {
+        "schema": 1,
+        "ok": True,
+        "cmd": "admin login",
+        "state": "authenticated",
+        "role": "repeater",
+        "fingerprint": ADMIN_FP.lower(),
+        "credential_exposed": False,
+        "session_secret_exposed": False,
+        "login_tx_queued": 3,
+        "host_console_timeout_recovered": True,
+        "recovery_source_command": "admin status",
+        "original_response_received": False,
+    }
+    assert calls == [
+        (wire, f"admin login {ADMIN_FP} <redacted>"),
+        ("admin status", None),
+    ]
 
 
 @pytest.mark.parametrize(
