@@ -447,6 +447,15 @@ def _settings_equal(result: object, snapshot: dict) -> bool:
     return _settings_snapshot(result) == snapshot
 
 
+def _identity_name_equal(result: object, snapshot: dict) -> bool:
+    """Bind the rebooted live identity to the one mutated setting."""
+
+    return bool(
+        isinstance(result, dict)
+        and result.get("node_name") == snapshot.get("node_name")
+    )
+
+
 def _set_settings(ser, timeout: float, snapshot: dict, steps: list[dict]) -> bool:
     # Core persistence mutates only the supported identity name. Path-hash
     # configuration is part of unavailable user TRACE/PATH tooling.
@@ -489,8 +498,10 @@ def run_core_persistence_check(
             "expected_d1l_public_key": normalized_public_key,
             "post_reboot_identity_status": {},
             "post_reboot_identity_ok": False,
+            "post_reboot_name_ok": False,
             "cleanup_post_reboot_identity_status": {},
             "cleanup_post_reboot_identity_ok": False,
+            "cleanup_post_reboot_name_ok": False,
             "d1l_public_key_continuity_ok": False,
             "steps": steps,
         }
@@ -523,7 +534,7 @@ def run_core_persistence_check(
     post_reboot: dict = {}
     post_reboot_identity: dict = {}
     post_reboot_identity_ok = False
-    persisted: dict = {}
+    post_reboot_name_ok = False
     first_transition = False
     if first_reboot_ok:
         wait_after_reboot(ser, max(2.5, timeout / 2.0))
@@ -545,14 +556,14 @@ def run_core_persistence_check(
             post_reboot_identity,
             normalized_public_key,
         )
-        if post_reboot_identity_ok:
-            persisted = send_console_command(ser, "settings get", timeout)
-            steps.append({"command": "settings get", "result": persisted})
+        post_reboot_name_ok = bool(
+            post_reboot_identity_ok
+            and _identity_name_equal(post_reboot_identity, changed)
+        )
 
     persisted_ok = (
         first_transition
-        and post_reboot_identity_ok
-        and _settings_equal(persisted, changed)
+        and post_reboot_name_ok
     )
     restored = (
         _set_settings(ser, timeout, original, steps)
@@ -578,8 +589,8 @@ def run_core_persistence_check(
     cleanup_post: dict = {}
     cleanup_post_identity: dict = {}
     cleanup_post_identity_ok = False
+    cleanup_post_name_ok = False
     cleanup_transition = False
-    cleanup_result: dict = {}
     if cleanup_reboot_ok:
         wait_after_reboot(ser, max(2.5, timeout / 2.0))
         cleanup_post = wait_for_console_ready(ser, timeout)
@@ -602,14 +613,14 @@ def run_core_persistence_check(
             cleanup_post_identity,
             normalized_public_key,
         )
-        if cleanup_post_identity_ok:
-            cleanup_result = send_console_command(ser, "settings get", timeout)
-            steps.append({"command": "settings get", "result": cleanup_result})
+        cleanup_post_name_ok = bool(
+            cleanup_post_identity_ok
+            and _identity_name_equal(cleanup_post_identity, original)
+        )
 
     cleanup_ok = (
         cleanup_transition
-        and cleanup_post_identity_ok
-        and _settings_equal(cleanup_result, original)
+        and cleanup_post_name_ok
     )
     d1l_public_key_continuity_ok = bool(
         post_reboot_identity_ok and cleanup_post_identity_ok
@@ -632,8 +643,10 @@ def run_core_persistence_check(
         "expected_d1l_public_key": normalized_public_key,
         "post_reboot_identity_status": post_reboot_identity,
         "post_reboot_identity_ok": post_reboot_identity_ok,
+        "post_reboot_name_ok": post_reboot_name_ok,
         "cleanup_post_reboot_identity_status": cleanup_post_identity,
         "cleanup_post_reboot_identity_ok": cleanup_post_identity_ok,
+        "cleanup_post_reboot_name_ok": cleanup_post_name_ok,
         "d1l_public_key_continuity_ok": d1l_public_key_continuity_ok,
         "steps": steps,
     }

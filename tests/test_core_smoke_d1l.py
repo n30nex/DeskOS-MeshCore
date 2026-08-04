@@ -9,10 +9,10 @@ COMMIT = "a" * 40
 PUBLIC_KEY = "0123456789abcdef" * 4
 
 
-def identity_status(public_key=PUBLIC_KEY):
+def identity_status(public_key=PUBLIC_KEY, *, node_name=None):
     normalized = core_smoke.exact_public_key(public_key)
     assert normalized is not None
-    return {
+    result = {
         "schema": 1,
         "ok": True,
         "cmd": "identity status",
@@ -21,6 +21,9 @@ def identity_status(public_key=PUBLIC_KEY):
         "fingerprint": normalized[:16].upper(),
         "role": "desk_companion",
     }
+    if node_name is not None:
+        result["node_name"] = node_name
+    return result
 
 
 def windows_port():
@@ -84,7 +87,12 @@ def install_hardware_fakes(monkeypatch, command_runner):
     return fake
 
 
-def install_persistence_fakes(monkeypatch, *, wrong_identity_number=None):
+def install_persistence_fakes(
+    monkeypatch,
+    *,
+    wrong_identity_number=None,
+    wrong_name_number=None,
+):
     commands = []
     current_name = {"value": "DeskOS"}
     identity_number = {"value": 0}
@@ -132,9 +140,12 @@ def install_persistence_fakes(monkeypatch, *, wrong_identity_number=None):
             }
         if command == "identity status":
             identity_number["value"] += 1
+            node_name = current_name["value"]
+            if identity_number["value"] == wrong_name_number:
+                node_name = "Wrong persisted name"
             if identity_number["value"] == wrong_identity_number:
-                return identity_status("f" * 64)
-            return identity_status()
+                return identity_status("f" * 64, node_name=node_name)
+            return identity_status(node_name=node_name)
         raise AssertionError(f"unexpected persistence command: {command}")
 
     monkeypatch.setattr(core_smoke, "send_console_command", command_runner)
@@ -172,10 +183,16 @@ def test_core_persistence_binds_full_identity_after_each_reboot(monkeypatch):
     )
 
     assert report["ok"] is True
-    assert report["post_reboot_identity_status"] == identity_status()
+    assert report["post_reboot_identity_status"] == identity_status(
+        node_name="D1L Core Persist"
+    )
     assert report["post_reboot_identity_ok"] is True
-    assert report["cleanup_post_reboot_identity_status"] == identity_status()
+    assert report["post_reboot_name_ok"] is True
+    assert report["cleanup_post_reboot_identity_status"] == identity_status(
+        node_name="DeskOS"
+    )
     assert report["cleanup_post_reboot_identity_ok"] is True
+    assert report["cleanup_post_reboot_name_ok"] is True
     assert report["d1l_public_key_continuity_ok"] is True
     assert [step["command"] for step in report["steps"]] == [
         "settings get",
@@ -185,14 +202,12 @@ def test_core_persistence_binds_full_identity_after_each_reboot(monkeypatch):
         "reboot",
         "health",
         "identity status",
-        "settings get",
         "settings set name DeskOS",
         "settings get",
         "health",
         "reboot",
         "health",
         "identity status",
-        "settings get",
     ]
     assert commands.count("identity status") == 2
     assert current_name["value"] == "DeskOS"
@@ -226,6 +241,37 @@ def test_core_persistence_key_drift_stops_before_next_settings_operation(
         assert report["cleanup_post_reboot_identity_ok"] is False
         assert report["reboot_count"] == 2
         assert current_name["value"] == "DeskOS"
+
+
+@pytest.mark.parametrize("wrong_name_number", [1, 2])
+def test_core_persistence_rejects_wrong_name_after_either_reboot(
+    monkeypatch,
+    wrong_name_number,
+):
+    _commands, current_name = install_persistence_fakes(
+        monkeypatch,
+        wrong_name_number=wrong_name_number,
+    )
+
+    report = core_smoke.run_core_persistence_check(
+        object(),
+        1.0,
+        PUBLIC_KEY,
+    )
+
+    assert report["ok"] is False
+    assert report["d1l_public_key_continuity_ok"] is True
+    if wrong_name_number == 1:
+        assert report["post_reboot_identity_ok"] is True
+        assert report["post_reboot_name_ok"] is False
+        assert report["persisted_after_reboot"] is False
+        assert report["cleanup_post_reboot_name_ok"] is True
+    else:
+        assert report["post_reboot_name_ok"] is True
+        assert report["cleanup_post_reboot_identity_ok"] is True
+        assert report["cleanup_post_reboot_name_ok"] is False
+        assert report["original_restored"] is False
+    assert current_name["value"] == "DeskOS"
 
 
 def test_core_smoke_requires_exact_com12():
