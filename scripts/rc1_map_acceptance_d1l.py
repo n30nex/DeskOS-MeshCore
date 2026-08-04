@@ -60,7 +60,7 @@ MAX_CACHE_BUDGET_MB = 24576
 CONSOLE_BAUD = 115200
 COMMAND_TIMEOUT_SECONDS = 20.0
 READ_ONLY_TIMEOUT_RETRY_SECONDS = 10.0
-BOOT_TIMEOUT_SECONDS = 45.0
+BOOT_TIMEOUT_SECONDS = 75.0
 POLL_INTERVAL_SECONDS = 1.0
 PREFETCH_TIMEOUT_SECONDS = 180.0
 OFFLINE_VIEW_TIMEOUT_SECONDS = 120.0
@@ -1211,6 +1211,26 @@ def reopen_serial_reset_safe(ser: Any) -> None:
         raise
 
 
+def reopen_serial_for_cleanup(
+    ser: Any,
+    *,
+    expected_boot_nonce: int | None,
+    timeout: float,
+    command_timeout: float,
+    interval: float,
+) -> dict[str, Any]:
+    """Reopen a closed exact-target handle and prove the expected healthy boot."""
+    reopen_serial_reset_safe(ser)
+    ser.reset_input_buffer()
+    health = wait_for_console_ready(
+        ser,
+        timeout=timeout,
+        command_timeout=command_timeout,
+        interval=interval,
+    )
+    return validate_health(health, boot_nonce=expected_boot_nonce)
+
+
 def reopen_after_product_reboot(
     ser: Any,
     *,
@@ -1529,6 +1549,29 @@ def run_acceptance(
         except BaseException as exc:
             primary_error = exc
         finally:
+            if (
+                not getattr(ser, "is_open", False)
+                and (original_tab is not None or wifi_restore_needed)
+            ):
+                try:
+                    cleanup_target = _resolve_pi_target(list_ports.comports)
+                    if (
+                        cleanup_target.get("stable_identity_sha256")
+                        != target_before.get("stable_identity_sha256")
+                    ):
+                        raise AcceptanceFailure(
+                            "target_changed",
+                            "D1L stable USB identity changed before cleanup",
+                        )
+                    reopen_serial_for_cleanup(
+                        ser,
+                        expected_boot_nonce=active_nonce,
+                        timeout=boot_timeout,
+                        command_timeout=command_timeout,
+                        interval=poll_interval,
+                    )
+                except BaseException as exc:
+                    cleanup_errors.append(f"serial:{exc}")
             if original_tab is not None:
                 try:
                     current = require_result(
@@ -1588,10 +1631,15 @@ def run_acceptance(
                     primary_error = exc
 
     if cleanup_errors:
+        details = list(cleanup_errors)
+        if primary_error is not None:
+            details.append(
+                f"primary:{type(primary_error).__name__}:{primary_error}"
+            )
         raise AcceptanceFailure(
             "cleanup_failed",
             "acceptance cleanup did not restore device state: "
-            + "; ".join(cleanup_errors),
+            + "; ".join(details),
         )
     if primary_error is not None:
         raise primary_error

@@ -584,6 +584,51 @@ def test_product_reboot_reopen_uses_reset_safe_control_line_order(
     assert ser.rts is False
 
 
+def test_cleanup_reopens_closed_serial_and_proves_expected_boot(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    opens = []
+    resets = []
+
+    class ClosedSerial:
+        def __init__(self):
+            self.is_open = False
+            self.dtr = False
+            self.rts = False
+
+        def open(self):
+            opens.append((self.dtr, self.rts))
+            self.is_open = True
+
+        def close(self):
+            self.is_open = False
+
+        def reset_input_buffer(self):
+            resets.append(True)
+
+    monkeypatch.setattr(
+        runner,
+        "wait_for_console_ready",
+        lambda *_args, **_kwargs: {**health(), "boot_nonce": 43},
+    )
+    ser = ClosedSerial()
+
+    result = runner.reopen_serial_for_cleanup(
+        ser,
+        expected_boot_nonce=43,
+        timeout=75.0,
+        command_timeout=20.0,
+        interval=0,
+    )
+
+    assert result["boot_nonce"] == 43
+    assert opens == [(True, False)]
+    assert resets == [True]
+    assert ser.is_open is True
+    assert ser.dtr is False
+    assert ser.rts is False
+
+
 def test_read_only_timeout_is_retried_once_and_recorded(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1145,6 +1190,7 @@ def test_cli_exposes_bounded_boot_timeout():
         ]
     )
     assert args.boot_timeout == runner.BOOT_TIMEOUT_SECONDS
+    assert runner.BOOT_TIMEOUT_SECONDS == 75.0
 
 
 def test_cli_exposes_bounded_wifi_timeout():
