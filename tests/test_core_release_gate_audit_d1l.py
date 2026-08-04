@@ -1405,7 +1405,7 @@ def test_core_smoke_gate_passes_exact_fixture_and_rejects_dry_or_wrong_sha(
     failed["unavailable_mutation_probes"] = [
         probe
         for probe in failed["unavailable_mutation_probes"]
-        if probe["command"] != "packets clear"
+        if probe["command"] != "ble on"
     ]
     write_json(path, failed)
     assert not audit.core_smoke_gate(
