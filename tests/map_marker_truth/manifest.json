@@ -127,7 +127,7 @@
     "main/map/map_math.h": "acaf12a2f2f66b08926b5cc191d058e093678d218449951cea2957fc055df4a5",
     "main/map/map_point_projection.c": "77cc6064eefb1ef2b74822468f629c6f98de921475db6e90e11de7127c317431",
     "main/map/map_point_projection.h": "4865c182004b8d4ba655b1c9d12a8b592f18c28faf523cd367431dc19e169c19",
-    "main/map/map_prefetch_service.c": "437b13ce3a157ed8186859f8e82050f2a7f4eb526ffc6b0cd0ae6ea29baf780f",
+    "main/map/map_prefetch_service.c": "6304e82bf8c1cf3cd327109aa04fa748e3dc6afef19e828d0320c9e7a5665ae5",
     "main/map/map_prefetch_service.h": "66a55eac73f640c552a95ee56e03b96cc51657bfa778737b62f7e0db4c9deb25",
     "main/map/map_view_service.c": "044d4a144a0b8490a5398d9dc1233afd8863e0207a98e9fae582d06a53229f60",
     "main/map/map_view_service.h": "f8fe9f3167787e34bb2450f520ab594e2e622f5bf2c73470590663ce304250c2",

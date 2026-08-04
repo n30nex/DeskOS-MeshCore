@@ -57,6 +57,9 @@ static d1l_map_prefetch_point_t *s_points;
 static uint8_t *s_tile_buffer;
 static d1l_map_prefetch_key_t s_completed_key;
 static bool s_completed_key_valid;
+static d1l_map_prefetch_key_t s_resume_key;
+static bool s_resume_key_valid;
+static uint64_t s_resume_index;
 static int64_t s_backoff_until_us;
 static uint64_t s_network_requests_total;
 
@@ -117,6 +120,29 @@ static bool key_equal(const d1l_map_prefetch_key_t *left,
            left->provider_max_zoom == right->provider_max_zoom &&
            left->viewport_valid == right->viewport_valid &&
            strcmp(left->source_id, right->source_id) == 0;
+}
+
+static bool resume_identity_equal(const d1l_map_prefetch_key_t *left,
+                                  const d1l_map_prefetch_key_t *right)
+{
+    return left && right &&
+           left->storage_capacity_kb == right->storage_capacity_kb &&
+           left->average_tile_bytes == right->average_tile_bytes &&
+           left->cache_budget_mb == right->cache_budget_mb &&
+           left->center_lat_e7 == right->center_lat_e7 &&
+           left->center_lon_e7 == right->center_lon_e7 &&
+           left->viewport_lat_e6 == right->viewport_lat_e6 &&
+           left->viewport_lon_e6 == right->viewport_lon_e6 &&
+           left->provider_max_zoom == right->provider_max_zoom &&
+           left->viewport_valid == right->viewport_valid &&
+           strcmp(left->source_id, right->source_id) == 0;
+}
+
+static void note_resume_progress(uint64_t index, uint64_t total_tiles)
+{
+    if (total_tiles > 0U) {
+        s_resume_index = (index + 1U) % total_tiles;
+    }
 }
 
 static void task_pause(void)
@@ -250,13 +276,23 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
              provider->source_id);
     const uint64_t starting_free_bytes =
         (uint64_t)starting_storage->free_kb * 1024ULL;
+    if (!s_resume_key_valid ||
+        !resume_identity_equal(&s_resume_key, key)) {
+        s_resume_index = 0U;
+    }
+    s_resume_key = *key;
+    s_resume_key_valid = true;
+    const uint64_t start_index =
+        s_resume_index % plan->total_tiles;
 
     status->running = true;
     set_phase(status, "downloading",
               "Downloading the local node map in the background");
     publish_status(status);
 
-    for (uint64_t index = 0U; index < plan->total_tiles; ++index) {
+    for (uint64_t offset = 0U; offset < plan->total_tiles; ++offset) {
+        const uint64_t index =
+            (start_index + offset) % plan->total_tiles;
         if (!prefetch_continue(&mutable_continuation)) {
             note_stop_state(status, &mutable_continuation);
             publish_status(status);
@@ -284,6 +320,7 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
         if (ret == ESP_OK && cached) {
             ++status->cached_tiles;
             ++status->visited_tiles;
+            note_resume_progress(index, plan->total_tiles);
             publish_status(status);
             taskYIELD();
             continue;
@@ -366,6 +403,7 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
             ++status->downloaded_tiles;
             ++status->visited_tiles;
             status->downloaded_bytes += downloaded_len;
+            note_resume_progress(index, plan->total_tiles);
             publish_status(status);
             memset(&result, 0, sizeof(result));
             task_pause_after_network_tile();
@@ -393,6 +431,9 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
 
     status->running = false;
     status->complete = true;
+    s_resume_index = 0U;
+    s_resume_key = *key;
+    s_resume_key_valid = true;
     set_phase(status, "ready",
               "Local node map is cached at the highest detail that fits");
     s_completed_key = *key;
