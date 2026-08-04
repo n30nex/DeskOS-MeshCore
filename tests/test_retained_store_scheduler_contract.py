@@ -56,7 +56,9 @@ def test_common_scheduler_owns_descriptor_order_and_one_forced_deadline():
         "d1l_route_store_worker_start()"
     ) < force.index("xSemaphoreTake(s_request_mutex, remaining_ticks)")
     assert force.count("absolute_deadline_remaining_ticks(deadline_us)") == 2
-    assert force.count("xSemaphoreGive(s_request_mutex)") == 4
+    assert force.count("xSemaphoreGive(s_request_mutex)") == 5
+    assert "force_flush_priority_begin(requester)" in force
+    assert force.count("force_flush_priority_end(requester)") == 3
 
 
 def test_scheduler_result_is_published_only_after_flush_lock_release():

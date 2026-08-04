@@ -200,6 +200,15 @@ def test_background_prefetch_resumes_after_natural_marker_generation_changes():
     )
 
 
+def test_background_prefetch_yields_to_forced_retained_flush():
+    source = read("main/map/map_prefetch_service.c")
+    continuation = source.split("static bool prefetch_continue", 1)[1].split(
+        "static void publish_waiting", 1
+    )[0]
+    assert '#include "mesh/route_store_worker.h"' in source
+    assert "d1l_route_store_persistence_should_yield()" in continuation
+
+
 def test_map_https_paths_share_one_measured_internal_worker_stack():
     prefetch = read("main/map/map_prefetch_service.c")
     prefetch_header = read("main/map/map_prefetch_service.h")
