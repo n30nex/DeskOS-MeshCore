@@ -331,9 +331,9 @@ def test_retained_canary_gets_targeted_longer_command_timeout(monkeypatch):
         ("storage filecanary", 120.0),
         ("storage retained-canary sdToken1", 180.0),
         ("messages public search sdToken1", 5.0),
-        ("reboot", 20.0),
+        ("reboot", 75.0),
         ("health", 5.0),
-        ("reboot", 25.0),
+        ("reboot", 75.0),
     ]
 
 

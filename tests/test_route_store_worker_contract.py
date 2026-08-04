@@ -68,7 +68,7 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_contact_store_flush_if_due()" not in service
     assert "d1l_contact_store_flush()" not in service
     assert "d1l_route_store_worker_force_flush(" in console
-    assert "D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U" in console
+    assert "D1L_REBOOT_QUIESCE_TIMEOUT_MS = 60000U" in console
     assert "D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS = 50U" in console
     assert "D1L_REBOOT_RESTART_MARGIN_MS = 100U" in console
     assert "retained storage flush failed; reboot cancelled" in console

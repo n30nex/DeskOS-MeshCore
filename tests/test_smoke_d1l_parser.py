@@ -282,7 +282,7 @@ def test_persistence_check_reboots_and_restores_original_fields(monkeypatch):
         for command in ("settings reset\n", "wifi off\n", "ble off\n")
     )
     assert ser.reset_count == 2
-    assert [timeout for command, timeout in calls if command == "reboot"] == [20.0, 20.0]
+    assert [timeout for command, timeout in calls if command == "reboot"] == [75.0, 75.0]
     assert [timeout for command, timeout in calls if command == "settings get"] == [1] * 5
 
 
@@ -485,8 +485,9 @@ def test_changed_wifi_profile_fails_preservation_evidence(monkeypatch):
 
 
 def test_reboot_timeout_floor_does_not_change_other_commands():
-    assert smoke_d1l.timeout_for_reboot_command("reboot", 5.0) == 20.0
-    assert smoke_d1l.timeout_for_reboot_command("reboot", 25.0) == 25.0
+    assert smoke_d1l.timeout_for_reboot_command("reboot", 5.0) == 75.0
+    assert smoke_d1l.timeout_for_reboot_command("reboot", 25.0) == 75.0
+    assert smoke_d1l.timeout_for_reboot_command("reboot", 90.0) == 90.0
     assert smoke_d1l.timeout_for_reboot_command("health", 5.0) == 5.0
 
 

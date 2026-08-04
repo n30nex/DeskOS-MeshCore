@@ -844,8 +844,8 @@ def test_slow_sd_operations_get_bounded_long_timeouts(monkeypatch):
         ("storage filecanary", 120.0),
         ("storage retained-canary remount1", 180.0),
         ("storage map-tile-canary remount1", 120.0),
-        ("reboot", 20.0),
-        ("reboot", 25.0),
+        ("reboot", 75.0),
+        ("reboot", 75.0),
     ]
 
 
