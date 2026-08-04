@@ -472,8 +472,12 @@ int main(void)
     pthread_t first_thread;
     assert(pthread_create(&first_thread, NULL, force_call_thread, &first) == 0);
     wait_for_message_entry();
+    /* The forced caller has priority while the worker owns the active flush.
+     * Unrelated producer tasks must yield so they cannot monopolize SD. */
+    assert(d1l_route_store_persistence_should_yield());
     assert(pthread_join(first_thread, NULL) == 0);
     assert(first.result == ESP_ERR_TIMEOUT);
+    assert(!d1l_route_store_persistence_should_yield());
 
     d1l_retained_store_worker_status_t active = {0};
     d1l_retained_store_worker_status(&active);

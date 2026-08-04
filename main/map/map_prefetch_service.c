@@ -14,6 +14,7 @@
 #include "map/map_prefetch_plan.h"
 #include "map/map_view_service.h"
 #include "mesh/node_store.h"
+#include "mesh/route_store_worker.h"
 #include "storage/map_tile_store.h"
 #include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
@@ -167,7 +168,8 @@ static bool prefetch_continue(void *context)
 {
     const d1l_map_prefetch_continue_t *expected =
         (const d1l_map_prefetch_continue_t *)context;
-    if (!expected || visible_map_active() ||
+    if (!expected || d1l_route_store_persistence_should_yield() ||
+        visible_map_active() ||
         d1l_node_store_marker_generation() !=
             expected->marker_generation) {
         return false;

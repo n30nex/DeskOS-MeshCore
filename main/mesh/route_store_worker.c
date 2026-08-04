@@ -44,6 +44,7 @@ static portMUX_TYPE s_quiesce_owner_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_worker_starting;
 static TaskHandle_t s_quiesce_owner;
 static TaskHandle_t s_quiesce_requester;
+static TaskHandle_t s_force_flush_requester;
 static bool s_quiesce_preempt_requested;
 static uint32_t s_next_request_id;
 static uint32_t s_result_request_id;
@@ -339,14 +340,46 @@ bool d1l_route_store_persistence_should_yield(void)
     const TaskHandle_t current = xTaskGetCurrentTaskHandle();
     TaskHandle_t requester;
     TaskHandle_t owner;
+    TaskHandle_t force_requester;
     bool preempt_requested;
     portENTER_CRITICAL(&s_quiesce_owner_mux);
     requester = s_quiesce_requester;
     owner = s_quiesce_owner;
+    force_requester = s_force_flush_requester;
     preempt_requested = s_quiesce_preempt_requested;
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
-    return preempt_requested && requester != NULL &&
-           current != requester && current != owner;
+    TaskHandle_t worker;
+    portENTER_CRITICAL(&s_state_mux);
+    worker = s_worker_task;
+    portEXIT_CRITICAL(&s_state_mux);
+    const bool quiesce_requested =
+        preempt_requested && requester != NULL &&
+        current != requester && current != owner;
+    const bool force_flush_requested =
+        force_requester != NULL && current != force_requester &&
+        current != worker;
+    return quiesce_requested || force_flush_requested;
+}
+
+static bool force_flush_priority_begin(TaskHandle_t requester)
+{
+    bool registered = false;
+    portENTER_CRITICAL(&s_quiesce_owner_mux);
+    if (s_force_flush_requester == NULL) {
+        s_force_flush_requester = requester;
+        registered = true;
+    }
+    portEXIT_CRITICAL(&s_quiesce_owner_mux);
+    return registered;
+}
+
+static void force_flush_priority_end(TaskHandle_t requester)
+{
+    portENTER_CRITICAL(&s_quiesce_owner_mux);
+    if (s_force_flush_requester == requester) {
+        s_force_flush_requester = NULL;
+    }
+    portEXIT_CRITICAL(&s_quiesce_owner_mux);
 }
 
 static bool scheduler_cancel_requested(void *context)
@@ -596,6 +629,11 @@ esp_err_t d1l_route_store_worker_force_flush(uint32_t timeout_ms)
         (void)xSemaphoreGive(s_request_mutex);
         return ESP_ERR_TIMEOUT;
     }
+    const TaskHandle_t requester = xTaskGetCurrentTaskHandle();
+    if (!force_flush_priority_begin(requester)) {
+        (void)xSemaphoreGive(s_request_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
 
     portENTER_CRITICAL(&s_state_mux);
     uint32_t request_id = ++s_next_request_id;
@@ -608,6 +646,7 @@ esp_err_t d1l_route_store_worker_force_flush(uint32_t timeout_ms)
         .deadline_us = deadline_us,
     };
     if (xQueueSend(s_request_queue, &request, 0) != pdTRUE) {
+        force_flush_priority_end(requester);
         (void)xSemaphoreGive(s_request_mutex);
         return ESP_ERR_TIMEOUT;
     }
@@ -620,11 +659,13 @@ esp_err_t d1l_route_store_worker_force_flush(uint32_t timeout_ms)
         result = s_result;
         portEXIT_CRITICAL(&s_state_mux);
         if (result_request_id == request_id) {
+            force_flush_priority_end(requester);
             (void)xSemaphoreGive(s_request_mutex);
             return result;
         }
         remaining_ticks = absolute_deadline_remaining_ticks(deadline_us);
         if (remaining_ticks == 0U) {
+            force_flush_priority_end(requester);
             (void)xSemaphoreGive(s_request_mutex);
             return ESP_ERR_TIMEOUT;
         }

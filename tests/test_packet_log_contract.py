@@ -189,3 +189,20 @@ def test_console_exposes_packet_detail_and_clear():
     assert "packets filter any any" in SMOKE_COMMANDS
     assert "packets search test" in SMOKE_COMMANDS
     assert "storage status" in SMOKE_COMMANDS
+
+
+def test_filtered_packet_search_has_foreground_sd_priority():
+    console = read("main/comms/usb_console.c")
+    search = console.split("static void cmd_packets_search", 1)[1].split(
+        "static void cmd_packets_detail", 1
+    )[0]
+    assert "stats.sd_history_enabled" in search
+    assert "stats.sd_history_records > stats.count" in search
+    assert "d1l_rp2040_bridge_quiesce_begin" in search
+    assert "D1L_PACKET_QUERY_QUIESCE_TIMEOUT_MS" in search
+    assert search.index("d1l_rp2040_bridge_quiesce_begin") < search.index(
+        "d1l_packet_log_query"
+    )
+    assert search.index("d1l_packet_log_query") < search.index(
+        "d1l_rp2040_bridge_quiesce_end"
+    )

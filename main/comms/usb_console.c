@@ -80,6 +80,10 @@ static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 60000U;
  * 27 ms at 115200 baud). */
 static const uint32_t D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS = 50U;
 static const uint32_t D1L_REBOOT_RESTART_MARGIN_MS = 100U;
+/* A filtered SD-history query can require many fixed-record bridge reads.
+ * Give foreground diagnostics bounded ownership so continuous background Map
+ * traffic cannot stretch a small query past the console deadline. */
+static const uint32_t D1L_PACKET_QUERY_QUIESCE_TIMEOUT_MS = 5000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 static bool parse_channel_id_hex(const char *text, uint64_t *out_value);
@@ -5488,8 +5492,22 @@ static void cmd_packets_search(const char *line)
     }
 
     d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    const bool needs_sd_bridge =
+        stats.sd_history_enabled && stats.sd_history_records > stats.count;
+    if (needs_sd_bridge) {
+        const esp_err_t quiesce_ret = d1l_rp2040_bridge_quiesce_begin(
+            D1L_PACKET_QUERY_QUIESCE_TIMEOUT_MS);
+        if (quiesce_ret != ESP_OK) {
+            err_result("packets search", esp_err_to_name(quiesce_ret),
+                       "foreground packet search could not acquire SD storage");
+            return;
+        }
+    }
     static d1l_packet_log_entry_t entries[8] EXT_RAM_BSS_ATTR;
     size_t copied = d1l_packet_log_query(entries, 8, "any", "any", search);
+    if (needs_sd_bridge) {
+        d1l_rp2040_bridge_quiesce_end();
+    }
     print_packet_entries_json("packets search", "any", "any", search, entries, copied, &stats);
 }
 
