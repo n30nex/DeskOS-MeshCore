@@ -169,9 +169,7 @@ static bool prefetch_continue(void *context)
     const d1l_map_prefetch_continue_t *expected =
         (const d1l_map_prefetch_continue_t *)context;
     if (!expected || d1l_route_store_persistence_should_yield() ||
-        visible_map_active() ||
-        d1l_node_store_marker_generation() !=
-            expected->marker_generation) {
+        visible_map_active()) {
         return false;
     }
     d1l_connectivity_status_t connectivity = {0};
@@ -190,6 +188,14 @@ static bool prefetch_continue(void *context)
            provider.network_fetch_allowed &&
            provider.background_prefetch_permitted &&
            strcmp(provider.source_id, expected->source_id) == 0;
+}
+
+static bool prefetch_plan_stale(
+    const d1l_map_prefetch_continue_t *expected)
+{
+    return expected &&
+           d1l_node_store_marker_generation() !=
+               expected->marker_generation;
 }
 
 static void publish_waiting(const char *phase,
@@ -323,6 +329,11 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
             ++status->cached_tiles;
             ++status->visited_tiles;
             note_resume_progress(index, plan->total_tiles);
+            if (prefetch_plan_stale(&mutable_continuation)) {
+                note_stop_state(status, &mutable_continuation);
+                publish_status(status);
+                return;
+            }
             publish_status(status);
             taskYIELD();
             continue;
@@ -406,13 +417,20 @@ static void run_plan(const d1l_map_prefetch_plan_t *plan,
             ++status->visited_tiles;
             status->downloaded_bytes += downloaded_len;
             note_resume_progress(index, plan->total_tiles);
+            if (prefetch_plan_stale(&mutable_continuation)) {
+                memset(&result, 0, sizeof(result));
+                note_stop_state(status, &mutable_continuation);
+                publish_status(status);
+                return;
+            }
             publish_status(status);
             memset(&result, 0, sizeof(result));
             task_pause_after_network_tile();
             continue;
         }
         if (result.cancelled ||
-            !prefetch_continue(&mutable_continuation)) {
+            !prefetch_continue(&mutable_continuation) ||
+            prefetch_plan_stale(&mutable_continuation)) {
             memset(&result, 0, sizeof(result));
             note_stop_state(status, &mutable_continuation);
             publish_status(status);
