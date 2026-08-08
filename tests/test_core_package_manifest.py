@@ -154,8 +154,8 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert install["schema"] == 2
     assert install["normal_install_script"] == "flash_project.py"
     assert install["normal_install_scripts"] == {
-        "windows": "flash_project.ps1",
-        "posix": "flash_project.sh",
+        "windows": "flash_update_bin.ps1",
+        "posix": "flash_update_bin.sh",
     }
     stable_posix = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
     assert install["normal_install_port"] == stable_posix
@@ -188,8 +188,8 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         "windows_explicit_operator_port_required": True,
         "windows_port_probe_forbidden": True,
     }
-    assert install["recovery_platform"] == "windows_only"
-    assert install["posix_recovery_script"] is None
+    assert install["recovery_platform"] == "windows_and_posix"
+    assert install["posix_recovery_script"] == "flash_full_8mb.sh"
     assert install["install_guide"] == "docs/CORE_INSTALL_RECOVERY.md"
     assert install["no_on_device_sd_format"] is True
     assert manifest["scripts"] == {
@@ -197,8 +197,10 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         "serial_target_resolver": "d1l_serial_target.py",
         "windows_project_flash": "flash_project.ps1",
         "posix_project_flash": "flash_project.sh",
+        "windows_update_flash": "flash_update_bin.ps1",
+        "posix_update_flash": "flash_update_bin.sh",
         "windows_full_flash": "flash_full_8mb.ps1",
-        "posix_full_flash": None,
+        "posix_full_flash": "flash_full_8mb.sh",
     }
     for relative, binding in install["generated_files"].items():
         generated = package / relative
@@ -232,6 +234,7 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     ps1 = (package / "flash_project.ps1").read_text(encoding="ascii")
     sh = (package / "flash_project.sh").read_text(encoding="ascii")
     runner_text = (package / "flash_project.py").read_text(encoding="ascii")
+    update = (package / "flash_update_bin.ps1").read_text(encoding="ascii")
     recovery = (package / "flash_full_8mb.ps1").read_text(encoding="ascii")
     guide = (
         package / "docs" / "CORE_INSTALL_RECOVERY.md"
@@ -241,10 +244,13 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert "flash_project.py" in ps1
     assert stable_posix in sh
     assert os.access(package / "flash_project.sh", os.X_OK)
+    assert os.access(package / "flash_update_bin.sh", os.X_OK)
+    assert os.access(package / "flash_full_8mb.sh", os.X_OK)
     assert "/dev/ttyUSB<number>" in guide
     assert stable_posix in guide
     assert "### Windows" in guide
-    assert "No POSIX recovery wrapper is shipped" in " ".join(guide.split())
+    assert "Fresh clean install on a blank or non-DeskOS device" in guide
+    assert "same production `deskos_sd_bridge.ino.uf2`" in guide
     for generated_text in (ps1, runner_text, recovery, guide):
         assert "COM12" not in generated_text
     assert_actions_identity(
@@ -258,6 +264,8 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert runner_text.index("verify_complete_package(root)") < runner_text.index(
         "runner(command, cwd=root)"
     )
+    assert "--validate-only" in update
+    assert "meshcore_deskos_d1l.bin" in update
     assert recovery.index("--validate-only") < recovery.index(
         "python -m esptool"
     )
@@ -604,11 +612,15 @@ def test_core_conditional_package_is_production_only(
         "prepare_sd": "prepare_sd_card.ps1",
         "flash_rp2040": "flash_rp2040.ps1",
         "flash_esp32": "flash_project.ps1",
+        "flash_esp32_update": "flash_update_bin.ps1",
+        "flash_esp32_fresh_clean": "flash_full_8mb.ps1",
     }
     assert user_install["linux"] == {
         "prepare_sd": "prepare_sd_card.sh",
         "flash_rp2040": "flash_rp2040.sh",
         "flash_esp32": "flash_project.sh",
+        "flash_esp32_update": "flash_update_bin.sh",
+        "flash_esp32_fresh_clean": "flash_full_8mb.sh",
     }
     assert set(user_install["files"]) == set(
         package_release_d1l.PRODUCTION_USER_INSTALL_FILES
@@ -621,6 +633,8 @@ def test_core_conditional_package_is_production_only(
     for relative in (
         "prepare_sd_card.sh",
         "flash_rp2040.sh",
+        "flash_update_bin.sh",
+        "flash_full_8mb.sh",
     ):
         assert os.access(package / relative, os.X_OK)
 
@@ -630,6 +644,9 @@ def test_core_conditional_package_is_production_only(
     assert "## 1. Prepare the microSD card" in guide
     assert "## 2. Flash the RP2040 SD-bridge side" in guide
     assert "## 4. Flash the ESP32 main GUI side" in guide
+    assert "### Existing DeskOS: preserving update BIN" in guide
+    assert "### No DeskOS: full clean 8 MB BIN" in guide
+    assert "separate update and clean UF2 files" in guide
     assert "# DeskOS D1L 1.0 - Windows and Linux Install" in guide
     assert "Run the read-only RC1 test" not in guide
     assert verify_checksum_tree(package) is True
@@ -813,26 +830,26 @@ def test_public_release_stages_only_production_user_assets():
         ROOT / "docs" / "RC1_RELEASE_EXECUTION_D1L.md"
     ).read_text(encoding="utf-8")
     staged = release_doc.split("## 4. Stage the public downloads", 1)[1].split(
-        "## 5. Publish RC1", 1
+        "## 5. Publish stable 1.0.1", 1
     )[0]
     for asset in (
-        "MeshCore-DeskOS-D1L-1.0.0.zip",
-        "MeshCore-DeskOS-D1L-1.0.0-bootloader.bin",
-        "MeshCore-DeskOS-D1L-1.0.0-partition-table.bin",
-        "MeshCore-DeskOS-D1L-1.0.0-ota-data.bin",
-        "MeshCore-DeskOS-D1L-1.0.0-app.bin",
-        "MeshCore-DeskOS-D1L-1.0.0-full-8mb.bin",
-        "MeshCore-DeskOS-D1L-1.0.0-rp2040-sd-bridge.uf2",
-        "START_HERE-1.0.0.md",
-        "SHA256SUMS-1.0.0.txt",
+        "MeshCore-DeskOS-D1L-$VERSION.zip",
+        "MeshCore-DeskOS-D1L-$VERSION-bootloader.bin",
+        "MeshCore-DeskOS-D1L-$VERSION-partition-table.bin",
+        "MeshCore-DeskOS-D1L-$VERSION-ota-data.bin",
+        "MeshCore-DeskOS-D1L-$VERSION-UPDATE-existing-deskos-at-0x20000.bin",
+        "MeshCore-DeskOS-D1L-$VERSION-FRESH-CLEAN-full-8mb-at-0x0.bin",
+        "MeshCore-DeskOS-D1L-$VERSION-RP2040-UPDATE-OR-FRESH.uf2",
+        "START_HERE-$VERSION.md",
+        "SHA256SUMS-$VERSION.txt",
     ):
         assert asset in staged
     release_command = release_doc.split(
-        "gh release create v1.0.0-rc.1", 1
+        'gh release create "$TAG"', 1
     )[1].split("## 6.", 1)[0]
     assert "--generate-notes" not in release_command
-    assert "--prerelease" in release_command
-    assert "--latest=false" in release_command
+    assert "--prerelease" not in release_command
+    assert "--latest" in release_command
     assert '"$ASSET_DIR"/*' in release_command
     for internal_marker in (
         "START_HERE_RC1",
@@ -845,23 +862,22 @@ def test_public_release_stages_only_production_user_assets():
         assert internal_marker not in release_command
 
 
-def test_stable_promotion_is_exact_fail_closed_and_byte_identical():
+def test_stable_install_path_release_is_exact_and_checksum_verified():
     release_doc = (
         ROOT / "docs" / "RC1_RELEASE_EXECUTION_D1L.md"
     ).read_text(encoding="utf-8")
-    stable = release_doc.split("## 6. Publish the same bytes as stable 1.0", 1)[1]
+    publish = release_doc.split("## 5. Publish stable 1.0.1", 1)[1]
 
-    assert "Do not rebuild or restage" in stable
-    assert "v1.0.0-rc.1^{commit}" in stable
-    assert "test -z \"$(git ls-remote --tags origin refs/tags/v1.0.0)\"" in stable
-    assert "gh release create v1.0.0" in stable
-    assert '"$ASSET_DIR"/*' in stable
-    assert "--verify-tag" in stable
-    assert "--latest" in stable
-    assert "--generate-notes" not in stable
-    assert "gh release download v1.0.0" in stable
-    assert "sha256sum --check SHA256SUMS-1.0.0.txt" in stable
-    assert 'cmp --silent "$file" "$VERIFY_DIR/$(basename "$file")"' in stable
+    assert "TAG=v1.0.1" in publish
+    assert 'git tag -a "$TAG" "$SHA"' in publish
+    assert 'gh release create "$TAG"' in publish
+    assert '"$ASSET_DIR"/*' in publish
+    assert "--verify-tag" in publish
+    assert "--latest" in publish
+    assert "--generate-notes" not in publish
+    assert 'gh release download "$TAG"' in publish
+    assert 'sha256sum --check "SHA256SUMS-$VERSION.txt"' in publish
+    assert 'cmp --silent "$file" "$VERIFY_DIR/$(basename "$file")"' in publish
 
 
 def test_rc1_conditional_capability_truth_matches_production_surface():

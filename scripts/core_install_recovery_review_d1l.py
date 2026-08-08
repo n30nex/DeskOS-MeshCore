@@ -56,7 +56,7 @@ INSTALL_REVIEW_CONFIRMATIONS = (
     "raw_tty_observational_only_reviewed",
     "non_erasing_normal_flash",
     "recovery_steps_reviewed",
-    "windows_only_recovery_reviewed",
+    "cross_platform_fresh_install_reviewed",
     "full_flash_data_loss_warning",
     "no_on_device_sd_format",
     "supported_features_reviewed",
@@ -67,7 +67,10 @@ GENERATED_INSTALL_FILES = (
     "flash_project.py",
     "flash_project.ps1",
     "flash_project.sh",
+    "flash_update_bin.ps1",
+    "flash_update_bin.sh",
     "flash_full_8mb.ps1",
+    "flash_full_8mb.sh",
     "docs/CORE_INSTALL_RECOVERY.md",
 )
 REVIEWED_PACKAGE_FILES = (
@@ -77,7 +80,10 @@ REVIEWED_PACKAGE_FILES = (
     "flash_project.py",
     "flash_project.ps1",
     "flash_project.sh",
+    "flash_update_bin.ps1",
+    "flash_update_bin.sh",
     "flash_full_8mb.ps1",
+    "flash_full_8mb.sh",
     "README_RELEASE.md",
     "SUPPORTED_FEATURES.md",
     "docs/CORE_INSTALL_RECOVERY.md",
@@ -186,9 +192,9 @@ def expected_target_policy() -> dict[str, Any]:
 
 def expected_recovery_policy() -> dict[str, Any]:
     return {
-        "platform": "windows_only",
+        "platform": "windows_and_posix",
         "script": "flash_full_8mb.ps1",
-        "posix_script": None,
+        "posix_script": "flash_full_8mb.sh",
         "typed_confirmation_required": True,
         "checksum_verified": True,
         "target_identity_verified": True,
@@ -343,8 +349,10 @@ def validate_package_review_inputs(
             "serial_target_resolver": "d1l_serial_target.py",
             "windows_project_flash": "flash_project.ps1",
             "posix_project_flash": "flash_project.sh",
+            "windows_update_flash": "flash_update_bin.ps1",
+            "posix_update_flash": "flash_update_bin.sh",
             "windows_full_flash": "flash_full_8mb.ps1",
-            "posix_full_flash": None,
+            "posix_full_flash": "flash_full_8mb.sh",
         }
         and isinstance(install, dict)
         and set(install) == CORE_INSTALL_CONTRACT_KEYS
@@ -354,8 +362,8 @@ def validate_package_review_inputs(
         and install.get("normal_install_script") == "flash_project.py"
         and install.get("normal_install_scripts")
         == {
-            "windows": "flash_project.ps1",
-            "posix": "flash_project.sh",
+            "windows": "flash_update_bin.ps1",
+            "posix": "flash_update_bin.sh",
         }
         and install.get("normal_install_port") == POSIX_D1L_TARGET
         and install.get("normal_install_targets")
@@ -365,8 +373,8 @@ def validate_package_review_inputs(
         and install.get("normal_install_package_root_only") is True
         and install.get("normal_install_checksum_verified") is True
         and install.get("recovery_script") == "flash_full_8mb.ps1"
-        and install.get("recovery_platform") == "windows_only"
-        and install.get("posix_recovery_script") is None
+        and install.get("recovery_platform") == "windows_and_posix"
+        and install.get("posix_recovery_script") == "flash_full_8mb.sh"
         and install.get("recovery_requires_typed_confirmation") is True
         and install.get("recovery_checksum_verified") is True
         and install.get("recovery_target_identity_verified") is True

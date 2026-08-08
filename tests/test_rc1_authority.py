@@ -26,8 +26,8 @@ def test_release_authority_is_product_delivery_not_a_lab_gate():
     ):
         assert active in bootstrap
 
-    rows = re.findall(r"^\| (D0|R[1-6]) \|", roadmap, flags=re.MULTILINE)
-    assert rows == ["D0", "R1", "R2", "R3", "R4", "R5", "R6"]
+    rows = re.findall(r"^\| (D0|R[1-8]) \|", roadmap, flags=re.MULTILINE)
+    assert rows == ["D0", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]
     assert re.search(r"\b\d+(?:\.\d+)?%", roadmap) is None
     assert re.search(r"\b\d+(?:\.\d+)?%", checklist) is None
 
@@ -49,14 +49,13 @@ def test_release_authority_is_product_delivery_not_a_lab_gate():
         "full-flash/meshcore_deskos_d1l-full-8mb.bin",
         "deskos_sd_bridge.ino.uf2",
         "START_HERE.md",
-        "SHA256SUMS-1.0.0.txt",
+        "SHA256SUMS-$VERSION.txt",
     ):
         assert public_file in runbook or public_file in checklist
 
-    assert "D1L_PORT=\"$PORT\" \"$PACKAGE/flash_project.sh\"" in runbook
-    assert "v1.0.0-rc.1" in runbook
-    assert "v1.0.0" in runbook
-    assert "Do not rebuild or restage" in runbook
+    assert 'grep -F \'Existing DeskOS: preserving update BIN\'' in runbook
+    assert "flash_full_8mb.sh" in runbook
+    assert "TAG=v1.0.1" in runbook
 
     assert "python ./scripts/completion_ledger.py" not in workflow
     assert "python ./scripts/release_gate_audit_d1l.py" not in workflow

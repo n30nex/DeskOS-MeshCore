@@ -372,8 +372,10 @@ def verify_core_package(
             "serial_target_resolver": "d1l_serial_target.py",
             "windows_project_flash": "flash_project.ps1",
             "posix_project_flash": "flash_project.sh",
+            "windows_update_flash": "flash_update_bin.ps1",
+            "posix_update_flash": "flash_update_bin.sh",
             "windows_full_flash": "flash_full_8mb.ps1",
-            "posix_full_flash": None,
+            "posix_full_flash": "flash_full_8mb.sh",
         }
         and isinstance(install, dict)
         and set(install) == CORE_INSTALL_CONTRACT_KEYS
@@ -383,8 +385,8 @@ def verify_core_package(
         and install.get("normal_install_script") == "flash_project.py"
         and install.get("normal_install_scripts")
         == {
-            "windows": "flash_project.ps1",
-            "posix": "flash_project.sh",
+            "windows": "flash_update_bin.ps1",
+            "posix": "flash_update_bin.sh",
         }
         and install.get("normal_install_port") == D1L_CORE_POSIX_TARGET
         and install.get("normal_install_targets")
@@ -394,8 +396,8 @@ def verify_core_package(
         and install.get("normal_install_package_root_only") is True
         and install.get("normal_install_checksum_verified") is True
         and install.get("recovery_script") == "flash_full_8mb.ps1"
-        and install.get("recovery_platform") == "windows_only"
-        and install.get("posix_recovery_script") is None
+        and install.get("recovery_platform") == "windows_and_posix"
+        and install.get("posix_recovery_script") == "flash_full_8mb.sh"
         and install.get("recovery_requires_typed_confirmation") is True
         and install.get("recovery_checksum_verified") is True
         and install.get("recovery_target_identity_verified") is True

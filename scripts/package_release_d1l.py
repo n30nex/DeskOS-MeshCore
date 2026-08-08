@@ -234,7 +234,10 @@ CORE_GENERATED_INSTALL_FILES = (
     "flash_project.py",
     "flash_project.ps1",
     "flash_project.sh",
+    "flash_update_bin.ps1",
+    "flash_update_bin.sh",
     "flash_full_8mb.ps1",
+    "flash_full_8mb.sh",
     "docs/CORE_INSTALL_RECOVERY.md",
 )
 PRODUCTION_USER_INSTALL_FILES = (
@@ -243,6 +246,10 @@ PRODUCTION_USER_INSTALL_FILES = (
     "prepare_sd_card.sh",
     "flash_rp2040.ps1",
     "flash_rp2040.sh",
+    "flash_update_bin.ps1",
+    "flash_update_bin.sh",
+    "flash_full_8mb.ps1",
+    "flash_full_8mb.sh",
     "scripts/flash_rp2040_sd_bridge_uf2.py",
     "scripts/verify_package.py",
 )
@@ -1708,6 +1715,28 @@ python -m pip install esptool pyserial
 chmod +x ./*.sh
 ```
 
+## Choose one ESP32 path
+
+### Update an existing DeskOS device
+
+Use `flash_update_bin.ps1` or `flash_update_bin.sh`. It writes the existing
+`firmware/meshcore_deskos_d1l.bin` application image at the offset recorded in
+`manifest.json` while preserving settings, contacts, messages, and other
+retained regions. Do not use this app-only path on a device that has never had
+DeskOS.
+
+### Fresh clean install on a device without DeskOS
+
+Use `flash_full_8mb.ps1` or `flash_full_8mb.sh`. It writes the complete 8 MB BIN
+at `0x0`, which replaces all ESP32 flash data. This is the correct path for a
+blank device, a device running other firmware, or an intentional clean start.
+Esptool erases every sector covered by this image, so do not run a separate
+`erase-flash` command.
+
+The RP2040 uses the same production UF2 in both cases. Copying it installs the
+complete SD-bridge firmware, so separate update and clean UF2 files would be
+identical duplicates.
+
 ## 1. Prepare the microSD card
 
 The included helper does not format, erase, or overwrite a different file.
@@ -1734,7 +1763,7 @@ The included payload installs the authorized Natural Resources Canada provider
 manifest at `deskos/map/offline-provider.json`; first setup verifies both the
 prepared card and this manifest before it can finish.
 
-## 2. Flash the RP2040 SD-bridge side
+## 2. Flash the RP2040 SD-bridge side for either path
 
 Power the D1L off. Put its RP2040 into physical BOOTSEL/UF2 mode using the
 procedure for your hardware revision. Continue only after the computer mounts a
@@ -1765,33 +1794,47 @@ the normal ESP32 USB/serial port.
 
 ## 4. Flash the ESP32 main GUI side
 
-The normal project flash writes the exact Actions-built ESP-IDF images at their
-declared offsets. It does not erase the flash and preserves unrelated settings,
-contacts, messages, and other NVS state.
+Find the D1L serial port. On Windows it must be the operator-selected COM port
+with VID:PID `1A86:7523`. On Linux use the stable by-id path shown below, never
+a raw `/dev/ttyUSB` path.
 
-Windows: find the D1L COM port in Device Manager. It must be the USB device with
-VID:PID `1A86:7523`. Enter that explicit port when prompted:
+### Existing DeskOS: preserving update BIN
+
+Windows:
 
 ```powershell
 $D1LPort = Read-Host "Enter the D1L COM port"
-.\\flash_project.ps1 -Port $D1LPort
+.\\flash_update_bin.ps1 -Port $D1LPort
 ```
 
-Linux: the D1L must be selected through its stable by-id path, never a raw
-`/dev/ttyUSB` path:
+Linux:
 
 ```sh
-ls -l /dev/serial/by-id/
 export D1L_PORT="{POSIX_D1L_TARGET}"
-./flash_project.sh
+./flash_update_bin.sh
+```
+
+### No DeskOS: full clean 8 MB BIN
+
+This path removes all previous ESP32 flash data and requires typed confirmation.
+
+Windows:
+
+```powershell
+$D1LPort = Read-Host "Enter the D1L COM port"
+.\\flash_full_8mb.ps1 -Port $D1LPort
+```
+
+Linux:
+
+```sh
+export D1L_PORT="{POSIX_D1L_TARGET}"
+./flash_full_8mb.sh
 ```
 
 If Linux reports permission denied, add your account to the serial-device group
 used by your distribution (commonly `dialout`), sign out and back in, and retry.
-Do not run the flasher against a guessed port.
-
-`flash_full_8mb.ps1` is destructive recovery, not a normal install. Use it only
-when you intentionally accept loss of retained state.
+Do not run either flasher against a guessed port.
 
 ## 5. Complete first setup on the screen
 
@@ -1839,11 +1882,15 @@ post private messages, Wi-Fi passwords, or credentials.
             "prepare_sd": "prepare_sd_card.ps1",
             "flash_rp2040": "flash_rp2040.ps1",
             "flash_esp32": "flash_project.ps1",
+            "flash_esp32_update": "flash_update_bin.ps1",
+            "flash_esp32_fresh_clean": "flash_full_8mb.ps1",
         },
         "linux": {
             "prepare_sd": "prepare_sd_card.sh",
             "flash_rp2040": "flash_rp2040.sh",
             "flash_esp32": "flash_project.sh",
+            "flash_esp32_update": "flash_update_bin.sh",
+            "flash_esp32_fresh_clean": "flash_full_8mb.sh",
         },
         "shared": {
             "prepare_sd": "scripts/prepare_deskos_sd.py",
@@ -1853,6 +1900,7 @@ post private messages, Wi-Fi passwords, or credentials.
         "rp2040_artifact": {
             "directory": "rp2040/rp2040-sd-bridge-firmware",
             "uf2": bridge_relative,
+            "same_file_for_update_and_fresh": True,
         },
         "no_sd_format": True,
         "normal_esp32_flash_erases_flash": False,
@@ -2677,6 +2725,7 @@ def write_flash_scripts(
     project_args = command_flash_files(entries)
 
     if release_profile == CORE_RELEASE_PROFILE:
+        app = app_entry(entries)
         resolver = copy_core_serial_target_resolver(root, package_dir)
         py_project = package_dir / "flash_project.py"
         py_project.write_text(
@@ -2729,6 +2778,55 @@ def write_flash_scripts(
         )
         sh_project.chmod(0o755)
 
+        ps_update = package_dir / "flash_update_bin.ps1"
+        ps_update.write_text(
+            "\n".join(
+                (
+                    "param([Parameter(Mandatory=$true)][string]$Port)",
+                    '$ErrorActionPreference = "Stop"',
+                    'if ([string]::IsNullOrWhiteSpace($Port)) { throw "Pass the operator-confirmed D1L COM port with -Port." }',
+                    "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
+                    'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
+                    'Write-Host "Updating an existing DeskOS device while preserving retained data."',
+                    "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
+                    "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --validate-only",
+                    'if ($LASTEXITCODE -ne 0) { throw "D1L identity validation failed with exit code $LASTEXITCODE" }',
+                    "python -m esptool --chip esp32s3 --port $ValidatedPort --baud "
+                    f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+                    f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+                    f"{app['offset']} (Join-Path $Root '{app['path']}')",
+                    'if ($LASTEXITCODE -ne 0) { throw "DeskOS update BIN flash failed with exit code $LASTEXITCODE" }',
+                    "",
+                )
+            ),
+            encoding="ascii",
+        )
+
+        sh_update = package_dir / "flash_update_bin.sh"
+        sh_update.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env sh",
+                    "set -eu",
+                    ': "${D1L_PORT:?Set D1L_PORT to the stable D1L by-id path.}"',
+                    f'if [ "$D1L_PORT" != "{POSIX_D1L_TARGET}" ]; then',
+                    f'  printf "%s\\n" "DeskOS 1.0 POSIX flashing requires {POSIX_D1L_TARGET}." >&2',
+                    "  exit 2",
+                    "fi",
+                    'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+                    'PYTHON_BIN="${D1L_PYTHON:-python3}"',
+                    '"$PYTHON_BIN" "$ROOT/flash_project.py" --port "$D1L_PORT" --validate-only',
+                    '"$PYTHON_BIN" -m esptool --chip esp32s3 --port "$D1L_PORT" --baud '
+                    f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+                    f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+                    f'{app["offset"]} "$ROOT/{app["path"]}"',
+                    "",
+                )
+            ),
+            encoding="ascii",
+        )
+        sh_update.chmod(0o755)
+
         ps_full = package_dir / "flash_full_8mb.ps1"
         ps_full_lines = [
             "param([Parameter(Mandatory=$true)][string]$Port)",
@@ -2736,12 +2834,12 @@ def write_flash_scripts(
             'if ([string]::IsNullOrWhiteSpace($Port)) { throw "Pass the operator-confirmed D1L COM port with -Port." }',
             "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
             'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
-            'Write-Warning "DESTRUCTIVE WINDOWS RECOVERY: use only when a normal install cannot recover the device."',
+            'Write-Warning "FRESH CLEAN INSTALL: this replaces the complete ESP32 flash and all retained data."',
             "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
             *powershell_checksum_guard_lines(),
             "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --validate-only",
             'if ($LASTEXITCODE -ne 0) { throw "D1L identity validation failed with exit code $LASTEXITCODE" }',
-            'Write-Warning "WINDOWS-ONLY RECOVERY: this writes the full 8MB image at 0x0 and can overwrite persisted settings/logs."',
+            'Write-Warning "This writes the full 8MB image at 0x0 for a blank or non-DeskOS device."',
             '$Confirm = Read-Host "Type FULL-FLASH-$ValidatedPort to continue"',
             'if ($Confirm -ne "FULL-FLASH-$ValidatedPort") { throw "Full flash confirmation failed." }',
             "python -m esptool --chip esp32s3 --port $ValidatedPort --baud "
@@ -2752,13 +2850,46 @@ def write_flash_scripts(
             "",
         ]
         ps_full.write_text("\n".join(ps_full_lines), encoding="ascii")
+
+        sh_full = package_dir / "flash_full_8mb.sh"
+        sh_full.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env sh",
+                    "set -eu",
+                    ': "${D1L_PORT:?Set D1L_PORT to the stable D1L by-id path.}"',
+                    f'if [ "$D1L_PORT" != "{POSIX_D1L_TARGET}" ]; then',
+                    f'  printf "%s\\n" "DeskOS 1.0 POSIX flashing requires {POSIX_D1L_TARGET}." >&2',
+                    "  exit 2",
+                    "fi",
+                    'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+                    'PYTHON_BIN="${D1L_PYTHON:-python3}"',
+                    '"$PYTHON_BIN" "$ROOT/flash_project.py" --port "$D1L_PORT" --validate-only',
+                    'printf "%s" "Type FULL-FLASH to replace the complete ESP32 flash and all retained data: "',
+                    "IFS= read -r CONFIRM",
+                    'if [ "$CONFIRM" != "FULL-FLASH" ]; then',
+                    '  printf "%s\\n" "Full clean flash cancelled." >&2',
+                    "  exit 2",
+                    "fi",
+                    '"$PYTHON_BIN" -m esptool --chip esp32s3 --port "$D1L_PORT" --baud '
+                    f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
+                    f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
+                    f'{full_image["flash_offset"]} "$ROOT/{full_image["path"]}"',
+                    "",
+                )
+            ),
+            encoding="ascii",
+        )
+        sh_full.chmod(0o755)
         return {
             "shared_project_flash": py_project.name,
             "serial_target_resolver": resolver["path"],
             "windows_project_flash": ps_project.name,
             "posix_project_flash": sh_project.name,
+            "windows_update_flash": ps_update.name,
+            "posix_update_flash": sh_update.name,
             "windows_full_flash": ps_full.name,
-            "posix_full_flash": None,
+            "posix_full_flash": sh_full.name,
         }
 
     ps_project = package_dir / "flash_project.ps1"
@@ -2957,19 +3088,18 @@ SD history mode: `{sd_history_mode}`
    payload under `sdcard/` includes the required authorized NRCan provider
    manifest.
 
-## Normal non-erasing USB install
+## Update an existing DeskOS device
 
-The normal project flash writes the Actions-built bootloader, partition table,
-OTA selection data, and application at their declared ESP-IDF offsets. It does not issue an erase
-and preserves unrelated NVS regions. Both wrappers invoke the package-root
-`flash_project.py`, which verifies the complete checksum inventory, resolves
-the exact USB identity, and gives esptool only the stable requested target.
+The app-only update wrappers write `firmware/meshcore_deskos_d1l.bin` at its
+manifest-declared offset and preserve unrelated flash regions. They first invoke
+the package-root `flash_project.py` in validation mode to verify the complete
+checksum inventory and exact USB identity.
 
 ### Linux
 
 ```sh
 export D1L_PORT="{POSIX_D1L_TARGET}"
-./flash_project.sh
+./flash_update_bin.sh
 ```
 
 ### Windows
@@ -2977,26 +3107,35 @@ export D1L_PORT="{POSIX_D1L_TARGET}"
 ```powershell
 $PackageRoot = (Get-Location).Path
 $OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
-& (Join-Path $PackageRoot "flash_project.ps1") -Port $OperatorPort
+& (Join-Path $PackageRoot "flash_update_bin.ps1") -Port $OperatorPort
 ```
 
 This Windows helper verifies the explicitly supplied port and its exact VID:PID
 `{EXPECTED_VID:04X}:{EXPECTED_PID:04X}`. It never scans for a fallback port.
 
-## Recovery
+## Fresh clean install on a blank or non-DeskOS device
 
-Try the normal project flash first. The full 8MB recovery image is a last
-resort: it can overwrite settings, contacts, messages, and other retained
-state. Core recovery is Windows-only and manual. No POSIX
-recovery wrapper is shipped. `flash_full_8mb.ps1` verifies the complete
-checksum inventory plus the explicitly supplied port's exact USB identity
-before it asks for port-bound confirmation.
+The full 8 MB image under `full-flash/` is written at `0x0` and replaces all
+ESP32 flash data. Esptool erases the sectors covered by the image; do not run a
+separate `erase-flash` command. Both platforms verify the complete checksum
+inventory and exact USB identity before asking for destructive confirmation.
 
 ```powershell
 $PackageRoot = (Get-Location).Path
 $OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
 & (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port $OperatorPort
 ```
+
+```sh
+export D1L_PORT="{POSIX_D1L_TARGET}"
+./flash_full_8mb.sh
+```
+
+## RP2040 UF2 for either path
+
+The same production `deskos_sd_bridge.ino.uf2` installs the complete RP2040
+bridge firmware for an update or a fresh install. No duplicate clean UF2 is
+needed.
 
 DeskOS 1.0 supports USB install/recovery only; it does not support OTA
 or signed SD update.
@@ -3087,8 +3226,9 @@ SD history mode: `{sd_mode}`
 
 {sd_note}
 
-Start with `START_HERE.md` for the complete Windows or Linux install:
-prepare the FAT32 card, flash the RP2040 bridge, and flash the ESP32 GUI.
+Start with `START_HERE.md`, choose either the preserving app BIN update or the
+full clean 8 MB BIN, prepare the FAT32 card, and install the one complete
+RP2040 UF2 used by both paths.
 
 `SUPPORTED_FEATURES.md` is the authoritative package capability summary.
 
@@ -3116,17 +3256,15 @@ Windows-only recovery wrapper also performs the same inventory and USB identity
 checks before its warning. The SD and RP2040 installers call the same complete
 package verifier.
 
-## Normal USB Install
+## Update an existing DeskOS device
 
-Normal project flashing writes the exact Actions-built bootloader, partition
-table, OTA selection data, and app at their ESP-IDF offsets without erasing
-unrelated NVS regions.
-Linux installation uses the stable by-id target and requires VID:PID
-`1A86:7523`.
+The app-only wrappers write `firmware/meshcore_deskos_d1l.bin` at its declared
+offset without erasing unrelated retained regions. Linux installation uses the
+stable by-id target and requires VID:PID `1A86:7523`.
 
 ```sh
 export D1L_PORT="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
-./flash_project.sh
+./flash_update_bin.sh
 ```
 
 On POSIX, `/dev/ttyUSB<number>` is observational only and is never an
@@ -3139,7 +3277,7 @@ enumerated port has VID:PID
 ```powershell
 $PackageRoot = (Get-Location).Path
 $OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
-& (Join-Path $PackageRoot "flash_project.ps1") -Port $OperatorPort
+& (Join-Path $PackageRoot "flash_update_bin.ps1") -Port $OperatorPort
 ```
 
 ## Prepare the SD card
@@ -3172,12 +3310,14 @@ copying:
 ./flash_rp2040.sh /media/$USER/RPI-RP2
 ```
 
-## Recovery
+## Fresh clean install
 
-Read `docs/CORE_INSTALL_RECOVERY.md` before recovery. The full 8MB recovery image
-requires an explicit typed confirmation and can overwrite retained state.
-Recovery remains Windows-only; no POSIX full-flash wrapper is included.
-USB install/recovery is the only supported update path in DeskOS 1.0.
+Blank or non-DeskOS devices use the full 8 MB BIN under `full-flash/` at `0x0`.
+`flash_full_8mb.ps1` and `flash_full_8mb.sh` require typed confirmation because
+this replaces all ESP32 flash data. No separate erase command is required.
+
+The same production RP2040 UF2 installs the complete bridge firmware for an
+update or a fresh install. USB flashing is the supported DeskOS 1.0 update path.
 
 Never format an SD card on the device.
 
@@ -3608,8 +3748,10 @@ def create_release_package(
         "notice_files": notice_files,
         "scripts": scripts,
         "notes": [
-            "Project flash scripts require D1L_PORT or an explicit -Port.",
-            "Full 8MB flash script requires a typed confirmation because it can overwrite persisted state.",
+            "Update and full-clean flash scripts require D1L_PORT or an explicit -Port.",
+            "The app BIN update is only for an existing DeskOS device.",
+            "The full 8MB BIN is the fresh-install path and requires typed confirmation.",
+            "The same complete RP2040 UF2 is used for update and fresh-install paths.",
         ],
     }
     if release_profile not in PRODUCTION_RELEASE_PROFILES:
@@ -3646,8 +3788,8 @@ def create_release_package(
                     "usb_only": True,
                     "normal_install_script": "flash_project.py",
                     "normal_install_scripts": {
-                        "windows": "flash_project.ps1",
-                        "posix": "flash_project.sh",
+                        "windows": "flash_update_bin.ps1",
+                        "posix": "flash_update_bin.sh",
                     },
                     "normal_install_port": POSIX_D1L_TARGET,
                     "normal_install_targets": {
@@ -3683,8 +3825,8 @@ def create_release_package(
                     "normal_install_package_root_only": True,
                     "normal_install_checksum_verified": True,
                     "recovery_script": "flash_full_8mb.ps1",
-                    "recovery_platform": "windows_only",
-                    "posix_recovery_script": None,
+                    "recovery_platform": "windows_and_posix",
+                    "posix_recovery_script": "flash_full_8mb.sh",
                     "recovery_requires_typed_confirmation": True,
                     "recovery_checksum_verified": True,
                     "recovery_target_identity_verified": True,

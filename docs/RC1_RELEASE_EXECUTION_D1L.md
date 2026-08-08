@@ -1,11 +1,17 @@
 # DeskOS D1L 1.0 production release
 
-This procedure turns one successful `main` build into the public DeskOS 1.0
+This procedure turns one successful `main` build into the public DeskOS 1.0.1
 downloads. It does not require a controlled peer, Wi-Fi credential, admin
 password, soak run, physical receipt, or release-audit script.
 
 End users should not follow this maintainer procedure. They download the ZIP,
 extract it, and follow `START_HERE.md` inside it.
+
+The project maintainer's attached D1L is
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`; public users select their own
+device port from `START_HERE.md`.
+
+Map and storage behavior are ordinary product use, not release-lab inputs.
 
 ## 1. Select the exact main build
 
@@ -17,7 +23,6 @@ set -euo pipefail
 export ROOT=<absolute-clean-checkout>
 export SHA=<40-character-main-commit>
 export RUN=<successful-main-push-run-id>
-export PORT=/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
 export REPO=n30nex/DeskOS-MeshCore
 
 cd "$ROOT"
@@ -59,121 +64,105 @@ test -f "$PACKAGE/firmware/ota_data_initial.bin"
 test -f "$PACKAGE/firmware/meshcore_deskos_d1l.bin"
 test -f "$PACKAGE/full-flash/meshcore_deskos_d1l-full-8mb.bin"
 test -f "$PACKAGE/rp2040/rp2040-sd-bridge-firmware/deskos_sd_bridge.ino.uf2"
+test -f "$PACKAGE/flash_update_bin.ps1"
+test -f "$PACKAGE/flash_update_bin.sh"
+test -f "$PACKAGE/flash_full_8mb.ps1"
+test -f "$PACKAGE/flash_full_8mb.sh"
 test -f "$PACKAGE/START_HERE.md"
 ```
 
-## 3. Install through the end-user path
+## 3. Confirm the two public install paths
 
-Use the package itself, not an internal hardware runner:
+Do not run a release-validation firmware or controlled-peer workflow. The public
+package itself must expose both end-user paths:
 
 ```bash
-test -L "$PORT" && test -r "$PORT" && test -w "$PORT"
-D1L_PORT="$PORT" "$PACKAGE/flash_project.sh"
+grep -F 'Existing DeskOS: preserving update BIN' "$PACKAGE/START_HERE.md"
+grep -F 'No DeskOS: full clean 8 MB BIN' "$PACKAGE/START_HERE.md"
+grep -F 'same production UF2' "$PACKAGE/START_HERE.md"
 ```
 
-This is the normal non-erasing ESP32 installation documented for users. It
-writes the packaged bootloader, partition table, OTA selection data, and app
-without issuing an erase. The RP2040 UF2 is installed only through the physical
-BOOTSEL/UF2 procedure in `START_HERE.md`.
-
-After boot, use DeskOS normally: complete setup if needed, open Home, Channels,
-Contacts, Map, and Settings, and send a Public message on the available mesh.
-This is ordinary product use, not a controlled-peer acceptance procedure.
+`flash_update_bin.*` writes the app BIN at its declared offset for an existing
+DeskOS device. `flash_full_8mb.*` writes the complete image at `0x0` for a
+blank/non-DeskOS device. `flash_rp2040.*` installs the same complete bridge UF2
+for either path.
 
 ## 4. Stage the public downloads
 
-Use one asset set for both RC1 and stable so the bytes are identical:
+Stage one clearly named stable asset set:
 
 ```bash
-ASSET_DIR="$ROOT/artifacts/DeskOS-D1L-1.0.0"
-ZIP_STAGE="$ROOT/artifacts/DeskOS-D1L-1.0.0-zip"
+VERSION=1.0.1
+ASSET_DIR="$ROOT/artifacts/DeskOS-D1L-$VERSION"
+ZIP_STAGE="$ROOT/artifacts/DeskOS-D1L-$VERSION-zip"
 test ! -e "$ASSET_DIR"
 test ! -e "$ZIP_STAGE"
 mkdir -p "$ASSET_DIR"
 mkdir -p "$ZIP_STAGE"
 
-cp -a "$PACKAGE" "$ZIP_STAGE/MeshCore-DeskOS-D1L-1.0.0"
+cp -a "$PACKAGE" "$ZIP_STAGE/MeshCore-DeskOS-D1L-$VERSION"
 (
   cd "$ZIP_STAGE"
   python3 -m zipfile -c \
-    "$ASSET_DIR/MeshCore-DeskOS-D1L-1.0.0.zip" \
-    MeshCore-DeskOS-D1L-1.0.0
+    "$ASSET_DIR/MeshCore-DeskOS-D1L-$VERSION.zip" \
+    "MeshCore-DeskOS-D1L-$VERSION"
 )
 
 cp "$PACKAGE/firmware/bootloader.bin" \
-  "$ASSET_DIR/MeshCore-DeskOS-D1L-1.0.0-bootloader.bin"
+  "$ASSET_DIR/MeshCore-DeskOS-D1L-$VERSION-bootloader.bin"
 cp "$PACKAGE/firmware/partition-table.bin" \
-  "$ASSET_DIR/MeshCore-DeskOS-D1L-1.0.0-partition-table.bin"
+  "$ASSET_DIR/MeshCore-DeskOS-D1L-$VERSION-partition-table.bin"
 cp "$PACKAGE/firmware/ota_data_initial.bin" \
-  "$ASSET_DIR/MeshCore-DeskOS-D1L-1.0.0-ota-data.bin"
+  "$ASSET_DIR/MeshCore-DeskOS-D1L-$VERSION-ota-data.bin"
 cp "$PACKAGE/firmware/meshcore_deskos_d1l.bin" \
-  "$ASSET_DIR/MeshCore-DeskOS-D1L-1.0.0-app.bin"
+  "$ASSET_DIR/MeshCore-DeskOS-D1L-$VERSION-UPDATE-existing-deskos-at-0x20000.bin"
 cp "$PACKAGE/full-flash/meshcore_deskos_d1l-full-8mb.bin" \
-  "$ASSET_DIR/MeshCore-DeskOS-D1L-1.0.0-full-8mb.bin"
+  "$ASSET_DIR/MeshCore-DeskOS-D1L-$VERSION-FRESH-CLEAN-full-8mb-at-0x0.bin"
 cp "$PACKAGE/rp2040/rp2040-sd-bridge-firmware/deskos_sd_bridge.ino.uf2" \
-  "$ASSET_DIR/MeshCore-DeskOS-D1L-1.0.0-rp2040-sd-bridge.uf2"
-cp "$PACKAGE/START_HERE.md" "$ASSET_DIR/START_HERE-1.0.0.md"
+  "$ASSET_DIR/MeshCore-DeskOS-D1L-$VERSION-RP2040-UPDATE-OR-FRESH.uf2"
+cp "$PACKAGE/START_HERE.md" "$ASSET_DIR/START_HERE-$VERSION.md"
 
 (cd "$ASSET_DIR" && sha256sum \
-  MeshCore-DeskOS-D1L-1.0.0.zip \
-  MeshCore-DeskOS-D1L-1.0.0-bootloader.bin \
-  MeshCore-DeskOS-D1L-1.0.0-partition-table.bin \
-  MeshCore-DeskOS-D1L-1.0.0-ota-data.bin \
-  MeshCore-DeskOS-D1L-1.0.0-app.bin \
-  MeshCore-DeskOS-D1L-1.0.0-full-8mb.bin \
-  MeshCore-DeskOS-D1L-1.0.0-rp2040-sd-bridge.uf2 \
-  START_HERE-1.0.0.md > SHA256SUMS-1.0.0.txt)
+  "MeshCore-DeskOS-D1L-$VERSION.zip" \
+  "MeshCore-DeskOS-D1L-$VERSION-bootloader.bin" \
+  "MeshCore-DeskOS-D1L-$VERSION-partition-table.bin" \
+  "MeshCore-DeskOS-D1L-$VERSION-ota-data.bin" \
+  "MeshCore-DeskOS-D1L-$VERSION-UPDATE-existing-deskos-at-0x20000.bin" \
+  "MeshCore-DeskOS-D1L-$VERSION-FRESH-CLEAN-full-8mb-at-0x0.bin" \
+  "MeshCore-DeskOS-D1L-$VERSION-RP2040-UPDATE-OR-FRESH.uf2" \
+  "START_HERE-$VERSION.md" > "SHA256SUMS-$VERSION.txt")
 ```
 
-The ZIP is the recommended user download. The standalone app/bootloader/
-partition/OTA files are for experienced ESP-IDF/esptool users. The full 8 MB
-image is factory recovery and can overwrite retained state.
+The ZIP is the recommended user download. The standalone update BIN is only for
+an existing DeskOS device at `0x20000`. The standalone full clean BIN is for a
+blank/non-DeskOS device at `0x0` and removes all prior ESP32 data. The one
+RP2040 UF2 installs the complete bridge firmware for either path.
 
-## 5. Publish RC1
+## 5. Publish stable 1.0.1
 
 ```bash
-test -z "$(git ls-remote --tags origin refs/tags/v1.0.0-rc.1)"
-git tag -a v1.0.0-rc.1 "$SHA" -m "MeshCore DeskOS D1L 1.0.0 RC1"
-git push origin refs/tags/v1.0.0-rc.1
+TAG=v1.0.1
+test -z "$(git ls-remote --tags origin "refs/tags/$TAG")"
+git tag -a "$TAG" "$SHA" -m "MeshCore DeskOS D1L $VERSION"
+git push origin "refs/tags/$TAG"
 
-gh release create v1.0.0-rc.1 "$ASSET_DIR"/* \
+gh release create "$TAG" "$ASSET_DIR"/* \
   --repo "$REPO" \
   --verify-tag \
   --target "$SHA" \
-  --title "MeshCore DeskOS D1L 1.0.0 RC1" \
-  --prerelease \
-  --latest=false \
-  --notes "Production DeskOS 1.0 RC1 for SenseCAP Indicator D1L. Download the ZIP, extract it fully, and start with START_HERE.md."
-```
-
-## 6. Publish the same bytes as stable 1.0
-
-Do not rebuild or restage between RC1 and stable:
-
-```bash
-test "$(git rev-parse 'v1.0.0-rc.1^{commit}')" = "$SHA"
-test -z "$(git ls-remote --tags origin refs/tags/v1.0.0)"
-
-git tag -a v1.0.0 "$SHA" -m "MeshCore DeskOS D1L 1.0.0"
-git push origin refs/tags/v1.0.0
-
-gh release create v1.0.0 "$ASSET_DIR"/* \
-  --repo "$REPO" \
-  --verify-tag \
-  --target "$SHA" \
-  --title "MeshCore DeskOS D1L 1.0.0" \
+  --title "MeshCore DeskOS D1L $VERSION" \
   --latest \
-  --notes "Stable DeskOS 1.0 for SenseCAP Indicator D1L. Download the ZIP, extract it fully, and start with START_HERE.md."
+  --notes "Stable DeskOS $VERSION for SenseCAP Indicator D1L. Download the ZIP and choose UPDATE EXISTING DESKOS or FRESH CLEAN INSTALL in START_HERE-$VERSION.md. The same complete RP2040 UF2 is used for either path."
 ```
 
-## 7. Confirm the public handoff
+## 6. Confirm the public handoff
 
 Download stable into a new directory and compare it with the staged assets:
 
 ```bash
 VERIFY_DIR="$(mktemp -d)"
-gh release download v1.0.0 --repo "$REPO" --dir "$VERIFY_DIR"
-(cd "$VERIFY_DIR" && sha256sum --check SHA256SUMS-1.0.0.txt)
+gh release download "$TAG" --repo "$REPO" --dir "$VERIFY_DIR"
+(cd "$VERIFY_DIR" && sha256sum --check "SHA256SUMS-$VERSION.txt")
 
 for file in "$ASSET_DIR"/*; do
   cmp --silent "$file" "$VERIFY_DIR/$(basename "$file")"
@@ -181,5 +170,5 @@ done
 ```
 
 Then confirm the release page tells users to download the ZIP and open
-`START_HERE.md`. No private credentials or project-operated mesh peer are part
+`START_HERE-1.0.1.md`. No private credentials or project-operated mesh peer are part
 of the public handoff.
