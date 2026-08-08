@@ -29,15 +29,18 @@ sharing, broad UI architecture work, and telemetry expansion are later work.
 
 ## Install and use
 
-Download the published `v1.0.0` package from the
+Download the published `v1.0.1` package from the
 [GitHub Releases page](https://github.com/n30nex/DeskOS-MeshCore/releases), extract it
 fully, and follow its `START_HERE.md`. The repository copies of the
 [`user guide`](docs/USER_GUIDE_D1L.md) and
 [`SD preparation guide`](docs/D1L_SD_CARD_GUIDED_INSTALL.md) explain the same
 product behavior. The firmware never formats an SD card.
 
-The ZIP is the recommended download because it contains every image and helper.
-Standalone BIN and UF2 assets are also published for experienced installers.
+The ZIP is the recommended download because it presents two explicit paths:
+an app BIN update for an existing DeskOS device, and a full clean 8 MB BIN for
+a blank or non-DeskOS device. The same complete RP2040 UF2 is used with either
+path. Standalone BIN and UF2 assets are also published for experienced
+installers.
 Maintainer publication steps are in the
 [1.0 release runbook](docs/RC1_RELEASE_EXECUTION_D1L.md); end users should use
 `START_HERE.md` from the downloaded package instead.
