@@ -409,7 +409,8 @@ static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
                         &controller->clear_heard);
 
     char search_label[32];
-    snprintf(search_label, sizeof(search_label), "%s",
+    snprintf(search_label, sizeof(search_label), "%.*s",
+             (int)(sizeof(search_label) - 1U),
              controller->rendered.search_text[0] ?
                  controller->rendered.search_text : "Search contacts");
     nodes_create_button(parent, search_label, 16, 54, 278, 44, 0x93C5FD,
