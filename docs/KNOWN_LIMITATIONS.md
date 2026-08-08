@@ -1,4 +1,4 @@
-# Current DeskOS D1L RC1 limitations
+# Current DeskOS D1L 1.0 limitations
 
 These are current user-visible limits of the `core_1_0` profile.
 
@@ -14,7 +14,7 @@ These are current user-visible limits of the `core_1_0` profile.
   background prefetch. OpenStreetMap Standard is not a bulk/offline provider.
 - BLE companion transport is deferred.
 - Signed OTA, signed SD update, rollback, and on-device recovery are deferred.
-  RC1 installation and recovery are host-side USB workflows.
+  1.0 installation and recovery are host-side USB workflows.
 - QR/contact/channel sharing polish is deferred.
 - Observer/MQTT behavior is opt-in and is not enabled silently.
 - Time and age labels remain unavailable until the device has a trusted time

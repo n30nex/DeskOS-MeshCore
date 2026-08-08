@@ -98,6 +98,7 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert "sd_history" in manifest["unavailable_capabilities"]
     assert manifest["sd_history_mode"] == "disabled"
     assert manifest["storage_authority"] == "nvs"
+    assert manifest["release_status"] == "production"
     assert manifest["full_feature_release_ready"] is False
     assert "core_release_ready" not in manifest
     assert "ready_for_public_release" not in manifest
@@ -629,7 +630,7 @@ def test_core_conditional_package_is_production_only(
     assert "## 1. Prepare the microSD card" in guide
     assert "## 2. Flash the RP2040 SD-bridge side" in guide
     assert "## 4. Flash the ESP32 main GUI side" in guide
-    assert "# DeskOS D1L 1.0 RC1 Candidate - Windows and Linux Install" in guide
+    assert "# DeskOS D1L 1.0 - Windows and Linux Install" in guide
     assert "Run the read-only RC1 test" not in guide
     assert verify_checksum_tree(package) is True
 
@@ -807,27 +808,32 @@ def test_production_surface_rejects_customer_test_instructions(tmp_path):
         package_release_d1l.validate_production_package_surface(tmp_path)
 
 
-def test_public_release_stages_only_production_zip_and_outer_checksums():
+def test_public_release_stages_only_production_user_assets():
     release_doc = (
         ROOT / "docs" / "RC1_RELEASE_EXECUTION_D1L.md"
     ).read_text(encoding="utf-8")
-    assets = re.search(
-        r"RELEASE_ASSETS=\(\n(?P<body>.*?)\n\)",
-        release_doc,
-        flags=re.DOTALL,
-    )
-    assert assets is not None
-    assert re.findall(r'"\$(\w+)"', assets.group("body")) == [
-        "PACKAGE_ASSET",
-        "ASSET_SUMS",
-    ]
+    staged = release_doc.split("## 4. Stage the public downloads", 1)[1].split(
+        "## 5. Publish RC1", 1
+    )[0]
+    for asset in (
+        "MeshCore-DeskOS-D1L-1.0.0.zip",
+        "MeshCore-DeskOS-D1L-1.0.0-bootloader.bin",
+        "MeshCore-DeskOS-D1L-1.0.0-partition-table.bin",
+        "MeshCore-DeskOS-D1L-1.0.0-ota-data.bin",
+        "MeshCore-DeskOS-D1L-1.0.0-app.bin",
+        "MeshCore-DeskOS-D1L-1.0.0-full-8mb.bin",
+        "MeshCore-DeskOS-D1L-1.0.0-rp2040-sd-bridge.uf2",
+        "START_HERE-1.0.0.md",
+        "SHA256SUMS-1.0.0.txt",
+    ):
+        assert asset in staged
     release_command = release_doc.split(
         "gh release create v1.0.0-rc.1", 1
-    )[1].split("test \"$(gh release view", 1)[0]
+    )[1].split("## 6.", 1)[0]
     assert "--generate-notes" not in release_command
     assert "--prerelease" in release_command
     assert "--latest=false" in release_command
-    assert "START_HERE.md" in release_command
+    assert '"$ASSET_DIR"/*' in release_command
     for internal_marker in (
         "START_HERE_RC1",
         "read-only RC1",
@@ -843,24 +849,19 @@ def test_stable_promotion_is_exact_fail_closed_and_byte_identical():
     release_doc = (
         ROOT / "docs" / "RC1_RELEASE_EXECUTION_D1L.md"
     ).read_text(encoding="utf-8")
-    stable = release_doc.split("## 10. Stable byte-for-byte promotion", 1)[1]
+    stable = release_doc.split("## 6. Publish the same bytes as stable 1.0", 1)[1]
 
-    assert "set -euo pipefail" in stable
-    assert "jq -r .ready_for_public_release" in stable
+    assert "Do not rebuild or restage" in stable
     assert "v1.0.0-rc.1^{commit}" in stable
     assert "test -z \"$(git ls-remote --tags origin refs/tags/v1.0.0)\"" in stable
-    assert "Refusing to replace an existing v1.0.0 release" in stable
-    assert 'cmp --silent "$PACKAGE_ASSET" "$STABLE_ASSET"' in stable
     assert "gh release create v1.0.0" in stable
+    assert '"$ASSET_DIR"/*' in stable
     assert "--verify-tag" in stable
     assert "--latest" in stable
     assert "--generate-notes" not in stable
     assert "gh release download v1.0.0" in stable
-    assert 'sha256sum --check SHA256SUMS.txt' in stable
-    assert (
-        'cmp --silent "$PACKAGE_ASSET" '
-        '"$VERIFY_DIR/MeshCore-DeskOS-D1L-v1.0.0.zip"'
-    ) in stable
+    assert "sha256sum --check SHA256SUMS-1.0.0.txt" in stable
+    assert 'cmp --silent "$file" "$VERIFY_DIR/$(basename "$file")"' in stable
 
 
 def test_rc1_conditional_capability_truth_matches_production_surface():

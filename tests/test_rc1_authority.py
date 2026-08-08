@@ -9,11 +9,10 @@ def read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
-def test_rc1_documentation_authority_is_small_and_fail_closed():
+def test_release_authority_is_product_delivery_not_a_lab_gate():
     bootstrap = read("CODEX_BOOTSTRAP_PROMPT.md")
     roadmap = read("docs/ROADMAP.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
-    test_plan = read("docs/TEST_PLAN_D1L.md")
     runbook = read("docs/RC1_RELEASE_EXECUTION_D1L.md")
     docs_index = read("docs/README.md")
     workflow = read(".github/workflows/d1l-ci.yml")
@@ -22,22 +21,42 @@ def test_rc1_documentation_authority_is_small_and_fail_closed():
         "AGENTS.md",
         "docs/RC1_SCOPE.md",
         "docs/ROADMAP.md",
-        "docs/TEST_PLAN_D1L.md",
         "docs/RC1_RELEASE_EXECUTION_D1L.md",
+        "docs/RELEASE_CHECKLIST.md",
     ):
         assert active in bootstrap
-    for obsolete in (
-        "SIGUI_MASTER_COMPLETION_ROADMAP_2026-07-12.md",
-        "SIGUI_EXECUTION_BACKLOG_2026-07-12.yaml",
-        "COMPLETION_LEDGER.yaml",
-    ):
-        assert obsolete not in bootstrap
 
     rows = re.findall(r"^\| (D0|R[1-6]) \|", roadmap, flags=re.MULTILINE)
     assert rows == ["D0", "R1", "R2", "R3", "R4", "R5", "R6"]
     assert re.search(r"\b\d+(?:\.\d+)?%", roadmap) is None
     assert re.search(r"\b\d+(?:\.\d+)?%", checklist) is None
-    assert "No timed idle, endurance, traffic, listening, or soak gate" in test_plan
+
+    active_release_text = "\n".join(
+        (read("README.md"), roadmap, checklist, runbook, read("AGENTS.md"))
+    )
+    for obsolete_requirement in (
+        "PEER_STATUS",
+        "ADMIN_PASSWORD_FILE",
+        "produce_rc1_protocol_acceptance_d1l.py",
+        "produce_rc1_bounded_physical_receipt_d1l.py",
+        "rc1_release_gate_audit_d1l.py",
+        "four machine sources",
+    ):
+        assert obsolete_requirement not in active_release_text
+
+    for public_file in (
+        "firmware/meshcore_deskos_d1l.bin",
+        "full-flash/meshcore_deskos_d1l-full-8mb.bin",
+        "deskos_sd_bridge.ino.uf2",
+        "START_HERE.md",
+        "SHA256SUMS-1.0.0.txt",
+    ):
+        assert public_file in runbook or public_file in checklist
+
+    assert "D1L_PORT=\"$PORT\" \"$PACKAGE/flash_project.sh\"" in runbook
+    assert "v1.0.0-rc.1" in runbook
+    assert "v1.0.0" in runbook
+    assert "Do not rebuild or restage" in runbook
 
     assert "python ./scripts/completion_ledger.py" not in workflow
     assert "python ./scripts/release_gate_audit_d1l.py" not in workflow
@@ -48,35 +67,34 @@ def test_rc1_documentation_authority_is_small_and_fail_closed():
     ]
     assert len(simulator_commands) == 4
     assert all("--release-profile core_1_0" in line for line in simulator_commands)
-    assert "shell: bash" in workflow
-
-    for release_doc in (read("README.md"), checklist, runbook):
-        assert "rc1_release_gate_audit_d1l.py" in release_doc
 
     assert re.findall(r"^## .+$", docs_index, flags=re.MULTILINE) == [
-        "## Active RC1 authority",
-        "## User/reference documentation",
-        "## RC2/deferred work",
+        "## Active 1.0 release documents",
+        "## User documentation",
+        "## Developer-only material",
         "## Historical archive",
     ]
     before_archive, archive_section = docs_index.split("## Historical archive", 1)
     assert "archive/pre-rc1-authority-reset" not in before_archive
     assert "provenance only" in archive_section
 
-    active_docs = (
-        "AGENTS.md",
-        "CODEX_BOOTSTRAP_PROMPT.md",
-        "README.md",
-        "docs/RC1_SCOPE.md",
-        "docs/ROADMAP.md",
-        "docs/TEST_PLAN_D1L.md",
-        "docs/RC1_RELEASE_EXECUTION_D1L.md",
-        "docs/RELEASE_CHECKLIST.md",
-        "docs/KNOWN_LIMITATIONS.md",
-        "docs/RC2_BACKLOG.md",
-    )
-    assert all("archive/pre-rc1-authority-reset" not in read(path) for path in active_docs)
 
+def test_production_package_contract_excludes_qualification_material():
+    package = read("scripts/package_release_d1l.py")
+    cmake = read("main/CMakeLists.txt")
+
+    assert "set(D1L_ENABLE_QUALIFICATION_HOOKS_DEFINE 0)" in cmake
+    for marker in (
+        'b"display test"',
+        'b"ui scroll-probe"',
+        'b"storage filecanary"',
+        'b"core retained-witness"',
+    ):
+        assert marker in package
+    assert '"release_status": "production"' in package
+
+
+def test_archived_plans_remain_non_executable_history():
     archived_plans = (
         "docs/archive/pre-rc1-authority-reset/COMPLETION_LEDGER.yaml",
         "docs/archive/pre-rc1-authority-reset/COMPLETION_STATUS.md",
@@ -90,18 +108,3 @@ def test_rc1_documentation_authority_is_small_and_fail_closed():
     )
     for path in archived_plans:
         assert "HISTORICAL RECORD — DO NOT EXECUTE" in read(path)[:700]
-
-
-def test_rc1_rf_runbook_uses_one_valid_controlled_peer_mode():
-    runbook = read("docs/RC1_RELEASE_EXECUTION_D1L.md")
-    rf_command = runbook.split(
-        '"$PY" scripts/rf_full_acceptance_d1l.py', 1
-    )[1].split('PROTOCOL="$EVIDENCE_DIR/protocol-admin.json"', 1)[0]
-
-    assert '--peer-status "$PEER_STATUS"' in rf_command
-    assert '--peer-port "$PEER_DEVICE"' in rf_command
-    assert "--peer-control-socket" not in rf_command
-    assert "--peer-device" not in rf_command
-    assert "--peer-public-key" not in rf_command
-    assert "--timeout 120" in rf_command
-    assert "--wait-sec 300" in rf_command
