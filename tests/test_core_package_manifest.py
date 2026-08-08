@@ -68,7 +68,7 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     monkeypatch.setenv("GITHUB_SHA", commit)
     monkeypatch.setenv("GITHUB_RUN_ID", "123456789")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/SIGUI")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/DeskOS-MeshCore")
     monkeypatch.setenv("GITHUB_WORKFLOW", "d1l-ci")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/release/24h-core")
     install_fake_source_identity(monkeypatch, commit)
@@ -390,17 +390,17 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     provenance_path = package / manifest["provenance"]["path"]
     provenance = json.loads(provenance_path.read_text(encoding="ascii"))
     assert provenance["predicate"]["buildDefinition"]["externalParameters"] == {
-        "sourceRepository": "https://github.com/n30nex/SIGUI",
+        "sourceRepository": "https://github.com/n30nex/DeskOS-MeshCore",
         "sourceRevision": commit,
         "releaseProfile": "core_1_0",
-        "workflowRepository": "n30nex/SIGUI",
+        "workflowRepository": "n30nex/DeskOS-MeshCore",
         "workflowName": "d1l-ci",
         "workflowPath": ".github/workflows/d1l-ci.yml",
         "workflowRunId": "123456789",
         "workflowRunAttempt": "1",
     }
     assert manifest["provenance"]["release_profile"] == "core_1_0"
-    assert manifest["provenance"]["workflow_repository"] == "n30nex/SIGUI"
+    assert manifest["provenance"]["workflow_repository"] == "n30nex/DeskOS-MeshCore"
     assert manifest["provenance"]["workflow_name"] == "d1l-ci"
     assert manifest["provenance"]["workflow_path"] == (
         ".github/workflows/d1l-ci.yml"
@@ -528,7 +528,7 @@ def test_core_supported_optional_package_requires_paired_rp2040(
     monkeypatch.setenv("GITHUB_SHA", commit)
     monkeypatch.setenv("GITHUB_RUN_ID", "234567890")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/SIGUI")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/DeskOS-MeshCore")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/release/24h-core")
     install_fake_source_identity(monkeypatch, commit)
 
@@ -578,7 +578,7 @@ def test_core_conditional_package_is_production_only(
     monkeypatch.setenv("GITHUB_SHA", commit)
     monkeypatch.setenv("GITHUB_RUN_ID", "345678901")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/SIGUI")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/DeskOS-MeshCore")
     monkeypatch.setenv("GITHUB_WORKFLOW", "d1l-ci")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     install_fake_source_identity(monkeypatch, commit)
@@ -756,7 +756,7 @@ def test_core_package_links_and_conditional_storage_authority_are_consistent(
     monkeypatch.setenv("GITHUB_SHA", commit)
     monkeypatch.setenv("GITHUB_RUN_ID", "456789012")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/SIGUI")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/DeskOS-MeshCore")
     monkeypatch.setenv("GITHUB_WORKFLOW", "d1l-ci")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     install_fake_source_identity(monkeypatch, commit)

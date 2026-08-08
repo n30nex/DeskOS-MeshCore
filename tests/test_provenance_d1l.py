@@ -78,11 +78,11 @@ def write_package_inputs(root: Path, commit: str = COMMIT) -> tuple[Path, dict]:
         "workflow": {
             "sha": commit,
             "ref": "refs/tags/v1.0.0-test",
-            "repository": "n30nex/SIGUI",
+            "repository": "n30nex/DeskOS-MeshCore",
             "workflow": "d1l-ci",
             "run_id": "123456",
             "run_attempt": "1",
-            "run_url": "https://github.com/n30nex/SIGUI/actions/runs/123456",
+            "run_url": "https://github.com/n30nex/DeskOS-MeshCore/actions/runs/123456",
         },
         "flash_files": flash_files,
         "notice_files": notice_files,
@@ -120,7 +120,7 @@ def as_core_manifest(
             "run_id": run_id,
             "run_attempt": run_attempt,
             "run_url": (
-                "https://github.com/n30nex/SIGUI/actions/runs/" + run_id
+                "https://github.com/n30nex/DeskOS-MeshCore/actions/runs/" + run_id
             ),
         }
     )
@@ -329,7 +329,7 @@ def test_core_statement_binds_exact_canonical_actions_invocation(tmp_path):
         "sourceRepository": sbom_d1l.PROJECT_REPOSITORY,
         "sourceRevision": COMMIT,
         "releaseProfile": "core_1_0",
-        "workflowRepository": "n30nex/SIGUI",
+        "workflowRepository": "n30nex/DeskOS-MeshCore",
         "workflowName": "d1l-ci",
         "workflowPath": ".github/workflows/d1l-ci.yml",
         "workflowRunId": "123456",
@@ -350,7 +350,7 @@ def test_core_statement_binds_exact_canonical_actions_invocation(tmp_path):
         expected_source_sha=COMMIT,
     )
     assert metadata["release_profile"] == "core_1_0"
-    assert metadata["workflow_repository"] == "n30nex/SIGUI"
+    assert metadata["workflow_repository"] == "n30nex/DeskOS-MeshCore"
     assert metadata["workflow_name"] == "d1l-ci"
     assert metadata["workflow_path"] == ".github/workflows/d1l-ci.yml"
     assert metadata["workflow_run_id"] == "123456"
@@ -438,7 +438,7 @@ def test_core_generator_rejects_incomplete_or_noncanonical_actions_identity(
     if field == "run_id":
         manifest["actions_run"] = value
         manifest["workflow"]["run_url"] = (
-            f"https://github.com/n30nex/SIGUI/actions/runs/{value}"
+            f"https://github.com/n30nex/DeskOS-MeshCore/actions/runs/{value}"
         )
     elif field == "run_attempt":
         manifest["actions_run_attempt"] = value

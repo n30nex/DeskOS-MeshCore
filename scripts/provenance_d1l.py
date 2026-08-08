@@ -82,7 +82,7 @@ LOCAL_BUILDER = (
 )
 WORKFLOW_PATH = ".github/workflows/d1l-ci.yml"
 WORKFLOW_NAME = "d1l-ci"
-CANONICAL_REPOSITORY = "n30nex/SIGUI"
+CANONICAL_REPOSITORY = "n30nex/DeskOS-MeshCore"
 DEFAULT_RELEASE_PROFILE = "d1l"
 CORE_RELEASE_PROFILE = "core_1_0"
 PROFILE = "SIGUI deterministic unsigned D1L provenance profile v1"

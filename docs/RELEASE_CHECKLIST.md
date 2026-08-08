@@ -4,6 +4,10 @@ This checklist is about the public product files. Internal developer checks,
 controlled peers, admin credentials, soak runs, and evidence receipts are not
 release deliverables.
 
+The package is the production `core_1_0` profile. Its `conditional` storage
+contract keeps SD primary and operates live-only without silent default-NVS
+fallback when prepared bridge/card storage is unavailable.
+
 - [ ] `manifest.json` identifies firmware version `1.0.0`, profile `core_1_0`,
   and the exact source commit.
 - [ ] The package contains `firmware/bootloader.bin`,

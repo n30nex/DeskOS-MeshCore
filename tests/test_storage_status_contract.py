@@ -979,12 +979,9 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "COM11" not in retained_runner
     assert "COM29" not in retained_runner
     normalized_plan = " ".join(active_plan.split())
-    assert "Run the four RC1 sources once" in normalized_plan
-    assert "one non-erasing flash source" in normalized_plan
-    assert "one RF source" in normalized_plan
-    assert "one protocol source" in normalized_plan
-    assert "one Map source" in normalized_plan
-    assert "No timed idle, endurance, traffic, listening, or soak gate" in normalized_plan
+    assert "development and CI only" in normalized_plan
+    assert "not a public release requirement" in normalized_plan
+    assert "No controlled peer" in normalized_plan
     assert "does not send RF" in install_guide
     assert "does not silently redirect persistent histories to" in install_guide
     assert "NVS" in install_guide
@@ -1106,7 +1103,7 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in store_header
     assert 'D1L_MAP_TILE_SOURCE_ID "openstreetmap-standard"' in store_header
     assert 'D1L_MAP_TILE_SOURCE_URL_TEMPLATE "https://tile.openstreetmap.org/{z}/{x}/{y}.png"' in store_header
-    assert 'D1L_MAP_TILE_USER_AGENT "MeshCore-DeskOS-D1L/1.0 (+https://github.com/n30nex/SIGUI)"' in store_header
+    assert 'D1L_MAP_TILE_USER_AGENT "MeshCore-DeskOS-D1L/1.0 (+https://github.com/n30nex/DeskOS-MeshCore)"' in store_header
     assert 'D1L_MAP_TILE_ATTRIBUTION "\\xC2\\xA9 OpenStreetMap contributors"' in store_header
     assert "D1L_MAP_TILE_MIN_CACHE_DAYS 7U" in store_header
     assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES (196U * 1024U)" in store_header
@@ -1178,7 +1175,7 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "MAP_TILE_CANARY_START_ID" in protocol
     assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run" not in workflow
     assert "python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run" not in workflow
-    assert "one Map source" in " ".join(docs.split())
+    assert "not a public release requirement" in " ".join(docs.split())
     assert "esp_http_client" in cmake
 
 
@@ -1225,6 +1222,6 @@ def test_docs_define_sd_primary_storage_and_live_only_degraded_mode():
         assert "live-only" in doc
         assert "default NVS" in doc.replace("-", " ")
 
-    assert "`package_sd_primary_truth_and_preparation`" in checklist
-    assert "without silent default-NVS fallback" in checklist
-    assert "No soak is required" in checklist
+    assert "without silent default-NVS fallback" in " ".join(checklist.split())
+    assert "soak runs" in checklist
+    assert "not release deliverables" in " ".join(checklist.split())

@@ -1,4 +1,4 @@
-# DeskOS 1.0 RC1 roadmap
+# DeskOS 1.0 production release roadmap
 
 Execute the highest unblocked row. Issue #71 is the GitHub controller.
 

@@ -151,7 +151,7 @@ def test_map_docs_define_the_bounded_interactive_policy_and_probe_safety():
     assert "at most 60%" in guide
     assert "at least 8 GiB" in guide
     assert "(c) OpenStreetMap contributors" in guide
-    assert "one Map source" in " ".join(test_plan.split())
-    assert "Authorized fresh tile download plus cache revisit from SD" in roadmap
+    assert "not a public release requirement" in " ".join(test_plan.split())
+    assert "configured Map as normal product use" in roadmap
     assert "example manifest intentionally uses a non-routable placeholder" in attributions
     assert "must not be pointed at OpenStreetMap Standard" in attributions

@@ -321,8 +321,8 @@ def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     assert "contact_trace_supported=false" not in test_plan
     assert "real_trace_contact_supported=false" not in test_plan
     assert "user trace" in scope
-    assert "PATH, Ping" in roadmap
-    assert "one protocol source" in " ".join(test_plan.split())
+    assert "PATH, Ping" in scope
+    assert "No controlled peer" in test_plan
 
 
 def test_trace_helper_and_service_are_exact_production_binding_sources() -> None:

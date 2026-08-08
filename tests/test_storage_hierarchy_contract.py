@@ -342,7 +342,7 @@ def test_release_docs_define_current_storage_and_map_acceptance():
 
     assert "SD as the primary store" in guide
     assert "Degraded mode keeps basic live RF" in guide
-    assert "`package_sd_primary_truth_and_preparation`" in checklist
-    assert "`authorized_map_download_and_cache_revisit`" in checklist
-    assert "four RC1 sources once" in test_plan
-    assert "No soak is required" in checklist
+    assert "without silent default-NVS fallback" in " ".join(checklist.split())
+    assert "RP2040 UF2" in " ".join(checklist.split())
+    assert "not a public release requirement" in " ".join(test_plan.split())
+    assert "ordinary product use" in runbook

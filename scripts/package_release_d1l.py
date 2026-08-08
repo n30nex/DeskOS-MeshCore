@@ -45,7 +45,7 @@ if __package__:
         canonicalize_release_report as canonicalize_signed_advert_report,
         validate_completed_report as validate_signed_advert_report,
     )
-    from .provenance_d1l import write_package_provenance
+    from .provenance_d1l import CANONICAL_REPOSITORY, write_package_provenance
     from .sbom_d1l import (
         discover_source_identity,
         exact_sha,
@@ -63,7 +63,10 @@ else:
         canonicalize_release_report as canonicalize_signed_advert_report,
         validate_completed_report as validate_signed_advert_report,
     )
-    from provenance_d1l import write_package_provenance  # type: ignore[no-redef]
+    from provenance_d1l import (  # type: ignore[no-redef]
+        CANONICAL_REPOSITORY,
+        write_package_provenance,
+    )
     from sbom_d1l import (  # type: ignore[no-redef]
         discover_source_identity,
         exact_sha,
@@ -3292,7 +3295,7 @@ and otherwise retains ESP-IDF rollback behavior. Never format the SD card.
 ## Checksums and reporting
 
 Verify `SHA256SUMS.txt` before flashing. Report defects at
-https://github.com/n30nex/SIGUI/issues/new with firmware commit
+https://github.com/n30nex/DeskOS-MeshCore/issues/new with firmware commit
 `{manifest['firmware_commit']}`, Actions run `{manifest['actions_run']}`,
 attempt `{manifest['actions_run_attempt']}`, and the relevant device receipt.
 
@@ -3448,9 +3451,10 @@ def create_release_package(
                 f"{profile_label} package requires the exact positive GitHub Actions "
                 "run attempt"
             )
-        if workflow.get("repository") != "n30nex/SIGUI":
+        if workflow.get("repository") != CANONICAL_REPOSITORY:
             raise ValueError(
-                f"{profile_label} package requires the canonical n30nex/SIGUI "
+                f"{profile_label} package requires the canonical "
+                f"{CANONICAL_REPOSITORY} "
                 "Actions repository"
             )
     meshcore_conformance = copy_meshcore_conformance_evidence(
