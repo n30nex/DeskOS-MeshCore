@@ -1,13 +1,18 @@
 # SIGUI documentation
 
-## Active 1.0 release documents
+## Current release truth
 
 - [`AGENTS.md`](../AGENTS.md) — repository operating rules.
-- [`RC1_SCOPE.md`](RC1_SCOPE.md) — compiled `core_1_0` product contract.
-- [`ROADMAP.md`](ROADMAP.md) — the seven-row release queue.
-- [`RC1_RELEASE_EXECUTION_D1L.md`](RC1_RELEASE_EXECUTION_D1L.md) — maintainer
-  artifact and publication procedure.
-- [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — public product deliverables.
+- [`RC2_SCOPE.md`](RC2_SCOPE.md) — current corrective `core_1_0` product contract.
+- [`RC1_SCOPE.md`](RC1_SCOPE.md) — historical 1.0/RC1 product contract.
+- [`ROADMAP.md`](ROADMAP.md) — shipped 1.0/RC1, corrective 1.2/RC2 and deferred
+  1.5/RC3 in one release queue.
+- [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md) —
+  completed Android/iOS parity ledger for 1.2/RC2.
+- [`RC1_RELEASE_EXECUTION_D1L.md`](RC1_RELEASE_EXECUTION_D1L.md) — historical
+  1.0 maintainer publication record.
+- [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — completed 1.0/RC1 and
+  1.2/RC2 publication records.
 
 ## User documentation
 
@@ -19,12 +24,15 @@
 - [`ADMIN_REMOTE_CLI_ALLOWLIST.md`](ADMIN_REMOTE_CLI_ALLOWLIST.md) — supported
   admin commands.
 - [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md) — third-party attribution.
+- [`screenshots/DEVICE_1_2_CAPTURE.md`](screenshots/DEVICE_1_2_CAPTURE.md) —
+  attached-device 1.2 screenshot provenance and framebuffer CRCs.
 
 ## Developer-only material
 
 - [`TEST_PLAN_D1L.md`](TEST_PLAN_D1L.md) describes internal development and CI
   checks. It is not part of the public package or publication checklist.
-- [`RC2_BACKLOG.md`](RC2_BACKLOG.md) contains later work and cannot expand 1.0.
+- [`RC3_BACKLOG.md`](RC3_BACKLOG.md) contains 1.5/RC3 features and debt. It
+  cannot expand the corrective 1.2/RC2 release.
 
 ## Historical archive
 

@@ -15,7 +15,7 @@ def test_public_release_metadata_has_no_bringup_or_stub_markers():
     mesh_source = read("main/mesh/meshcore_service.c")
     package_script = read("scripts/package_release_d1l.py")
 
-    assert '#define D1L_FIRMWARE_VERSION "1.0.1"' in config
+    assert '#define D1L_FIRMWARE_VERSION "1.2.0"' in config
     assert "D1L_PHASE1_BRINGUP" not in cmake
     assert "phase1_stub" not in mesh_source
     assert "phase2_stub" not in console

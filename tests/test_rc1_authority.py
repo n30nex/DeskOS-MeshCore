@@ -26,8 +26,8 @@ def test_release_authority_is_product_delivery_not_a_lab_gate():
     ):
         assert active in bootstrap
 
-    rows = re.findall(r"^\| (D0|R[1-8]) \|", roadmap, flags=re.MULTILINE)
-    assert rows == ["D0", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]
+    rows = re.findall(r"^\| (R[1-4]) \|", roadmap, flags=re.MULTILINE)
+    assert rows == ["R1", "R2", "R3", "R4"]
     assert re.search(r"\b\d+(?:\.\d+)?%", roadmap) is None
     assert re.search(r"\b\d+(?:\.\d+)?%", checklist) is None
 
@@ -68,7 +68,7 @@ def test_release_authority_is_product_delivery_not_a_lab_gate():
     assert all("--release-profile core_1_0" in line for line in simulator_commands)
 
     assert re.findall(r"^## .+$", docs_index, flags=re.MULTILINE) == [
-        "## Active 1.0 release documents",
+        "## Current release truth",
         "## User documentation",
         "## Developer-only material",
         "## Historical archive",

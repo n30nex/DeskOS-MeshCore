@@ -1,8 +1,10 @@
 #include "ui_phase1.h"
 
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
@@ -68,7 +70,7 @@ static lv_disp_drv_t s_disp_drv;
 static lv_color_t *s_buf1;
 static lv_color_t *s_buf2;
 static esp_timer_handle_t s_lv_tick_timer;
-#if D1L_ENABLE_QUALIFICATION_HOOKS
+#if D1L_ENABLE_UI_CAPTURE
 static uint8_t *s_capture_shadow;
 static uint8_t *s_capture_snapshot;
 static SemaphoreHandle_t s_capture_lock;
@@ -126,6 +128,9 @@ static lv_obj_t *s_packet_detail_sheet;
 static lv_obj_t *s_packet_search_sheet;
 static lv_obj_t *s_packet_search_textarea;
 static lv_obj_t *s_packet_search_keyboard;
+static lv_obj_t *s_nodes_search_sheet;
+static lv_obj_t *s_nodes_search_textarea;
+static lv_obj_t *s_nodes_search_keyboard;
 static lv_obj_t *s_mesh_roles_sheet;
 static lv_obj_t *s_lock_overlay;
 #if D1L_ENABLE_QUALIFICATION_HOOKS
@@ -236,6 +241,8 @@ static uint32_t s_finder_last_render_second;
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]
     EXT_RAM_BSS_ATTR;
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
+static char s_nodes_search_text[D1L_NODE_PUBLIC_KEY_HEX_LEN];
+static d1l_node_sort_t s_nodes_sort = D1L_NODE_SORT_LAST_HEARD;
 static uint64_t s_public_history_channel_id;
 static char s_public_history_channel_name[D1L_CHANNEL_NAME_LEN];
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
@@ -1016,7 +1023,7 @@ static void lv_tick_task(void *arg)
     lv_tick_inc(5);
 }
 
-#if D1L_ENABLE_QUALIFICATION_HOOKS
+#if D1L_ENABLE_UI_CAPTURE
 static uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len)
 {
     crc = ~crc;
@@ -1164,7 +1171,7 @@ static void lcd_direct_mode_copy_cb(void)
             to += bytes_per_line;
         }
 
-#if D1L_ENABLE_QUALIFICATION_HOOKS
+#if D1L_ENABLE_UI_CAPTURE
         copy_rect_to_capture_shadow(0, y_start, D1L_UI_CAPTURE_WIDTH, y_end,
                                     fb_to, 0, 0, h_res);
 #endif
@@ -1178,7 +1185,7 @@ static void lcd_direct_mode_copy_cb(void)
 static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
     esp_err_t ret = bsp_lcd_flush(area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_map);
-#if !CONFIG_LCD_LVGL_DIRECT_MODE && D1L_ENABLE_QUALIFICATION_HOOKS
+#if !CONFIG_LCD_LVGL_DIRECT_MODE && D1L_ENABLE_UI_CAPTURE
     copy_rect_to_capture_shadow(area->x1, area->y1, area->x2 + 1, area->y2 + 1,
                                 (const uint8_t *)color_map, area->x1, area->y1,
                                 area->x2 - area->x1 + 1);
@@ -1826,6 +1833,12 @@ static void hide_packet_detail_sheet(void)
 static void hide_packet_search_sheet(void)
 {
     d1l_ui_modal_hide(s_packet_search_sheet);
+    restore_dock_for_active_tab();
+}
+
+static void hide_nodes_search_sheet(void)
+{
+    d1l_ui_modal_hide(s_nodes_search_sheet);
     restore_dock_for_active_tab();
 }
 
@@ -2804,6 +2817,7 @@ static void present_dm_compose_sheet(const d1l_contact_entry_t *selected,
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
+    hide_nodes_search_sheet();
     hide_mesh_roles_sheet();
 #if D1L_ENABLE_QUALIFICATION_HOOKS
     s_compose_probe_send_suppressed = probe_only;
@@ -2951,6 +2965,7 @@ static bool show_contact_edit_sheet(void)
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
+    hide_nodes_search_sheet();
     hide_mesh_roles_sheet();
     d1l_ui_contact_sheets_hide_all(&s_contact_sheets_controller, false);
     if (!d1l_ui_contact_sheets_render_edit(
@@ -3615,6 +3630,7 @@ static void show_contact_detail_for(const d1l_contact_entry_t *entry)
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
+    hide_nodes_search_sheet();
     hide_mesh_roles_sheet();
     hide_contact_export_sheet();
     hide_contact_edit_sheet();
@@ -3715,6 +3731,7 @@ static void show_node_detail_view(const d1l_node_view_t *view, bool return_to_ma
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
+    hide_nodes_search_sheet();
     hide_mesh_roles_sheet();
     const d1l_ui_dm_identity_eligibility_t eligibility =
         dm_identity_for_node(view, NULL);
@@ -5723,7 +5740,7 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
                 s_public_search_text[0] = '\0';
                 d1l_ui_messages_hide_channel_selector(
                     &s_messages_controller);
-                request_content_refresh();
+                set_messages_mode(D1L_UI_MESSAGES_MODE_PUBLIC);
             }
         }
         break;
@@ -5751,6 +5768,91 @@ static void render_messages(lv_obj_t *content, const d1l_app_snapshot_t *snapsho
                            handle_messages_action, NULL);
 }
 
+static bool nodes_contains_casefold(const char *haystack, const char *needle)
+{
+    if (!needle || needle[0] == '\0') {
+        return true;
+    }
+    if (!haystack) {
+        return false;
+    }
+    for (const char *start = haystack; *start; ++start) {
+        const char *left = start;
+        const char *right = needle;
+        while (*left && *right &&
+               tolower((unsigned char)*left) ==
+                   tolower((unsigned char)*right)) {
+            left++;
+            right++;
+        }
+        if (*right == '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int nodes_ascii_casecmp(const char *left, const char *right)
+{
+    left = left ? left : "";
+    right = right ? right : "";
+    while (*left && *right) {
+        const int folded_left = tolower((unsigned char)*left);
+        const int folded_right = tolower((unsigned char)*right);
+        if (folded_left != folded_right) {
+            return folded_left < folded_right ? -1 : 1;
+        }
+        left++;
+        right++;
+    }
+    return *left == *right ? 0 : (*left ? 1 : -1);
+}
+
+static const char *nodes_contact_name(const d1l_contact_entry_t *entry)
+{
+    if (!entry) {
+        return "";
+    }
+    return entry->alias[0] ? entry->alias : entry->heard_name;
+}
+
+static bool nodes_contact_matches_search(const d1l_contact_entry_t *entry)
+{
+    return entry &&
+        (nodes_contains_casefold(nodes_contact_name(entry), s_nodes_search_text) ||
+         nodes_contains_casefold(entry->type, s_nodes_search_text) ||
+         nodes_contains_casefold(entry->fingerprint, s_nodes_search_text) ||
+         nodes_contains_casefold(entry->public_key_hex, s_nodes_search_text));
+}
+
+static int nodes_contact_compare(const void *left_ptr, const void *right_ptr)
+{
+    const d1l_contact_entry_t *left = left_ptr;
+    const d1l_contact_entry_t *right = right_ptr;
+    if (s_nodes_sort == D1L_NODE_SORT_SIGNAL &&
+        left->last_rssi_dbm != right->last_rssi_dbm) {
+        return left->last_rssi_dbm > right->last_rssi_dbm ? -1 : 1;
+    }
+    if (s_nodes_sort == D1L_NODE_SORT_ROLE) {
+        const int role_order = nodes_ascii_casecmp(left->type, right->type);
+        if (role_order != 0) {
+            return role_order;
+        }
+    }
+    if (s_nodes_sort == D1L_NODE_SORT_NAME ||
+        s_nodes_sort == D1L_NODE_SORT_ROLE) {
+        const int name_order = nodes_ascii_casecmp(
+            nodes_contact_name(left), nodes_contact_name(right));
+        if (name_order != 0) {
+            return name_order;
+        }
+    }
+    if (left->last_heard_ms != right->last_heard_ms) {
+        return left->last_heard_ms > right->last_heard_ms ? -1 : 1;
+    }
+    return nodes_ascii_casecmp(left->fingerprint, right->fingerprint);
+}
+
 static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
                                            d1l_ui_nodes_view_model_t *view_model)
 {
@@ -5759,21 +5861,30 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
     }
     memset(view_model, 0, sizeof(*view_model));
     view_model->contact_count = snapshot->contact_count;
+    view_model->sort = s_nodes_sort;
+    snprintf(view_model->search_text, sizeof(view_model->search_text), "%s",
+             s_nodes_search_text);
 
-    view_model->contact_row_count = snapshot->recent_contact_count;
-    if (view_model->contact_row_count > D1L_APP_SNAPSHOT_CONTACT_PREVIEW) {
-        view_model->contact_row_count = D1L_APP_SNAPSHOT_CONTACT_PREVIEW;
+    const size_t source_contact_count =
+        snapshot->recent_contact_count > D1L_CONTACT_STORE_CAPACITY ?
+            D1L_CONTACT_STORE_CAPACITY : snapshot->recent_contact_count;
+    for (size_t i = 0; i < source_contact_count; ++i) {
+        if (!nodes_contact_matches_search(&snapshot->recent_contacts[i])) {
+            continue;
+        }
+        view_model->contact_rows[view_model->contact_row_count++] =
+            snapshot->recent_contacts[i];
     }
-    memcpy(view_model->contact_rows, snapshot->recent_contacts,
-           view_model->contact_row_count * sizeof(view_model->contact_rows[0]));
+    qsort(view_model->contact_rows, view_model->contact_row_count,
+          sizeof(view_model->contact_rows[0]), nodes_contact_compare);
     for (size_t i = 0; i < view_model->contact_row_count; ++i) {
         view_model->contact_can_dm[i] = contact_can_dm(&view_model->contact_rows[i]);
     }
 
     const d1l_node_query_t node_query = {
         .filter = D1L_NODE_FILTER_ALL,
-        .sort = D1L_NODE_SORT_LAST_HEARD,
-        .text = NULL,
+        .sort = s_nodes_sort,
+        .text = s_nodes_search_text[0] ? s_nodes_search_text : NULL,
         .keyed_only = false,
         .reachable_only = false,
     };
@@ -5969,6 +6080,121 @@ static void render_finder_sheet(void)
     lv_obj_scroll_to_y(s_finder_sheet, previous_scroll_y, LV_ANIM_OFF);
 }
 
+static void close_nodes_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_nodes_search_sheet();
+}
+
+static void apply_nodes_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_nodes_search_text[0] = '\0';
+    if (s_nodes_search_textarea) {
+        const char *text = lv_textarea_get_text(s_nodes_search_textarea);
+        if (text) {
+            snprintf(s_nodes_search_text, sizeof(s_nodes_search_text), "%s", text);
+        }
+    }
+    hide_nodes_search_sheet();
+    request_content_refresh();
+}
+
+static void clear_nodes_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_nodes_search_text[0] = '\0';
+    if (s_nodes_search_textarea) {
+        lv_textarea_set_text(s_nodes_search_textarea, "");
+    }
+    hide_nodes_search_sheet();
+    request_content_refresh();
+}
+
+static void nodes_search_keyboard_event_cb(lv_event_t *event)
+{
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY) {
+        apply_nodes_search_event_cb(event);
+    } else if (code == LV_EVENT_CANCEL) {
+        hide_nodes_search_sheet();
+    }
+}
+
+static void open_nodes_search_sheet(void)
+{
+    if (!s_nodes_search_sheet) {
+        return;
+    }
+    if (s_nodes_search_textarea && s_nodes_search_keyboard) {
+        lv_textarea_set_text(s_nodes_search_textarea, s_nodes_search_text);
+        lv_keyboard_set_textarea(s_nodes_search_keyboard, s_nodes_search_textarea);
+    }
+    show_modal(s_nodes_search_sheet);
+}
+
+static void cycle_nodes_sort(void)
+{
+    switch (s_nodes_sort) {
+    case D1L_NODE_SORT_LAST_HEARD:
+        s_nodes_sort = D1L_NODE_SORT_NAME;
+        break;
+    case D1L_NODE_SORT_NAME:
+        s_nodes_sort = D1L_NODE_SORT_ROLE;
+        break;
+    case D1L_NODE_SORT_ROLE:
+        s_nodes_sort = D1L_NODE_SORT_SIGNAL;
+        break;
+    case D1L_NODE_SORT_SIGNAL:
+    default:
+        s_nodes_sort = D1L_NODE_SORT_LAST_HEARD;
+        break;
+    }
+    request_content_refresh();
+}
+
+static bool open_managed_contact(const d1l_contact_entry_t *contact)
+{
+    if (!d1l_contact_store_can_admin(contact)) {
+        return false;
+    }
+    const d1l_node_query_t query = {
+        .filter = D1L_NODE_FILTER_ALL,
+        .sort = D1L_NODE_SORT_LAST_HEARD,
+        .text = contact->fingerprint,
+    };
+    d1l_node_view_t node = {0};
+    if (d1l_app_model_query_nodes(&query, &node, 1U) == 1U &&
+        strcmp(node.node.fingerprint, contact->fingerprint) == 0) {
+        show_node_detail_view(&node, false);
+        return true;
+    }
+
+    node.node.seq = contact->seq;
+    node.node.last_heard_ms = contact->last_heard_ms;
+    node.node.heard_count = contact->last_heard_ms ? 1U : 0U;
+    node.node.rssi_dbm = contact->last_rssi_dbm;
+    node.node.snr_tenths = contact->last_snr_tenths;
+    node.node.path_hash_bytes = contact->path_hash_bytes;
+    node.node.path_hops = contact->path_hops;
+    snprintf(node.node.fingerprint, sizeof(node.node.fingerprint), "%s",
+             contact->fingerprint);
+    snprintf(node.node.public_key_hex, sizeof(node.node.public_key_hex), "%s",
+             contact->public_key_hex);
+    snprintf(node.node.name, sizeof(node.node.name), "%s",
+             contact->heard_name);
+    snprintf(node.node.type, sizeof(node.node.type), "%s", contact->type);
+    snprintf(node.display_name, sizeof(node.display_name), "%.*s",
+             (int)(sizeof(node.display_name) - 1U), nodes_contact_name(contact));
+    snprintf(node.role, sizeof(node.role), "%s", contact->type);
+    node.favorite = contact->favorite;
+    node.muted = contact->muted;
+    node.keyed = d1l_contact_store_has_export_key(contact);
+    node.reachable = contact->last_heard_ms != 0U;
+    show_node_detail_view(&node, false);
+    return true;
+}
+
 static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
                                 void *context)
 {
@@ -5978,7 +6204,9 @@ static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
     }
     switch (event->action) {
     case D1L_UI_NODES_ACTION_OPEN_CONTACT:
-        show_contact_detail_for(event->contact);
+        if (!open_managed_contact(event->contact)) {
+            show_contact_detail_for(event->contact);
+        }
         break;
     case D1L_UI_NODES_ACTION_OPEN_CONTACT_DM:
         open_dm_compose_for_contact(event->contact);
@@ -5988,6 +6216,12 @@ static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
         break;
     case D1L_UI_NODES_ACTION_OPEN_NODE_DM:
         open_node_dm_for(event->node);
+        break;
+    case D1L_UI_NODES_ACTION_OPEN_SEARCH:
+        open_nodes_search_sheet();
+        break;
+    case D1L_UI_NODES_ACTION_CYCLE_SORT:
+        cycle_nodes_sort();
         break;
     case D1L_UI_NODES_ACTION_FIND_NEARBY: {
         const esp_err_t ret = d1l_app_model_discover_nearby();
@@ -8218,7 +8452,7 @@ bool d1l_ui_phase1_tab_switch_pending(void)
     return d1l_ui_navigation_switch_pending();
 }
 
-#if D1L_ENABLE_QUALIFICATION_HOOKS
+#if D1L_ENABLE_UI_CAPTURE
 static void fill_capture_status(d1l_ui_capture_status_t *status)
 {
     if (!status) {
@@ -8233,8 +8467,11 @@ static void fill_capture_status(d1l_ui_capture_status_t *status)
     status->lock_visible = s_lock_visible;
     status->tab_pending = d1l_ui_phase1_tab_switch_pending();
     status->content_pending = content_refresh_pending();
-    status->render_pending = status->tab_pending || status->content_pending ||
+    status->render_pending = status->tab_pending || status->content_pending;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+    status->render_pending = status->render_pending ||
         scroll_probe_pending() || compose_probe_pending();
+#endif
     status->width = D1L_UI_CAPTURE_WIDTH;
     status->height = D1L_UI_CAPTURE_HEIGHT;
     status->bytes_per_pixel = D1L_UI_CAPTURE_BYTES_PER_PIXEL;
@@ -8404,6 +8641,7 @@ static void process_pending_tab_switch(void)
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
+    hide_nodes_search_sheet();
     hide_mesh_roles_sheet();
     render_active_tab();
     force_ui_layout_repaint();
@@ -9879,6 +10117,71 @@ static void create_packet_search_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_packet_search_sheet);
 }
 
+static void create_nodes_search_sheet(lv_obj_t *screen)
+{
+    s_nodes_search_sheet = create_object(screen, "contacts search sheet");
+    if (!s_nodes_search_sheet) {
+        return;
+    }
+    lv_obj_set_size(s_nodes_search_sheet, 448, 320);
+    lv_obj_set_pos(s_nodes_search_sheet, 16, 82);
+    lv_obj_set_style_radius(s_nodes_search_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_nodes_search_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_nodes_search_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_nodes_search_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_nodes_search_sheet, 12, 0);
+    lv_obj_clear_flag(s_nodes_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = create_label(
+        s_nodes_search_sheet, "Contact Search", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+    create_button(s_nodes_search_sheet, "Apply", 212, 0, 66, 40,
+                  apply_nodes_search_event_cb, NULL);
+    create_button(s_nodes_search_sheet, "Clear", 286, 0, 64, 40,
+                  clear_nodes_search_event_cb, NULL);
+    create_button(s_nodes_search_sheet, "Close", 358, 0, 66, 40,
+                  close_nodes_search_event_cb, NULL);
+
+    s_nodes_search_textarea = create_textarea(
+        s_nodes_search_sheet, "contacts search textarea");
+    if (!s_nodes_search_textarea) {
+        d1l_ui_modal_hide(s_nodes_search_sheet);
+        return;
+    }
+    lv_obj_set_size(s_nodes_search_textarea, 424, 48);
+    lv_obj_set_pos(s_nodes_search_textarea, 0, 54);
+    lv_textarea_set_one_line(s_nodes_search_textarea, true);
+    lv_textarea_set_max_length(
+        s_nodes_search_textarea, D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U);
+    lv_textarea_set_placeholder_text(
+        s_nodes_search_textarea, "Name, role, fingerprint, or public key");
+    lv_obj_set_style_radius(s_nodes_search_textarea, 8, 0);
+    lv_obj_set_style_bg_color(
+        s_nodes_search_textarea, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(
+        s_nodes_search_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_text_color(
+        s_nodes_search_textarea, lv_color_hex(0xF4F7FB), 0);
+    lv_obj_set_style_text_color(
+        s_nodes_search_textarea, lv_color_hex(0x8EA0AE),
+        LV_PART_TEXTAREA_PLACEHOLDER);
+
+    s_nodes_search_keyboard = create_keyboard(
+        s_nodes_search_sheet, "contacts search keyboard");
+    if (!s_nodes_search_keyboard) {
+        d1l_ui_modal_hide(s_nodes_search_sheet);
+        return;
+    }
+    d1l_ui_keyboard_configure_input(
+        s_nodes_search_keyboard, s_nodes_search_textarea, 0, 114, 424, 194);
+    lv_obj_add_event_cb(s_nodes_search_keyboard, nodes_search_keyboard_event_cb,
+                        LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_nodes_search_keyboard, nodes_search_keyboard_event_cb,
+                        LV_EVENT_CANCEL, NULL);
+    d1l_ui_modal_hide(s_nodes_search_sheet);
+}
+
 static void create_mesh_roles_sheet(lv_obj_t *screen)
 {
     s_mesh_roles_sheet = create_object(screen, "mesh roles sheet");
@@ -10151,6 +10454,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     }
     create_packet_detail_sheet(s_screen);
     create_packet_search_sheet(s_screen);
+    create_nodes_search_sheet(s_screen);
     if (d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
         create_mesh_roles_sheet(s_screen);
     }
@@ -10192,7 +10496,7 @@ static esp_err_t initialize_ui_runtime(void)
 {
     lv_init();
     d1l_ui_packets_init(&s_packets_controller);
-#if D1L_ENABLE_QUALIFICATION_HOOKS
+#if D1L_ENABLE_UI_CAPTURE
     ESP_RETURN_ON_ERROR(init_capture_buffers(), TAG,
                         "capture buffer init failed");
 #endif

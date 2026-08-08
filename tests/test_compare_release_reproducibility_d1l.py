@@ -57,6 +57,7 @@ def write_source_tree(root: Path) -> None:
         "docs/ADMIN_REMOTE_CLI_ALLOWLIST.md",
         "docs/ATTRIBUTIONS.md",
         "docs/RC1_SCOPE.md",
+        "docs/RC2_SCOPE.md",
     ):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)

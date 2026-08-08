@@ -43,7 +43,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U" in header
     assert "D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
     assert "D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
-    assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
+    assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW D1L_CONTACT_STORE_CAPACITY" in header
     assert "D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U" in header
     assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW D1L_ROOM_SERVER_PREVIEW_CAPACITY" in header
     assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW D1L_REPEATER_PREVIEW_CAPACITY" in header
@@ -1202,7 +1202,7 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "node_total_written" in source
     assert "contact_total_written" in source
     assert "#define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
-    assert "#define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
+    assert "#define D1L_APP_SNAPSHOT_CONTACT_PREVIEW D1L_CONTACT_STORE_CAPACITY" in header
     assert "i < controller->rendered.contact_row_count" in nodes_source
     assert "d1l_app_model_query_nodes(" in source
     assert "D1L_NODE_STORE_CAPACITY" in source

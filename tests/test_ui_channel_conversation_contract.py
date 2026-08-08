@@ -83,7 +83,7 @@ def test_selector_is_bounded_redacted_and_selection_is_fail_closed() -> None:
     assert "d1l_app_model_select_channel(" in select
     success = select.split("if (ret == ESP_OK)", 1)[1]
     assert "d1l_ui_messages_hide_channel_selector(" in success
-    assert "request_content_refresh();" in success
+    assert "set_messages_mode(D1L_UI_MESSAGES_MODE_PUBLIC);" in success
     before_success = select.split("if (ret == ESP_OK)", 1)[0]
     assert "d1l_ui_messages_hide_channel_selector(" not in before_success
     assert "d1l_app_model_send_" not in select

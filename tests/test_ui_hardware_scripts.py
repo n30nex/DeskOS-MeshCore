@@ -774,8 +774,8 @@ def test_active_release_docs_keep_ui_in_normal_product_use():
     workflow = (ROOT / ".github/workflows/d1l-ci.yml").read_text(encoding="utf-8")
 
     assert "D1L board, display, touch, backlight, Home, and core navigation" in scope
-    assert "| R1 | End-user package |" in roadmap
-    assert "| R6 | Stable publication |" in roadmap
+    assert "| C1 | Shared UI structure |" in roadmap
+    assert "| C7 | Publication |" in roadmap
     assert "not a public release" in test_plan
     assert "requirement" in test_plan
     assert "--release-profile core_1_0" in workflow

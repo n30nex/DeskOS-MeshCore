@@ -1,8 +1,8 @@
-# DeskOS 1.0 product scope
+# DeskOS 1.0 / RC1 product scope
 
-DeskOS 1.0 is the compiled and packaged `core_1_0` release profile. Source
-feature flags and the generated package manifest remain the runtime truth;
-this file is their concise human contract.
+DeskOS 1.0 / RC1 is the shipped compiled and packaged `core_1_0` release
+profile. Source feature flags and the generated package manifest remain the
+runtime truth; this file is their concise human contract.
 
 | State | Surface | 1.0 contract |
 |---|---|---|
@@ -18,7 +18,12 @@ this file is their concise human contract.
 | Deferred from 1.0 | Advanced QR/contact/channel sharing and emoji work | These are not part of the 1.0 product. |
 | Deferred from 1.0 | Broad UI architecture refactoring | The current working UI is the 1.0 product surface. |
 | Deferred from 1.0 | Telemetry expansion beyond current diagnostics | Existing diagnostics are the 1.0 boundary. |
-| Deferred from 1.0 | New features discovered during release work | Record them in `RC2_BACKLOG.md` unless they are a reproducible 1.0 defect. |
+| Corrective after 1.0 | Reproducible 1.0 defects and required mobile-parity gaps | Fix in 1.2 / RC2 under issue #322; do not defer them as later features. |
+| Deferred from 1.0 | New features, architecture work and technical debt | Record them in `RC3_BACKLOG.md` for 1.5 / RC3 unless they are required to close a 1.2 / RC2 parity gap. |
 
 Changing this contract requires explicit maintainer approval and matching
 changes to the compiled release profile and package contract.
+
+Known post-release defects in this baseline are recorded in
+[`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md). Their presence does not rewrite
+the historical 1.0/RC1 artifact record; they block 1.2/RC2 until corrected.

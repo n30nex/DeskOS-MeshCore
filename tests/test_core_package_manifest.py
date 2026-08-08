@@ -239,7 +239,7 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     guide = (
         package / "docs" / "CORE_INSTALL_RECOVERY.md"
     ).read_text(encoding="ascii")
-    assert "Installing DeskOS D1L 1.0" in ps1
+    assert "Installing DeskOS D1L" in ps1
     assert "Parameter(Mandatory=$true)" in ps1
     assert "flash_project.py" in ps1
     assert stable_posix in sh
@@ -647,7 +647,7 @@ def test_core_conditional_package_is_production_only(
     assert "### Existing DeskOS: preserving update BIN" in guide
     assert "### No DeskOS: full clean 8 MB BIN" in guide
     assert "separate update and clean UF2 files" in guide
-    assert "# DeskOS D1L 1.0 - Windows and Linux Install" in guide
+    assert "# DeskOS D1L 1.0.0 - Windows and Linux Install" in guide
     assert "Run the read-only RC1 test" not in guide
     assert verify_checksum_tree(package) is True
 
@@ -791,7 +791,7 @@ def test_core_package_links_and_conditional_storage_authority_are_consistent(
     package = tmp_path / "release" / "core-authority"
     packaged_docs = {row["path"] for row in manifest["release_docs"]}
     assert "docs/ADMIN_REMOTE_CLI_ALLOWLIST.md" in packaged_docs
-    assert "docs/RC1_SCOPE.md" in packaged_docs
+    assert "docs/RC2_SCOPE.md" in packaged_docs
 
     user_guide = (package / "docs" / "USER_GUIDE_D1L.md").read_text(
         encoding="ascii"

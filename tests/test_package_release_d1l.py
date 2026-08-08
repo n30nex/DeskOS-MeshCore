@@ -126,6 +126,9 @@ def write_fake_notices(root: Path) -> None:
     (root / "docs" / "RC1_SCOPE.md").write_text(
         "RC1 candidate scope\n", encoding="ascii"
     )
+    (root / "docs" / "RC2_SCOPE.md").write_text(
+        "RC2 product scope\n", encoding="ascii"
+    )
     overlay = root / "overlays" / "meshcore_ed25519_defined"
     overlay.mkdir(parents=True, exist_ok=True)
     (overlay / "license.txt").write_text("orlp zlib license\n", encoding="ascii")
@@ -469,6 +472,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         "docs/ADMIN_REMOTE_CLI_ALLOWLIST.md",
         "docs/ATTRIBUTIONS.md",
         "docs/RC1_SCOPE.md",
+        "docs/RC2_SCOPE.md",
     ]
     assert [item["name"] for item in manifest["rp2040_artifacts"]] == [
         "rp2040-sd-bridge-firmware",
@@ -653,8 +657,8 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
     assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
     assert (
-        "`docs/` contains the current RC1 user guide, feature-parity matrix, "
-        "limitations, SD-card setup, admin allowlist, attributions, and RC1 scope."
+        "`docs/` contains the current user guide, feature-parity matrix, "
+        "limitations, SD-card setup, admin allowlist, attributions, and release scope."
         in normalized_readme
     )
     assert "`notices/` contains the project license" in readme

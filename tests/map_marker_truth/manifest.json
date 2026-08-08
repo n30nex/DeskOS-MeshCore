@@ -118,7 +118,7 @@
   ],
   "production_source_pins": {
     "main/app/app_model.c": "9374cd658486c9d224c48ce209c14049aace3da1982a170e0ec43277aab3765d",
-    "main/app/app_model.h": "b22f77178dfe09a13e31e4d50e31351e5da9286d1eb85a4050269959aea009c1",
+    "main/app/app_model.h": "5a2e43724373b36d49c29e289cb544b5c2952d5a4e3b8116062136a98c5cce38",
     "main/app/settings_model.c": "6e7cfaf1d614059224356e3971ae27986135202686eacfa86addc24d226a95e0",
     "main/app/settings_model.h": "f7fc9e0b5cb9b52e1c6c597f95cf8d48c2ae266d092031034d76b059372e83b6",
     "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
@@ -148,7 +148,7 @@
     "main/ui/ui_map.h": "1e18d81b50dd1c4a22e73afb8d295b96c57171fbb601adebf931f1c8e75e7949",
     "main/ui/ui_node_detail.c": "2ca7489a5fc29bf9cfc884bda382cf5d40ea98bc867de41d11496711e6293a16",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "d29fb587b6ee2846fe99ee26683031a2f74a62d9e4db7b5baa17c37de5ba13ca",
+    "main/ui/ui_phase1.c": "da1bd8336ec5d6532157dbb88b1a79c6bcbb938d9fb2ae8b4431c4fd7972342d",
     "tools/ui_simulator.py": "7983b8c6d5e124c669ac014ec784789178fe3a36fd1b49e836c237be161799e8"
   }
 }

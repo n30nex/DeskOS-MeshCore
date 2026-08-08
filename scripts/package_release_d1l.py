@@ -122,12 +122,13 @@ RELEASE_DOC_SPECS = [
     ("docs/ADMIN_REMOTE_CLI_ALLOWLIST.md", "ADMIN_REMOTE_CLI_ALLOWLIST.md"),
     ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
     ("docs/RC1_SCOPE.md", "RC1_SCOPE.md"),
+    ("docs/RC2_SCOPE.md", "RC2_SCOPE.md"),
 ]
 PRODUCTION_RELEASE_DOC_SPECS = [
     ("docs/USER_GUIDE_D1L.md", "USER_GUIDE_D1L.md"),
     ("docs/D1L_SD_CARD_GUIDED_INSTALL.md", "D1L_SD_CARD_GUIDED_INSTALL.md"),
     ("docs/ADMIN_REMOTE_CLI_ALLOWLIST.md", "ADMIN_REMOTE_CLI_ALLOWLIST.md"),
-    ("docs/RC1_SCOPE.md", "RC1_SCOPE.md"),
+    ("docs/RC2_SCOPE.md", "RC2_SCOPE.md"),
     ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
 ]
 NOTICE_FILE_SPECS = [
@@ -167,10 +168,6 @@ PRODUCTION_FORBIDDEN_ESP_PAYLOAD_MARKERS = (
     b"ui scroll-probe",
     b"ui compose-probe",
     b"ui data-canary",
-    b"ui capture status",
-    b"ui capture begin",
-    b"ui capture chunk",
-    b"ui capture end",
     b"map acceptance status",
     b"map acceptance open",
     b"storage filecanary",
@@ -1521,6 +1518,7 @@ def write_production_user_install_bundle(
     package_dir: Path,
     *,
     source_commit: str,
+    app_version: str,
     sd_history_mode: str,
 ) -> dict:
     """Write checksum-bound Windows/Linux production install helpers."""
@@ -1566,7 +1564,7 @@ def write_production_user_install_bundle(
         or bridge_path.stat().st_size <= 0
     ):
         raise ValueError(
-            "DeskOS 1.0 install requires the production RP2040 bridge UF2"
+            "DeskOS install requires the production RP2040 bridge UF2"
         )
 
     prepare_ps1 = package_dir / "prepare_sd_card.ps1"
@@ -1677,9 +1675,9 @@ def write_production_user_install_bundle(
 
     guide = package_dir / "START_HERE.md"
     guide.write_text(
-        f"""# DeskOS D1L 1.0 - Windows and Linux Install
+        f"""# DeskOS D1L {app_version} - Windows and Linux Install
 
-This is the DeskOS D1L 1.0 production package:
+This is the DeskOS D1L {app_version} production package:
 
 - firmware commit: `{source_commit}`
 - GitHub Actions run and attempt: see `manifest.json` and `README_RELEASE.md`
@@ -2361,7 +2359,7 @@ def core_flash_runner_source(
         for entry in sorted(entries, key=lambda item: parse_offset(item["offset"]))
     ]
     template = r'''#!/usr/bin/env python3
-"""Checksum- and identity-guarded Core 1.0 project flasher."""
+"""Checksum- and identity-guarded DeskOS project flasher."""
 
 from __future__ import annotations
 
@@ -2747,7 +2745,7 @@ def write_flash_scripts(
                     'if ([string]::IsNullOrWhiteSpace($Port)) { throw "Pass the operator-confirmed D1L COM port with -Port." }',
                     "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
                     'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
-                    'Write-Host "Installing DeskOS D1L 1.0 on the explicitly selected USB device."',
+                    'Write-Host "Installing DeskOS D1L on the explicitly selected USB device."',
                     "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
                     "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort",
                     'if ($LASTEXITCODE -ne 0) { throw "Project flash failed with exit code $LASTEXITCODE" }',
@@ -2765,7 +2763,7 @@ def write_flash_scripts(
                     "set -eu",
                     ': "${D1L_PORT:?Set D1L_PORT to the stable D1L by-id path.}"',
                     f'if [ "$D1L_PORT" != "{POSIX_D1L_TARGET}" ]; then',
-                    f'  printf "%s\\n" "Core 1.0 POSIX D1L flashing requires {POSIX_D1L_TARGET}." >&2',
+                    f'  printf "%s\\n" "DeskOS POSIX D1L flashing requires {POSIX_D1L_TARGET}." >&2',
                     "  exit 2",
                     "fi",
                     'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
@@ -2810,7 +2808,7 @@ def write_flash_scripts(
                     "set -eu",
                     ': "${D1L_PORT:?Set D1L_PORT to the stable D1L by-id path.}"',
                     f'if [ "$D1L_PORT" != "{POSIX_D1L_TARGET}" ]; then',
-                    f'  printf "%s\\n" "DeskOS 1.0 POSIX flashing requires {POSIX_D1L_TARGET}." >&2',
+                    f'  printf "%s\\n" "DeskOS POSIX flashing requires {POSIX_D1L_TARGET}." >&2',
                     "  exit 2",
                     "fi",
                     'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
@@ -2859,7 +2857,7 @@ def write_flash_scripts(
                     "set -eu",
                     ': "${D1L_PORT:?Set D1L_PORT to the stable D1L by-id path.}"',
                     f'if [ "$D1L_PORT" != "{POSIX_D1L_TARGET}" ]; then',
-                    f'  printf "%s\\n" "DeskOS 1.0 POSIX flashing requires {POSIX_D1L_TARGET}." >&2',
+                    f'  printf "%s\\n" "DeskOS POSIX flashing requires {POSIX_D1L_TARGET}." >&2',
                     "  exit 2",
                     "fi",
                     'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
@@ -2963,6 +2961,7 @@ def write_supported_features(
     package_dir: Path,
     *,
     source_commit: str,
+    app_version: str,
     actions_run: str,
     actions_run_attempt: str,
     sd_history_mode: str,
@@ -2983,7 +2982,7 @@ def write_supported_features(
         )
     elif sd_history_mode == "supported_optional":
         sd_text = (
-            "SD is the qualified primary retained-data store for the paired "
+            "SD is the supported primary retained-data store for the paired "
             "artifacts in this exact package."
         )
     else:
@@ -2994,7 +2993,7 @@ def write_supported_features(
             "history is not redirected into default NVS."
         )
     path.write_text(
-        f"""# MeshCore DeskOS D1L 1.0 Supported Features
+        f"""# MeshCore DeskOS D1L {app_version} Supported Features
 
 Release profile: `{CORE_RELEASE_PROFILE}`
 
@@ -3018,7 +3017,7 @@ SD history mode: `{sd_history_mode}`
 
 Unavailable capabilities are intentionally hidden or rejected before side
 effects. BLE companion transport, signed update/recovery, advanced QR sharing,
-and the on-device USB recovery service are not part of DeskOS 1.0. The
+and the on-device USB recovery service are not part of DeskOS {app_version}. The
 package still contains a checksum-verified host-side factory recovery image.
 
 ## Current known limitations
@@ -3027,7 +3026,7 @@ package still contains a checksum-verified host-side factory recovery image.
   primary and missing/unusable media produces visible live-only operation.
 - Signed OTA/SD update and the on-device USB recovery service are unavailable.
   A checksum-verified host-side factory recovery image remains in the package.
-- This package contains the production DeskOS 1.0 product surface only.
+- This package contains the production DeskOS {app_version} product surface only.
 
 ## Support and reporting
 
@@ -3049,6 +3048,7 @@ def write_core_install_recovery_guide(
     package_dir: Path,
     *,
     source_commit: str,
+    app_version: str,
     actions_run: str,
     actions_run_attempt: str,
     sd_history_mode: str,
@@ -3057,7 +3057,7 @@ def write_core_install_recovery_guide(
     docs_dir.mkdir(parents=True, exist_ok=True)
     path = docs_dir / "CORE_INSTALL_RECOVERY.md"
     path.write_text(
-        f"""# MeshCore DeskOS D1L 1.0 Install and Recovery
+        f"""# MeshCore DeskOS D1L {app_version} Install and Recovery
 
 Firmware commit: `{source_commit}`
 
@@ -3082,7 +3082,7 @@ SD history mode: `{sd_history_mode}`
 5. The generated entrypoint verifies every file against `SHA256SUMS.txt` and
    rejects missing, extra, linked, duplicate, or mismatched files.
 6. Read `SUPPORTED_FEATURES.md`. BLE companion transport, signed OTA/recovery,
-   and advanced QR sharing are unavailable in DeskOS 1.0.
+   and advanced QR sharing are unavailable in DeskOS {app_version}.
 7. Never format an SD card on the device.
 8. Prepare a FAT32 card with `scripts/prepare_deskos_sd.py`; the checked-in
    payload under `sdcard/` includes the required authorized NRCan provider
@@ -3092,7 +3092,7 @@ SD history mode: `{sd_history_mode}`
 
 The app-only update wrappers write `firmware/meshcore_deskos_d1l.bin` at its
 manifest-declared offset and preserve unrelated flash regions. They first invoke
-the package-root `flash_project.py` in validation mode to verify the complete
+the package-root `flash_project.py` in read-only mode to verify the complete
 checksum inventory and exact USB identity.
 
 ### Linux
@@ -3137,7 +3137,7 @@ The same production `deskos_sd_bridge.ino.uf2` installs the complete RP2040
 bridge firmware for an update or a fresh install. No duplicate clean UF2 is
 needed.
 
-DeskOS 1.0 supports USB install/recovery only; it does not support OTA
+DeskOS {app_version} supports USB install/recovery only; it does not support OTA
 or signed SD update.
 """,
         encoding="ascii",
@@ -3152,6 +3152,7 @@ or signed SD update.
 def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -> None:
     readme = package_dir / "README_RELEASE.md"
     app = app_entry(manifest["flash_files"])
+    app_version = str(manifest["app_version"])
     if manifest.get("release_profile") == CORE_RELEASE_PROFILE:
         sd_mode = manifest["sd_history_mode"]
         supported_lines = "\n".join(
@@ -3198,7 +3199,7 @@ def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -
             "RP2040 payload is included."
             if sd_mode == "disabled"
             else (
-                "SD history is qualified optional and is bound to the paired "
+                "SD history is supported optional and is bound to the paired "
                 "RP2040 artifacts in this package."
                 if sd_mode == "supported_optional"
                 else (
@@ -3210,7 +3211,7 @@ def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -
             )
         )
         readme.write_text(
-            f"""# {PROJECT} 1.0 Production Package
+            f"""# {PROJECT} {app_version} Production Package
 
 Package: `{package_name}`
 
@@ -3242,7 +3243,7 @@ RP2040 UF2 used by both paths.
 
 Unavailable means hidden or rejected before side effects. BLE companion
 transport, signed OTA/recovery, advanced QR sharing, and the on-device USB
-recovery service are not part of DeskOS 1.0. The package still
+recovery service are not part of DeskOS {app_version}. The package still
 contains a checksum-verified host-side factory recovery image.
 
 ## SHA-256 values
@@ -3317,15 +3318,14 @@ Blank or non-DeskOS devices use the full 8 MB BIN under `full-flash/` at `0x0`.
 this replaces all ESP32 flash data. No separate erase command is required.
 
 The same production RP2040 UF2 installs the complete bridge firmware for an
-update or a fresh install. USB flashing is the supported DeskOS 1.0 update path.
+update or a fresh install. USB flashing is the supported DeskOS {app_version} update path.
 
 Never format an SD card on the device.
 
 ## Current known limitations
 
 - {sd_note}
-- Only the supported matrix above is available; Full Feature remains
-  unreleased.
+- Capabilities marked unavailable above are outside this release.
 - Installation and recovery are USB-only; OTA and signed SD update are
   unavailable.
 
@@ -3467,8 +3467,8 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 {rp2040_contents}
 - `update/d1l-update.bin` is the application image for development update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
-- `docs/` contains the current RC1 user guide, feature-parity matrix,
-  limitations, SD-card setup, admin allowlist, attributions, and RC1 scope.
+- `docs/` contains the current user guide, feature-parity matrix,
+  limitations, SD-card setup, admin allowlist, attributions, and release scope.
 - `notices/` contains the project license, third-party notices, source audit notes, attributions, and the verbatim orlp Ed25519 zlib license for public distribution.
 - `evidence/` contains deterministic projections of current-commit MeshCore wire-envelope and signed-advert runtime receipts when supplied by CI. Their manifest entries bind the raw Actions receipt hashes; neither projection alone closes WP-04 or issue #65.
 - `{manifest['build_inputs']['path']}` records the exact build-input lock copied into package metadata.
@@ -3550,6 +3550,7 @@ def create_release_package(
     requested_commit = os.environ.get("GITHUB_SHA") or source_git.get("commit")
     source_identity = discover_source_identity(root, requested_commit)
     expected_commit = source_identity["commit"]
+    app_version = d1l_firmware_version(root)
     repository_commit = source_git.get("commit")
     if repository_commit is not None and exact_sha(
         repository_commit, "repository source commit"
@@ -3626,7 +3627,7 @@ def create_release_package(
             package_dir,
             update_image,
             expected_commit,
-            d1l_firmware_version(root),
+            app_version,
             source_security_sequence(source_identity),
             update_signing_key,
         )
@@ -3695,6 +3696,7 @@ def create_release_package(
             write_core_install_recovery_guide(
                 package_dir,
                 source_commit=expected_commit,
+                app_version=app_version,
                 actions_run=str(workflow["run_id"]),
                 actions_run_attempt=str(workflow["run_attempt"]),
                 sd_history_mode=sd_history_mode,
@@ -3712,6 +3714,7 @@ def create_release_package(
             root,
             package_dir,
             source_commit=expected_commit,
+            app_version=app_version,
             sd_history_mode=sd_history_mode,
         )
         if release_profile == CORE_RELEASE_PROFILE
@@ -3730,7 +3733,7 @@ def create_release_package(
             )
         ),
         "project": PROJECT,
-        "app_version": d1l_firmware_version(root),
+        "app_version": app_version,
         "package": package_name,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "git": source_git,
@@ -3840,6 +3843,7 @@ def create_release_package(
         manifest["supported_features"] = write_supported_features(
             package_dir,
             source_commit=expected_commit,
+            app_version=app_version,
             actions_run=str(workflow["run_id"]),
             actions_run_attempt=str(workflow["run_attempt"]),
             sd_history_mode=sd_history_mode,

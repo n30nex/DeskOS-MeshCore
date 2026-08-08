@@ -10,13 +10,21 @@
 #define D1L_UI_DISPLAY_WIDTH 480U
 #define D1L_UI_DISPLAY_HEIGHT 480U
 
-#if D1L_ENABLE_QUALIFICATION_HOOKS
+#ifndef D1L_ENABLE_UI_CAPTURE
+#define D1L_ENABLE_UI_CAPTURE 1
+#endif
+
+#if D1L_ENABLE_UI_CAPTURE != 0 && D1L_ENABLE_UI_CAPTURE != 1
+#error "D1L_ENABLE_UI_CAPTURE must be exactly 0 or 1"
+#endif
+
 #define D1L_UI_CAPTURE_WIDTH D1L_UI_DISPLAY_WIDTH
 #define D1L_UI_CAPTURE_HEIGHT D1L_UI_DISPLAY_HEIGHT
 #define D1L_UI_CAPTURE_BYTES_PER_PIXEL 2U
 #define D1L_UI_CAPTURE_TOTAL_BYTES (D1L_UI_CAPTURE_WIDTH * D1L_UI_CAPTURE_HEIGHT * D1L_UI_CAPTURE_BYTES_PER_PIXEL)
 #define D1L_UI_CAPTURE_MAX_CHUNK_BYTES 1024U
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 typedef struct {
     bool ok;
     bool surface_supported;
@@ -33,7 +41,9 @@ typedef struct {
     int32_t scroll_top_after;
     int32_t scroll_bottom_after;
 } d1l_ui_scroll_probe_result_t;
+#endif
 
+#if D1L_ENABLE_UI_CAPTURE
 typedef struct {
     bool available;
     bool active;
@@ -55,7 +65,9 @@ typedef struct {
     char active_tab[16];
     char pending_tab[16];
 } d1l_ui_capture_status_t;
+#endif
 
+#if D1L_ENABLE_QUALIFICATION_HOOKS
 typedef struct {
     bool ok;
     bool target_supported;
@@ -97,6 +109,8 @@ esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
                                       d1l_ui_scroll_probe_result_t *result);
 esp_err_t d1l_ui_phase1_compose_probe(const char *target,
                                        d1l_ui_compose_probe_result_t *result);
+#endif
+#if D1L_ENABLE_UI_CAPTURE
 esp_err_t d1l_ui_capture_status(d1l_ui_capture_status_t *out_status);
 esp_err_t d1l_ui_capture_begin(d1l_ui_capture_status_t *out_status);
 esp_err_t d1l_ui_capture_chunk(size_t offset,
