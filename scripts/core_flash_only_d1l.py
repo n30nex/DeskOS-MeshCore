@@ -105,7 +105,7 @@ EXPECTED_STORAGE_AUTHORITY = "sd_primary_live_only_without_sd"
 EXPECTED_RP2040_ARTIFACT_NAMES = (
     "rp2040-sd-bridge-firmware",
 )
-EXPECTED_REPOSITORY = "n30nex/SIGUI"
+EXPECTED_REPOSITORY = "n30nex/DeskOS-MeshCore"
 EXPECTED_FLASH_ROLES = {
     0x0: ("bootloader", "bootloader/bootloader.bin"),
     0x8000: ("partition-table", "partition_table/partition-table.bin"),

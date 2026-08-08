@@ -603,7 +603,7 @@ def core_flash_gate_fixture(
             "storage_authority": (
                 "sd_primary_live_only_without_sd"
             ),
-            "repository": "n30nex/SIGUI",
+            "repository": "n30nex/DeskOS-MeshCore",
             "flash_files_match_actions": True,
         },
         "actions_capture_verification": capture,
