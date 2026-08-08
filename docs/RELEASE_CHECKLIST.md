@@ -4,6 +4,10 @@ This tracks public product deliverables. Controlled peers, credentials, admin
 passwords, soak runs, internal evidence, and qualification firmware are not
 release deliverables and must not appear in the public package.
 
+The RC2 production profile remains `core_1_0` with `conditional` storage:
+SD-primary retained history when prepared storage is ready, visible live-only
+operation otherwise, and without silent default-NVS fallback.
+
 ## 1.0 / RC1 record
 
 - [x] `v1.0.0-rc.1`, `v1.0.0`, and the `v1.0.1` packaging correction are

@@ -28,6 +28,9 @@ The public `v1.0.1` assets matched their staged files byte-for-byte. Known RC1
 UI defects became the bounded RC2 work; they do not rewrite the historical RC1
 record.
 
+DeskOS supports the configured Map as normal product use; it is not a
+release-lab prerequisite.
+
 ## 1.2 / RC2: corrective mobile parity
 
 [Issue #322](https://github.com/n30nex/DeskOS-MeshCore/issues/322) controls RC2.
