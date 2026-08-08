@@ -1,6 +1,7 @@
 # DeskOS 1.0 production release roadmap
 
-Execute the highest unblocked row. Issue #71 is the GitHub controller.
+Issue #71 records the original 1.0 release. The 1.0.1 packaging correction is
+complete.
 
 | ID | Work | Completion predicate | State / current blocker |
 |---|---|---|---|
@@ -11,8 +12,11 @@ Execute the highest unblocked row. Issue #71 is the GitHub controller.
 | R4 | Ordinary use | Ship the runtime-documented dark touch UI for use on the owner's mesh; no controlled peer or lab receipt | Complete |
 | R5 | RC1 publication | Publish `v1.0.0-rc.1` with the ZIP, BINs, UF2, checksums, and instructions | Complete |
 | R6 | Stable publication | Publish the same artifact bytes as `v1.0.0`, verify public downloads, and close issue #71 | Complete |
-| R7 | Explicit install paths | Name the app BIN update, full clean 8 MB BIN, and shared complete RP2040 UF2; provide Windows/Linux commands for both ESP32 paths | In progress |
-| R8 | Packaging correction | Publish `v1.0.1` from the exact successful main package with explicit update/fresh asset names and instructions | Blocked by R7 |
+| R7 | Explicit install paths | Name the app BIN update, full clean 8 MB BIN, and shared complete RP2040 UF2; provide Windows/Linux commands for both ESP32 paths | Complete |
+| R8 | Packaging correction | Publish `v1.0.1` from the exact successful main package with explicit update/fresh asset names and instructions | Complete: commit `b796f5eeb080f520ab162e37430e69a1845dcfbe`, run `31260655342` |
 
 The shipped product supports the configured Map as normal product use; it is not
 a release-lab prerequisite.
+
+The nine public `v1.0.1` assets were downloaded fresh and matched the staged
+files byte-for-byte.
