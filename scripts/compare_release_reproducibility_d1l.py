@@ -41,6 +41,7 @@ if __package__:
         validate_generated_package_metadata,
     )
     from .provenance_d1l import (
+        CANONICAL_REPOSITORY,
         GITHUB_HOSTED_BUILDER,
         validate_against_inputs as validate_provenance_against_inputs,
         validate_profile as validate_provenance_profile,
@@ -75,6 +76,7 @@ else:
         validate_generated_package_metadata,
     )
     from provenance_d1l import (  # type: ignore[no-redef]
+        CANONICAL_REPOSITORY,
         GITHUB_HOSTED_BUILDER,
         validate_against_inputs as validate_provenance_against_inputs,
         validate_profile as validate_provenance_profile,
@@ -98,7 +100,7 @@ SCHEMA = 1
 ARTIFACT_TYPE = "d1l_release_reproducibility_comparison"
 PROJECT = "MeshCore DeskOS D1L"
 WORKFLOW_NAME = "d1l-ci"
-REPOSITORY = "n30nex/SIGUI"
+REPOSITORY = CANONICAL_REPOSITORY
 PROFILE_FULL_RELEASE = "full-release"
 PROFILE_ESP32_ONLY = "esp32-only"
 COMPARISON_PROFILES = (PROFILE_FULL_RELEASE, PROFILE_ESP32_ONLY)

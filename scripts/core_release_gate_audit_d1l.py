@@ -92,6 +92,7 @@ try:
         summarize_map_network_evidence,
     )
     from provenance_d1l import (
+        CANONICAL_REPOSITORY,
         discover_source_identity,
         validate_against_inputs as validate_provenance_against_inputs,
         validate_core_actions_binding,
@@ -186,6 +187,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         summarize_map_network_evidence,
     )
     from scripts.provenance_d1l import (
+        CANONICAL_REPOSITORY,
         discover_source_identity,
         validate_against_inputs as validate_provenance_against_inputs,
         validate_core_actions_binding,
@@ -819,7 +821,7 @@ def core_immutable_source_inputs_gate(
         and scope.get("kind") == "d1l_candidate_scope"
         and scope.get("source_commit") == commit
         and str(scope.get("workflow_run_id")) == str(run_id)
-        and scope.get("repository") == "n30nex/SIGUI"
+        and scope.get("repository") == CANONICAL_REPOSITORY
         and scope.get("workflow") == "d1l-ci"
         and scope.get("event") in {"push", "workflow_dispatch"}
         and scope.get("include_sd_bridge") is True
@@ -1003,7 +1005,7 @@ def actions_run_metadata_gate(
         and receipt.get("schema") == 2
         and receipt.get("mode") == "github-api-artifact-capture"
         and receipt.get("ok") is True
-        and receipt.get("repository") == "n30nex/SIGUI"
+        and receipt.get("repository") == CANONICAL_REPOSITORY
         and exact_sha(receipt.get("expected_commit")) == commit
         and str(receipt.get("github_actions_run")) == str(run_id)
         and str(receipt.get("workflow_run_attempt"))
@@ -1127,7 +1129,7 @@ def package_gate(
             failures.append("workflow.run_id")
         if str(workflow.get("run_attempt")) != str(run_attempt):
             failures.append("workflow.run_attempt")
-        if workflow.get("repository") != "n30nex/SIGUI":
+        if workflow.get("repository") != CANONICAL_REPOSITORY:
             failures.append("workflow.repository")
 
     install = manifest.get("install_recovery_guide")
@@ -1198,7 +1200,7 @@ def package_gate(
         if metadata_name == "provenance":
             expected_provenance_metadata = {
                 "release_profile": CORE_RELEASE_PROFILE,
-                "workflow_repository": "n30nex/SIGUI",
+                "workflow_repository": CANONICAL_REPOSITORY,
                 "workflow_name": "d1l-ci",
                 "workflow_path": ".github/workflows/d1l-ci.yml",
                 "workflow_run_id": str(run_id),
@@ -1573,7 +1575,7 @@ def core_flash_receipt_gate(
         and package.get("release_profile") == CORE_RELEASE_PROFILE
         and package.get("sd_history_mode") == FINAL_SD_HISTORY_MODE
         and package.get("storage_authority") == FINAL_STORAGE_AUTHORITY
-        and package.get("repository") == "n30nex/SIGUI"
+        and package.get("repository") == CANONICAL_REPOSITORY
         and str(package.get("workflow_run_attempt")) == str(run_attempt)
         and package.get("flash_files_match_actions") is True
         and capture_ok
