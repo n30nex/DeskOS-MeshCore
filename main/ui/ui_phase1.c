@@ -6184,8 +6184,8 @@ static bool open_managed_contact(const d1l_contact_entry_t *contact)
     snprintf(node.node.name, sizeof(node.node.name), "%s",
              contact->heard_name);
     snprintf(node.node.type, sizeof(node.node.type), "%s", contact->type);
-    snprintf(node.display_name, sizeof(node.display_name), "%s",
-             nodes_contact_name(contact));
+    snprintf(node.display_name, sizeof(node.display_name), "%.*s",
+             (int)(sizeof(node.display_name) - 1U), nodes_contact_name(contact));
     snprintf(node.role, sizeof(node.role), "%s", contact->type);
     node.favorite = contact->favorite;
     node.muted = contact->muted;
