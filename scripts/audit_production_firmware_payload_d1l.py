@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed when a customer firmware payload retains qualification hooks."""
+"""Reject qualification hooks while allowing the read-only UI capture API."""
 
 from __future__ import annotations
 
@@ -21,10 +21,6 @@ ESP_FORBIDDEN_MARKERS: tuple[bytes, ...] = (
     b"ui scroll-probe",
     b"ui compose-probe",
     b"ui data-canary",
-    b"ui capture status",
-    b"ui capture begin",
-    b"ui capture chunk",
-    b"ui capture end",
     b"map acceptance status",
     b"map acceptance open",
     b"storage filecanary",
@@ -79,12 +75,11 @@ FORBIDDEN_SYMBOL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     for pattern in (
         r"^cmd_(?:display|touch)_test$",
         r"^d1l_board_display_color_test$",
-        r"^cmd_ui_(?:scroll_probe|compose_probe|data_canary|capture(?:_|$))",
+        r"^cmd_ui_(?:scroll_probe|compose_probe|data_canary)$",
         r"^cmd_map_acceptance_",
         r"^cmd_storage_(?:filecanary|map_tile_canary|map_tile_check|export_canary|retained_canary)",
         r"^cmd_core_retained_witness$",
         r"^d1l_ui_phase1_(?:scroll_probe|compose_probe|request_map_acceptance)$",
-        r"^d1l_ui_capture_",
         r"^d1l_ui_map_viewport_prepare_acceptance$",
         r"^d1l_export_store_write_canary$",
         r"^d1l_map_tile_store_(?:write|check)_canary$",
@@ -94,7 +89,6 @@ FORBIDDEN_SYMBOL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"^(?:s_)?(?:scroll|compose)_probe(?:_|$)",
         r"^process_pending_(?:scroll|compose)_probe$",
         r"^probe_gate_",
-        r"^s_capture_(?:shadow|snapshot|lock|active|frame_seq|flush_count|crc32)",
         r"^(?:retained_canary|core_retained_witness|storage_filecanary)",
     )
 )

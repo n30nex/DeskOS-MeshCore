@@ -22,16 +22,16 @@ def test_nodes_root_has_owned_bounded_view_model_and_action_lifetime():
     assert "d1l_ui_nodes_controller_t" in header
     assert "d1l_ui_nodes_render" in header
     assert "d1l_ui_nodes_deactivate" in header
-    assert "d1l_contact_entry_t contact_rows[D1L_APP_SNAPSHOT_CONTACT_PREVIEW]" in header
+    assert "d1l_contact_entry_t contact_rows[D1L_CONTACT_STORE_CAPACITY]" in header
     assert "d1l_node_view_t node_rows[D1L_NODE_STORE_CAPACITY]" in header
-    assert "bool contact_can_dm[D1L_APP_SNAPSHOT_CONTACT_PREVIEW]" in header
+    assert "bool contact_can_dm[D1L_CONTACT_STORE_CAPACITY]" in header
     assert "bool node_can_dm[D1L_NODE_STORE_CAPACITY]" in header
     assert "d1l_ui_node_role_counts_t role_counts" in header
 
     assert "view_model != &controller->rendered" in source
     assert "controller->rendered = *view_model;" in source
     assert "controller->rendered.contact_row_count >" in source
-    assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW" in source
+    assert "D1L_CONTACT_STORE_CAPACITY" in source
     assert "node_row_count > D1L_NODE_STORE_CAPACITY" in source
     assert "binding->row_index >= controller->rendered.contact_row_count" in source
     assert "binding->row_index >= controller->rendered.node_row_count" in source
@@ -44,7 +44,7 @@ def test_nodes_root_has_owned_bounded_view_model_and_action_lifetime():
 
     assert "nodes_view_model_from_snapshot(snapshot, &s_nodes_controller.rendered);" in phase1
     assert "snapshot->recent_contact_count" in phase1
-    assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW" in phase1
+    assert "D1L_CONTACT_STORE_CAPACITY" in phase1
     assert "d1l_app_model_query_nodes(" in phase1
     assert "D1L_NODE_STORE_CAPACITY" in phase1
     assert "d1l_ui_nodes_summarize_roles(" in phase1
@@ -68,6 +68,8 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
         '"Contacts"',
         '"Find"',
         '"Clear"',
+        '"Search contacts"',
+        '"Sort: Recent"',
         '"Saved contacts"',
         '"Nearby"',
         '"No contacts yet"',
@@ -75,6 +77,7 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
         '"No saved contacts yet"',
         '"No other nearby nodes"',
         '"Message"',
+        '"Manage"',
         '"Chat"',
         '"Repeater"',
         '"Room"',
@@ -110,6 +113,8 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
     assert "Scroll proof" not in source
     assert "D1L_UI_NODES_ACTION_OPEN_CONTACT_DM" in source
     assert "D1L_UI_NODES_ACTION_OPEN_NODE_DM" in source
+    assert "D1L_UI_NODES_ACTION_OPEN_SEARCH" in source
+    assert "D1L_UI_NODES_ACTION_CYCLE_SORT" in source
 
     assert "static lv_obj_t *s_" not in source
     assert "lv_timer_" not in source

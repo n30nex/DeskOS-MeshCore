@@ -157,16 +157,13 @@ def test_audit_rejects_enabled_test_or_ocd_sdkconfig(tmp_path, key):
         "cmd_display_test",
         "cmd_touch_test",
         "d1l_board_display_color_test",
-        "cmd_ui_capture_begin",
         "cmd_map_acceptance_open",
         "cmd_storage_retained_canary",
         "cmd_core_retained_witness",
-        "d1l_ui_capture_chunk",
         "d1l_export_store_write_canary",
         "d1l_message_store_append_public_volatile",
         "d1l_dm_store_append_volatile",
         "d1l_packet_log_append_raw_volatile",
-        "s_capture_shadow",
         "process_pending_compose_probe",
     ],
 )
@@ -181,6 +178,16 @@ def test_audit_rejects_qualification_symbols(tmp_path, symbol):
             "detail": symbol,
         }
     ]
+
+
+def test_audit_allows_read_only_capture_symbols(tmp_path):
+    elf = tmp_path / "app.elf"
+    elf.write_bytes(b"ELF")
+
+    assert payload_audit.audit_symbols(
+        elf,
+        ["cmd_ui_capture_begin", "d1l_ui_capture_chunk", "s_capture_shadow"],
+    ) == []
 
 
 def test_cli_report_is_fail_closed_and_machine_readable(
@@ -215,7 +222,7 @@ def test_cli_report_is_fail_closed_and_machine_readable(
     assert report["findings"] == []
 
 
-def test_package_surface_rejects_binary_hooks_but_allows_test_channel(tmp_path):
+def test_package_surface_allows_capture_but_rejects_qualification_hooks(tmp_path):
     package = tmp_path / "customer-package"
     firmware = package / "firmware"
     firmware.mkdir(parents=True)
@@ -225,6 +232,9 @@ def test_package_surface_rejects_binary_hooks_but_allows_test_channel(tmp_path):
     package_release_d1l.validate_production_package_surface(package)
 
     app.write_bytes(b"normal product payload\0ui capture begin\0")
+    package_release_d1l.validate_production_package_surface(package)
+
+    app.write_bytes(b"normal product payload\0ui data-canary\0")
     with pytest.raises(
         ValueError,
         match="Production firmware payload contains an internal qualification marker",

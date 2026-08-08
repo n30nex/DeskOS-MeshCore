@@ -1871,7 +1871,7 @@ static void cmd_ui_status(void)
     printf("}\n");
 }
 
-#if D1L_ENABLE_QUALIFICATION_HOOKS
+#if D1L_ENABLE_UI_CAPTURE
 static void print_ui_capture_status_fields(const d1l_ui_capture_status_t *status)
 {
     const d1l_ui_capture_status_t empty = {
@@ -8909,7 +8909,10 @@ static void cmd_help(void)
                "\"ui compose-probe "
                "<public|public-long|dm|dm-long|public-search|dm-search|"
                "packet-search|contact-edit|onboarding>\","
-               "\"ui data-canary <token>\",\"ui capture status\","
+               "\"ui data-canary <token>\","
+#endif
+#if D1L_ENABLE_UI_CAPTURE
+               "\"ui capture status\","
                "\"ui capture begin\",\"ui capture chunk <offset> <len>\","
                "\"ui capture end\","
 #endif
@@ -8983,7 +8986,10 @@ static void cmd_help(void)
 #if D1L_ENABLE_QUALIFICATION_HOOKS
            "\"ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map|map_options|map_location|map_cache>\","
            "\"ui compose-probe <public|public-long|dm|dm-long|public-search|dm-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>\","
-           "\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\","
+           "\"ui data-canary <token>\","
+#endif
+#if D1L_ENABLE_UI_CAPTURE
+           "\"ui capture status\",\"ui capture begin\","
            "\"ui capture chunk <offset> <len>\",\"ui capture end\","
 #endif
            "\"map center\","
@@ -9359,6 +9365,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_ui_compose_probe(line);
     } else if (strncmp(line, "ui data-canary ", strlen("ui data-canary ")) == 0) {
         cmd_ui_data_canary(line);
+#endif
+#if D1L_ENABLE_UI_CAPTURE
     } else if (strcmp(line, "ui capture status") == 0) {
         cmd_ui_capture_status();
     } else if (strcmp(line, "ui capture begin") == 0) {

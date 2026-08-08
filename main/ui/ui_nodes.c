@@ -122,6 +122,27 @@ static const char *nodes_role_badge_text(const char *role)
     return "Node";
 }
 
+static bool nodes_role_is_managed_service(const char *role)
+{
+    return role &&
+        (strcmp(role, "repeater") == 0 || strcmp(role, "room") == 0);
+}
+
+static const char *nodes_sort_label(d1l_node_sort_t sort)
+{
+    switch (sort) {
+    case D1L_NODE_SORT_NAME:
+        return "Sort: A-Z";
+    case D1L_NODE_SORT_ROLE:
+        return "Sort: Role";
+    case D1L_NODE_SORT_SIGNAL:
+        return "Sort: Signal";
+    case D1L_NODE_SORT_LAST_HEARD:
+    default:
+        return "Sort: Recent";
+    }
+}
+
 static const char *nodes_role_avatar_text(const char *role)
 {
     const char *label = nodes_role_badge_text(role);
@@ -248,10 +269,16 @@ static void nodes_dispatch_global_event_cb(lv_event_t *event)
         !binding->controller->action_handler) {
         return;
     }
+    d1l_ui_nodes_action_t action = D1L_UI_NODES_ACTION_CLEAR_HEARD;
+    if (binding == &binding->controller->open_search) {
+        action = D1L_UI_NODES_ACTION_OPEN_SEARCH;
+    } else if (binding == &binding->controller->cycle_sort) {
+        action = D1L_UI_NODES_ACTION_CYCLE_SORT;
+    } else if (binding == &binding->controller->find_nearby) {
+        action = D1L_UI_NODES_ACTION_FIND_NEARBY;
+    }
     const d1l_ui_nodes_action_event_t action_event = {
-        .action = binding == &binding->controller->find_nearby ?
-            D1L_UI_NODES_ACTION_FIND_NEARBY :
-            D1L_UI_NODES_ACTION_CLEAR_HEARD,
+        .action = action,
         .contact = NULL,
         .node = NULL,
     };
@@ -367,6 +394,12 @@ static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
     controller->clear_heard = (d1l_ui_nodes_action_binding_t) {
         .controller = controller,
     };
+    controller->open_search = (d1l_ui_nodes_action_binding_t) {
+        .controller = controller,
+    };
+    controller->cycle_sort = (d1l_ui_nodes_action_binding_t) {
+        .controller = controller,
+    };
     nodes_create_button(parent, "Find", 304, 4, 70, 44, 0xA7F3D0, true,
                         nodes_dispatch_global_event_cb,
                         &controller->find_nearby);
@@ -374,6 +407,18 @@ static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
                         controller->rendered.node_row_count > 0U,
                         nodes_dispatch_global_event_cb,
                         &controller->clear_heard);
+
+    char search_label[32];
+    snprintf(search_label, sizeof(search_label), "%s",
+             controller->rendered.search_text[0] ?
+                 controller->rendered.search_text : "Search contacts");
+    nodes_create_button(parent, search_label, 16, 54, 278, 44, 0x93C5FD,
+                        true, nodes_dispatch_global_event_cb,
+                        &controller->open_search);
+    nodes_create_button(parent, nodes_sort_label(controller->rendered.sort),
+                        302, 54, 150, 44, 0xC4B5FD, true,
+                        nodes_dispatch_global_event_cb,
+                        &controller->cycle_sort);
 }
 
 static void nodes_render_section_label(lv_obj_t *parent,
@@ -399,6 +444,7 @@ static void nodes_render_contact_row(
     const d1l_contact_entry_t *entry =
         &controller->rendered.contact_rows[index];
     const bool can_dm = controller->rendered.contact_can_dm[index];
+    const bool can_manage = d1l_contact_store_can_admin(entry);
     lv_obj_t *row = nodes_create_panel(
         parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT);
     if (!row) {
@@ -437,6 +483,9 @@ static void nodes_render_contact_row(
     if (can_dm) {
         nodes_create_button(row, "Message", 340, 7, 84, 44, 0xA7F3D0, true,
                             nodes_dispatch_contact_dm_event_cb, binding);
+    } else if (can_manage) {
+        nodes_create_button(row, "Manage", 340, 7, 84, 44, 0xFBBF24, true,
+                            nodes_dispatch_contact_open_event_cb, binding);
     } else {
         lv_obj_t *chevron = nodes_create_label(row, ">", 0x8EA0AE);
         if (chevron) {
@@ -457,6 +506,7 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
     const d1l_node_view_t *view = &controller->rendered.node_rows[index];
     const d1l_node_entry_t *entry = &view->node;
     const bool can_dm = controller->rendered.node_can_dm[index];
+    const bool can_manage = view->keyed && nodes_role_is_managed_service(view->role);
     lv_obj_t *row = nodes_create_panel(
         parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT);
     if (!row) {
@@ -496,6 +546,9 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
     if (can_dm) {
         nodes_create_button(row, "Message", 340, 7, 84, 44, 0xA7F3D0, true,
                             nodes_dispatch_node_dm_event_cb, binding);
+    } else if (can_manage) {
+        nodes_create_button(row, "Manage", 340, 7, 84, 44, 0xFBBF24, true,
+                            nodes_dispatch_node_open_event_cb, binding);
     } else {
         lv_obj_t *chevron = nodes_create_label(row, ">", 0x8EA0AE);
         if (chevron) {
@@ -508,7 +561,7 @@ static void nodes_render_empty_state(
     d1l_ui_nodes_controller_t *controller,
     lv_obj_t *parent)
 {
-    lv_obj_t *panel = nodes_create_panel(parent, 16, 76, 448, 210);
+    lv_obj_t *panel = nodes_create_panel(parent, 16, 126, 448, 210);
     if (!panel) {
         return;
     }
@@ -522,7 +575,9 @@ static void nodes_render_empty_state(
             lv_obj_center(plus);
         }
     }
-    lv_obj_t *title = nodes_create_label(panel, "No contacts yet", 0xF4F7FB);
+    const bool searching = controller->rendered.search_text[0] != '\0';
+    lv_obj_t *title = nodes_create_label(
+        panel, searching ? "No matches" : "No contacts yet", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
         lv_obj_set_width(title, 416);
@@ -531,7 +586,8 @@ static void nodes_render_empty_state(
     }
     lv_obj_t *copy = nodes_create_label(
         panel,
-        "Nearby nodes appear here after a signed advert.",
+        searching ? "Try another name, role, or public key." :
+                    "Nearby nodes appear here after a signed advert.",
         0x8EA0AE);
     if (copy) {
         lv_label_set_long_mode(copy, LV_LABEL_LONG_WRAP);
@@ -539,9 +595,11 @@ static void nodes_render_empty_state(
         lv_obj_set_style_text_align(copy, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(copy, 44, 108);
     }
-    nodes_create_button(panel, "Find nearby", 126, 150, 196, 48,
-                        0xA7F3D0, true, nodes_dispatch_global_event_cb,
-                        &controller->find_nearby);
+    nodes_create_button(panel, searching ? "Edit search" : "Find nearby",
+                        126, 150, 196, 48, 0xA7F3D0, true,
+                        nodes_dispatch_global_event_cb,
+                        searching ? &controller->open_search :
+                                    &controller->find_nearby);
 }
 
 static void nodes_render_empty_section(lv_obj_t *parent,
@@ -579,9 +637,9 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
         controller->rendered = *view_model;
     }
     if (controller->rendered.contact_row_count >
-        D1L_APP_SNAPSHOT_CONTACT_PREVIEW) {
+        D1L_CONTACT_STORE_CAPACITY) {
         controller->rendered.contact_row_count =
-            D1L_APP_SNAPSHOT_CONTACT_PREVIEW;
+            D1L_CONTACT_STORE_CAPACITY;
     }
     if (controller->rendered.node_row_count > D1L_NODE_STORE_CAPACITY) {
         controller->rendered.node_row_count = D1L_NODE_STORE_CAPACITY;
@@ -598,7 +656,7 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
         return;
     }
 
-    int y = 62;
+    int y = 112;
     nodes_render_section_label(parent, y, "Saved contacts");
     y += 24;
     if (controller->rendered.contact_row_count == 0U) {
@@ -642,6 +700,8 @@ void d1l_ui_nodes_deactivate(d1l_ui_nodes_controller_t *controller)
     memset(&controller->rendered, 0, sizeof(controller->rendered));
     memset(controller->contact_rows, 0, sizeof(controller->contact_rows));
     memset(controller->node_rows, 0, sizeof(controller->node_rows));
+    memset(&controller->open_search, 0, sizeof(controller->open_search));
+    memset(&controller->cycle_sort, 0, sizeof(controller->cycle_sort));
     memset(&controller->find_nearby, 0, sizeof(controller->find_nearby));
     memset(&controller->clear_heard, 0, sizeof(controller->clear_heard));
     controller->action_handler = NULL;
