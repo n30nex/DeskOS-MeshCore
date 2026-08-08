@@ -31,9 +31,9 @@ RC2 includes the complete 1.0 product plus:
 
 The retained product includes Home and core navigation; Public/channel and
 direct messaging; contacts, Nodes, Finder, PATH/Ping/TRACE; repeater/room
-administration; Map/location; Wi-Fi and radio/device settings; conditional
-SD-primary retained history with visible live-only fallback; diagnostics; and opt-in
-Observer/MQTT.
+administration; Map/location; Wi-Fi and radio/device settings; diagnostics;
+and opt-in Observer/MQTT. It uses conditional SD-primary retained history with
+visible live-only fallback.
 
 If prepared SD storage is unavailable, DeskOS does not silently redirect
 retained history to default NVS.
