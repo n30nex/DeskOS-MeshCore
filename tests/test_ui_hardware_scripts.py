@@ -737,7 +737,7 @@ def test_scroll_probe_ignores_normal_power_on_history_but_rejects_crash_like_res
     assert scroll_probe_d1l.event_failed(event) is True
 
 
-def test_active_release_docs_require_reduced_bounded_gate_without_soak():
+def test_active_release_docs_require_public_product_assets_without_lab_inputs():
     release_docs = [
         (ROOT / rel).read_text(encoding="utf-8").split("## Historical", 1)[0]
         for rel in (
@@ -752,18 +752,18 @@ def test_active_release_docs_require_reduced_bounded_gate_without_soak():
     )
     active = "\n".join(release_docs)
 
-    assert "Four sources match final candidate" in active
-    assert "`bounded_gate_without_soak_or_duration_requirement`" in active
-    assert "No soak" in active
+    assert "firmware/meshcore_deskos_d1l.bin" in active
+    assert "deskos_sd_bridge.ino.uf2" in active
+    assert "START_HERE.md" in active
     assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in active
-    assert "ID_VENDOR_ID=1a86" in active
-    assert "ID_MODEL_ID=7523" in active
+    assert "PEER_STATUS" not in active
+    assert "ADMIN_PASSWORD_FILE" not in active
     assert "100-cycle" not in active
     assert "500-cycle tab-abuse" not in active
     assert "500-cycle tab abuse" not in active
 
 
-def test_active_release_docs_keep_ui_in_scope_without_an_extra_gate():
+def test_active_release_docs_keep_ui_in_normal_product_use():
     roadmap = (ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8").split(
         "## Historical", 1
     )[0]
@@ -774,9 +774,10 @@ def test_active_release_docs_keep_ui_in_scope_without_an_extra_gate():
     workflow = (ROOT / ".github/workflows/d1l-ci.yml").read_text(encoding="utf-8")
 
     assert "D1L board, display, touch, backlight, Home, and core navigation" in scope
-    assert "| R1 | Freeze exact main package |" in roadmap
-    assert "| R6 | Aggregate and release |" in roadmap
-    assert "No timed idle, endurance, traffic, listening, or soak gate" in test_plan
+    assert "| R1 | End-user package |" in roadmap
+    assert "| R6 | Stable publication |" in roadmap
+    assert "not a public release" in test_plan
+    assert "requirement" in test_plan
     assert "--release-profile core_1_0" in workflow
 
 

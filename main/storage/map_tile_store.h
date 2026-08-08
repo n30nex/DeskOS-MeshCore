@@ -19,7 +19,7 @@
 #define D1L_MAP_TILE_DOWNLOAD_MAX_BYTES (196U * 1024U)
 #define D1L_MAP_TILE_SOURCE_ID "openstreetmap-standard"
 #define D1L_MAP_TILE_SOURCE_URL_TEMPLATE "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-#define D1L_MAP_TILE_USER_AGENT "MeshCore-DeskOS-D1L/1.0 (+https://github.com/n30nex/SIGUI)"
+#define D1L_MAP_TILE_USER_AGENT "MeshCore-DeskOS-D1L/1.0 (+https://github.com/n30nex/DeskOS-MeshCore)"
 #define D1L_MAP_TILE_ATTRIBUTION "\xC2\xA9 OpenStreetMap contributors"
 #define D1L_MAP_TILE_LICENSE_URL "https://www.openstreetmap.org/copyright"
 #define D1L_MAP_TILE_MIN_CACHE_DAYS 7U

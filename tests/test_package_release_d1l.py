@@ -234,7 +234,7 @@ def fake_source_identity(commit: str) -> dict:
     return {
         "commit": commit,
         "created": "2026-07-13T18:01:56Z",
-        "repository": "https://github.com/n30nex/SIGUI",
+        "repository": "https://github.com/n30nex/DeskOS-MeshCore",
         "submodules": [
             {
                 "path": "third_party/MeshCore",

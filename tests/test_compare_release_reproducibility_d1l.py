@@ -482,7 +482,7 @@ def build_pair(
         lambda _root, _expected: identity,
     )
     monkeypatch.setenv("GITHUB_SHA", COMMIT)
-    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/SIGUI")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/DeskOS-MeshCore")
     monkeypatch.setenv("GITHUB_WORKFLOW", "d1l-ci")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")

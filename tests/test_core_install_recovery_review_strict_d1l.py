@@ -53,7 +53,7 @@ def write_package(root: Path) -> Path:
             "sha": COMMIT,
             "run_id": RUN_ID,
             "run_attempt": RUN_ATTEMPT,
-            "repository": "n30nex/SIGUI",
+            "repository": "n30nex/DeskOS-MeshCore",
         },
         "scripts": {
             "shared_project_flash": "flash_project.py",

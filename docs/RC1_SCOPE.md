@@ -1,24 +1,24 @@
-# DeskOS 1.0 RC1 scope
+# DeskOS 1.0 product scope
 
-RC1 is the compiled and packaged `core_1_0` release profile. Source feature
-flags and the generated package manifest remain the compiled truth; this file
-is their concise human contract.
+DeskOS 1.0 is the compiled and packaged `core_1_0` release profile. Source
+feature flags and the generated package manifest remain the runtime truth;
+this file is their concise human contract.
 
-| State | Surface | RC1 contract |
+| State | Surface | 1.0 contract |
 |---|---|---|
-| Included and release-gated | D1L board, display, touch, backlight, Home, and core navigation | The exact Actions firmware and package must expose the bounded touch-first product surface. |
-| Included and release-gated | Public/channel messaging, DM, contacts, Nodes, packets, ACK, PATH, Ping, route, and signal | Final sources prove the required controlled RF and protocol behavior on the exact candidate. |
-| Included and release-gated | Radio settings, identity, multichannel management, controlled administration, user trace, and mutable terminal actions | Unsupported or unauthorized operations fail closed before side effects. |
-| Included and release-gated | User Wi-Fi, configured location, Map, provider attribution, current diagnostics, and opt-in observer/MQTT | The final Map source proves an authorized fresh download and SD cache revisit. |
+| Included | D1L board, display, touch, backlight, Home, and core navigation | The dark 480x480 touch UI uses Home, Channels, Contacts, Map, and Settings as its primary navigation. |
+| Included | Public/channel messaging, DM, contacts, Nodes, packets, ACK, PATH, Ping, route, and signal | These work on the user's own compatible MeshCore network; no project-operated peer is required. |
+| Included | Radio settings, identity, multichannel management, administration, user trace, and terminal actions | Remote actions still require the permissions and confirmations shown by the product. |
+| Included | User Wi-Fi, configured location, Map, provider attribution, diagnostics, and opt-in observer/MQTT | Mesh messaging does not require Wi-Fi. Online Map download uses the user's configured Wi-Fi and provider; cached maps remain available offline. |
 | Included but degraded/conditional | SD-primary retained history and Map cache | With the paired bridge, prepared FAT32 card, and authorized provider, SD is primary. Without required media, the UI reports live-only operation and does not silently redirect retained history into default NVS. The firmware never formats the card. |
 | Included but degraded/conditional | Location and time | The D1L has no onboard GPS. Location is configured or obtained from supported signed data; age and time claims remain unavailable until a trusted source exists. |
 | Included but degraded/conditional | Installation and recovery | Normal host-side USB installation is supported. The package includes a checksum-verified host recovery image; recovery is explicit and may overwrite retained state. |
-| Deferred from RC1 | BLE companion transport | Continue only as reviewed RC2 work. |
-| Deferred from RC1 | Signed OTA, update, rollback, and on-device recovery | USB remains the RC1 installation and recovery path. |
-| Deferred from RC1 | Advanced QR/contact/channel sharing and emoji work | No deferred sharing polish is an RC1 gate. |
-| Deferred from RC1 | Broad UI architecture refactoring | RC1 changes stay bounded to observed release defects. |
-| Deferred from RC1 | Telemetry expansion beyond current release diagnostics | Existing release diagnostics are the RC1 boundary. |
-| Deferred from RC1 | Feature additions discovered during qualification | Record them in `RC2_BACKLOG.md` unless they are a reproducible RC1 defect. |
+| Deferred from 1.0 | BLE companion transport | Continue only as later reviewed work. |
+| Deferred from 1.0 | Signed OTA, update, rollback, and on-device recovery | USB remains the 1.0 installation and recovery path. |
+| Deferred from 1.0 | Advanced QR/contact/channel sharing and emoji work | These are not part of the 1.0 product. |
+| Deferred from 1.0 | Broad UI architecture refactoring | The current working UI is the 1.0 product surface. |
+| Deferred from 1.0 | Telemetry expansion beyond current diagnostics | Existing diagnostics are the 1.0 boundary. |
+| Deferred from 1.0 | New features discovered during release work | Record them in `RC2_BACKLOG.md` unless they are a reproducible 1.0 defect. |
 
 Changing this contract requires explicit maintainer approval and matching
 changes to the compiled release profile and package contract.

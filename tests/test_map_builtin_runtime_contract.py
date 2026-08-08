@@ -23,7 +23,7 @@ def test_builtin_openstreetmap_source_is_fixed_identified_and_attributed():
     ) in header
     assert (
         'D1L_MAP_TILE_USER_AGENT '
-        '"MeshCore-DeskOS-D1L/1.0 (+https://github.com/n30nex/SIGUI)"'
+        '"MeshCore-DeskOS-D1L/1.0 (+https://github.com/n30nex/DeskOS-MeshCore)"'
     ) in header
     assert 'D1L_MAP_TILE_LICENSE_URL "https://www.openstreetmap.org/copyright"' in header
     assert 'D1L_MAP_TILE_ATTRIBUTION "\\xC2\\xA9 OpenStreetMap contributors"' in header

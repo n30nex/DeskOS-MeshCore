@@ -1,4 +1,8 @@
-# DeskOS D1L RC1 test plan
+# DeskOS D1L developer checks
+
+This file is for development and CI only. It is not a public release
+requirement, is not included in the production package, and must not turn an
+end-user firmware release into a lab campaign.
 
 ## Layer A — change-local tests
 
@@ -23,14 +27,11 @@ A rerun is allowed only after a patch made for a failure, for a failed or
 cancelled infrastructure job, or for a documented flaky external dependency.
 Do not rerun a green qualification for confidence.
 
-## Layer C — final exact-candidate hardware pass
+No controlled peer, admin password, timed soak, endurance loop, fuzz rerun, or
+evidence aggregate is a 1.0 publication requirement. The attached D1L is used
+once through the documented normal install and ordinary product UI.
 
-Run the four RC1 sources once against the frozen exact `main` candidate: one
-non-erasing flash source, one RF source, one protocol source, and one Map
-source. Aggregate those sources and run `rc1_release_gate_audit_d1l.py`.
-
-No timed idle, endurance, traffic, listening, or soak gate is part of RC1.
-
-A new test is allowed only when it reproduces an observed defect, fails before
-the fix, passes after the fix, protects a user-visible RC1 contract, and is
-smaller than the protected code path where reasonably possible.
+A new developer check is allowed only when it reproduces an observed defect,
+fails before the fix, passes after the fix, protects a user-visible 1.0
+contract, and is smaller than the protected code path where reasonably
+possible.

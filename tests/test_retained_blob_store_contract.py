@@ -311,4 +311,4 @@ def test_release_docs_define_sd_primary_without_history_nvs_fallback():
     assert "does not silently redirect history into default NVS" in user_guide
     assert "Degraded mode keeps basic live RF Public/channel/DM chat" in user_guide
     assert "firmware never formats it" in limitations
-    assert "without silent default-NVS fallback" in checklist
+    assert "without silent default-NVS fallback" in " ".join(checklist.split())

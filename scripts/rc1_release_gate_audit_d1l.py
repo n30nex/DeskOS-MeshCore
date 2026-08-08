@@ -538,7 +538,7 @@ def rc1_user_install_contract(
     except (OSError, UnicodeError):
         return False
     required_guide_text = (
-        "# DeskOS D1L 1.0 RC1 Candidate - Windows and Linux Install",
+        "# DeskOS D1L 1.0 - Windows and Linux Install",
         str(manifest.get("firmware_commit")),
         "GitHub Actions run and attempt: see `manifest.json`",
         "prepare_sd_card.ps1",

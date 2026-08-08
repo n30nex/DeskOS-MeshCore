@@ -337,7 +337,7 @@ def validate_package_review_inputs(
         and exact_sha(workflow.get("sha")) == commit
         and str(workflow.get("run_id")) == run_id
         and str(workflow.get("run_attempt")) == run_attempt
-        and workflow.get("repository") == "n30nex/SIGUI"
+        and workflow.get("repository") == "n30nex/DeskOS-MeshCore"
         and scripts == {
             "shared_project_flash": "flash_project.py",
             "serial_target_resolver": "d1l_serial_target.py",

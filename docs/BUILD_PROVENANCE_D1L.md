@@ -3,7 +3,7 @@
 ## SIGUI D1L package v1
 
 Build-type URI:
-`https://github.com/n30nex/SIGUI/blob/main/docs/BUILD_PROVENANCE_D1L.md#sigui-d1l-package-v1`
+`https://github.com/n30nex/DeskOS-MeshCore/blob/main/docs/BUILD_PROVENANCE_D1L.md#sigui-d1l-package-v1`
 
 This build type runs `scripts/package_release_d1l.py` from the exact SIGUI source
 revision. It copies the already-built ESP32 firmware and optional RP2040 artifacts
@@ -14,7 +14,7 @@ The complete `externalParameters` schema has exactly three string fields:
 
 | Field | Required value |
 | --- | --- |
-| `sourceRepository` | `https://github.com/n30nex/SIGUI` |
+| `sourceRepository` | `https://github.com/n30nex/DeskOS-MeshCore` |
 | `sourceRevision` | Exact 40-character lowercase Git commit |
 | `releaseProfile` | `d1l` |
 
@@ -49,7 +49,7 @@ python scripts/provenance_d1l.py --root . --source-sha <sha> \
 ## Local builder v1
 
 Builder URI:
-`https://github.com/n30nex/SIGUI/blob/main/docs/BUILD_PROVENANCE_D1L.md#local-builder-v1`
+`https://github.com/n30nex/DeskOS-MeshCore/blob/main/docs/BUILD_PROVENANCE_D1L.md#local-builder-v1`
 
 When no complete GitHub Actions run identity is present, the same packaging script
 is the self-asserted local builder. GitHub-hosted runs use

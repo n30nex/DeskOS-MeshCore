@@ -1,11 +1,12 @@
 # DeskOS RC2 backlog
 
-This is the only future-work backlog. None of these items is an RC1 gate.
+This is the only future-work backlog. None of these items is part of the 1.0
+product or publication checklist.
 
 ## BLE companion completion
 
-Review and rebase the existing draft PR only after RC1; do not merge it during
-RC1 closure.
+Review and rebase the existing draft PR only after 1.0; do not merge it during
+the 1.0 release.
 
 ## Signed update, rollback, and recovery
 
@@ -31,8 +32,8 @@ Track non-blocking navigation, visual, Finder, Ping, Trace, and settings polish.
 
 ## Longer reliability qualification
 
-Run post-RC1 endurance and traffic campaigns as product-development evidence,
-not retroactive RC1 gates.
+Run post-1.0 endurance and traffic campaigns as later product-development work,
+not retroactive publication requirements.
 
 ## Technical debt moved from RC1
 

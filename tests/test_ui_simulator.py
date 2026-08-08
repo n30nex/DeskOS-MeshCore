@@ -2420,8 +2420,8 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     assert "focused source checks" in active_test_plan
     assert "simulator images" in active_test_plan
     assert "alone do not pass" in active_test_plan
-    assert "| D0 | Authority reset |" in active_roadmap
-    assert "| R6 | Aggregate and release |" in active_roadmap
-    assert "`one_bounded_physical_receipt`" in active_checklist
-    assert "`authorized_map_download_and_cache_revisit`" in active_checklist
-    assert "No soak is required" in active_checklist
+    assert "| D0 | Product scope |" in active_roadmap
+    assert "| R6 | Stable publication |" in active_roadmap
+    assert "RP2040 UF2" in " ".join(active_checklist.split())
+    assert "`v1.0.0`" in active_checklist
+    assert "not release deliverables" in " ".join(active_checklist.split())

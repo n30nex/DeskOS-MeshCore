@@ -45,7 +45,7 @@ if __package__:
         canonicalize_release_report as canonicalize_signed_advert_report,
         validate_completed_report as validate_signed_advert_report,
     )
-    from .provenance_d1l import write_package_provenance
+    from .provenance_d1l import CANONICAL_REPOSITORY, write_package_provenance
     from .sbom_d1l import (
         discover_source_identity,
         exact_sha,
@@ -63,7 +63,10 @@ else:
         canonicalize_release_report as canonicalize_signed_advert_report,
         validate_completed_report as validate_signed_advert_report,
     )
-    from provenance_d1l import write_package_provenance  # type: ignore[no-redef]
+    from provenance_d1l import (  # type: ignore[no-redef]
+        CANONICAL_REPOSITORY,
+        write_package_provenance,
+    )
     from sbom_d1l import (  # type: ignore[no-redef]
         discover_source_identity,
         exact_sha,
@@ -1667,9 +1670,9 @@ def write_production_user_install_bundle(
 
     guide = package_dir / "START_HERE.md"
     guide.write_text(
-        f"""# DeskOS D1L 1.0 RC1 Candidate - Windows and Linux Install
+        f"""# DeskOS D1L 1.0 - Windows and Linux Install
 
-This is the DeskOS D1L 1.0 RC1 candidate package:
+This is the DeskOS D1L 1.0 production package:
 
 - firmware commit: `{source_commit}`
 - GitHub Actions run and attempt: see `manifest.json` and `README_RELEASE.md`
@@ -1804,12 +1807,12 @@ to:
 6. review Public, #bot, and #test before finishing.
 
 The normal dock is Home, Channels, Contacts, Map, and Settings. DeskOS does not
-ship a local identity, position, nearby-node list, or qualification data; those
+ship a local identity, position, nearby-node list, or sample mesh data; those
 are established only from your setup and real MeshCore traffic.
 
 ## Reporting a problem
 
-Open https://github.com/n30nex/SIGUI/issues/new. Include commit
+Open https://github.com/n30nex/DeskOS-MeshCore/issues/new. Include commit
 `{source_commit}`, your operating system, and the operation that failed. Do not
 post private messages, Wi-Fi passwords, or credentials.
 """,
@@ -2860,7 +2863,7 @@ def write_supported_features(
             "history is not redirected into default NVS."
         )
     path.write_text(
-        f"""# MeshCore DeskOS D1L 1.0 RC1 Candidate Supported Features
+        f"""# MeshCore DeskOS D1L 1.0 Supported Features
 
 Release profile: `{CORE_RELEASE_PROFILE}`
 
@@ -2884,7 +2887,7 @@ SD history mode: `{sd_history_mode}`
 
 Unavailable capabilities are intentionally hidden or rejected before side
 effects. BLE companion transport, signed update/recovery, advanced QR sharing,
-and the on-device USB recovery service are not part of the RC1 candidate. The
+and the on-device USB recovery service are not part of DeskOS 1.0. The
 package still contains a checksum-verified host-side factory recovery image.
 
 ## Current known limitations
@@ -2893,12 +2896,12 @@ package still contains a checksum-verified host-side factory recovery image.
   primary and missing/unusable media produces visible live-only operation.
 - Signed OTA/SD update and the on-device USB recovery service are unavailable.
   A checksum-verified host-side factory recovery image remains in the package.
-- This package contains the bounded RC1 candidate product surface only.
+- This package contains the production DeskOS 1.0 product surface only.
 
 ## Support and reporting
 
 Report defects with the firmware commit, GitHub Actions run, and run attempt
-shown above at https://github.com/n30nex/SIGUI/issues/new.
+shown above at https://github.com/n30nex/DeskOS-MeshCore/issues/new.
 
 Use USB installation and recovery only. Never format an SD card on the device.
 """,
@@ -2923,7 +2926,7 @@ def write_core_install_recovery_guide(
     docs_dir.mkdir(parents=True, exist_ok=True)
     path = docs_dir / "CORE_INSTALL_RECOVERY.md"
     path.write_text(
-        f"""# MeshCore DeskOS D1L 1.0 RC1 Candidate Install and Recovery
+        f"""# MeshCore DeskOS D1L 1.0 Install and Recovery
 
 Firmware commit: `{source_commit}`
 
@@ -2948,7 +2951,7 @@ SD history mode: `{sd_history_mode}`
 5. The generated entrypoint verifies every file against `SHA256SUMS.txt` and
    rejects missing, extra, linked, duplicate, or mismatched files.
 6. Read `SUPPORTED_FEATURES.md`. BLE companion transport, signed OTA/recovery,
-   and advanced QR sharing are unavailable in the RC1 candidate.
+   and advanced QR sharing are unavailable in DeskOS 1.0.
 7. Never format an SD card on the device.
 8. Prepare a FAT32 card with `scripts/prepare_deskos_sd.py`; the checked-in
    payload under `sdcard/` includes the required authorized NRCan provider
@@ -2995,7 +2998,7 @@ $OperatorPort = Read-Host "Enter the operator-confirmed D1L COM port"
 & (Join-Path $PackageRoot "flash_full_8mb.ps1") -Port $OperatorPort
 ```
 
-The RC1 candidate supports USB install/recovery only; it does not support OTA
+DeskOS 1.0 supports USB install/recovery only; it does not support OTA
 or signed SD update.
 """,
         encoding="ascii",
@@ -3068,7 +3071,7 @@ def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -
             )
         )
         readme.write_text(
-            f"""# {PROJECT} 1.0 RC1 Candidate Package
+            f"""# {PROJECT} 1.0 Production Package
 
 Package: `{package_name}`
 
@@ -3084,7 +3087,7 @@ SD history mode: `{sd_mode}`
 
 {sd_note}
 
-Start with `START_HERE.md` for the complete Windows or Linux candidate install:
+Start with `START_HERE.md` for the complete Windows or Linux install:
 prepare the FAT32 card, flash the RP2040 bridge, and flash the ESP32 GUI.
 
 `SUPPORTED_FEATURES.md` is the authoritative package capability summary.
@@ -3099,7 +3102,7 @@ prepare the FAT32 card, flash the RP2040 bridge, and flash the ESP32 GUI.
 
 Unavailable means hidden or rejected before side effects. BLE companion
 transport, signed OTA/recovery, advanced QR sharing, and the on-device USB
-recovery service are not part of the RC1 candidate. The package still
+recovery service are not part of DeskOS 1.0. The package still
 contains a checksum-verified host-side factory recovery image.
 
 ## SHA-256 values
@@ -3174,7 +3177,7 @@ copying:
 Read `docs/CORE_INSTALL_RECOVERY.md` before recovery. The full 8MB recovery image
 requires an explicit typed confirmation and can overwrite retained state.
 Recovery remains Windows-only; no POSIX full-flash wrapper is included.
-USB install/recovery is the only supported update path in the RC1 candidate.
+USB install/recovery is the only supported update path in DeskOS 1.0.
 
 Never format an SD card on the device.
 
@@ -3188,7 +3191,7 @@ Never format an SD card on the device.
 
 ## Support and reporting
 
-Report defects at https://github.com/n30nex/SIGUI/issues/new. Include firmware
+Report defects at https://github.com/n30nex/DeskOS-MeshCore/issues/new. Include firmware
 commit `{manifest['firmware_commit']}`, Actions run
 `{manifest['actions_run']}`, run attempt
 `{manifest['actions_run_attempt']}`, this package name, and what went wrong.
@@ -3292,7 +3295,7 @@ and otherwise retains ESP-IDF rollback behavior. Never format the SD card.
 ## Checksums and reporting
 
 Verify `SHA256SUMS.txt` before flashing. Report defects at
-https://github.com/n30nex/SIGUI/issues/new with firmware commit
+https://github.com/n30nex/DeskOS-MeshCore/issues/new with firmware commit
 `{manifest['firmware_commit']}`, Actions run `{manifest['actions_run']}`,
 attempt `{manifest['actions_run_attempt']}`, and the relevant device receipt.
 
@@ -3448,9 +3451,10 @@ def create_release_package(
                 f"{profile_label} package requires the exact positive GitHub Actions "
                 "run attempt"
             )
-        if workflow.get("repository") != "n30nex/SIGUI":
+        if workflow.get("repository") != CANONICAL_REPOSITORY:
             raise ValueError(
-                f"{profile_label} package requires the canonical n30nex/SIGUI "
+                f"{profile_label} package requires the canonical "
+                f"{CANONICAL_REPOSITORY} "
                 "Actions repository"
             )
     meshcore_conformance = copy_meshcore_conformance_evidence(
@@ -3635,6 +3639,7 @@ def create_release_package(
                 "sd_history_mode": sd_history_mode,
                 "sd_history_state": capability_truth["sd_history_state"],
                 "storage_authority": capability_truth["storage_authority"],
+                "release_status": "production",
                 "full_feature_release_ready": False,
                 "install_recovery_guide": {
                     "schema": CORE_INSTALL_CONTRACT_SCHEMA,
