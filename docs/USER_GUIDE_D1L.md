@@ -1,18 +1,14 @@
-# MeshCore DeskOS D1L 1.0 User Guide
+# MeshCore DeskOS D1L 1.2 User Guide
 
 This guide covers the production `core_1_0` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-## Current 1.0 / RC1 issues
-
-The shipped baseline has two major UI defects. Selecting **#Public** can stop
-at a `channels queued` toast without opening the chat (#320). **Contacts** lacks
-mobile-style search, sorting and direct selected-node actions for status,
-repeater login and companion DM (#321). The complete corrective parity release
-is 1.2 / RC2 under #322. See
-[`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) before relying on those flows.
+DeskOS 1.2/RC2 corrects the RC1 channel-selection and Contacts navigation
+defects. The remaining intentional limits and mobile-to-D1L adaptations are in
+[`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) and
+[`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md).
 
 ## First start
 
@@ -41,7 +37,7 @@ settings. A factory-fresh device opens the first-start wizard:
    **Finish setup**.
 
 Wi-Fi remains optional for offline MeshCore use. The prepared FAT32 card and
-NRCan provider manifest are required for the complete 1.0 setup.
+NRCan provider manifest are required for the complete 1.2 setup.
 
 The dock is **Home**, **Channels**, **Contacts**, **Map**, and **Settings**.
 Home is a summary page; lists and long pages scroll vertically.
@@ -58,12 +54,11 @@ reseeded.
 
 ## Messages, channels and direct messages
 
-The Public channel is always configured. In the shipped 1.0/RC1 UI, selecting
-it may hit defect #320 and fail to open its chat after showing `channels
-queued`. DeskOS also contains custom-channel controls to:
-create or import, select, enable, rename, make default and remove with local
-confirmation. QR sharing is intentionally absent from 1.0; URI import remains
-available.
+The Public channel is always configured. Open **Channels** and tap Public or
+any other enabled channel to select it and immediately open its conversation.
+Use the channel controls to create or import, select, enable, rename, make
+default, and remove with local confirmation. Rich on-device QR sharing is
+deferred to 1.5/RC3; URI import remains available.
 
 Public and channel views support send, receive, retained history, search and
 unread state. Public display names have the `sender_name_unverified` boundary.
@@ -78,13 +73,18 @@ Opening or refreshing a thread does not silently retry a failed message.
 ## Contacts, Finder, Ping and TRACE
 
 Contacts can be imported from the USB console with
-`contacts import <meshcore-uri>`. The shipped touchscreen contains rename,
-favorite, mute and confirmed-removal functions, but the overall tab is not yet
-mobile-app equivalent: it lacks usable search, sorting and clear direct actions
-on the selected node. Contact and channel QR sharing is not part of 1.0.
+`contacts import <meshcore-uri>`. The touchscreen list shows every saved
+contact. Use **Search** to match name, role, fingerprint, or public key, and use
+**Sort** to cycle **Recent**, **A-Z**, **Role**, and **Signal**. Selecting a row
+shows direct **Message** and **Manage** actions alongside rename, favorite,
+mute, and confirmed removal.
 
-The underlying 1.0 functions include the following, but #321 tracks the missing
-clean selected-node workflow needed to reach and use them consistently:
+**Message** opens the existing DM composer/thread for a verified Chat or
+Companion contact. **Manage** opens node detail for a Repeater or Room and
+provides its status/login workflow even when the contact has no current
+heard-node row. Rich contact/channel QR sharing remains 1.5/RC3 work.
+
+The same Contacts area provides:
 
 - **Find** sends a zero-hop discovery request and lists returned full keys,
   role and there/back SNR. Finder results are unverified until a signed advert
@@ -148,10 +148,9 @@ tiles remain usable and RF chat continues.
 ## Repeater and room administration
 
 The administration capability uses an exact verified Repeater or Room key and
-a masked password. The current Contacts UI does not provide the required clean
-selected-node entry flow; that defect is #321. Where the action is reachable,
-repeater and room logins may request empty-password negotiation; the peer
-decides whether to accept it and
+a masked password. Select the saved contact, choose **Manage**, then open the
+Admin action. Repeater and room logins may request empty-password negotiation;
+the peer decides whether to accept it and
 returns the session permissions (guest, read-only, write or admin). Leaving,
 logging out or switching targets clears volatile session authority.
 
@@ -183,7 +182,7 @@ reset state. Retained history is not redirected there.
 
 - The firmware never formats an SD card.
 - Prepare a 32GB-or-larger FAT32 card with the checked-in
-  `scripts/prepare_deskos_sd.py` workflow. The 1.0 first-start flow requires
+  `scripts/prepare_deskos_sd.py` workflow. The 1.2 first-start flow requires
   the authorized NRCan provider manifest for background/offline Map download.
 - Foreign, non-FAT32 or unmountable media is preserved and reported.
 - A missing/unusable card activates a prominent degraded notice.
@@ -205,9 +204,9 @@ Observer is optional and uses `mqtts://`, TLS, QoS 1 and a bounded queue. It
 may publish device health and explicitly enabled location state. It never
 publishes message text, keys, contacts or forwarded RF traffic.
 
-## Not included in 1.0
+## Deferred to 1.5 / RC3
 
-DeskOS D1L 1.0 hides and rejects:
+DeskOS D1L 1.2 does not expose:
 
 - BLE companion pairing and transport;
 - contact/channel QR sharing;
@@ -247,9 +246,26 @@ local screen navigation: it wakes the display and clears the ordinary
 tap-to-unlock idle cover before showing the requested page. It does not bypass
 first-start setup, protected actions, or confirmation prompts.
 
+DeskOS 1.2 also provides a read-only production framebuffer export for support
+and documentation. It copies the current 480x480 RGB565 screen only; it cannot
+transmit RF, format storage, or enable developer/qualification behavior. From a
+repository checkout with `pyserial` and Pillow installed:
+
+```sh
+python scripts/ui_capture_d1l.py \
+  --port /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0 \
+  --prep-command "ui tab home" \
+  --png-out deskos-home.png \
+  --out deskos-home.json
+```
+
+Valid tab names include `home`, `messages`, `nodes`, `map`, and `settings`.
+Review the screen before capture: locations may be shown, but do not publish
+private-message content, passwords, keys, or admin credentials.
+
 ## Installation
 
-Use the published DeskOS D1L 1.0 download and follow its `START_HERE.md`.
+Use the published DeskOS D1L 1.2 download and follow its `START_HERE.md`.
 On Linux, select the D1L only through the stable by-id path:
 
 ```text

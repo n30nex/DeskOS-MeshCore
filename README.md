@@ -1,81 +1,90 @@
 # MeshCore DeskOS for SenseCAP Indicator D1L
 
-DeskOS **1.0 / RC1** is the current production `core_1_0` firmware for the
-SenseCAP Indicator D1L. GitHub Releases provides the complete user package,
-standalone ESP32 BIN files, the RP2040 UF2, checksums, and installation
-instructions.
+DeskOS **1.2 / RC2** is the corrective `core_1_0` release candidate for the
+SenseCAP Indicator D1L. The latest published baseline remains **1.0 / RC1**
+until the RC2 exact-device capture and public artifact steps are complete.
 
-DeskOS is the on-device MeshCore interface for the SenseCAP Indicator D1L. The
-public 1.0 binaries use the bounded `core_1_0` profile built and packaged by
-GitHub Actions.
+DeskOS is a standalone, dark, touch-first MeshCore client. Public binaries are
+built and packaged by GitHub Actions. GitHub Releases provides the complete
+user package, standalone ESP32 BIN files, the RP2040 UF2, checksums, and
+installation instructions.
 
 ## Release train
 
 | Release | Purpose | State |
 |---|---|---|
-| **1.0 / RC1** | Current public baseline, including the `v1.0.1` packaging correction | Shipped |
-| **1.2 / RC2** | Correct every current product defect and achieve MeshCore Android/iOS form-and-function parity on the D1L | In progress: [#322](https://github.com/n30nex/DeskOS-MeshCore/issues/322) |
-| **1.5 / RC3** | Fold deferred features, architecture work and technical debt into the corrected product | Planned after RC2 |
+| **1.0 / RC1** | Published baseline, including the `v1.0.1` packaging correction | Shipped/historical |
+| **1.2 / RC2** | Correct channel selection and Contacts, document mobile-to-D1L parity, add actual-device screenshots, and retain explicit update/fresh-install paths | Candidate implementation complete; device capture/publication in progress under [#322](https://github.com/n30nex/DeskOS-MeshCore/issues/322) |
+| **1.5 / RC3** | Fold deferred features, architecture work, localization, and technical debt into the corrected product | Planned after RC2 |
 
-## 1.0 / RC1 feature inventory
+## 1.2 / RC2 product
 
-These surfaces are present in the shipped product, but this list is not a
-claim of complete MeshCore mobile-app parity:
+RC2 includes the complete 1.0 product plus:
 
-- touch-first Home and core navigation;
-- Public and channel messaging, direct messages, contacts, Nodes, and packets;
-- truthful ACK, PATH, Ping, route, signal, radio, and identity behavior;
-- controlled repeater/room administration and user-authorized terminal actions;
-- configured location, Wi-Fi, Map download/cache behavior, and attribution;
-- conditional SD-primary retained history with visible live-only operation and
-  no default NVS history fallback when required media is unavailable; and
-- current release diagnostics and opt-in observer/MQTT behavior.
+- selecting Public or another enabled channel immediately opens its chat;
+- Contacts search across name, role, fingerprint, and key;
+- Recent, A-Z, Role, and Signal contact sorting;
+- direct Message and Manage actions for companion DMs and repeater/room detail,
+  status, and login; and
+- a read-only production framebuffer export for support and actual-device
+  documentation.
 
-The exact included, conditional, and deferred product contract is
-[`docs/RC1_SCOPE.md`](docs/RC1_SCOPE.md). The live parity ledger is
+The retained product includes Home and core navigation; Public/channel and
+direct messaging; contacts, Nodes, Finder, PATH/Ping/TRACE; repeater/room
+administration; Map/location; Wi-Fi and radio/device settings; conditional
+SD-primary history with visible live-only fallback; diagnostics; and opt-in
+Observer/MQTT.
+
+The exact product boundary is [`docs/RC2_SCOPE.md`](docs/RC2_SCOPE.md). The
+current mobile-to-D1L outcome matrix is
 [`docs/DESKOS_MESHCORE_FEATURE_PARITY.md`](docs/DESKOS_MESHCORE_FEATURE_PARITY.md).
 
-## Known 1.0 / RC1 issues
+## RC2 correction status
 
-- Selecting **#Public** can show `channels queued` without opening the chat;
-  tracked by [#320](https://github.com/n30nex/DeskOS-MeshCore/issues/320).
-- **Contacts** lacks the mobile-app search, sorting and direct selected-node
-  actions; tracked by [#321](https://github.com/n30nex/DeskOS-MeshCore/issues/321).
-- The wider navigation and functional parity correction is tracked by
-  [#322](https://github.com/n30nex/DeskOS-MeshCore/issues/322) for 1.2 / RC2.
+- The [#320](https://github.com/n30nex/DeskOS-MeshCore/issues/320)
+  channel-selection root cause is fixed in the RC2 candidate.
+- The [#321](https://github.com/n30nex/DeskOS-MeshCore/issues/321) Contacts
+  search/sort/action workflows are implemented in the RC2 candidate.
+- The full current mobile baseline and explicit D1L adaptations are recorded
+  under [#322](https://github.com/n30nex/DeskOS-MeshCore/issues/322).
+- Exact Actions build, attached-device use, screenshots, and publication remain
+  before those issues close.
 
 ## Actual-device screenshots
 
-Fresh 480x480 screenshots from an actual D1L running the exact production
-candidate are a **1.2 / RC2 release requirement**, tracked by
-[#323](https://github.com/n30nex/DeskOS-MeshCore/issues/323). The shipped 1.0
-production firmware does not expose its framebuffer over serial because its
-qualification hooks are disabled. Simulator renders are therefore not shown
-here as if they were device captures. RC2 must add a read-only production
-export and replace this notice with current Home, Channels, Contacts, Map and
-Settings images captured over the verified serial route.
+RC2 now contains the minimal read-only production serial framebuffer export.
+Fresh 480x480 Home, Channels, Contacts, Map, and Settings images from the
+attached D1L will replace this notice before publication and close
+[#323](https://github.com/n30nex/DeskOS-MeshCore/issues/323). Locations may be
+visible; private messages, passwords, keys, and admin credentials will not be
+published.
 
 ## Deferred to 1.5 / RC3
 
-BLE companion transport, signed OTA/update/recovery, richer QR/contact/channel
-sharing, broad UI architecture work, and telemetry expansion follow the 1.2 /
-RC2 corrective release. They are tracked in
+BLE companion transport, signed OTA/update/recovery, richer QR/deep-link
+sharing, localization expansion, broad UI architecture work, and optional
+telemetry expansion follow RC2. They are tracked in
 [`docs/RC3_BACKLOG.md`](docs/RC3_BACKLOG.md).
 
 ## Install and use
 
-Download the published `v1.0.1` package from the
-[GitHub Releases page](https://github.com/n30nex/DeskOS-MeshCore/releases), extract it
-fully, and follow its `START_HERE.md`. The repository copies of the
-[`user guide`](docs/USER_GUIDE_D1L.md) and
-[`SD preparation guide`](docs/D1L_SD_CARD_GUIDED_INSTALL.md) explain the same
-product behavior. The firmware never formats an SD card.
+Until RC2 publication, download the published `v1.0.1` package from the
+[GitHub Releases page](https://github.com/n30nex/DeskOS-MeshCore/releases),
+extract it fully, and follow its `START_HERE.md`. The repository
+[`user guide`](docs/USER_GUIDE_D1L.md) describes the RC2 candidate; the
+[`SD preparation guide`](docs/D1L_SD_CARD_GUIDED_INSTALL.md) applies to both
+lines. The firmware never formats an SD card.
 
-The ZIP is the recommended download because it presents two explicit paths:
-an app BIN update for an existing DeskOS device, and a full clean 8 MB BIN for
-a blank or non-DeskOS device. The same complete RP2040 UF2 is used with either
-path. Standalone BIN and UF2 assets are also published for experienced
-installers.
-Maintainer publication steps are in the
-[1.0 release runbook](docs/RC1_RELEASE_EXECUTION_D1L.md); end users should use
-`START_HERE.md` from the downloaded package instead.
+Every release package has two explicit ESP32 paths:
+
+- **Update:** the app BIN for an existing DeskOS installation; it preserves
+  unrelated retained flash regions.
+- **Fresh clean install:** the full 8 MB BIN at `0x0` for a blank device,
+  another firmware, or an intentional clean start.
+
+The same complete RP2040 SD-bridge UF2 is used with either ESP32 path because a
+UF2 copy installs the full RP2040 image. Standalone BIN and UF2 assets are also
+published for experienced installers.
+
+The [historical 1.0 release runbook](docs/RC1_RELEASE_EXECUTION_D1L.md) is for
+maintainers. End users should use `START_HERE.md` from the downloaded package.

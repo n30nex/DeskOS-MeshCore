@@ -3,13 +3,14 @@
 ## Current release truth
 
 - [`AGENTS.md`](../AGENTS.md) — repository operating rules.
-- [`RC1_SCOPE.md`](RC1_SCOPE.md) — compiled `core_1_0` product contract.
+- [`RC2_SCOPE.md`](RC2_SCOPE.md) — current corrective `core_1_0` product contract.
+- [`RC1_SCOPE.md`](RC1_SCOPE.md) — historical 1.0/RC1 product contract.
 - [`ROADMAP.md`](ROADMAP.md) — shipped 1.0/RC1, corrective 1.2/RC2 and deferred
   1.5/RC3 in one release queue.
 - [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md) —
   live Android/iOS parity ledger and 1.2/RC2 gate.
-- [`RC1_RELEASE_EXECUTION_D1L.md`](RC1_RELEASE_EXECUTION_D1L.md) — maintainer
-  artifact and publication procedure.
+- [`RC1_RELEASE_EXECUTION_D1L.md`](RC1_RELEASE_EXECUTION_D1L.md) — historical
+  1.0 maintainer publication record.
 - [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — completed 1.0/RC1 record and
   the 1.2/RC2 publication gate.
 
