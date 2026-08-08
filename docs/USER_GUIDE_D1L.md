@@ -5,6 +5,15 @@ history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
+## Current 1.0 / RC1 issues
+
+The shipped baseline has two major UI defects. Selecting **#Public** can stop
+at a `channels queued` toast without opening the chat (#320). **Contacts** lacks
+mobile-style search, sorting and direct selected-node actions for status,
+repeater login and companion DM (#321). The complete corrective parity release
+is 1.2 / RC2 under #322. See
+[`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) before relying on those flows.
+
 ## First start
 
 Every boot begins with a full-screen readiness check. It shows live progress
@@ -49,7 +58,9 @@ reseeded.
 
 ## Messages, channels and direct messages
 
-The Public channel is always present. DeskOS also supports custom channels:
+The Public channel is always configured. In the shipped 1.0/RC1 UI, selecting
+it may hit defect #320 and fail to open its chat after showing `channels
+queued`. DeskOS also contains custom-channel controls to:
 create or import, select, enable, rename, make default and remove with local
 confirmation. QR sharing is intentionally absent from 1.0; URI import remains
 available.
@@ -67,10 +78,13 @@ Opening or refreshing a thread does not silently retry a failed message.
 ## Contacts, Finder, Ping and TRACE
 
 Contacts can be imported from the USB console with
-`contacts import <meshcore-uri>`. The touchscreen supports rename, favorite,
-mute and confirmed removal. Contact and channel QR sharing is not part of 1.0.
+`contacts import <meshcore-uri>`. The shipped touchscreen contains rename,
+favorite, mute and confirmed-removal functions, but the overall tab is not yet
+mobile-app equivalent: it lacks usable search, sorting and clear direct actions
+on the selected node. Contact and channel QR sharing is not part of 1.0.
 
-From **Contacts**:
+The underlying 1.0 functions include the following, but #321 tracks the missing
+clean selected-node workflow needed to reach and use them consistently:
 
 - **Find** sends a zero-hop discovery request and lists returned full keys,
   role and there/back SNR. Finder results are unverified until a signed advert
@@ -133,9 +147,11 @@ tiles remain usable and RF chat continues.
 
 ## Repeater and room administration
 
-Open a verified Repeater or Room node and choose **Admin**. Login uses the
-exact retained server key and a masked password. Repeater and room logins may
-request empty-password negotiation; the peer decides whether to accept it and
+The administration capability uses an exact verified Repeater or Room key and
+a masked password. The current Contacts UI does not provide the required clean
+selected-node entry flow; that defect is #321. Where the action is reachable,
+repeater and room logins may request empty-password negotiation; the peer
+decides whether to accept it and
 returns the session permissions (guest, read-only, write or admin). Leaving,
 logging out or switching targets clears volatile session authority.
 
