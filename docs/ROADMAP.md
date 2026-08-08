@@ -13,3 +13,6 @@ Execute the highest unblocked row. Issue #71 is the GitHub controller.
 | R6 | Stable publication | Publish the same artifact bytes as `v1.0.0`, verify public downloads, and close issue #71 | Complete |
 | R7 | Explicit install paths | Name the app BIN update, full clean 8 MB BIN, and shared complete RP2040 UF2; provide Windows/Linux commands for both ESP32 paths | In progress |
 | R8 | Packaging correction | Publish `v1.0.1` from the exact successful main package with explicit update/fresh asset names and instructions | Blocked by R7 |
+
+The shipped product supports the configured Map as normal product use; it is not
+a release-lab prerequisite.

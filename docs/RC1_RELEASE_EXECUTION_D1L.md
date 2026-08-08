@@ -7,6 +7,12 @@ password, soak run, physical receipt, or release-audit script.
 End users should not follow this maintainer procedure. They download the ZIP,
 extract it, and follow `START_HERE.md` inside it.
 
+The project maintainer's attached D1L is
+`/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`; public users select their own
+device port from `START_HERE.md`.
+
+Map and storage behavior are ordinary product use, not release-lab inputs.
+
 ## 1. Select the exact main build
 
 Run on the Pi from a clean checkout:
