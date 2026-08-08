@@ -5,7 +5,7 @@
 | Release | Product state | Repository state |
 |---|---|---|
 | **1.0 / RC1** | Published baseline (`v1.0.0`, corrected package `v1.0.1`) | Historical and complete |
-| **1.2 / RC2** | Corrective release: working channel selection, mobile-style Contacts, complete parity ledger, actual-device screenshots, and explicit update/fresh-install downloads | Candidate implementation complete; exact build, device capture, and publication in progress |
+| **1.2 / RC2** | Corrective release: working channel selection, mobile-style Contacts, complete parity ledger, actual-device screenshots, and explicit update/fresh-install downloads | Published and complete (`v1.2.0`) |
 | **1.5 / RC3** | Deferred feature expansion and technical debt | Starts only after RC2 is public |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
@@ -40,17 +40,16 @@ The current Android/iOS comparison and accepted D1L adaptations are recorded in
 | ID | Work | Completion predicate | Current state |
 |---|---|---|---|
 | C0 | Mobile baseline audit | Every user-facing mobile area and primary action has a DeskOS outcome or an explicit D1L adaptation | Complete in parity ledger |
-| C1 | Shared UI structure | Dark touch shell, list/detail hierarchy, selection, and primary actions are consistent and discoverable | Implemented; exact-device pass pending |
-| C2 | Channels and chat | Selecting `#Public` or another enabled channel opens its conversation; read, send, search, unread, and channel-management flows remain usable | Implemented for #320; exact-device pass pending |
-| C3 | Contacts and nodes | Search, Recent/A-Z/Role/Signal sorting, node detail/status, repeater/room management, and companion DM actions are directly reachable | Implemented for #321; exact-device pass pending |
+| C1 | Shared UI structure | Dark touch shell, list/detail hierarchy, selection, and primary actions are consistent and discoverable | Complete |
+| C2 | Channels and chat | Selecting `#Public` or another enabled channel opens its conversation; read, send, search, unread, and channel-management flows remain usable | Complete for #320 |
+| C3 | Contacts and nodes | Search, Recent/A-Z/Role/Signal sorting, node detail/status, repeater/room management, and companion DM actions are directly reachable | Complete for #321 |
 | C4 | Remaining parity | Home, DMs, Finder, PATH/TRACE, Map, Wi-Fi, radio/device settings, administration, storage, diagnostics, and Observer have a documented normal-use outcome | Complete in parity ledger |
-| C5 | Actual-device README images | Production read-only framebuffer export yields fresh 480x480 Home, Channels, Contacts, Map, and Settings PNGs from the attached D1L | Export implemented for #323; capture pending |
-| C6 | Public package | Exact Actions build contains update BIN, full clean 8 MB BIN, one complete RP2040 UF2, checksums, and current end-user instructions | Build in progress |
-| C7 | Publication | Merge RC2, tag/release it, download every public asset again, and match published checksums | Pending C5-C6 |
+| C5 | Actual-device README images | Production read-only framebuffer export yields fresh 480x480 Home, Channels, Contacts, Map, and Settings PNGs from the attached D1L | Complete for #323; Map shows 9/9 local SD tiles |
+| C6 | Public package | Exact Actions build contains update BIN, full clean 8 MB BIN, one complete RP2040 UF2, checksums, and current end-user instructions | Complete |
+| C7 | Publication | Merge RC2, tag/release it, download every public asset again, and match published checksums | Complete (`v1.2.0`) |
 
-RC2 is ready when C0-C7 are complete and issues #320, #321, #322, and #323
-are closed. Internal test plans remain developer material and are not shipped in
-the production package or firmware.
+RC2 is complete. Internal test plans remain developer material and are not
+shipped in the production package or firmware.
 
 ## 1.5 / RC3: deferred expansion and debt
 

@@ -8,11 +8,11 @@
 - [`ROADMAP.md`](ROADMAP.md) — shipped 1.0/RC1, corrective 1.2/RC2 and deferred
   1.5/RC3 in one release queue.
 - [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md) —
-  live Android/iOS parity ledger and 1.2/RC2 gate.
+  completed Android/iOS parity ledger for 1.2/RC2.
 - [`RC1_RELEASE_EXECUTION_D1L.md`](RC1_RELEASE_EXECUTION_D1L.md) — historical
   1.0 maintainer publication record.
-- [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — completed 1.0/RC1 record and
-  the 1.2/RC2 publication gate.
+- [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — completed 1.0/RC1 and
+  1.2/RC2 publication records.
 
 ## User documentation
 
@@ -24,6 +24,8 @@
 - [`ADMIN_REMOTE_CLI_ALLOWLIST.md`](ADMIN_REMOTE_CLI_ALLOWLIST.md) — supported
   admin commands.
 - [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md) — third-party attribution.
+- [`screenshots/DEVICE_1_2_CAPTURE.md`](screenshots/DEVICE_1_2_CAPTURE.md) —
+  attached-device 1.2 screenshot provenance and framebuffer CRCs.
 
 ## Developer-only material
 

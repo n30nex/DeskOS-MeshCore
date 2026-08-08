@@ -1,8 +1,8 @@
 # MeshCore DeskOS for SenseCAP Indicator D1L
 
-DeskOS **1.2 / RC2** is the corrective `core_1_0` release candidate for the
-SenseCAP Indicator D1L. The latest published baseline remains **1.0 / RC1**
-until the RC2 exact-device capture and public artifact steps are complete.
+DeskOS **1.2 / RC2** is the current corrective `core_1_0` release for the
+SenseCAP Indicator D1L. Download the public `v1.2.0` files from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.2.0).
 
 DeskOS is a standalone, dark, touch-first MeshCore client. Public binaries are
 built and packaged by GitHub Actions. GitHub Releases provides the complete
@@ -14,7 +14,7 @@ installation instructions.
 | Release | Purpose | State |
 |---|---|---|
 | **1.0 / RC1** | Published baseline, including the `v1.0.1` packaging correction | Shipped/historical |
-| **1.2 / RC2** | Correct channel selection and Contacts, document mobile-to-D1L parity, add actual-device screenshots, and retain explicit update/fresh-install paths | Candidate implementation complete; device capture/publication in progress under [#322](https://github.com/n30nex/DeskOS-MeshCore/issues/322) |
+| **1.2 / RC2** | Correct channel selection and Contacts, document mobile-to-D1L parity, add actual-device screenshots, and retain explicit update/fresh-install paths | Current public release (`v1.2.0`) |
 | **1.5 / RC3** | Fold deferred features, architecture work, localization, and technical debt into the corrected product | Planned after RC2 |
 
 ## 1.2 / RC2 product
@@ -45,22 +45,35 @@ current mobile-to-D1L outcome matrix is
 ## RC2 correction status
 
 - The [#320](https://github.com/n30nex/DeskOS-MeshCore/issues/320)
-  channel-selection root cause is fixed in the RC2 candidate.
+  channel-selection root cause is fixed in 1.2.
 - The [#321](https://github.com/n30nex/DeskOS-MeshCore/issues/321) Contacts
-  search/sort/action workflows are implemented in the RC2 candidate.
+  search/sort/action workflows are included in 1.2.
 - The full current mobile baseline and explicit D1L adaptations are recorded
   under [#322](https://github.com/n30nex/DeskOS-MeshCore/issues/322).
-- Exact Actions build, attached-device use, screenshots, and publication remain
-  before those issues close.
+- The exact Actions package, attached-device update, actual-device screenshots,
+  update BIN, full-clean BIN, and RP2040 UF2 are published with `v1.2.0`.
 
 ## Actual-device screenshots
 
-RC2 now contains the minimal read-only production serial framebuffer export.
-Fresh 480x480 Home, Channels, Contacts, Map, and Settings images from the
-attached D1L will replace this notice before publication and close
-[#323](https://github.com/n30nex/DeskOS-MeshCore/issues/323). Locations may be
-visible; private messages, passwords, keys, and admin credentials will not be
-published.
+These are native 480x480 production framebuffer captures from the attached D1L
+running DeskOS `1.2.0`, build
+`e15aff9eed9feb94bef6a81f90d62ac0f9fd9610`. The Map image was captured only
+after all 9 local SD tiles were loaded and rendered. Full capture provenance is
+recorded in
+[`docs/screenshots/DEVICE_1_2_CAPTURE.md`](docs/screenshots/DEVICE_1_2_CAPTURE.md).
+
+| Home | Channels |
+|---|---|
+| ![DeskOS 1.2 Home on the attached D1L](docs/screenshots/device-1.2-home.png) | ![DeskOS 1.2 Channels with Public on the attached D1L](docs/screenshots/device-1.2-channels.png) |
+
+| Contacts | Settings |
+|---|---|
+| ![DeskOS 1.2 Contacts search, sort, and actions on the attached D1L](docs/screenshots/device-1.2-contacts.png) | ![DeskOS 1.2 Settings on the attached D1L](docs/screenshots/device-1.2-settings.png) |
+
+![DeskOS 1.2 Map with all local SD tiles loaded on the attached D1L](docs/screenshots/device-1.2-map-local-tiles.png)
+
+Locations and public node labels are intentionally visible. Private messages,
+passwords, private keys, and admin credentials are not shown.
 
 ## Deferred to 1.5 / RC3
 
@@ -71,10 +84,10 @@ telemetry expansion follow RC2. They are tracked in
 
 ## Install and use
 
-Until RC2 publication, download the published `v1.0.1` package from the
-[GitHub Releases page](https://github.com/n30nex/DeskOS-MeshCore/releases),
+Download the `v1.2.0` package from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.2.0),
 extract it fully, and follow its `START_HERE.md`. The repository
-[`user guide`](docs/USER_GUIDE_D1L.md) describes the RC2 candidate; the
+[`user guide`](docs/USER_GUIDE_D1L.md) describes the current release; the
 [`SD preparation guide`](docs/D1L_SD_CARD_GUIDED_INSTALL.md) applies to both
 lines. The firmware never formats an SD card.
 

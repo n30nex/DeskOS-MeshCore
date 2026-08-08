@@ -34,23 +34,25 @@ Actions run `31260655342`.
   source truth.
 - [x] 1.0/RC1 remains historical; 1.2/RC2 is corrective; 1.5/RC3 remains the
   deferred expansion line.
-- [ ] README embeds fresh 480x480 Home, Channels, Contacts, Map, and Settings
-  captures from the attached D1L (#323).
+- [x] README embeds fresh 480x480 Home, Channels, Contacts, Map, and Settings
+  captures from the attached D1L (#323); Map was captured at 9/9 local SD tile
+  cache hits and 9/9 rendered.
 
 ### Exact public artifacts
 
-- [ ] The exact final commit has a successful GitHub Actions build/package run.
-- [ ] The attached D1L runs that exact candidate and normal touch use confirms
-  the #320 and #321 workflows.
-- [ ] The public package contains only production/user files and includes:
+- [x] The exact final commit has a successful GitHub Actions build/package run.
+- [x] The attached D1L runs production `1.2.0`; its version receipt identifies
+  the exact Actions-built firmware commit. No separate validation firmware or
+  controlled-peer gate is required.
+- [x] The public package contains only production/user files and includes:
   - app update BIN for an existing DeskOS installation;
   - full clean 8 MB BIN for a blank/non-DeskOS device;
   - one complete RP2040 UF2 for either path;
   - `START_HERE.md`, user docs, and checksums.
-- [ ] PR #325 is merged and the exact main artifact is published as 1.2/RC2.
-- [ ] Every release asset is freshly downloaded and matches the published
+- [x] PR #325 is merged and the exact main artifact is published as 1.2/RC2.
+- [x] Every release asset is freshly downloaded and matches the published
   checksums.
-- [ ] Issues #320, #321, #322, and #323 are closed with links to the shipped
+- [x] Issues #320, #321, #322, and #323 are closed with links to the shipped
   release.
 
 ## 1.5 / RC3 boundary

@@ -12,8 +12,6 @@ work.
 State meanings:
 
 - **Complete** — normal DeskOS product workflow is implemented.
-- **Device pass pending** — implementation is complete but must still be used
-  on the attached D1L before publication.
 - **Accepted D1L adaptation** — the standalone D1L provides a documented
   outcome instead of a phone/OS-specific workflow.
 - **RC3** — visible mobile convenience is explicitly outside the bounded RC2
@@ -26,7 +24,7 @@ State meanings:
 | App connection/onboarding | First-start on the D1L creates the local identity, optional location/Wi-Fi, radio preset, storage, and initial channels; no phone pairing is required | Accepted D1L adaptation |
 | Dark primary navigation | Persistent dark Home, Channels, Contacts, Map, and Settings dock with scrollable touch pages | Complete |
 | Home/status | Home summarizes identity, radio, storage, unread activity, connectivity, and shortcuts | Complete |
-| Channel list and selection | Channels lists configured channels; tapping an enabled channel selects it and immediately opens its conversation | Device pass pending (#320 implementation complete) |
+| Channel list and selection | Channels lists configured channels; tapping an enabled channel selects it and immediately opens its conversation | Complete (#320) |
 | Public/channel conversation | Read retained history, send/receive messages, show sender and delivery state, and maintain unread state | Complete |
 | Channel message search | Search the active retained conversation and return to normal history | Complete |
 | Channel management | Create/import, select, enable/disable, rename, set default, and remove with confirmation | Complete |
@@ -41,12 +39,12 @@ State meanings:
 | Mobile capability / action | DeskOS location and outcome | RC2 state |
 |---|---|---|
 | Contacts list | Contacts shows the complete bounded saved-contact list with role, recency, and signal context | Complete |
-| Contact search | Search name, role, fingerprint, or public key from Contacts | Device pass pending (#321 implementation complete) |
-| Contact sort/filter | Cycle Recent, A-Z, Role, and Signal ordering; search narrows the visible list | Device pass pending (#321 implementation complete) |
-| Selected contact actions | Obvious **Message** and **Manage** actions open the DM or node-management workflow | Device pass pending (#321 implementation complete) |
+| Contact search | Search name, role, fingerprint, or public key from Contacts | Complete (#321) |
+| Contact sort/filter | Cycle Recent, A-Z, Role, and Signal ordering; search narrows the visible list | Complete (#321) |
+| Selected contact actions | Obvious **Message** and **Manage** actions open the DM or node-management workflow | Complete (#321) |
 | Contact detail/edit | Inspect canonical identity and role; rename, favorite, mute, or remove a saved contact with confirmation | Complete |
-| Companion DM | A verified Chat/Companion contact opens the existing DM compose/thread path | Device pass pending (#321 implementation complete) |
-| Repeater/room entry | A saved Repeater or Room opens node detail and the existing Admin login path even when no transient heard-node row is present | Device pass pending (#321 implementation complete) |
+| Companion DM | A verified Chat/Companion contact opens the existing DM compose/thread path | Complete (#321) |
+| Repeater/room entry | A saved Repeater or Room opens node detail and the existing Admin login path even when no transient heard-node row is present | Complete (#321) |
 | Finder/discovery | Find sends zero-hop discovery and shows key, role, and there/back SNR without treating unverified results as contacts | Complete |
 | PATH/Ping/TRACE | Verified contacts expose PATH/TRACE state; repeaters expose zero-hop Ping with pending, timeout, RTT, RSSI, and hop SNR results | Complete |
 | Path/map relationship | Node/location detail and Map expose signed position truth; no position is inferred from a display name | Complete |
@@ -67,7 +65,7 @@ State meanings:
 | Storage/history | SD is primary for retained data; missing media produces visible live-only RF chat without silently moving history to default NVS | Complete |
 | Packet/event diagnostics | Bounded packet detail/raw preview, event log, storage/Map/Wi-Fi/radio/crash state, and secret redaction | Complete |
 | Observer integration | Opt-in TLS-only QoS 1 MQTT health/location observer; never publishes message text, keys, contacts, or forwarded traffic | Complete |
-| Production screenshot/support export | Read-only 480x480 RGB565 framebuffer capture over the USB console; no RF transmit, storage format, test hook, or qualification mode | Device pass pending (#323 implementation complete) |
+| Production screenshot/support export | Read-only 480x480 RGB565 framebuffer capture over the USB console; no RF transmit, storage format, test hook, or qualification mode | Complete (#323) |
 | Accessibility/language | 480x480 touch layout, dark contrast, plain labels, and on-device keyboard; the current firmware is English-only | Accepted D1L adaptation; language expansion is RC3 |
 
 ## Explicit RC3 conveniences
@@ -85,15 +83,11 @@ equivalents are explicit and their richer implementations remain in
 
 ## RC2 completion
 
-The software parity audit is complete. Publication still requires the bounded
-physical product work already tracked by #320-#323:
-
-1. use the exact Actions candidate on the attached D1L;
-2. confirm channel selection and Contacts actions through the normal touch UI;
-3. capture Home, Channels, Contacts, Map, and Settings through the read-only
-   production serial export; and
-4. publish and freshly download the update BIN, full clean BIN, complete RP2040
-   UF2, package, instructions, and checksums.
+The software parity audit and bounded RC2 product work are complete. The public
+release includes the Actions-built update BIN, full clean BIN, complete RP2040
+UF2, package, instructions, and checksums. The README contains actual-device
+Home, Channels, Contacts, Map, and Settings captures; the Map capture shows all
+9 local SD tiles loaded and rendered.
 
 No controlled peer, credentials, admin password, soak campaign, or special
 release firmware is required.
