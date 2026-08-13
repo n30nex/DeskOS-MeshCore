@@ -88,6 +88,7 @@ def test_version_reports_exact_actions_or_checkout_build_commit():
     console = read("main/comms/usb_console.c")
 
     assert "d1l_resolve_source_provenance(" in root_cmake
+    assert '$ENV{D1L_SOURCE_SHA}' in provenance
     assert '$ENV{GITHUB_SHA}' in provenance
     assert "COMMAND git rev-parse --verify HEAD" in provenance
     assert "COMMAND git show -s --format=%ct HEAD" in provenance

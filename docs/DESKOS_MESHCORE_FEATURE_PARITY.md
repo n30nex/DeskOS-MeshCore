@@ -1,6 +1,6 @@
 # DeskOS MeshCore mobile parity
 
-This is the 1.2/RC2 product ledger for the SenseCAP Indicator D1L. The mobile
+This is the 1.5/RC3 product ledger for the SenseCAP Indicator D1L. The mobile
 baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).
@@ -14,8 +14,8 @@ State meanings:
 - **Complete** — normal DeskOS product workflow is implemented.
 - **Accepted D1L adaptation** — the standalone D1L provides a documented
   outcome instead of a phone/OS-specific workflow.
-- **RC3** — visible mobile convenience is explicitly outside the bounded RC2
-  correction and recorded for 1.5/RC3.
+- **1.5 complete** - the full-feature production profile exposes the finished
+  normal on-device workflow.
 
 ## Navigation and messaging
 
@@ -68,26 +68,24 @@ State meanings:
 | Production screenshot/support export | Read-only 480x480 RGB565 framebuffer capture over the USB console; no RF transmit, storage format, test hook, or qualification mode | Complete (#323) |
 | Accessibility/language | 480x480 touch layout, dark contrast, plain labels, and on-device keyboard; the current firmware is English-only | Accepted D1L adaptation; language expansion is RC3 |
 
-## Explicit RC3 conveniences
+## 1.5 full-feature conveniences
 
-These mobile conveniences do not hide a broken RC2 core workflow. Their D1L
-equivalents are explicit and their richer implementations remain in
-[`RC3_BACKLOG.md`](RC3_BACKLOG.md).
+These mobile conveniences build on the corrected 1.2 workflows and retain the
+same storage, identity, and local-authorization boundaries.
 
 | Mobile convenience | RC2 outcome | State |
 |---|---|---|
-| BLE phone companion transport | DeskOS is the standalone client and uses its own screen/radio | RC3 (#324) |
-| QR/deep-link contact and channel sharing | Existing URI import and management remain available; richer on-device QR/sharing is deferred | RC3 |
-| Mobile in-app firmware update | Public update BIN and full clean 8 MB BIN use host USB; the complete RP2040 UF2 is copied through BOOTSEL | Accepted D1L adaptation; signed OTA/on-device recovery is RC3 |
+| BLE phone companion transport | Secure pairing, bonding, reconnect, disconnect, forget, and the bounded MeshCore companion protocol | 1.5 complete (#324) |
+| QR/deep-link contact and channel sharing | Deliberate privacy-safe contact/channel QR export plus existing URI import and management | 1.5 complete |
+| Mobile in-app firmware update | Signed local-SD inactive-slot install, anti-downgrade sequence, boot confirmation, rollback, and retained USB recovery | 1.5 complete |
 | Phone OS localization and notifications | English on-device UI and on-device unread state | Accepted D1L adaptation |
 
-## RC2 completion
+## 1.5 completion
 
-The software parity audit and bounded RC2 product work are complete. The public
-release includes the Actions-built update BIN, full clean BIN, complete RP2040
-UF2, package, instructions, and checksums. The README contains actual-device
-Home, Channels, Contacts, Map, and Settings captures; the Map capture shows all
-9 local SD tiles loaded and rendered.
+The software parity audit and corrected 1.2 product work remain complete. The
+1.5 release adds the full-feature surfaces above and includes the Actions-built
+update BIN, full clean BIN, complete RP2040 UF2, signed local update bundle,
+instructions, and checksums.
 
 No controlled peer, credentials, admin password, soak campaign, or special
 release firmware is required.

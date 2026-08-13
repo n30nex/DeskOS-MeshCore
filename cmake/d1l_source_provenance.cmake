@@ -5,6 +5,13 @@ set(D1L_ARCHIVE_GIT_COMMIT "$Format:%H$")
 set(D1L_ARCHIVE_GIT_EPOCH_SEC "$Format:%ct$")
 
 function(d1l_resolve_source_provenance SOURCE_ROOT OUT_COMMIT OUT_EPOCH_SEC)
+    set(_d1l_ci_commit "$ENV{D1L_SOURCE_SHA}")
+    set(_d1l_ci_commit_name "D1L_SOURCE_SHA")
+    if("${_d1l_ci_commit}" STREQUAL "")
+        set(_d1l_ci_commit "$ENV{GITHUB_SHA}")
+        set(_d1l_ci_commit_name "GITHUB_SHA")
+    endif()
+
     if(EXISTS "${SOURCE_ROOT}/.git")
         execute_process(
             COMMAND git rev-parse --verify HEAD
@@ -41,10 +48,10 @@ function(d1l_resolve_source_provenance SOURCE_ROOT OUT_COMMIT OUT_EPOCH_SEC)
             message(FATAL_ERROR
                 "D1L source commit override does not match current HEAD")
         endif()
-        if(NOT "$ENV{GITHUB_SHA}" STREQUAL "" AND
-           NOT "$ENV{GITHUB_SHA}" STREQUAL "${_d1l_commit}")
+        if(NOT "${_d1l_ci_commit}" STREQUAL "" AND
+           NOT "${_d1l_ci_commit}" STREQUAL "${_d1l_commit}")
             message(FATAL_ERROR
-                "GITHUB_SHA does not match current D1L checkout HEAD")
+                "${_d1l_ci_commit_name} does not match current D1L checkout HEAD")
         endif()
 
         execute_process(
@@ -77,10 +84,10 @@ function(d1l_resolve_source_provenance SOURCE_ROOT OUT_COMMIT OUT_EPOCH_SEC)
             message(FATAL_ERROR
                 "D1L build epoch override does not match archive provenance")
         endif()
-        if(NOT "$ENV{GITHUB_SHA}" STREQUAL "" AND
-           NOT "$ENV{GITHUB_SHA}" STREQUAL "${_d1l_commit}")
+        if(NOT "${_d1l_ci_commit}" STREQUAL "" AND
+           NOT "${_d1l_ci_commit}" STREQUAL "${_d1l_commit}")
             message(FATAL_ERROR
-                "GITHUB_SHA does not match archive provenance")
+                "${_d1l_ci_commit_name} does not match archive provenance")
         endif()
     endif()
 

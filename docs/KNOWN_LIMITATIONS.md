@@ -1,9 +1,9 @@
-# DeskOS D1L 1.2 / RC2 limitations
+# DeskOS D1L 1.5 / RC3 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
 
-These limits apply to the production `core_1_0` profile with `conditional`
+These limits apply to the production `full_feature` profile with `conditional`
 SD-primary storage.
 
 - The D1L has no onboard GPS. Map centering and location-dependent features use
@@ -16,13 +16,12 @@ SD-primary storage.
 - Fresh Map download also requires user-configured Wi-Fi and an HTTPS provider
   manifest that explicitly permits offline storage and background prefetch.
   OpenStreetMap Standard remains visible-current-view-only.
-- BLE companion transport is deferred to 1.5/RC3; DeskOS is a standalone
-  on-device MeshCore client.
-- Rich on-device QR/deep-link sharing is deferred. Existing URI import and
-  contact/channel management remain available.
-- Signed OTA, signed SD update, rollback, and on-device recovery are deferred.
-  Public 1.2 installation/recovery uses the app update BIN or full clean 8 MB
-  BIN over USB plus the complete RP2040 UF2 through BOOTSEL.
+- BLE and Wi-Fi are deliberate alternative connectivity modes rather than
+  concurrent network stacks. MeshCore RF remains available in either mode.
+- QR export is deliberately limited to supported public contact and channel
+  material. It is not a general QR generator and never exports secrets.
+- Signed update is local-SD only. It does not download firmware or accept an
+  RF-triggered update. USB app/full-clean flashing remains the recovery path.
 - The current UI is English-only. Additional localization is RC3 work.
 - Observer/MQTT is opt-in and is never enabled silently.
 - Time and age labels remain unavailable until the device has a trusted time

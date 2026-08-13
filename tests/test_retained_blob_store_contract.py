@@ -302,8 +302,11 @@ def test_release_docs_define_sd_primary_without_history_nvs_fallback():
     checklist = read("docs/RELEASE_CHECKLIST.md")
     limitations = read("docs/KNOWN_LIMITATIONS.md")
 
-    for doc in (readme, user_guide, checklist, limitations):
-        assert "core_1_0" in doc
+    for doc in (readme, user_guide, limitations):
+        assert "full_feature" in doc
+        assert "conditional" in doc
+    assert "core_1_0" in checklist
+    for doc in (checklist,):
         assert "conditional" in doc
 
     assert "SD as the primary store" in user_guide

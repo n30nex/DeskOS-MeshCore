@@ -66,7 +66,7 @@ def test_actions_requires_overlay_validator_with_byte_pinned_clang_18():
     assert "scripts/validate_ed25519_defined_overlay.py" in validator_block
     assert "--cc clang-18" in validator_block
     assert "--sanitizers required" in validator_block
-    assert "ed25519_defined_overlay_${GITHUB_SHA}.json" in validator_block
+    assert "ed25519_defined_overlay_${D1L_SOURCE_SHA}.json" in validator_block
 
 
 def test_baseline_and_overlay_are_byte_identical_on_host_corpus(tmp_path):

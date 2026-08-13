@@ -111,6 +111,7 @@ TOP_BAR_FREE_VIEWS = (
             "contact_incomplete_detail_sheet",
             "contact_noncanonical_detail_sheet",
             "node_detail_sheet",
+            "map_node_detail_sheet",
             "heard_only_node_detail_sheet",
             "managed_node_detail_sheet",
             "dm_thread_sheet",
@@ -3627,7 +3628,7 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
             (x - 22, y - 22, x + 22, y + 22),
             kind="map_marker_hit",
             action="open_map_node_detail",
-            destination="node_detail_sheet",
+            destination="map_node_detail_sheet",
         )
         placed.append(bounds)
         names.append(display_name)
@@ -4915,15 +4916,15 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
          f"{selected_channel.name}  showing {min(len(selected_messages), public_page_limit)}/{len(selected_messages)} retained"),
     )
     draw_button(
-        s, (204, 94, 282, 134), "Search", BLUE,
+        s, (246, 94, 306, 134), "Search", BLUE,
         action="open_public_search" if selected_channel.channel_id == 1
         else "open_channel_search",
         destination="public_search_sheet" if selected_channel.channel_id == 1
         else "channel_search_private_sheet",
     )
-    draw_button(s, (292, 94, 356, 134), "Clear", ACCENT, action="clear_public_search")
+    draw_button(s, (312, 94, 368, 134), "Clear", ACCENT, action="clear_public_search")
     draw_button(
-        s, (366, 94, 436, 134), "Close", MUTED,
+        s, (374, 94, 436, 134), "Close", MUTED,
         action="close_public_history",
         destination="messages_public" if selected_channel.channel_id == 1
         else "messages_channel_private",
@@ -5272,7 +5273,12 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
     )
 
 
-def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
+def render_node_detail_page(
+    s: Surface,
+    snap: Snapshot,
+    node: Node,
+    return_destination: str = "nodes",
+):
     s.rect((0, 0, WIDTH, HEIGHT), (17, 25, 35))
     s.text("Contact", (20, 8, 180, 36), 22, TEXT, True)
     dm_reason = node_dm_identity_reason(snap, node)
@@ -5297,11 +5303,6 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
             action="explain_node_dm",
             destination=None,
         )
-    return_destination = (
-        "map"
-        if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
-        else "nodes"
-    )
     draw_button(
         s,
         (316, 4, 392, 48),
@@ -5387,7 +5388,11 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
 
 
 def render_node_detail_sheet(s: Surface, snap: Snapshot):
-    render_node_detail_page(s, snap, snap.heard[0])
+    render_node_detail_page(s, snap, snap.heard[0], "nodes")
+
+
+def render_map_node_detail_sheet(s: Surface, snap: Snapshot):
+    render_node_detail_page(s, snap, snap.heard[0], "map")
 
 
 def render_heard_only_node_detail_sheet(s: Surface, snap: Snapshot):
@@ -6812,7 +6817,9 @@ def render_first_start_radio(s: Surface, snap: Snapshot):
     )
 
 
-def render_first_start_storage_map(s: Surface, snap: Snapshot):
+def first_start_storage_status(
+    snap: Snapshot,
+) -> tuple[bool, bool, str, str, str]:
     prepared_sd_ready = (
         snap.storage_sd_present
         and snap.storage_sd_mounted
@@ -6820,6 +6827,36 @@ def render_first_start_storage_map(s: Surface, snap: Snapshot):
         and snap.storage_sd_filesystem.lower() == "fat32"
     )
     nrcan_provider_ready = snap.map_tile_cache_ready
+    media_ready = prepared_sd_ready and nrcan_provider_ready
+    return (
+        prepared_sd_ready,
+        nrcan_provider_ready,
+        (
+            "SD card: ready (prepared FAT32)"
+            if prepared_sd_ready
+            else "SD card: not ready; prepare FAT32 externally"
+        ),
+        (
+            "NRCan provider: manifest ready"
+            if nrcan_provider_ready
+            else "NRCan provider: not ready; install the prepared-card manifest"
+        ),
+        (
+            "Storage and maps are ready. Continue to channels."
+            if media_ready
+            else "Both checks are required before Continue."
+        ),
+    )
+
+
+def render_first_start_storage_map(s: Surface, snap: Snapshot):
+    (
+        prepared_sd_ready,
+        nrcan_provider_ready,
+        sd_status,
+        nrcan_status,
+        readiness_status,
+    ) = first_start_storage_status(snap)
     media_ready = prepared_sd_ready and nrcan_provider_ready
     draw_first_start_header(s, "Prepare storage & maps", "STEP 5 OF 6")
     s.wrapped_text(
@@ -6835,33 +6872,15 @@ def render_first_start_storage_map(s: Surface, snap: Snapshot):
         MUTED,
     )
     s.wrapped_text(
-        (
-            "SD card: ready (prepared FAT32)"
-            if prepared_sd_ready
-            else "SD card: not ready; prepare FAT32 externally"
-        ),
-        (16, 238, 464, 278),
-        14,
-        GREEN if prepared_sd_ready else AMBER,
-        True,
+        sd_status, (16, 238, 464, 278), 14,
+        GREEN if prepared_sd_ready else AMBER, True,
     )
     s.wrapped_text(
-        (
-            "NRCan provider: manifest ready"
-            if nrcan_provider_ready
-            else "NRCan provider: not ready; install the prepared-card manifest"
-        ),
-        (16, 294, 464, 340),
-        14,
-        GREEN if nrcan_provider_ready else AMBER,
-        True,
+        nrcan_status, (16, 294, 464, 340), 14,
+        GREEN if nrcan_provider_ready else AMBER, True,
     )
     s.text(
-        (
-            "Storage and maps are ready. Continue to channels."
-            if media_ready
-            else "Both checks are required before Continue."
-        ),
+        readiness_status,
         (16, 370, 464, 400),
         13,
         GREEN if media_ready else AMBER,
@@ -7101,6 +7120,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "contact_noncanonical_detail_sheet": render_contact_noncanonical_detail_sheet,
     "contact_options_page": render_contact_options_page,
     "node_detail_sheet": render_node_detail_sheet,
+    "map_node_detail_sheet": render_map_node_detail_sheet,
     "heard_only_node_detail_sheet": render_heard_only_node_detail_sheet,
     "managed_node_detail_sheet": render_managed_node_detail_sheet,
     "contact_edit_sheet": render_contact_edit_sheet,
@@ -7435,6 +7455,10 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Contact",
         "Close",
     ),
+    "map_node_detail_sheet": (
+        "Contact",
+        "Close",
+    ),
     "heard_only_node_detail_sheet": (
         "Contact",
         "Heard-only Chat",
@@ -7668,11 +7692,26 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
 def required_labels_for_profile(
     view: str,
     release_profile: str,
+    snap: Snapshot | None = None,
 ) -> tuple[str, ...]:
     if release_profile == CORE_RELEASE_PROFILE:
         return CORE_REQUIRED_LABELS.get(view, REQUIRED_LABELS.get(view, ()))
     if release_profile == FULL_FEATURE_RELEASE_PROFILE:
-        return REQUIRED_LABELS.get(view, ())
+        labels = REQUIRED_LABELS.get(view, ())
+        if view == "first_start_storage_map" and snap is not None:
+            _, _, sd_status, nrcan_status, readiness_status = (
+                first_start_storage_status(snap)
+            )
+            replacements = {
+                "SD card: not ready; prepare FAT32 externally": sd_status,
+                "NRCan provider: not ready; install the prepared-card manifest": nrcan_status,
+                "Both checks are required before Continue.": readiness_status,
+            }
+            labels = tuple(
+                replacements.get(label, label)
+                for label in labels
+            )
+        return labels
     raise ValueError(f"unknown release profile: {release_profile}")
 
 
@@ -8718,6 +8757,7 @@ def render_lifecycle_generation(
     required_labels = required_labels_for_profile(
         rendered_state.current_view,
         rendered_state.release_profile,
+        snap,
     )
     summary = surface.summary(
         Path("lifecycle") / f"{rendered_state.current_view}.png",
@@ -9597,7 +9637,7 @@ def generate(
         RENDERERS[view](surface, snap)
         screenshot = out_dir / f"{view}.png"
         surface.save(screenshot)
-        required_labels = required_labels_for_profile(view, release_profile)
+        required_labels = required_labels_for_profile(view, release_profile, snap)
         if view == "settings_support_expanded" and snap.firmware_version != "1.0.0":
             required_labels = tuple(
                 f"Version {snap.firmware_version}" if label == "Version 1.0.0" else label

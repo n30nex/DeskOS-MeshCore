@@ -42,6 +42,20 @@ def test_ci_avoids_duplicate_branch_push_and_pull_request_runs():
     assert "workflow_dispatch:" in trigger
 
 
+def test_ci_builds_and_records_the_exact_pr_head_commit():
+    workflow = workflow_text()
+
+    assert (
+        "D1L_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}"
+        in workflow
+    )
+    assert workflow.count("ref: ${{ env.D1L_SOURCE_SHA }}") == 5
+    assert "GITHUB_SHA" not in workflow
+    assert 'source_commit = $env:D1L_SOURCE_SHA' in workflow
+    assert 'repository_commit = $env:D1L_SOURCE_SHA' in workflow
+    assert '--commit "$D1L_SOURCE_SHA"' in workflow
+
+
 def test_ci_host_checks_are_host_only_for_sd_bridge():
     host = job_block("host-checks")
 
@@ -75,14 +89,14 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
         < host.index("name: Host tests")
     )
     assert host.count("python -m pytest tests -q") == 1
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --out artifacts/ui-sim" in host
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario large-mesh --out artifacts/ui-sim-large" in host
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario storage-states --out artifacts/ui-sim-storage" in host
+    assert "python ./tools/ui_simulator.py --release-profile full_feature --out artifacts/ui-sim" in host
+    assert "python ./tools/ui_simulator.py --release-profile full_feature --scenario large-mesh --out artifacts/ui-sim-large" in host
+    assert "python ./tools/ui_simulator.py --release-profile full_feature --scenario storage-states --out artifacts/ui-sim-storage" in host
     assert "python ./scripts/smoke_d1l.py --dry-run" not in host
     assert "python ./scripts/ui_corruption_probe_d1l.py --dry-run" not in host
     assert "ui_tab_abuse_d1l.py" not in host
     assert "python ./scripts/scroll_probe_d1l.py --dry-run" not in host
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --out artifacts/ui-sim-map-ready" in host
+    assert "python ./tools/ui_simulator.py --release-profile full_feature --scenario map-ready --out artifacts/ui-sim-map-ready" in host
     assert "shell: bash" in host
     assert "soak_d1l.py" not in host
     assert "storage_active_soak_d1l.py" not in host
@@ -114,8 +128,8 @@ def test_ci_detects_when_sd_bridge_scope_is_required():
     assert "reason=manual_dispatch" in job
     assert "reason=rc1_sd_paths" in job
     assert "core_sd_disabled" not in job
-    assert 'release_profile = "core_1_0"' in workflow_text()
-    assert 'release_profile = "full_feature"' not in workflow_text()
+    assert 'release_profile = "full_feature"' in workflow_text()
+    assert 'release_profile = "core_1_0"' not in workflow_text()
     dispatch = job.split(
         'if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]', 1
     )[1].split("else", 1)[0]
@@ -218,13 +232,13 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "--toolchain-receipt artifacts/meshcore-conformance/toolchain-inputs.json" in job
     assert (
         '--signed-advert-runtime-receipt "artifacts/meshcore-conformance/'
-        'meshcore_signed_advert_runtime_${GITHUB_SHA}.json"'
+        'meshcore_signed_advert_runtime_${D1L_SOURCE_SHA}.json"'
     ) in job
-    assert '--commit "$GITHUB_SHA"' in job
+    assert '--commit "$D1L_SOURCE_SHA"' in job
     assert "--seed 13746277" in job
     assert "--runs 100000" in job
     assert "--dry-run" not in job
-    assert 'artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json' in job
+    assert 'artifacts/meshcore-conformance/meshcore_conformance_${D1L_SOURCE_SHA}.json' in job
     assert "name: d1l-meshcore-wire-conformance" in job
     assert "path: artifacts/meshcore-conformance/**" in job
     assert "if-no-files-found: error" in job
@@ -294,18 +308,29 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "path: artifacts/rp2040-release-inputs" in job
     assert "merge-multiple: false" in job
     assert "package_args=(--build-dir build --out-dir artifacts/release" in job
-    assert "--release-profile core_1_0 --sd-history-mode conditional" in job
+    assert "--release-profile full_feature --sd-history-mode conditional" in job
     assert (
-        "idf.py -D D1L_RELEASE_PROFILE=core_1_0 "
+        "idf.py -D D1L_RELEASE_PROFILE=full_feature "
         "-D D1L_SD_HISTORY_MODE=conditional build"
     ) in job
-    assert "D1L_UPDATE_SIGNING_KEY_PEM" not in job
-    assert "--update-signing-key" not in job
+    package_step = job.split("- name: Package D1L release", 1)[1].split(
+        "- name: Verify firmware checksums", 1
+    )[0]
+    assert "if: github.event_name != 'pull_request'" in package_step
+    assert "D1L_UPDATE_SIGNING_KEY_PEM: ${{ secrets.D1L_UPDATE_SIGNING_KEY_PEM }}" in package_step
+    assert 'if [[ -z "${D1L_UPDATE_SIGNING_KEY_PEM:-}" ]]' in package_step
+    assert 'signing_key="$(mktemp)"' in package_step
+    assert 'chmod 600 "$signing_key"' in package_step
+    assert "trap cleanup_signing_key EXIT" in package_step
+    assert 'rm -f "$signing_key"' in package_step
+    assert "printf '%s\\n' \"$D1L_UPDATE_SIGNING_KEY_PEM\" > \"$signing_key\"" in package_step
+    assert '--update-signing-key "$signing_key"' in package_step
     assert '--meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON"' in job
     assert 'python scripts/package_release_d1l.py "${package_args[@]}"' in job
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job
     assert "python scripts/verify_checksums.py artifacts/firmware" in job
-    assert 'python scripts/verify_checksums.py "artifacts/release/d1l-release-${GITHUB_SHA}"' in job
+    assert 'python scripts/verify_checksums.py "artifacts/release/d1l-release-${D1L_SOURCE_SHA}"' in job
+    assert job.count("if: github.event_name != 'pull_request'") >= 3
     assert "python scripts/verify_checksums.py artifacts/release\n" not in job
     assert "test -f sdkconfig" in job
     assert "test -f build/config/sdkconfig.json" in job
@@ -367,7 +392,7 @@ def test_ci_records_exact_host_success_only_after_all_host_checks_pass():
     assert 'status = "pass"' in host
     assert "passed = $true" in host
     assert "all_prior_steps_completed = $true" in host
-    assert "repository_commit = $env:GITHUB_SHA" in host
+    assert "repository_commit = $env:D1L_SOURCE_SHA" in host
     assert "workflow_run_id = [string]$env:GITHUB_RUN_ID" in host
     assert 'd1l_host_checks_success_{0}.json' in host
     assert host.index("name: Host tests") < host.index("name: Record exact host-check success evidence")

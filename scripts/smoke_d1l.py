@@ -27,6 +27,7 @@ SMOKE_COMMANDS = [
     "i2c",
     "display test",
     "touch test",
+    "touch raw",
     "button",
     "ui status",
     "radiohw",
@@ -65,6 +66,25 @@ SMOKE_COMMANDS = [
     "crashlog",
     "health",
 ]
+
+QUALIFICATION_ONLY_COMMANDS = frozenset({"display test", "touch test"})
+SD_SEARCH_MIN_TIMEOUT_SECONDS = 20.0
+
+
+def commands_for_release_profile(release_profile: object) -> list[str]:
+    if release_profile == "development":
+        return list(SMOKE_COMMANDS)
+    return [
+        command
+        for command in SMOKE_COMMANDS
+        if command not in QUALIFICATION_ONLY_COMMANDS
+    ]
+
+
+def smoke_command_timeout(command: str, default_timeout: float) -> float:
+    if command.startswith("packets search "):
+        return max(default_timeout, SD_SEARCH_MIN_TIMEOUT_SECONDS)
+    return default_timeout
 
 # These fields describe host-observed console framing. Device JSON must never
 # be able to supply or override them.
@@ -713,8 +733,21 @@ def run_serial_smoke(
         ser.reset_input_buffer()
         preflight_health = wait_for_console_ready(ser, timeout)
         preflight_crashlog = send_console_command(ser, "crashlog", timeout)
-        for command in SMOKE_COMMANDS:
-            results.append(send_console_command(ser, command, timeout))
+        version_result = send_console_command(ser, "version", timeout)
+        results.append(version_result)
+        executed_commands = commands_for_release_profile(
+            version_result.get("release_profile")
+        )
+        for command in executed_commands:
+            if command == "version":
+                continue
+            results.append(
+                send_console_command(
+                    ser,
+                    command,
+                    smoke_command_timeout(command, timeout),
+                )
+            )
         persistence = run_persistence_check(ser, timeout) if persistence_test else None
 
     if manual_touch:
@@ -755,6 +788,10 @@ def run_serial_smoke(
         "final_boot_nonce": final_boot_nonce,
         "boot_stable": boot_stable,
         "new_crash_like_entries": new_crashes,
+        "executed_commands": executed_commands,
+        "skipped_commands": [
+            command for command in SMOKE_COMMANDS if command not in executed_commands
+        ],
         "ok": (
             preflight_health.get("ok") is True
             and preflight_crashlog.get("ok") is True

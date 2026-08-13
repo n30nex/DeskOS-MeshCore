@@ -5,8 +5,8 @@
 | Release | Product state | Repository state |
 |---|---|---|
 | **1.0 / RC1** | Published baseline (`v1.0.0`, corrected package `v1.0.1`) | Historical and complete |
-| **1.2 / RC2** | Corrective release: working channel selection, mobile-style Contacts, complete parity ledger, actual-device screenshots, and explicit update/fresh-install downloads | Published and complete (`v1.2.0`) |
-| **1.5 / RC3** | Deferred feature expansion and technical debt | Starts only after RC2 is public |
+| **1.2 / RC2** | Corrective release: working channel selection, mobile-style Contacts, complete parity ledger, actual-device screenshots, and explicit update/fresh-install downloads | Historical (`v1.2.0`) |
+| **1.5 / RC3** | Secure BLE companion, signed local update/rollback, public-data QR sharing, diagnostics, and full-feature production activation | Current (`v1.5.0`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -51,10 +51,10 @@ The current Android/iOS comparison and accepted D1L adaptations are recorded in
 RC2 is complete. Internal test plans remain developer material and are not
 shipped in the production package or firmware.
 
-## 1.5 / RC3: deferred expansion and debt
+## 1.5 / RC3: full-feature release
 
-RC3 owns the work deliberately left outside the corrective release. Its source
-of truth is [`RC3_BACKLOG.md`](RC3_BACKLOG.md) and the `1.5 / RC3` milestone:
+RC3 activates the product work deliberately held outside the corrective 1.2
+profile. Its source is [`RC3_BACKLOG.md`](RC3_BACKLOG.md):
 
 - BLE companion completion (#324);
 - advanced QR, deep-link, and sharing workflows;
@@ -63,4 +63,6 @@ of truth is [`RC3_BACKLOG.md`](RC3_BACKLOG.md) and the `1.5 / RC3` milestone:
 - optional telemetry and diagnostic expansion; and
 - remaining feature and documentation debt already recorded in the backlog.
 
-Those items must not delay or expand 1.2/RC2.
+The production Actions candidate uses the `full_feature` profile. Pull requests
+compile and test that profile without receiving the update-signing secret;
+trusted branch builds alone produce the signed release package.

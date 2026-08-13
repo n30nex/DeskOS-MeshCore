@@ -55,6 +55,15 @@ static uint64_t deadline_after(uint64_t now_us, uint64_t timeout_us)
                                              : now_us + timeout_us;
 }
 
+static size_t bounded_text_length(const char *text, size_t capacity)
+{
+    if (!text) {
+        return capacity;
+    }
+    const char *terminator = memchr(text, '\0', capacity);
+    return terminator ? (size_t)(terminator - text) : capacity;
+}
+
 static void write_le32(uint8_t *dest, uint32_t value)
 {
     dest[0] = (uint8_t)value;
@@ -239,7 +248,7 @@ esp_err_t d1l_meshcore_admin_build_login_packet(
         return ESP_ERR_INVALID_ARG;
     }
     d1l_meshcore_admin_binding_wipe(out_binding);
-    const size_t password_len = strnlen(
+    const size_t password_len = bounded_text_length(
         password, D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U);
     const d1l_meshcore_admin_role_t role =
         d1l_meshcore_admin_role_for_contact(contact);

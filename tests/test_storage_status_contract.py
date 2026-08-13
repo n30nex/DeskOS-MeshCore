@@ -1211,7 +1211,10 @@ def test_docs_define_sd_primary_storage_and_live_only_degraded_mode():
     scope = read("docs/RC1_SCOPE.md")
     runbook = read("docs/RC1_RELEASE_EXECUTION_D1L.md")
 
-    for doc in (readme, user_guide, limitations, checklist, scope):
+    for doc in (readme, user_guide, limitations):
+        assert "full_feature" in doc
+        assert "conditional" in doc
+    for doc in (checklist, scope):
         assert "core_1_0" in doc
         assert "conditional" in doc
     assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in runbook

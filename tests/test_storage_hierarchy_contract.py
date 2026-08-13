@@ -335,7 +335,10 @@ def test_release_docs_define_current_storage_and_map_acceptance():
     scope = read("docs/RC1_SCOPE.md")
     runbook = read("docs/RC1_RELEASE_EXECUTION_D1L.md")
 
-    for doc in (readme, guide, checklist, scope):
+    for doc in (readme, guide):
+        assert "full_feature" in doc
+        assert "conditional" in doc
+    for doc in (checklist, scope):
         assert "core_1_0" in doc
         assert "conditional" in doc
     assert "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0" in runbook

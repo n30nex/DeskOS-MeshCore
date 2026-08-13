@@ -267,10 +267,10 @@ def test_core_profile_exposes_trace_and_location_but_omits_export():
     assert {"Export", "Share QR"}.isdisjoint(set(options.labels))
 
     node_detail = ui_simulator.Surface(
-        "node_detail_sheet",
+        "map_node_detail_sheet",
         release_profile=ui_simulator.CORE_RELEASE_PROFILE,
     )
-    ui_simulator.RENDERERS["node_detail_sheet"](node_detail, snapshot)
+    ui_simulator.RENDERERS["map_node_detail_sheet"](node_detail, snapshot)
     close = next(
         target
         for target in node_detail.touch_targets

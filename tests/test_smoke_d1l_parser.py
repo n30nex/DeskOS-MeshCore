@@ -144,6 +144,20 @@ def test_dry_run_lists_phase1_commands():
     assert not any(command.startswith("mesh send public") for command in report["commands"])
 
 
+def test_production_smoke_uses_raw_touch_and_skips_qualification_hooks():
+    commands = smoke_d1l.commands_for_release_profile("full_feature")
+
+    assert "touch raw" in commands
+    assert "display test" not in commands
+    assert "touch test" not in commands
+    assert smoke_d1l.commands_for_release_profile("development") == SMOKE_COMMANDS
+
+
+def test_sd_packet_search_gets_bounded_startup_timeout():
+    assert smoke_d1l.smoke_command_timeout("packets search test", 8.0) == 20.0
+    assert smoke_d1l.smoke_command_timeout("health", 8.0) == 8.0
+
+
 def test_firmware_identity_requires_exact_device_build_commit():
     commit = "0123456789abcdef0123456789abcdef01234567"
     version = {
