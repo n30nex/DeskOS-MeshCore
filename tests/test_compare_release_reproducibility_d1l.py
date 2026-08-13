@@ -498,6 +498,11 @@ def build_pair(
         "PRODUCTION_RELEASE_PROFILES",
         frozenset({package_release_d1l.CORE_RELEASE_PROFILE}),
     )
+    monkeypatch.setattr(
+        sbom_d1l,
+        "PRODUCTION_RELEASE_PROFILES",
+        frozenset({"core_1_0"}),
+    )
 
     signing_key = root / "test-update-signing-key.pem"
     signing_key.write_text("fixture key; signing is covered by release CI\n", encoding="ascii")
