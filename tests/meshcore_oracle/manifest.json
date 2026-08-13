@@ -68,7 +68,7 @@
     }
   },
   "production_binding_sources": {
-    "main/CMakeLists.txt": "d033427a140832fae0c14ee32ee90fa3fc7515dc07d66bf08f52c15fae298694",
+    "main/CMakeLists.txt": "8f9e270c6da00c18d94df86dadd5fb3e5c0a027c6939a889fb964ba3e356d12c",
     "main/app/qualification_hooks.h": "fc6c4e1c9e3663d6fc7fc7e41aaf028f9689138dec6341d3b59b5ae4e930954d",
     "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
     "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
