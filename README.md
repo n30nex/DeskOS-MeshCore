@@ -131,8 +131,20 @@ until they succeed, fail, time out, or are cancelled.
 | ![DeskOS 1.7.1 repeater manager preview](docs/screenshots/simulator-1.7.1/repeater_manager.png) | ![DeskOS 1.7.1 repeater status preview](docs/screenshots/simulator-1.7.1/repeater_status.png) |
 
 These are deterministic 480x480 simulator previews used for layout regression.
-They contain no real password or private radio material; physical 1.7.1 device
-captures are collected separately during release acceptance.
+They contain no real password or private radio material.
+
+### Physical 1.7.1 release captures
+
+These screens were captured from the attached D1L after flashing the exact
+`v1.7.1` Actions package. The Contacts screen shows the direct Login controls
+that begin the new repeater workflow.
+
+| Home | Contacts with direct Login |
+|---|---|
+| ![DeskOS 1.7.1 Home on the D1L](docs/screenshots/device-1.7.1/home.png) | ![DeskOS 1.7.1 Contacts and repeater Login controls on the D1L](docs/screenshots/device-1.7.1/contacts.png) |
+
+Capture provenance and privacy notes are recorded in
+[`docs/screenshots/device-1.7.1/README.md`](docs/screenshots/device-1.7.1/README.md).
 
 The 1.7 simulator previews below show the refreshed production palette. They
 are visual previews, not substitutes for the physical D1L release check.
