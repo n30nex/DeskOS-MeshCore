@@ -68,12 +68,16 @@ def resolve(
     source: Path,
     module: Path,
     *definitions: str,
+    env_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     ordinal = len(list(tmp_path.glob("build-*")))
     build = tmp_path / f"build-{ordinal}"
     output = tmp_path / f"resolved-{ordinal}.txt"
     env = dict(os.environ)
     env.pop("GITHUB_SHA", None)
+    env.pop("D1L_SOURCE_SHA", None)
+    if env_overrides:
+        env.update(env_overrides)
     command = [
         str(CMAKE),
         "-S",
@@ -117,6 +121,29 @@ def test_clean_checkout_binds_current_head_and_rejects_dirty_or_historical_stamp
     )
     assert historical.returncode != 0
     assert "does not match current HEAD" in historical.stderr
+
+
+def test_pull_request_source_sha_takes_precedence_over_merge_sha(tmp_path: Path):
+    source, commit, epoch = fixture_repo(tmp_path)
+    module = source / "cmake/d1l_source_provenance.cmake"
+
+    accepted = resolve(
+        tmp_path,
+        source,
+        module,
+        env_overrides={"D1L_SOURCE_SHA": commit, "GITHUB_SHA": "f" * 40},
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.resolved_output == f"{commit}\n{epoch}\n"
+
+    rejected = resolve(
+        tmp_path,
+        source,
+        module,
+        env_overrides={"D1L_SOURCE_SHA": "f" * 40, "GITHUB_SHA": commit},
+    )
+    assert rejected.returncode != 0
+    assert "D1L_SOURCE_SHA does not match current D1L checkout HEAD" in rejected.stderr
 
 
 def test_git_archive_substitution_is_accepted_and_raw_no_git_tree_is_rejected(
