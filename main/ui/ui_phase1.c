@@ -1799,6 +1799,17 @@ static void finalize_admin_login(const d1l_meshcore_admin_snapshot_t *status)
     clear_admin_pending_password();
 }
 
+static bool admin_state_preserves_selected_page(
+    d1l_meshcore_admin_state_t state)
+{
+    return state == D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+           state == D1L_MESHCORE_ADMIN_LOGIN_PENDING ||
+           state == D1L_MESHCORE_ADMIN_STATUS_PENDING ||
+           state == D1L_MESHCORE_ADMIN_MUTATION_PENDING ||
+           state == D1L_MESHCORE_ADMIN_CLI_PENDING ||
+           state == D1L_MESHCORE_ADMIN_QUERY_PENDING;
+}
+
 static esp_err_t select_admin_target(
     const char *fingerprint, const char *name)
 {
@@ -7562,8 +7573,7 @@ static bool render_admin_service_sheet(void)
     if (status.state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
         s_admin_page == D1L_UI_ADMIN_PAGE_LOGIN) {
         s_admin_page = D1L_UI_ADMIN_PAGE_HUB;
-    } else if (status.state != D1L_MESHCORE_ADMIN_AUTHENTICATED &&
-               status.state != D1L_MESHCORE_ADMIN_LOGIN_PENDING) {
+    } else if (!admin_state_preserves_selected_page(status.state)) {
         s_admin_page = D1L_UI_ADMIN_PAGE_LOGIN;
     }
     if (status.state != D1L_MESHCORE_ADMIN_AUTHENTICATED ||
