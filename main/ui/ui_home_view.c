@@ -266,7 +266,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
              input->time_available && input->time_label && input->time_label[0] ?
                  input->time_label : "Syncing");
     snprintf(out_view->wifi_value, sizeof(out_view->wifi_value), "%s",
-             input->wifi_connected ? "Connected" :
+              input->wifi_connected ? "Online" :
              (input->wifi_connecting ? "Connecting" :
               (input->wifi_enabled ? "On" : "Off")));
     snprintf(out_view->ble_value, sizeof(out_view->ble_value), "%s",

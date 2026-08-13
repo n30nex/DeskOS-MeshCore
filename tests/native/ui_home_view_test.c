@@ -63,7 +63,7 @@ static void test_ready_view_owns_all_rendered_strings(void)
     assert(strcmp(view.more_status, "1 packet captured") == 0);
     assert(strcmp(view.mesh_value, "Ready") == 0);
     assert(strcmp(view.time_value, "12:34") == 0);
-    assert(strcmp(view.wifi_value, "Connected") == 0);
+    assert(strcmp(view.wifi_value, "Online") == 0);
     assert(strcmp(view.ble_value, "On") == 0);
     assert(strcmp(view.sd_value, "ready") == 0);
     assert(strcmp(view.sd_compact_value, "Ready") == 0);
