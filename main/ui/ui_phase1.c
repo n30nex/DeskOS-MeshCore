@@ -645,6 +645,24 @@ static bool content_generation_changed_from_rendered(const d1l_app_snapshot_t *s
     return !content_generation_equal(&current, &s_rendered_content_generation);
 }
 
+static bool nodes_content_generation_changed_from_rendered(
+    const d1l_app_snapshot_t *snapshot)
+{
+    const d1l_ui_content_generation_t current =
+        content_generation_from_snapshot(snapshot);
+    return !s_rendered_content_generation_valid ||
+        current.node_total_written !=
+            s_rendered_content_generation.node_total_written ||
+        current.contact_total_written !=
+            s_rendered_content_generation.contact_total_written ||
+        current.route_total_written !=
+            s_rendered_content_generation.route_total_written ||
+        current.node_count != s_rendered_content_generation.node_count ||
+        current.contact_count != s_rendered_content_generation.contact_count ||
+        current.dm_capable_contact_count !=
+            s_rendered_content_generation.dm_capable_contact_count;
+}
+
 static d1l_ui_map_render_input_t map_render_input_from_snapshot(
     const d1l_app_snapshot_t *snapshot)
 {
@@ -8404,6 +8422,19 @@ static void fill_capture_status(d1l_ui_capture_status_t *status)
     snprintf(status->pending_tab, sizeof(status->pending_tab), "%s", d1l_ui_phase1_pending_tab_name());
 }
 
+static bool ui_capture_in_progress(void)
+{
+    if (!s_capture_lock) {
+        return false;
+    }
+    if (xSemaphoreTake(s_capture_lock, 0) != pdTRUE) {
+        return true;
+    }
+    const bool active = s_capture_active;
+    xSemaphoreGive(s_capture_lock);
+    return active;
+}
+
 esp_err_t d1l_ui_capture_status(d1l_ui_capture_status_t *out_status)
 {
     if (!out_status) {
@@ -8503,6 +8534,8 @@ esp_err_t d1l_ui_capture_end(d1l_ui_capture_status_t *out_status)
     if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
         !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
         map_interactive_touch_authorized()) {
+        request_content_refresh();
+    } else if (d1l_ui_navigation_active() != D1L_UI_TAB_MAP) {
         request_content_refresh();
     }
     return ESP_OK;
@@ -9555,6 +9588,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
         }
     }
     const bool map_active = d1l_ui_navigation_active() == D1L_UI_TAB_MAP;
+    const bool nodes_active = d1l_ui_navigation_active() == D1L_UI_TAB_NODES;
     const bool map_uncovered = map_active &&
         !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
         map_interactive_touch_authorized();
@@ -9573,7 +9607,18 @@ static void refresh_timer_cb(lv_timer_t *timer)
              * saving/clearing a location still call request_content_refresh(). */
             remember_rendered_content_generation(&s_snapshot);
         } else {
-            request_content_refresh();
+#if D1L_ENABLE_UI_CAPTURE
+            if (ui_capture_in_progress()) {
+                /* Keep the immutable capture responsive, then catch up when
+                 * capture_end requests one coalesced refresh. */
+            } else
+#endif
+            if (nodes_active &&
+                !nodes_content_generation_changed_from_rendered(&s_snapshot)) {
+                remember_rendered_content_generation(&s_snapshot);
+            } else {
+                request_content_refresh();
+            }
         }
     }
     if (s_toast && s_toast_until != 0 && lv_tick_get() > s_toast_until) {
