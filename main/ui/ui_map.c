@@ -19,15 +19,15 @@
 #include "ui_keyboard.h"
 #include "ui_modal.h"
 
-#define MAP_COLOR_BG 0x071018U
-#define MAP_COLOR_PANEL 0x111923U
+#define MAP_COLOR_BG 0x17191AU
+#define MAP_COLOR_PANEL 0x20262BU
 #define MAP_COLOR_PANEL_PRESSED 0x182533U
-#define MAP_COLOR_BORDER 0x263241U
+#define MAP_COLOR_BORDER 0x33404AU
 #define MAP_COLOR_TEXT 0xF4F7FBU
-#define MAP_COLOR_MUTED 0x8EA0AEU
+#define MAP_COLOR_MUTED 0xA6B0B7U
 #define MAP_COLOR_DETAIL 0xD5E0E9U
-#define MAP_COLOR_GOOD 0x5EEAD4U
-#define MAP_COLOR_INFO 0x93C5FDU
+#define MAP_COLOR_GOOD 0x20D9EDU
+#define MAP_COLOR_INFO 0x4D7FFFU
 #define MAP_COLOR_WARN 0xFBBF24U
 #define MAP_VIEWPORT_WIDTH 478U
 #define MAP_VIEWPORT_HEIGHT (D1L_UI_DOCKED_CONTENT_HEIGHT - 2U)
@@ -183,8 +183,8 @@ static lv_obj_t *map_button(lv_obj_t *parent, const char *text,
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 9, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = map_label(button, text, MAP_COLOR_TEXT);
     if (label) {
@@ -201,7 +201,7 @@ static void map_style_primary_button(lv_obj_t *button)
     if (!button) {
         return;
     }
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x12362F), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x23321A), 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x174A40), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(button, lv_color_hex(MAP_COLOR_GOOD), 0);
     lv_obj_set_style_border_width(button, 1, 0);
@@ -626,7 +626,7 @@ static uint32_t map_marker_role_color(const char *type)
         return 0x38BDF8U;
     }
     if (type && strcmp(type, "chat") == 0) {
-        return 0x2DD4BFU;
+        return 0x1E5AEFU;
     }
     return 0xA3E635U;
 }
@@ -1641,7 +1641,7 @@ void d1l_ui_map_render(lv_obj_t *parent,
         map_label_dot(attribution, 240);
         lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_RIGHT, 0);
         lv_obj_set_pos(attribution, 228, (int)MAP_VIEWPORT_HEIGHT - 36);
-        lv_obj_set_style_bg_color(attribution, lv_color_hex(0x071018), 0);
+        lv_obj_set_style_bg_color(attribution, lv_color_hex(0x17191A), 0);
         lv_obj_set_style_bg_opa(attribution, LV_OPA_80, 0);
         lv_obj_set_style_pad_all(attribution, 2, 0);
     }

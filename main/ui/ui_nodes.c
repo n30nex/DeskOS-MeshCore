@@ -53,8 +53,8 @@ static lv_obj_t *nodes_create_panel(lv_obj_t *parent,
     lv_obj_set_size(panel, width, height);
     lv_obj_set_pos(panel, x, y);
     lv_obj_set_style_radius(panel, 8, 0);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(panel, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(panel, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_border_width(panel, 1, 0);
     lv_obj_set_style_pad_all(panel, 0, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -83,8 +83,8 @@ static lv_obj_t *nodes_create_button(lv_obj_t *parent,
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
     lv_obj_set_style_bg_color(
-        button, lv_color_hex(accent == 0xF87171 ? 0x2A1118 : 0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+        button, lv_color_hex(accent == 0xF87171 ? 0x2A1118 : 0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(
         button, lv_color_hex(accent == 0xF87171 ? 0x7F1D1D : 0x34566A), 0);
     lv_obj_set_style_border_width(button, 1, 0);
@@ -168,18 +168,18 @@ static uint32_t nodes_role_color(const char *role)
 {
     const char *label = nodes_role_badge_text(role);
     if (strcmp(label, "Room") == 0) {
-        return 0xA7F3D0;
+        return 0x84FF2E;
     }
     if (strcmp(label, "Repeater") == 0) {
         return 0xFBBF24;
     }
     if (strcmp(label, "Sensor") == 0) {
-        return 0xC4B5FD;
+        return 0x7D93FF;
     }
     if (strcmp(label, "Chat") == 0) {
-        return 0x5EEAD4;
+        return 0x20D9ED;
     }
-    return 0x93C5FD;
+    return 0x4D7FFF;
 }
 
 static lv_obj_t *nodes_render_role_avatar(lv_obj_t *parent,
@@ -385,7 +385,7 @@ static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
     snprintf(summary, sizeof(summary), "%u saved | %u nearby",
              (unsigned)controller->rendered.contact_count,
              (unsigned)nearby_count);
-    lv_obj_t *meta = nodes_create_label(parent, summary, 0x8EA0AE);
+    lv_obj_t *meta = nodes_create_label(parent, summary, 0xA6B0B7);
     if (meta) {
         nodes_set_dot_width(meta, 274);
         lv_obj_set_pos(meta, 16, 34);
@@ -403,7 +403,7 @@ static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
     controller->cycle_sort = (d1l_ui_nodes_action_binding_t) {
         .controller = controller,
     };
-    nodes_create_button(parent, "Find", 304, 4, 70, 44, 0xA7F3D0, true,
+    nodes_create_button(parent, "Find", 304, 4, 70, 44, 0x84FF2E, true,
                         nodes_dispatch_global_event_cb,
                         &controller->find_nearby);
     nodes_create_button(parent, "Clear", 382, 4, 70, 44, 0xF87171,
@@ -416,11 +416,11 @@ static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
              (int)(sizeof(search_label) - 1U),
              controller->rendered.search_text[0] ?
                  controller->rendered.search_text : "Search contacts");
-    nodes_create_button(parent, search_label, 16, 54, 278, 44, 0x93C5FD,
+    nodes_create_button(parent, search_label, 16, 54, 278, 44, 0x4D7FFF,
                         true, nodes_dispatch_global_event_cb,
                         &controller->open_search);
     nodes_create_button(parent, nodes_sort_label(controller->rendered.sort),
-                        302, 54, 150, 44, 0xC4B5FD, true,
+                        302, 54, 150, 44, 0x7D93FF, true,
                         nodes_dispatch_global_event_cb,
                         &controller->cycle_sort);
 }
@@ -429,7 +429,7 @@ static void nodes_render_section_label(lv_obj_t *parent,
                                        int y,
                                        const char *text)
 {
-    lv_obj_t *label = nodes_create_label(parent, text, 0x8EA0AE);
+    lv_obj_t *label = nodes_create_label(parent, text, 0xA6B0B7);
     if (label) {
         lv_obj_set_pos(label, 20, y);
     }
@@ -444,7 +444,7 @@ static void nodes_render_limit_note(lv_obj_t *parent,
     char text[80];
     snprintf(text, sizeof(text), "Showing %u of %u %s. Use Search to find more.",
              (unsigned)rendered, (unsigned)total, kind);
-    lv_obj_t *label = nodes_create_label(parent, text, 0x8EA0AE);
+    lv_obj_t *label = nodes_create_label(parent, text, 0xA6B0B7);
     nodes_set_dot_width(label, 424);
     if (label) {
         lv_obj_set_pos(label, 20, y);
@@ -484,7 +484,7 @@ static void nodes_render_contact_row(
         (entry->heard_name[0] ? entry->heard_name : "Saved contact");
     lv_obj_t *name = nodes_create_label(
         row, display_name,
-        entry->muted ? 0x8EA0AE : (entry->favorite ? 0xFBBF24 : 0xF4F7FB));
+        entry->muted ? 0xA6B0B7 : (entry->favorite ? 0xFBBF24 : 0xF4F7FB));
     nodes_set_dot_width(name, can_dm ? 246 : 320);
     if (name) {
         lv_obj_set_pos(name, 58, 7);
@@ -495,19 +495,19 @@ static void nodes_render_contact_row(
              nodes_contact_route_label(entry),
              entry->muted ? " | Muted" :
              (entry->favorite ? " | Favorite" : ""));
-    lv_obj_t *details = nodes_create_label(row, meta, 0x8EA0AE);
+    lv_obj_t *details = nodes_create_label(row, meta, 0xA6B0B7);
     nodes_set_dot_width(details, can_dm ? 266 : 344);
     if (details) {
         lv_obj_set_pos(details, 58, 31);
     }
     if (can_dm) {
-        nodes_create_button(row, "Chat", 340, 7, 84, 44, 0xA7F3D0, true,
+        nodes_create_button(row, "Chat", 340, 7, 84, 44, 0x84FF2E, true,
                             nodes_dispatch_contact_dm_event_cb, binding);
     } else if (can_manage) {
         nodes_create_button(row, "Manage", 340, 7, 84, 44, 0xFBBF24, true,
                             nodes_dispatch_contact_open_event_cb, binding);
     } else {
-        lv_obj_t *chevron = nodes_create_label(row, ">", 0x8EA0AE);
+        lv_obj_t *chevron = nodes_create_label(row, ">", 0xA6B0B7);
         if (chevron) {
             lv_obj_set_pos(chevron, 426, 20);
         }
@@ -545,7 +545,7 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
     const char *display_name = view->display_name[0] ? view->display_name :
         (entry->name[0] ? entry->name : "Nearby node");
     lv_obj_t *name = nodes_create_label(
-        row, display_name, view->muted ? 0x8EA0AE :
+        row, display_name, view->muted ? 0xA6B0B7 :
         (view->favorite ? 0xFBBF24 : 0xF4F7FB));
     nodes_set_dot_width(name, can_dm ? 246 : 320);
     if (name) {
@@ -558,19 +558,19 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
              nodes_role_badge_text(view->role), route,
              view->muted ? " | Muted" :
              (view->favorite ? " | Favorite" : ""));
-    lv_obj_t *details = nodes_create_label(row, meta, 0x8EA0AE);
+    lv_obj_t *details = nodes_create_label(row, meta, 0xA6B0B7);
     nodes_set_dot_width(details, can_dm ? 266 : 344);
     if (details) {
         lv_obj_set_pos(details, 58, 31);
     }
     if (can_dm) {
-        nodes_create_button(row, "Chat", 340, 7, 84, 44, 0xA7F3D0, true,
+        nodes_create_button(row, "Chat", 340, 7, 84, 44, 0x84FF2E, true,
                             nodes_dispatch_node_dm_event_cb, binding);
     } else if (can_manage) {
         nodes_create_button(row, "Manage", 340, 7, 84, 44, 0xFBBF24, true,
                             nodes_dispatch_node_open_event_cb, binding);
     } else {
-        lv_obj_t *chevron = nodes_create_label(row, ">", 0x8EA0AE);
+        lv_obj_t *chevron = nodes_create_label(row, ">", 0xA6B0B7);
         if (chevron) {
             lv_obj_set_pos(chevron, 426, 20);
         }
@@ -588,8 +588,8 @@ static void nodes_render_empty_state(
     lv_obj_t *icon = nodes_create_panel(panel, 196, 18, 48, 48);
     if (icon) {
         lv_obj_set_style_radius(icon, 24, 0);
-        lv_obj_set_style_border_color(icon, lv_color_hex(0x5EEAD4), 0);
-        lv_obj_t *plus = nodes_create_label(icon, "+", 0x5EEAD4);
+        lv_obj_set_style_border_color(icon, lv_color_hex(0x20D9ED), 0);
+        lv_obj_t *plus = nodes_create_label(icon, "+", 0x20D9ED);
         if (plus) {
             lv_obj_set_style_text_font(plus, &lv_font_montserrat_24, 0);
             lv_obj_center(plus);
@@ -608,7 +608,7 @@ static void nodes_render_empty_state(
         panel,
         searching ? "Try another name, role, or public key." :
                     "Nearby nodes appear here after a signed advert.",
-        0x8EA0AE);
+        0xA6B0B7);
     if (copy) {
         lv_label_set_long_mode(copy, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(copy, 360);
@@ -616,7 +616,7 @@ static void nodes_render_empty_state(
         lv_obj_set_pos(copy, 44, 108);
     }
     nodes_create_button(panel, searching ? "Edit search" : "Find nearby",
-                        126, 150, 196, 48, 0xA7F3D0, true,
+                        126, 150, 196, 48, 0x84FF2E, true,
                         nodes_dispatch_global_event_cb,
                         searching ? &controller->open_search :
                                     &controller->find_nearby);
@@ -637,7 +637,7 @@ static void nodes_render_empty_section(lv_obj_t *parent,
         nodes_set_dot_width(title_label, 416);
         lv_obj_set_pos(title_label, 12, 7);
     }
-    lv_obj_t *detail_label = nodes_create_label(panel, detail, 0x8EA0AE);
+    lv_obj_t *detail_label = nodes_create_label(panel, detail, 0xA6B0B7);
     if (detail_label) {
         nodes_set_dot_width(detail_label, 416);
         lv_obj_set_pos(detail_label, 12, 31);

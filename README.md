@@ -1,8 +1,14 @@
-# MeshCore DeskOS for SenseCAP Indicator D1L
+<p align="center">
+  <img src="branding/deskos-mark-512.png" width="180" alt="DeskOS touch-display mesh mark">
+</p>
 
-DeskOS **1.6** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.6.0` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.6.0).
+<h1 align="center">DeskOS MeshCore</h1>
+
+<p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
+
+DeskOS **1.7** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.7.0` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.0).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -11,7 +17,26 @@ and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
 
-## What 1.6 adds
+## What 1.7 adds
+
+DeskOS 1.7 gives the firmware a clear identity inspired by the bright visual
+family of [NeonPocketMC](https://github.com/n30nex/NeonPocketMC):
+
+- a new DeskOS touch-display and three-node mesh mark;
+- a smooth, non-blocking 3.2-second opening animation;
+- electric cyan, cobalt, neon lime, and charcoal across the complete UI;
+- simpler opening messages that describe what is actually on screen; and
+- matching repository artwork and interface previews.
+
+<p align="center">
+  <img src="docs/images/branding/deskos-boot.gif" width="360" alt="DeskOS animated opening preview">
+</p>
+
+The animation above is generated from the same bounded timeline as the
+firmware. The on-device scene is drawn with lightweight LVGL shapes rather
+than storing a large bitmap in flash.
+
+## Everyday improvements from 1.6
 
 DeskOS 1.6 keeps the complete 1.5 feature set and refines the everyday touch
 experience:
@@ -66,13 +91,27 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.0 / RC1** | Initial production baseline | Historical |
 | **1.2 / RC2** | Channel, Contacts, parity, packaging, and screenshot correction | Historical (`v1.2.0`) |
 | **1.5 / RC3** | BLE, signed update/rollback, sharing, diagnostics, and full-feature activation | Historical (`v1.5.0`) |
-| **1.6** | Compact Home, Contacts search/sorts, UI truthfulness, and diagnostics polish | Current (`v1.6.0`) |
+| **1.6** | Compact Home, Contacts search/sorts, UI truthfulness, and diagnostics polish | Historical (`v1.6.0`) |
+| **1.7** | DeskOS identity, animated opening, and NeonPocket-inspired product theme | Current (`v1.7.0`) |
 
 ## Device UI
 
 These native 480x480 captures show the production touch shell introduced in
 1.2 and refined by 1.6. Their exact 1.2 provenance is recorded in
 [`docs/screenshots/DEVICE_1_2_CAPTURE.md`](docs/screenshots/DEVICE_1_2_CAPTURE.md).
+
+The 1.7 simulator previews below show the refreshed production palette. They
+are visual previews, not substitutes for the physical D1L release check.
+
+| Home | Channels |
+|---|---|
+| ![DeskOS 1.7 Home preview](docs/screenshots/simulator-1.7/home.png) | ![DeskOS 1.7 Channels preview](docs/screenshots/simulator-1.7/messages.png) |
+
+| Contacts | Settings |
+|---|---|
+| ![DeskOS 1.7 Contacts preview](docs/screenshots/simulator-1.7/nodes.png) | ![DeskOS 1.7 Settings preview](docs/screenshots/simulator-1.7/settings.png) |
+
+### Physical 1.2 reference captures
 
 | Home | Channels |
 |---|---|

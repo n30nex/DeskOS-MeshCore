@@ -138,8 +138,8 @@ static lv_obj_t *create_button(
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label(button, text, 0xF4F7FB);
     if (!label) {
@@ -169,8 +169,8 @@ static lv_obj_t *create_sheet(lv_obj_t *parent, bool scrollable)
     lv_obj_set_size(sheet, 448, 320);
     lv_obj_set_pos(sheet, 16, 82);
     lv_obj_set_style_radius(sheet, 8, 0);
-    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(sheet, 1, 0);
     lv_obj_set_style_pad_all(sheet, 12, 0);
     if (scrollable) {
@@ -284,7 +284,7 @@ bool d1l_ui_device_sheets_render_display(
         BINDING_CLOSE_DISPLAY,
         D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DISPLAY) != NULL && complete;
 
-    lv_obj_t *state = create_label(sheet, "Local display time", 0x5EEAD4);
+    lv_obj_t *state = create_label(sheet, "Local display time", 0x20D9ED);
     if (state) {
         lv_obj_set_pos(state, 8, 54);
     }
@@ -296,7 +296,7 @@ bool d1l_ui_device_sheets_render_display(
                  snapshot->timezone_label : "UTC fallback",
              snapshot->time_available && snapshot->time_label[0] != '\0' ?
                  snapshot->time_label : "time not synced");
-    lv_obj_t *summary = create_label(sheet, time_summary, 0xE5EDF5);
+    lv_obj_t *summary = create_label(sheet, time_summary, 0xF4F7FB);
     configure_wrapped_label(summary, 8, 88);
     complete = summary != NULL && complete;
 
@@ -382,7 +382,7 @@ bool d1l_ui_device_sheets_render_diagnostics(
         controller, sheet, "Close", 340, 0, 76, 40,
         BINDING_CLOSE_DIAGNOSTICS,
         D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DIAGNOSTICS) != NULL && complete;
-    lv_obj_t *health = create_label(sheet, "Health", 0x5EEAD4);
+    lv_obj_t *health = create_label(sheet, "Health", 0x20D9ED);
     if (health) {
         lv_obj_set_pos(health, 8, 50);
     }
@@ -393,30 +393,30 @@ bool d1l_ui_device_sheets_render_diagnostics(
              snapshot->reset_reason ? snapshot->reset_reason : "UNKNOWN",
              (unsigned long)(snapshot->uptime_ms / 1000U),
              snapshot->mesh_state ? snapshot->mesh_state : "unknown");
-    complete = create_diagnostic_line(sheet, text, 8, 76, 0xE5EDF5, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 76, 0xF4F7FB, 408) != NULL &&
                complete;
     snprintf(text, sizeof(text), "heap %luK free  min %luK  largest %luK",
              (unsigned long)(snapshot->heap_free / 1024U),
              (unsigned long)(snapshot->heap_min_free / 1024U),
              (unsigned long)(snapshot->heap_largest_free / 1024U));
-    complete = create_diagnostic_line(sheet, text, 8, 104, 0x8EA0AE, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 104, 0xA6B0B7, 408) != NULL &&
                complete;
     snprintf(text, sizeof(text), "LVGL free %lu  largest %lu  used %u%%",
              (unsigned long)snapshot->lvgl_free_bytes,
              (unsigned long)snapshot->lvgl_largest_free_bytes,
              (unsigned)snapshot->lvgl_used_pct);
-    complete = create_diagnostic_line(sheet, text, 8, 132, 0x8EA0AE, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 132, 0xA6B0B7, 408) != NULL &&
                complete;
     snprintf(text, sizeof(text), "ui stack %lu words  console stack %lu",
              (unsigned long)snapshot->ui_task_stack_free_words,
              (unsigned long)snapshot->current_task_stack_free_words);
-    complete = create_diagnostic_line(sheet, text, 8, 160, 0x8EA0AE, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 160, 0xA6B0B7, 408) != NULL &&
                complete;
     snprintf(text, sizeof(text), "packets rx %lu tx %lu  rejected %lu",
              (unsigned long)snapshot->rx_packets,
              (unsigned long)snapshot->tx_packets,
              (unsigned long)snapshot->rejected_commands);
-    complete = create_diagnostic_line(sheet, text, 8, 188, 0x93C5FD, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 188, 0x4D7FFF, 408) != NULL &&
                complete;
 
     lv_obj_t *stores = create_label(sheet, "Crashlog  Events  Serial", 0xF4F7FB);

@@ -166,7 +166,7 @@ static void home_bind_action(lv_obj_t *object,
     binding->action = action;
     lv_obj_add_flag(object, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(object, lv_color_hex(0x17241D), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(object, lv_color_hex(0x5EEAD4), LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(object, lv_color_hex(0x20D9ED), LV_STATE_FOCUSED);
     lv_obj_add_event_cb(object, home_action_event_cb, LV_EVENT_CLICKED, binding);
 }
 
@@ -182,7 +182,7 @@ static void render_home_toolbar(lv_obj_t *parent,
     lv_obj_set_size(toolbar, 480, 44);
     lv_obj_set_pos(toolbar, 0, 0);
     lv_obj_set_style_radius(toolbar, 0, 0);
-    lv_obj_set_style_bg_color(toolbar, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_bg_color(toolbar, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_border_color(toolbar, lv_color_hex(0x1F372E), 0);
     lv_obj_set_style_border_width(toolbar, 1, 0);
     lv_obj_set_style_pad_all(toolbar, 0, 0);
@@ -205,11 +205,11 @@ static void render_home_toolbar(lv_obj_t *parent,
         lv_obj_set_size(lock, 86, 44);
         lv_obj_set_pos(lock, 382, 0);
         lv_obj_set_style_radius(lock, 8, 0);
-        lv_obj_set_style_bg_color(lock, lv_color_hex(0x1E2A36), 0);
-        lv_obj_set_style_bg_color(lock, lv_color_hex(0x263545), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(lock, lv_color_hex(0x252D33), 0);
+        lv_obj_set_style_bg_color(lock, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
         lv_obj_set_style_shadow_width(lock, 0, 0);
         lv_obj_set_style_pad_all(lock, 0, 0);
-        lv_obj_t *label = home_create_label(lock, "Lock", 0xE5EDF5);
+        lv_obj_t *label = home_create_label(lock, "Lock", 0xF4F7FB);
         if (label) {
             lv_obj_center(label);
         }
@@ -249,7 +249,7 @@ static void render_destination_card(lv_obj_t *parent,
         lv_obj_set_pos(title_label, 52, 16);
     }
 
-    lv_obj_t *arrow_label = home_create_label(card, LV_SYMBOL_RIGHT, 0x8EA0AE);
+    lv_obj_t *arrow_label = home_create_label(card, LV_SYMBOL_RIGHT, 0xA6B0B7);
     if (arrow_label) {
         lv_obj_set_pos(arrow_label, 192, 18);
     }

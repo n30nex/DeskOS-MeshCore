@@ -31,6 +31,7 @@
 #include "mesh/dm_store.h"
 #include "mesh/user_text.h"
 #include "ui_ble.h"
+#include "ui_boot_scene.h"
 #include "ui_channel_sheets.h"
 #include "ui_chrome.h"
 #include "ui_compose_eligibility.h"
@@ -92,6 +93,8 @@ static portMUX_TYPE s_content_refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_map_visibility_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_product_navigation_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_started = false;
+static d1l_ui_boot_scene_t s_boot_scene;
+static bool s_boot_scene_played;
 static lv_obj_t *s_screen;
 static lv_obj_t *s_top_bar;
 static lv_obj_t *s_content;
@@ -1418,8 +1421,8 @@ static lv_obj_t *create_panel(lv_obj_t *parent, int x, int y, int w, int h)
     lv_obj_set_size(panel, w, h);
     lv_obj_set_pos(panel, x, y);
     lv_obj_set_style_radius(panel, 8, 0);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(panel, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(panel, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_border_width(panel, 1, 0);
     lv_obj_set_style_pad_all(panel, 12, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -1440,8 +1443,8 @@ static lv_obj_t *create_button(lv_obj_t *parent, const char *text, int x, int y,
     lv_obj_set_size(button, w, h);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label_object(button, "button label");
     if (label) {
@@ -1475,15 +1478,15 @@ static lv_obj_t *create_dock_button(lv_obj_t *parent,
     lv_obj_set_style_radius(button, 7, 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x101B25), 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x1D303E), LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_border_width(button, 0, 0);
     lv_obj_set_style_border_width(button, 1, LV_STATE_CHECKED);
-    lv_obj_set_style_border_color(button, lv_color_hex(0x5EEAD4), LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x20D9ED), LV_STATE_CHECKED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_set_style_pad_all(button, 0, 0);
 
     /* The symbol is never the only cue: every compact tab keeps visible text. */
-    lv_obj_t *icon = create_label(button, item->icon, 0x8EA0AE);
+    lv_obj_t *icon = create_label(button, item->icon, 0xA6B0B7);
     if (icon) {
         lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, 0);
         lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 3);
@@ -1529,7 +1532,7 @@ static void style_contact_option_button(lv_obj_t *button, uint32_t accent,
         lv_obj_set_style_text_color(label, lv_color_hex(accent), 0);
         lv_obj_align(label, LV_ALIGN_LEFT_MID, 12, 0);
     }
-    lv_obj_t *detail_label = create_label(button, detail ? detail : "", 0x8EA0AE);
+    lv_obj_t *detail_label = create_label(button, detail ? detail : "", 0xA6B0B7);
     if (detail_label) {
         lv_label_set_long_mode(detail_label, LV_LABEL_LONG_DOT);
         lv_obj_set_width(detail_label, 220);
@@ -1545,8 +1548,8 @@ static void show_toast(const char *action, esp_err_t ret)
     }
     if (ret == ESP_OK) {
         label_set_fmt(s_toast, "%s queued", action);
-        lv_obj_set_style_bg_color(s_toast, lv_color_hex(0x12362F), 0);
-        lv_obj_set_style_border_color(s_toast, lv_color_hex(0x5EEAD4), 0);
+        lv_obj_set_style_bg_color(s_toast, lv_color_hex(0x23321A), 0);
+        lv_obj_set_style_border_color(s_toast, lv_color_hex(0x20D9ED), 0);
     } else {
         label_set_fmt(s_toast, "%s: %s", action, esp_err_to_name(ret));
         lv_obj_set_style_bg_color(s_toast, lv_color_hex(0x3A1720), 0);
@@ -1563,8 +1566,8 @@ static void show_toast_text(const char *text, bool ok)
         return;
     }
     lv_label_set_text(s_toast, text);
-    lv_obj_set_style_bg_color(s_toast, lv_color_hex(ok ? 0x12362F : 0x3A1720), 0);
-    lv_obj_set_style_border_color(s_toast, lv_color_hex(ok ? 0x5EEAD4 : 0xF87171), 0);
+    lv_obj_set_style_bg_color(s_toast, lv_color_hex(ok ? 0x23321A : 0x3A1720), 0);
+    lv_obj_set_style_border_color(s_toast, lv_color_hex(ok ? 0x20D9ED : 0xF87171), 0);
     lv_obj_clear_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_toast);
     s_toast_until = lv_tick_get() + 3000U;
@@ -1904,6 +1907,9 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
 static void update_startup_overlay(const d1l_app_snapshot_t *snapshot)
 {
     if (!snapshot) {
+        return;
+    }
+    if (d1l_ui_boot_scene_visible(&s_boot_scene)) {
         return;
     }
 #if D1L_ENABLE_QUALIFICATION_HOOKS
@@ -2515,7 +2521,7 @@ static void render_packet_row(lv_obj_t *parent,
     lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED,
                         row_token(s_packet_row_generation, payload_index));
     lv_obj_set_style_pad_all(row, 7, 0);
-    lv_obj_set_style_bg_color(row, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_border_color(row, lv_color_hex(accent_color), 0);
 
     lv_obj_t *accent = create_object(row, "packet row accent");
@@ -2533,12 +2539,12 @@ static void render_packet_row(lv_obj_t *parent,
     lv_obj_t *kind = create_label(row, entry->kind[0] ? entry->kind : "packet", 0xF4F7FB);
     label_set_dot_width(kind, 128);
     obj_align_if(kind, LV_ALIGN_TOP_LEFT, 54, 0);
-    lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
+    lv_obj_t *meta = create_label(row, "", 0xA6B0B7);
     label_set_fmt(meta, "#%lu  rssi %d  snr %s",
                   (unsigned long)entry->seq, entry->rssi_dbm, snr);
     label_set_dot_width(meta, 190);
     obj_align_if(meta, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_obj_t *note = create_label(row, entry->note[0] ? entry->note : "-", 0xE5EDF5);
+    lv_obj_t *note = create_label(row, entry->note[0] ? entry->note : "-", 0xF4F7FB);
     label_set_dot_width(note, 380);
     obj_align_if(note, LV_ALIGN_BOTTOM_LEFT, 8, 0);
 }
@@ -2556,15 +2562,15 @@ static void render_route_row(lv_obj_t *parent,
     lv_obj_add_event_cb(row, open_route_detail_event_cb, LV_EVENT_CLICKED,
                         row_token(s_route_row_generation, payload_index));
     lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_t *label = create_label(row, entry->label[0] ? entry->label : entry->target, 0xA7F3D0);
+    lv_obj_t *label = create_label(row, entry->label[0] ? entry->label : entry->target, 0x84FF2E);
     label_set_dot_width(label, 176);
     obj_align_if(label, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
+    lv_obj_t *meta = create_label(row, "", 0xA6B0B7);
     label_set_fmt(meta, "#%lu %s %s", (unsigned long)entry->seq, entry->direction, entry->route);
     label_set_dot_width(meta, 190);
     obj_align_if(meta, LV_ALIGN_TOP_RIGHT, 0, 0);
     const int snr_abs = entry->last_snr_tenths < 0 ? -entry->last_snr_tenths : entry->last_snr_tenths;
-    lv_obj_t *signal = create_label(row, "", 0xE5EDF5);
+    lv_obj_t *signal = create_label(row, "", 0xF4F7FB);
     label_set_fmt(signal, "%s  rssi %d  snr %s%d.%d  hops %u",
                   entry->kind, entry->last_rssi_dbm,
                   entry->last_snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10,
@@ -2687,7 +2693,7 @@ static void update_compose_counter(void)
     lv_obj_set_style_text_color(s_compose_counter,
                                 lv_color_hex(text_error ? 0xF87171 :
                                              eligibility.retry_available ?
-                                                 0xFBBF24 : 0x8EA0AE),
+                                                 0xFBBF24 : 0xA6B0B7),
                                 0);
     if (s_compose_send_button) {
         if (eligibility.send_enabled) {
@@ -3310,13 +3316,13 @@ static void render_route_trace_sheet(void)
                       route_reset_event_cb, NULL);
     }
 
-    lv_obj_t *meta = create_label(s_route_trace_sheet, "", 0x8EA0AE);
+    lv_obj_t *meta = create_label(s_route_trace_sheet, "", 0xA6B0B7);
     label_set_fmt(meta, "Trace %.16s  rows %u/%u",
                   contact->fingerprint, (unsigned)route_count,
                   (unsigned)D1L_ROUTE_STORE_CAPACITY);
     lv_obj_set_pos(meta, 16, 60);
 
-    lv_obj_t *contact_path = create_label(s_route_trace_sheet, "", 0x8EA0AE);
+    lv_obj_t *contact_path = create_label(s_route_trace_sheet, "", 0xA6B0B7);
     label_set_fmt(contact_path, "%s  contact path %s hops %u",
                   contact->public_key_hex[0] ? "key retained" : "no key",
                   contact->out_path_valid ? "known" : "unknown",
@@ -3325,7 +3331,7 @@ static void render_route_trace_sheet(void)
     lv_obj_set_width(contact_path, 448);
     lv_obj_set_pos(contact_path, 16, 88);
 
-    lv_obj_t *best_label = create_label(s_route_trace_sheet, "", route_count ? 0x5EEAD4 : 0xFBBF24);
+    lv_obj_t *best_label = create_label(s_route_trace_sheet, "", route_count ? 0x20D9ED : 0xFBBF24);
     if (route_count) {
         label_set_fmt(best_label, "best %s  seq %lu  confidence %u  hops %u",
                       s_route_trace_entries[best].route,
@@ -3340,7 +3346,7 @@ static void render_route_trace_sheet(void)
     lv_obj_set_pos(best_label, 16, 116);
 
     lv_obj_t *telemetry_state =
-        create_label(s_route_trace_sheet, "", 0x93C5FD);
+        create_label(s_route_trace_sheet, "", 0x4D7FFF);
     if (s_route_trace_telemetry.pending) {
         label_set_fmt(
             telemetry_state,
@@ -3375,9 +3381,9 @@ static void render_route_trace_sheet(void)
             lv_obj_set_width(trace_panel, 448);
             lv_obj_set_pos(trace_panel, 16, content_y);
             lv_obj_set_style_bg_color(
-                trace_panel, lv_color_hex(0x10282A), 0);
+                trace_panel, lv_color_hex(0x17294A), 0);
             lv_obj_set_style_border_color(
-                trace_panel, lv_color_hex(0x2DD4BF), 0);
+                trace_panel, lv_color_hex(0x1E5AEF), 0);
             lv_obj_set_style_border_width(trace_panel, 1, 0);
             lv_obj_set_style_radius(trace_panel, 8, 0);
             lv_obj_set_style_pad_all(trace_panel, 8, 0);
@@ -3453,14 +3459,14 @@ static void render_route_trace_sheet(void)
             }
 
             lv_obj_t *result =
-                create_label(trace_panel, result_line, 0x5EEAD4);
+                create_label(trace_panel, result_line, 0x20D9ED);
             if (result) {
                 lv_label_set_long_mode(result, LV_LABEL_LONG_WRAP);
                 lv_obj_set_width(result, 416);
                 lv_obj_set_pos(result, 8, 4);
             }
             lv_obj_t *snrs =
-                create_label(trace_panel, snr_line, 0xE5EDF5);
+                create_label(trace_panel, snr_line, 0xF4F7FB);
             if (snrs) {
                 lv_label_set_long_mode(snrs, LV_LABEL_LONG_WRAP);
                 lv_obj_set_width(snrs, 416);
@@ -3474,7 +3480,7 @@ static void render_route_trace_sheet(void)
         lv_obj_t *empty = create_label(
             s_route_trace_sheet,
             "Tap Probe to discover a route, verify reachability, and request base telemetry.",
-            0x8EA0AE);
+            0xA6B0B7);
         lv_label_set_long_mode(empty, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(empty, 448);
         lv_obj_set_pos(empty, 16, content_y);
@@ -3492,15 +3498,15 @@ static void render_route_trace_sheet(void)
             lv_obj_set_width(panel, 448);
             lv_obj_set_pos(panel, 16, content_y);
             lv_obj_set_style_bg_color(
-                panel, lv_color_hex(i == 0U ? 0x10282A : 0x111923), 0);
+                panel, lv_color_hex(i == 0U ? 0x17294A : 0x20262B), 0);
             lv_obj_set_style_border_color(
-                panel, lv_color_hex(0x334155), 0);
+                panel, lv_color_hex(0x3C4A54), 0);
             lv_obj_set_style_border_width(panel, 1, 0);
             lv_obj_set_style_radius(panel, 8, 0);
             lv_obj_set_style_pad_all(panel, 8, 0);
             lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
 
-            lv_obj_t *record_meta = create_label(panel, "", 0x5EEAD4);
+            lv_obj_t *record_meta = create_label(panel, "", 0x20D9ED);
             label_set_fmt(
                 record_meta,
                 "#%lu  %lus ago  RSSI %d  SNR %s%d.%d  hops %u",
@@ -3522,7 +3528,7 @@ static void render_route_trace_sheet(void)
             lv_obj_set_pos(record_meta, 8, 4);
 
             lv_obj_t *record_text =
-                create_label(panel, entry->result.text, 0xE5EDF5);
+                create_label(panel, entry->result.text, 0xF4F7FB);
             lv_label_set_long_mode(record_text, LV_LABEL_LONG_WRAP);
             lv_obj_set_width(record_text, 416);
             lv_obj_set_pos(record_text, 8, 28);
@@ -3552,7 +3558,7 @@ static void render_route_trace_sheet(void)
     }
     lv_obj_set_size(list, 448, 200);
     lv_obj_set_pos(list, 16, content_y);
-    lv_obj_set_style_bg_color(list, lv_color_hex(0x0B111B), 0);
+    lv_obj_set_style_bg_color(list, lv_color_hex(0x191E22), 0);
     lv_obj_set_style_border_color(list, lv_color_hex(0x253447), 0);
     lv_obj_set_style_border_width(list, 1, 0);
     lv_obj_set_style_radius(list, 8, 0);
@@ -3570,7 +3576,7 @@ static void render_route_trace_sheet(void)
         lv_obj_set_size(row, 416, 50);
         lv_obj_set_pos(row, 0, y);
         lv_obj_set_style_bg_color(row, lv_color_hex(ui_route_trace_is_direct(entry) ? 0x132A32 : 0x182230), 0);
-        lv_obj_set_style_border_color(row, lv_color_hex(0x334155), 0);
+        lv_obj_set_style_border_color(row, lv_color_hex(0x3C4A54), 0);
         lv_obj_set_style_border_width(row, 1, 0);
         lv_obj_set_style_radius(row, 8, 0);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -3583,7 +3589,7 @@ static void render_route_trace_sheet(void)
         lv_obj_set_pos(line1, 10, 6);
 
         const int snr_abs = entry->last_snr_tenths < 0 ? -entry->last_snr_tenths : entry->last_snr_tenths;
-        lv_obj_t *line2 = create_label(row, "", 0x8EA0AE);
+        lv_obj_t *line2 = create_label(row, "", 0xA6B0B7);
         label_set_fmt(line2, "rssi %d snr %s%d.%d hops %u conf %u seen %lu",
                       entry->last_rssi_dbm,
                       entry->last_snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10,
@@ -3597,7 +3603,7 @@ static void render_route_trace_sheet(void)
 
     lv_obj_t *note = create_label(s_route_trace_sheet,
                                   "Probe and TRACE are contact-only RF; Reset forgets only this contact; no Public RF",
-                                  0x8EA0AE);
+                                  0xA6B0B7);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, 448);
     lv_obj_set_pos(note, 16, content_y);
@@ -3819,13 +3825,13 @@ static void render_route_detail_sheet(void)
 
     create_button(s_route_detail_sheet, "Close", 316, 0, 76, 40, close_route_detail_event_cb, NULL);
 
-    lv_obj_t *target = create_label(s_route_detail_sheet, "", 0xE5EDF5);
+    lv_obj_t *target = create_label(s_route_detail_sheet, "", 0xF4F7FB);
     label_set_fmt(target, "target %.16s", entry->target[0] ? entry->target : "-");
     lv_label_set_long_mode(target, LV_LABEL_LONG_DOT);
     lv_obj_set_width(target, 392);
     lv_obj_set_pos(target, 8, 48);
 
-    lv_obj_t *route = create_label(s_route_detail_sheet, "", 0x8EA0AE);
+    lv_obj_t *route = create_label(s_route_detail_sheet, "", 0xA6B0B7);
     label_set_fmt(route, "#%lu  %s  %s  %s",
                   (unsigned long)entry->seq,
                   entry->kind[0] ? entry->kind : "packet",
@@ -3836,7 +3842,7 @@ static void render_route_detail_sheet(void)
     lv_obj_set_pos(route, 8, 82);
 
     const int snr_abs = entry->last_snr_tenths < 0 ? -entry->last_snr_tenths : entry->last_snr_tenths;
-    lv_obj_t *signal = create_label(s_route_detail_sheet, "", 0x8EA0AE);
+    lv_obj_t *signal = create_label(s_route_detail_sheet, "", 0xA6B0B7);
     label_set_fmt(signal, "rssi %d  snr %s%d.%d  payload %u",
                   entry->last_rssi_dbm,
                   entry->last_snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10,
@@ -3845,14 +3851,14 @@ static void render_route_detail_sheet(void)
     lv_obj_set_width(signal, 392);
     lv_obj_set_pos(signal, 8, 116);
 
-    lv_obj_t *path = create_label(s_route_detail_sheet, "", 0x8EA0AE);
+    lv_obj_t *path = create_label(s_route_detail_sheet, "", 0xA6B0B7);
     label_set_fmt(path, "hash %u byte  hops %u  confidence %u",
                   entry->path_hash_bytes, entry->path_hops, entry->confidence);
     lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
     lv_obj_set_width(path, 392);
     lv_obj_set_pos(path, 8, 150);
 
-    lv_obj_t *seen = create_label(s_route_detail_sheet, "", 0x8EA0AE);
+    lv_obj_t *seen = create_label(s_route_detail_sheet, "", 0xA6B0B7);
     label_set_fmt(seen, "seen %lu  first %lums  last %lums",
                   (unsigned long)entry->seen_count,
                   (unsigned long)entry->first_seen_ms,
@@ -3965,8 +3971,8 @@ static lv_obj_t *create_nested_page_body(lv_obj_t *page, const char *name)
     lv_obj_set_size(body, 448, 292);
     lv_obj_set_pos(body, 16, 60);
     lv_obj_set_style_radius(body, 8, 0);
-    lv_obj_set_style_bg_color(body, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_color(body, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(body, lv_color_hex(0x17191A), 0);
+    lv_obj_set_style_border_color(body, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_border_width(body, 1, 0);
     lv_obj_set_style_pad_all(body, 12, 0);
     lv_obj_set_style_pad_row(body, 10, 0);
@@ -4016,19 +4022,19 @@ static void render_message_detail_sheet(void)
         return;
     }
 
-    create_nested_page_label(body, "Sender", 0x5EEAD4, false);
-    lv_obj_t *sender = create_nested_page_label(body, "", 0xE5EDF5, false);
+    create_nested_page_label(body, "Sender", 0x20D9ED, false);
+    lv_obj_t *sender = create_nested_page_label(body, "", 0xF4F7FB, false);
     if (sender) {
         label_set_fmt(sender, "%s  %s",
                       entry->author[0] ? entry->author : "unknown",
                       message_delivery_label(entry));
     }
 
-    create_nested_page_label(body, "Channel", 0x5EEAD4, false);
+    create_nested_page_label(body, "Channel", 0x20D9ED, false);
     create_nested_page_label(
         body, channel_found && detail_channel.name[0] ?
             detail_channel.name : "Channel unavailable",
-        channel_found ? 0xE5EDF5 : 0xFBBF24, false);
+        channel_found ? 0xF4F7FB : 0xFBBF24, false);
 
     const d1l_ui_dm_identity_eligibility_t sender_dm =
         public_sender_dm_eligibility();
@@ -4037,7 +4043,7 @@ static void render_message_detail_sheet(void)
              d1l_ui_dm_identity_reason_text(sender_dm.reason));
     create_nested_page_label(body, dm_reason, 0xFBBF24, true);
 
-    create_nested_page_label(body, "Message", 0x5EEAD4, false);
+    create_nested_page_label(body, "Message", 0x20D9ED, false);
     create_nested_page_label(body, entry->text[0] ? entry->text : "-", 0xF4F7FB, true);
 
     lv_obj_t *technical = create_button(body,
@@ -4049,7 +4055,7 @@ static void render_message_detail_sheet(void)
     }
 
     if (s_message_detail_advanced) {
-        lv_obj_t *signal = create_nested_page_label(body, "", 0x8EA0AE, true);
+        lv_obj_t *signal = create_nested_page_label(body, "", 0xA6B0B7, true);
         if (signal) {
             if (entry->direction[0] == 't') {
                 lv_label_set_text(signal,
@@ -4063,7 +4069,7 @@ static void render_message_detail_sheet(void)
                               snr_abs / 10, snr_abs % 10);
             }
         }
-        lv_obj_t *path = create_nested_page_label(body, "", 0x8EA0AE, true);
+        lv_obj_t *path = create_nested_page_label(body, "", 0xA6B0B7, true);
         if (path) {
             if (entry->direction[0] == 't') {
                 lv_label_set_text(path,
@@ -4074,14 +4080,14 @@ static void render_message_detail_sheet(void)
                               entry->path_hops == 1 ? "" : "s");
             }
         }
-        lv_obj_t *seq = create_nested_page_label(body, "", 0x8EA0AE, true);
+        lv_obj_t *seq = create_nested_page_label(body, "", 0xA6B0B7, true);
         if (seq) {
             label_set_fmt(seq, "Sequence  %lu  uptime %lums  direction %s",
                           (unsigned long)entry->seq,
                           (unsigned long)entry->uptime_ms,
                           entry->direction[0] ? entry->direction : "?");
         }
-        lv_obj_t *hash = create_nested_page_label(body, "", 0x8EA0AE, true);
+        lv_obj_t *hash = create_nested_page_label(body, "", 0xA6B0B7, true);
         if (hash) {
             label_set_fmt(hash, "Path signature  %u byte%s  saved after %s",
                           entry->path_hash_bytes,
@@ -4172,7 +4178,7 @@ static void render_packet_detail_sheet(void)
                   218, 0, 92, 40, packet_detail_mode_event_cb, NULL);
     create_button(s_packet_detail_sheet, "Close", 320, 0, 76, 40, close_packet_detail_event_cb, NULL);
 
-    lv_obj_t *kind_title = create_label(s_packet_detail_sheet, "Kind", 0x8EA0AE);
+    lv_obj_t *kind_title = create_label(s_packet_detail_sheet, "Kind", 0xA6B0B7);
     lv_obj_set_pos(kind_title, 8, 54);
     lv_obj_t *kind = create_label(s_packet_detail_sheet, "", accent_color);
     label_set_fmt(kind, "%s  %s  #%lu",
@@ -4182,18 +4188,18 @@ static void render_packet_detail_sheet(void)
     label_set_dot_width(kind, 392);
     lv_obj_set_pos(kind, 8, 76);
 
-    lv_obj_t *signal_title = create_label(s_packet_detail_sheet, "Signal", 0x8EA0AE);
+    lv_obj_t *signal_title = create_label(s_packet_detail_sheet, "Signal", 0xA6B0B7);
     lv_obj_set_pos(signal_title, 8, 108);
-    lv_obj_t *signal = create_label(s_packet_detail_sheet, "", 0xE5EDF5);
+    lv_obj_t *signal = create_label(s_packet_detail_sheet, "", 0xF4F7FB);
     label_set_fmt(signal, "direction %s  rssi %d  snr %s",
                   entry->direction[0] ? entry->direction : "-",
                   entry->rssi_dbm, snr);
     label_set_dot_width(signal, 392);
     lv_obj_set_pos(signal, 8, 130);
 
-    lv_obj_t *payload_title = create_label(s_packet_detail_sheet, "Payload", 0x8EA0AE);
+    lv_obj_t *payload_title = create_label(s_packet_detail_sheet, "Payload", 0xA6B0B7);
     lv_obj_set_pos(payload_title, 8, 162);
-    lv_obj_t *payload = create_label(s_packet_detail_sheet, "", 0xE5EDF5);
+    lv_obj_t *payload = create_label(s_packet_detail_sheet, "", 0xF4F7FB);
     label_set_fmt(payload, "%u bytes  raw %u%s",
                   entry->payload_len,
                   entry->raw_len,
@@ -4209,25 +4215,25 @@ static void render_packet_detail_sheet(void)
     lv_obj_set_pos(note, 8, 216);
 
     if (!s_packet_detail_advanced) {
-        lv_obj_t *hint = create_label(s_packet_detail_sheet, "Advanced shows path and raw hex", 0x8EA0AE);
+        lv_obj_t *hint = create_label(s_packet_detail_sheet, "Advanced shows path and raw hex", 0xA6B0B7);
         lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
         lv_obj_set_width(hint, 392);
         lv_obj_set_pos(hint, 8, 252);
         return;
     }
 
-    lv_obj_t *path_title = create_label(s_packet_detail_sheet, "Path", 0x8EA0AE);
+    lv_obj_t *path_title = create_label(s_packet_detail_sheet, "Path", 0xA6B0B7);
     lv_obj_set_pos(path_title, 8, 252);
-    lv_obj_t *path = create_label(s_packet_detail_sheet, "", 0xE5EDF5);
+    lv_obj_t *path = create_label(s_packet_detail_sheet, "", 0xF4F7FB);
     label_set_fmt(path, "hash %u byte  hops %u  uptime %lums",
                   entry->path_hash_bytes, entry->path_hops, (unsigned long)entry->uptime_ms);
     lv_obj_set_width(path, 392);
     lv_obj_set_pos(path, 8, 274);
 
-    lv_obj_t *raw_title = create_label(s_packet_detail_sheet, "Raw Hex", 0x8EA0AE);
+    lv_obj_t *raw_title = create_label(s_packet_detail_sheet, "Raw Hex", 0xA6B0B7);
     lv_obj_set_pos(raw_title, 8, 306);
 
-    lv_obj_t *raw = create_label(s_packet_detail_sheet, entry->raw_hex[0] ? entry->raw_hex : "-", 0x93C5FD);
+    lv_obj_t *raw = create_label(s_packet_detail_sheet, entry->raw_hex[0] ? entry->raw_hex : "-", 0x4D7FFF);
     lv_label_set_long_mode(raw, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(raw, 392);
     lv_obj_set_pos(raw, 8, 328);
@@ -4409,12 +4415,12 @@ static void render_room_server_role_row(lv_obj_t *parent, int y, const d1l_mesh_
     char snr[16];
     lv_obj_t *row = create_panel(parent, 0, y, 424, 56);
     lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_t *name = create_label(row, entry->name[0] ? entry->name : entry->fingerprint, 0xA7F3D0);
+    lv_obj_t *name = create_label(row, entry->name[0] ? entry->name : entry->fingerprint, 0x84FF2E);
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
     lv_obj_set_width(name, 406);
     lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
     format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
-    lv_obj_t *meta = create_label(row, "", 0xE5EDF5);
+    lv_obj_t *meta = create_label(row, "", 0xF4F7FB);
     label_set_fmt(meta, "%.12s  %d dBm / %s dB",
                   entry->fingerprint, entry->rssi_dbm, snr);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
@@ -4451,7 +4457,7 @@ static void render_repeater_role_row(lv_obj_t *parent, int y,
     lv_obj_set_width(label, 406);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
     format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
-    lv_obj_t *meta = create_label(row, "", 0xE5EDF5);
+    lv_obj_t *meta = create_label(row, "", 0xF4F7FB);
     label_set_fmt(meta, "%d dBm / %s dB  %u hop%s via %.16s",
                   entry->rssi_dbm, snr, entry->path_hops,
                   entry->path_hops == 1U ? "" : "s",
@@ -4477,7 +4483,7 @@ static lv_obj_t *create_mesh_roles_list(const char *title, uint32_t accent,
 
     lv_obj_t *section = create_label(panel, title, accent);
     lv_obj_set_pos(section, 12, 10);
-    lv_obj_t *showing = create_label(panel, "", 0x8EA0AE);
+    lv_obj_t *showing = create_label(panel, "", 0xA6B0B7);
     label_set_fmt(showing, "showing %u/%u",
                   (unsigned)visible_count, (unsigned)loaded_count);
     lv_label_set_long_mode(showing, LV_LABEL_LONG_DOT);
@@ -4499,7 +4505,7 @@ static lv_obj_t *create_mesh_roles_list(const char *title, uint32_t accent,
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
 
-    lv_obj_t *footer = create_label(panel, "", 0x8EA0AE);
+    lv_obj_t *footer = create_label(panel, "", 0xA6B0B7);
     if (total_count > loaded_count) {
         label_set_fmt(footer, "Newest %u of %lu loaded - scroll",
                       (unsigned)loaded_count, (unsigned long)total_count);
@@ -4532,7 +4538,7 @@ static void render_mesh_roles_root(void)
     render_mesh_roles_header("Mesh Roles", close_mesh_roles_event_cb);
 
     lv_obj_t *intro = create_label(s_mesh_roles_sheet,
-                                   "Browse one role group at a time.", 0x8EA0AE);
+                                   "Browse one role group at a time.", 0xA6B0B7);
     lv_label_set_long_mode(intro, LV_LABEL_LONG_DOT);
     lv_obj_set_width(intro, 360);
     lv_obj_set_pos(intro, 104, 36);
@@ -4542,7 +4548,7 @@ static void render_mesh_roles_root(void)
     lv_obj_t *rooms = create_button(s_mesh_roles_sheet, "Rooms",
                                     16, 76, 448, 84,
                                     open_mesh_room_servers_event_cb, NULL);
-    style_contact_option_button(rooms, 0xA7F3D0, room_count);
+    style_contact_option_button(rooms, 0x84FF2E, room_count);
 
     snprintf(repeater_count, sizeof(repeater_count), "%lu found  >",
              (unsigned long)repeater_total);
@@ -4554,10 +4560,10 @@ static void render_mesh_roles_root(void)
     lv_obj_t *note = create_panel(s_mesh_roles_sheet, 16, 288, 448, 76);
     lv_obj_set_style_pad_all(note, 12, 0);
     lv_obj_t *note_title = create_label(
-        note, "Large networks show recent results first", 0x93C5FD);
+        note, "Large networks show recent results first", 0x4D7FFF);
     lv_obj_align(note_title, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_t *note_text = create_label(
-        note, "Read-only lists. Each role scrolls separately.", 0x8EA0AE);
+        note, "Read-only lists. Each role scrolls separately.", 0xA6B0B7);
     lv_label_set_long_mode(note_text, LV_LABEL_LONG_DOT);
     lv_obj_set_width(note_text, 420);
     lv_obj_align(note_text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
@@ -4570,14 +4576,14 @@ static void render_mesh_roles_room_servers(void)
         total = (uint32_t)s_snapshot.recent_room_count;
     }
     render_mesh_roles_header("Rooms", mesh_roles_subpage_back_event_cb);
-    lv_obj_t *meta = create_label(s_mesh_roles_sheet, "", 0x8EA0AE);
+    lv_obj_t *meta = create_label(s_mesh_roles_sheet, "", 0xA6B0B7);
     label_set_fmt(meta, "%lu room server%s",
                   (unsigned long)total, total == 1U ? "" : "s");
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 360);
     lv_obj_set_pos(meta, 104, 36);
 
-    lv_obj_t *list = create_mesh_roles_list("Room servers", 0xA7F3D0,
+    lv_obj_t *list = create_mesh_roles_list("Room servers", 0x84FF2E,
                                             s_snapshot.recent_room_count, total);
     if (!list) {
         return;
@@ -4588,7 +4594,7 @@ static void render_mesh_roles_room_servers(void)
         y += 64;
     }
     if (s_snapshot.recent_room_count == 0) {
-        lv_obj_t *empty = create_label(list, "No room servers heard yet.", 0x8EA0AE);
+        lv_obj_t *empty = create_label(list, "No room servers heard yet.", 0xA6B0B7);
         lv_obj_set_pos(empty, 8, 12);
     }
 }
@@ -4600,7 +4606,7 @@ static void render_mesh_roles_repeater_candidates(void)
         total = (uint32_t)s_snapshot.recent_repeater_count;
     }
     render_mesh_roles_header("Repeaters", mesh_roles_subpage_back_event_cb);
-    lv_obj_t *meta = create_label(s_mesh_roles_sheet, "", 0x8EA0AE);
+    lv_obj_t *meta = create_label(s_mesh_roles_sheet, "", 0xA6B0B7);
     label_set_fmt(meta, "%lu repeater candidate%s",
                   (unsigned long)total, total == 1U ? "" : "s");
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
@@ -4618,7 +4624,7 @@ static void render_mesh_roles_repeater_candidates(void)
         y += 64;
     }
     if (s_snapshot.recent_repeater_count == 0) {
-        lv_obj_t *empty = create_label(list, "No path-hop candidates yet.", 0x8EA0AE);
+        lv_obj_t *empty = create_label(list, "No path-hop candidates yet.", 0xA6B0B7);
         lv_obj_set_pos(empty, 8, 12);
     }
 }
@@ -4893,7 +4899,7 @@ static void render_public_history_sheet(void)
             s_public_history_channel_id, s_public_history_entries,
             s_public_history_limit, 0, s_public_search_text,
             &total_matches) : 0U;
-    lv_obj_t *meta = create_label(s_public_history_sheet, "", 0x8EA0AE);
+    lv_obj_t *meta = create_label(s_public_history_sheet, "", 0xA6B0B7);
     if (s_public_search_text[0]) {
         if (public_history) {
             label_set_fmt(meta, "Showing %u of %u  Search: %.18s",
@@ -4942,14 +4948,14 @@ static void render_public_history_sheet(void)
         lv_obj_set_style_pad_all(row, 8, 0);
         lv_obj_t *author = create_label(row, entry->author,
                                         unread ? 0xFBBF24 :
-                                        (entry->direction[0] == 't' ? 0x93C5FD : 0x5EEAD4));
+                                        (entry->direction[0] == 't' ? 0x4D7FFF : 0x20D9ED));
         lv_label_set_long_mode(author, LV_LABEL_LONG_DOT);
         lv_obj_set_width(author, 156);
         lv_obj_align(author, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_t *state = create_label(row, "", 0x8EA0AE);
+        lv_obj_t *state = create_label(row, "", 0xA6B0B7);
         label_set_fmt(state, "#%lu %s", (unsigned long)entry->seq, public_row_state(entry));
         lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
-        lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
+        lv_obj_t *text = create_label(row, entry->text, 0xF4F7FB);
         lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
         lv_obj_set_width(text, 372);
         lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
@@ -4962,7 +4968,7 @@ static void render_public_history_sheet(void)
                                        s_public_search_text[0] ?
                                        "No messages match this search" :
                                        "No saved messages",
-                                       0x8EA0AE);
+                                       0xA6B0B7);
         lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
     } else {
         lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
@@ -5930,7 +5936,7 @@ static void render_finder_sheet(void)
     }
     lv_obj_t *status = create_label(s_finder_sheet, state,
                                     s_finder_snapshot.active ?
-                                        0x5EEAD4 : 0x8EA0AE);
+                                        0x20D9ED : 0xA6B0B7);
     if (status) {
         lv_label_set_long_mode(status, LV_LABEL_LONG_DOT);
         lv_obj_set_width(status, 448);
@@ -5964,9 +5970,9 @@ static void render_finder_sheet(void)
         }
         lv_obj_set_size(panel, 448, 74);
         lv_obj_set_pos(panel, 16, y);
-        lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0);
+        lv_obj_set_style_bg_color(panel, lv_color_hex(0x20262B), 0);
         lv_obj_set_style_border_color(
-            panel, lv_color_hex(known ? 0x2DD4BF : 0x334155), 0);
+            panel, lv_color_hex(known ? 0x1E5AEF : 0x3C4A54), 0);
         lv_obj_set_style_border_width(panel, 1, 0);
         lv_obj_set_style_radius(panel, 8, 0);
         lv_obj_set_style_pad_all(panel, 8, 0);
@@ -5977,7 +5983,7 @@ static void render_finder_sheet(void)
                  name, finder_role_name(entry->node_type),
                  known ? "  contact" : "");
         lv_obj_t *heading_label =
-            create_label(panel, heading, known ? 0x5EEAD4 : 0xF4F7FB);
+            create_label(panel, heading, known ? 0x20D9ED : 0xF4F7FB);
         if (heading_label) {
             lv_label_set_long_mode(heading_label, LV_LABEL_LONG_DOT);
             lv_obj_set_width(heading_label, 416);
@@ -5999,7 +6005,7 @@ static void render_finder_sheet(void)
             local_abs / 4, (local_abs % 4) * 25,
             (unsigned long)(entry->age_ms / 1000U));
         lv_obj_t *metrics_label =
-            create_label(panel, metrics, 0x8EA0AE);
+            create_label(panel, metrics, 0xA6B0B7);
         if (metrics_label) {
             lv_label_set_long_mode(metrics_label, LV_LABEL_LONG_DOT);
             lv_obj_set_width(metrics_label, 416);
@@ -6020,7 +6026,7 @@ static void render_finder_sheet(void)
             s_finder_snapshot.active ?
                 "Waiting for compatible chats, repeaters, rooms, and sensors..." :
                 "Tap Scan to actively find compatible zero-hop nodes.",
-            0x8EA0AE);
+            0xA6B0B7);
         if (empty) {
             lv_label_set_long_mode(empty, LV_LABEL_LONG_WRAP);
             lv_obj_set_width(empty, 448);
@@ -6440,8 +6446,8 @@ static lv_obj_t *render_packet_filter_button(lv_obj_t *parent, const char *label
     lv_obj_t *button = create_button(parent, label, x, 112, 58, 34, packet_filter_event_cb,
                                      (void *)(uintptr_t)mode);
     if (button && s_packets_controller.filter == mode) {
-        lv_obj_set_style_bg_color(button, lv_color_hex(0x12362F), 0);
-        lv_obj_set_style_border_color(button, lv_color_hex(0x5EEAD4), 0);
+        lv_obj_set_style_bg_color(button, lv_color_hex(0x23321A), 0);
+        lv_obj_set_style_border_color(button, lv_color_hex(0x20D9ED), 0);
         lv_obj_set_style_border_width(button, 1, 0);
     }
     return button;
@@ -6463,9 +6469,9 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
     lv_obj_t *terminal = create_panel(content, 18, 52, 424, 50);
     if (terminal) {
         lv_obj_set_style_pad_all(terminal, 8, 0);
-        lv_obj_set_style_bg_color(terminal, lv_color_hex(0x071018), 0);
-        lv_obj_set_style_border_color(terminal, lv_color_hex(0x334155), 0);
-        lv_obj_t *line1 = create_label(terminal, "", 0x5EEAD4);
+        lv_obj_set_style_bg_color(terminal, lv_color_hex(0x17191A), 0);
+        lv_obj_set_style_border_color(terminal, lv_color_hex(0x3C4A54), 0);
+        lv_obj_t *line1 = create_label(terminal, "", 0x20D9ED);
         label_set_fmt(line1, "live %s  rssi %d  snr %s  avg %d",
                       s_packets_controller.paused ? "paused" : "tail",
                       snapshot->signal_summary.latest_rssi_dbm,
@@ -6473,7 +6479,7 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
                       snapshot->signal_summary.avg_rssi_dbm);
         label_set_dot_width(line1, 392);
         obj_align_if(line1, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_t *line2 = create_label(terminal, "", 0x8EA0AE);
+        lv_obj_t *line2 = create_label(terminal, "", 0xA6B0B7);
         label_set_fmt(line2, "rooms %lu  repeaters %lu  samples %lu",
                       (unsigned long)snapshot->signal_summary.room_server_count,
                       (unsigned long)snapshot->signal_summary.repeater_candidate_count,
@@ -6497,12 +6503,12 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         lv_obj_set_pos(search, 26, 152);
     }
 
-    lv_obj_t *feed_title = create_label(content, "Packet Feed", 0x8EA0AE);
+    lv_obj_t *feed_title = create_label(content, "Packet Feed", 0xA6B0B7);
     obj_set_pos_if(feed_title, 26, s_packets_controller.search_text[0] ? 176 : 156);
 
     size_t packet_rows = refresh_packet_terminal_rows();
     int y = s_packets_controller.search_text[0] ? 204 : 184;
-    lv_obj_t *feed_count = create_label(content, "", 0x8EA0AE);
+    lv_obj_t *feed_count = create_label(content, "", 0xA6B0B7);
     const size_t page_first = packet_rows > 0 ? s_packets_controller.skip_newest + 1U : 0;
     const size_t page_last = s_packets_controller.skip_newest + packet_rows;
     label_set_fmt(feed_count, "page %u-%u/%u%s",
@@ -6522,11 +6528,11 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         y += 52;
     }
     if (packet_rows == 0 && snapshot->recent_packet_count > 0) {
-        lv_obj_t *empty = create_label(content, "No packets match filter", 0x8EA0AE);
+        lv_obj_t *empty = create_label(content, "No packets match filter", 0xA6B0B7);
         lv_obj_set_pos(empty, 26, y + 8);
         y += 34;
     } else if (packet_rows == 0) {
-        lv_obj_t *empty = create_label(content, "Packet log is empty", 0x8EA0AE);
+        lv_obj_t *empty = create_label(content, "Packet log is empty", 0xA6B0B7);
         lv_obj_set_pos(empty, 26, y + 8);
         y += 34;
     }
@@ -6550,7 +6556,7 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         lv_obj_t *roles = create_button(content, "Mesh Roles", 18, y, 130, 36,
                                         open_mesh_roles_event_cb, NULL);
         if (roles) {
-            lv_obj_set_style_bg_color(roles, lv_color_hex(0x12362F), 0);
+            lv_obj_set_style_bg_color(roles, lv_color_hex(0x23321A), 0);
         }
         y += 48;
     }
@@ -6560,7 +6566,7 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
     }
     s_route_row_payload_count = route_rows;
     if (route_rows > 0U) {
-        lv_obj_t *routes = create_label(content, "Routes", 0x8EA0AE);
+        lv_obj_t *routes = create_label(content, "Routes", 0xA6B0B7);
         lv_obj_set_pos(routes, 26, y);
         y += 24;
         for (size_t i = 0; i < route_rows; ++i) {
@@ -6740,7 +6746,7 @@ static void render_storage_detail_row(lv_obj_t *parent, int y,
     lv_obj_t *name_label = create_label(parent, name, accent);
     lv_obj_set_width(name_label, 150);
     lv_obj_set_pos(name_label, 12, y);
-    lv_obj_t *value_label = create_label(parent, value, 0xE5EDF5);
+    lv_obj_t *value_label = create_label(parent, value, 0xF4F7FB);
     lv_label_set_long_mode(value_label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(value_label, 254);
     lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_RIGHT, 0);
@@ -6754,7 +6760,7 @@ static void render_storage_root(void)
     lv_obj_t *subtitle = create_label(s_storage_sheet,
         d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY) ?
             "Card and saved-data overview" : "Built-in storage",
-        0x8EA0AE);
+        0xA6B0B7);
     lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
     lv_obj_set_width(subtitle, 360);
     lv_obj_set_pos(subtitle, 104, 40);
@@ -6764,17 +6770,17 @@ static void render_storage_root(void)
         if (internal) {
             lv_obj_set_style_pad_all(internal, 12, 0);
             lv_obj_t *eyebrow = create_label(
-                internal, "Current storage", 0x8EA0AE);
+                internal, "Current storage", 0xA6B0B7);
             lv_obj_set_pos(eyebrow, 0, 0);
             lv_obj_t *state = create_label(
-                internal, "Built-in storage", 0x5EEAD4);
+                internal, "Built-in storage", 0x20D9ED);
             lv_obj_set_style_text_font(state, &lv_font_montserrat_24, 0);
             lv_obj_set_pos(state, 0, 26);
             lv_obj_t *detail = create_label(
                 internal,
                 "Settings, contacts, Public and direct messages, routes, and "
                 "read markers are saved on this device.",
-                0xE5EDF5);
+                0xF4F7FB);
             lv_label_set_long_mode(detail, LV_LABEL_LONG_WRAP);
             lv_obj_set_size(detail, 424, 58);
             lv_obj_set_pos(detail, 0, 58);
@@ -6783,13 +6789,13 @@ static void render_storage_root(void)
         if (recovery) {
             lv_obj_set_style_pad_all(recovery, 12, 0);
             lv_obj_t *title = create_label(
-                recovery, "Recovery", 0x93C5FD);
+                recovery, "Recovery", 0x4D7FFF);
             lv_obj_set_pos(title, 0, 0);
             lv_obj_t *copy = create_label(
                 recovery,
                 "Use the verified USB install and recovery guide. "
                 "Normal upgrades keep your saved data.",
-                0xE5EDF5);
+                0xF4F7FB);
             lv_label_set_long_mode(copy, LV_LABEL_LONG_WRAP);
             lv_obj_set_size(copy, 424, 56);
             lv_obj_set_pos(copy, 0, 26);
@@ -6800,14 +6806,14 @@ static void render_storage_root(void)
     lv_obj_t *hero_panel = create_panel(s_storage_sheet, 16, 64, 448, 92);
     if (hero_panel) {
         lv_obj_set_style_pad_all(hero_panel, 0, 0);
-        lv_obj_t *eyebrow = create_label(hero_panel, "Current storage", 0x8EA0AE);
+        lv_obj_t *eyebrow = create_label(hero_panel, "Current storage", 0xA6B0B7);
         lv_obj_set_pos(eyebrow, 12, 8);
         lv_obj_t *state = create_label(hero_panel, hero->state, hero->accent);
         lv_obj_set_style_text_font(state, &lv_font_montserrat_24, 0);
         lv_label_set_long_mode(state, LV_LABEL_LONG_DOT);
         lv_obj_set_width(state, 424);
         lv_obj_set_pos(state, 12, 28);
-        lv_obj_t *detail = create_label(hero_panel, hero->detail, 0x8EA0AE);
+        lv_obj_t *detail = create_label(hero_panel, hero->detail, 0xA6B0B7);
         lv_label_set_long_mode(detail, LV_LABEL_LONG_DOT);
         lv_obj_set_width(detail, 424);
         lv_obj_set_pos(detail, 12, 64);
@@ -6822,7 +6828,7 @@ static void render_storage_root(void)
     lv_obj_t *data = create_button(s_storage_sheet, "Data locations",
                                     16, 248, 448, 68,
                                     open_storage_data_locations_event_cb, NULL);
-    style_contact_option_button(data, 0x93C5FD, s_storage_view.data_summary);
+    style_contact_option_button(data, 0x4D7FFF, s_storage_view.data_summary);
 
     lv_obj_t *guidance = create_panel(s_storage_sheet, 16, 324, 448, 40);
     if (guidance) {
@@ -6843,7 +6849,7 @@ static void render_storage_card_status(void)
 
     render_storage_header("Card status", storage_subpage_back_event_cb);
     lv_obj_t *subtitle = create_label(s_storage_sheet,
-                                      "Read-only card details", 0x8EA0AE);
+                                      "Read-only card details", 0xA6B0B7);
     lv_obj_set_pos(subtitle, 104, 40);
 
     lv_obj_t *panel = create_panel(s_storage_sheet, 16, 68, 448, 288);
@@ -6854,9 +6860,9 @@ static void render_storage_card_status(void)
     render_storage_detail_row(panel, 18, "State", card->state,
                               card->state_accent);
     render_storage_detail_row(panel, 70, "Filesystem",
-                              card->filesystem, 0x93C5FD);
-    render_storage_detail_row(panel, 122, "Capacity", card->capacity, 0xC4B5FD);
-    render_storage_detail_row(panel, 174, "Free space", card->free_space, 0xC4B5FD);
+                              card->filesystem, 0x4D7FFF);
+    render_storage_detail_row(panel, 122, "Capacity", card->capacity, 0x7D93FF);
+    render_storage_detail_row(panel, 174, "Free space", card->free_space, 0x7D93FF);
     render_storage_detail_row(panel, 226, "Readiness", card->readiness,
                               card->readiness_accent);
 }
@@ -6887,7 +6893,7 @@ static void render_storage_data_locations(void)
     }
     render_storage_header("Data locations", storage_subpage_back_event_cb);
     lv_obj_t *subtitle = create_label(s_storage_sheet,
-                                      "Where saved data is kept", 0x8EA0AE);
+                                      "Where saved data is kept", 0xA6B0B7);
     lv_obj_set_pos(subtitle, 104, 40);
 
     lv_obj_t *list = create_object(s_storage_sheet, "storage locations list");
@@ -6897,8 +6903,8 @@ static void render_storage_data_locations(void)
     lv_obj_set_size(list, 448, 288);
     lv_obj_set_pos(list, 16, 68);
     lv_obj_set_style_radius(list, 8, 0);
-    lv_obj_set_style_bg_color(list, lv_color_hex(0x0B121A), 0);
-    lv_obj_set_style_border_color(list, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(list, lv_color_hex(0x191E22), 0);
+    lv_obj_set_style_border_color(list, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_border_width(list, 1, 0);
     lv_obj_set_style_pad_all(list, 8, 0);
     lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLLABLE);
@@ -7263,7 +7269,7 @@ static void device_sheets_action_handler(
         if (ret == ESP_OK && s_screen) {
             lv_obj_set_style_bg_color(
                 s_screen,
-                lv_color_hex(settings.high_contrast ? 0x000000 : 0x071018),
+                lv_color_hex(settings.high_contrast ? 0x000000 : 0x17191A),
                 0);
         }
         (void)render_display_sheet();
@@ -9636,7 +9642,7 @@ static void create_top_bar(lv_obj_t *screen)
     s_top_bar = bar;
     lv_obj_set_size(bar, 480, 56);
     lv_obj_set_pos(bar, 0, 0);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_border_width(bar, 0, 0);
     lv_obj_set_style_pad_all(bar, 8, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
@@ -9644,12 +9650,12 @@ static void create_top_bar(lv_obj_t *screen)
     s_title_label = create_label(bar, "DeskOS", 0xF4F7FB);
     lv_obj_align(s_title_label, LV_ALIGN_LEFT_MID, 2, 0);
 
-    s_status_label = create_label(bar, "starting", 0x5EEAD4);
+    s_status_label = create_label(bar, "starting", 0x20D9ED);
     lv_label_set_long_mode(s_status_label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_status_label, 190);
     lv_obj_align(s_status_label, LV_ALIGN_TOP_RIGHT, -48, 1);
 
-    s_identity_label = create_label(bar, "ID --------", 0x8EA0AE);
+    s_identity_label = create_label(bar, "ID --------", 0xA6B0B7);
     lv_label_set_long_mode(s_identity_label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_identity_label, 190);
     lv_obj_align(s_identity_label, LV_ALIGN_BOTTOM_RIGHT, -48, -1);
@@ -9665,7 +9671,7 @@ static void create_dock(lv_obj_t *screen)
     }
     lv_obj_set_size(s_dock, 480, D1L_UI_DOCK_HEIGHT);
     lv_obj_set_pos(s_dock, 0, D1L_UI_DOCK_Y);
-    lv_obj_set_style_bg_color(s_dock, lv_color_hex(0x09131D), 0);
+    lv_obj_set_style_bg_color(s_dock, lv_color_hex(0x1B2024), 0);
     lv_obj_set_style_border_width(s_dock, 0, 0);
     lv_obj_set_style_pad_all(s_dock, 0, 0);
     lv_obj_clear_flag(s_dock, LV_OBJ_FLAG_SCROLLABLE);
@@ -9689,9 +9695,9 @@ static void create_toast(lv_obj_t *screen)
     lv_obj_set_pos(s_toast, 30, 366);
     lv_obj_set_style_radius(s_toast, 8, 0);
     lv_obj_set_style_bg_opa(s_toast, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(s_toast, lv_color_hex(0x12362F), 0);
+    lv_obj_set_style_bg_color(s_toast, lv_color_hex(0x23321A), 0);
     lv_obj_set_style_border_width(s_toast, 1, 0);
-    lv_obj_set_style_border_color(s_toast, lv_color_hex(0x5EEAD4), 0);
+    lv_obj_set_style_border_color(s_toast, lv_color_hex(0x20D9ED), 0);
     lv_obj_set_style_pad_all(s_toast, 11, 0);
     lv_obj_set_style_text_color(s_toast, lv_color_hex(0xF4F7FB), 0);
     lv_label_set_text(s_toast, "");
@@ -9707,8 +9713,8 @@ static void create_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_sheet, 440, 160);
     lv_obj_set_pos(s_sheet, 20, 250);
     lv_obj_set_style_radius(s_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_sheet, 14, 0);
     lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -9727,8 +9733,8 @@ static void create_compose_sheet(lv_obj_t *screen)
         return;
     }
     lv_obj_set_style_radius(s_compose_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_compose_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_compose_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_compose_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_compose_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_compose_sheet, 1, 0);
 
     s_compose_title = create_label(s_compose_sheet, "Public", 0xF4F7FB);
@@ -9756,16 +9762,16 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_textarea_set_one_line(s_compose_textarea, false);
     lv_textarea_set_text(s_compose_textarea, "");
     lv_obj_set_style_radius(s_compose_textarea, 8, 0);
-    lv_obj_set_style_bg_color(s_compose_textarea, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_color(s_compose_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(s_compose_textarea, lv_color_hex(0x17191A), 0);
+    lv_obj_set_style_border_color(s_compose_textarea, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0xF4F7FB), 0);
-    lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0x8EA0AE), LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0xA6B0B7), LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_set_style_text_font(
         s_compose_textarea, &d1l_ui_font_symbols_14, 0);
     lv_obj_add_event_cb(s_compose_textarea, compose_textarea_event_cb,
                         LV_EVENT_VALUE_CHANGED, NULL);
 
-    s_compose_counter = create_label(s_compose_sheet, "0/138", 0x8EA0AE);
+    s_compose_counter = create_label(s_compose_sheet, "0/138", 0xA6B0B7);
     lv_label_set_long_mode(s_compose_counter, LV_LABEL_LONG_DOT);
 
     s_compose_keyboard = create_keyboard(s_compose_sheet, "compose keyboard");
@@ -9791,8 +9797,8 @@ static void create_public_history_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_public_history_sheet, 448, 328);
     lv_obj_set_pos(s_public_history_sheet, 16, 82);
     lv_obj_set_style_radius(s_public_history_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_public_history_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_public_history_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_public_history_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_public_history_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_public_history_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_public_history_sheet, 12, 0);
     configure_sheet_scroll(s_public_history_sheet);
@@ -9808,7 +9814,7 @@ static void create_message_detail_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_message_detail_sheet, 480, 424);
     lv_obj_set_pos(s_message_detail_sheet, 0, 56);
     lv_obj_set_style_radius(s_message_detail_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_message_detail_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_bg_color(s_message_detail_sheet, lv_color_hex(0x20262B), 0);
     lv_obj_set_style_border_width(s_message_detail_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_message_detail_sheet, 0, 0);
     lv_obj_clear_flag(s_message_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -9824,8 +9830,8 @@ static void create_public_search_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_public_search_sheet, 448, 320);
     lv_obj_set_pos(s_public_search_sheet, 16, 82);
     lv_obj_set_style_radius(s_public_search_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_public_search_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_public_search_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_public_search_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_public_search_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_public_search_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_public_search_sheet, 12, 0);
     lv_obj_clear_flag(s_public_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -9856,10 +9862,10 @@ static void create_public_search_sheet(lv_obj_t *screen)
     lv_textarea_set_max_length(s_public_search_textarea, D1L_MESSAGE_TEXT_LEN - 1U);
     lv_textarea_set_placeholder_text(s_public_search_textarea, "Search author or message");
     lv_obj_set_style_radius(s_public_search_textarea, 8, 0);
-    lv_obj_set_style_bg_color(s_public_search_textarea, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_color(s_public_search_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(s_public_search_textarea, lv_color_hex(0x17191A), 0);
+    lv_obj_set_style_border_color(s_public_search_textarea, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_text_color(s_public_search_textarea, lv_color_hex(0xF4F7FB), 0);
-    lv_obj_set_style_text_color(s_public_search_textarea, lv_color_hex(0x8EA0AE),
+    lv_obj_set_style_text_color(s_public_search_textarea, lv_color_hex(0xA6B0B7),
                                 LV_PART_TEXTAREA_PLACEHOLDER);
 
     s_public_search_keyboard = create_keyboard(s_public_search_sheet, "public search keyboard");
@@ -9886,8 +9892,8 @@ static void create_dm_search_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_dm_search_sheet, 448, 320);
     lv_obj_set_pos(s_dm_search_sheet, 16, 82);
     lv_obj_set_style_radius(s_dm_search_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_dm_search_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_dm_search_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_dm_search_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_dm_search_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_dm_search_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_dm_search_sheet, 12, 0);
     lv_obj_clear_flag(s_dm_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -9918,13 +9924,13 @@ static void create_dm_search_sheet(lv_obj_t *screen)
         s_dm_search_textarea, "Search this conversation");
     lv_obj_set_style_radius(s_dm_search_textarea, 8, 0);
     lv_obj_set_style_bg_color(
-        s_dm_search_textarea, lv_color_hex(0x071018), 0);
+        s_dm_search_textarea, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_border_color(
-        s_dm_search_textarea, lv_color_hex(0x263241), 0);
+        s_dm_search_textarea, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_text_color(
         s_dm_search_textarea, lv_color_hex(0xF4F7FB), 0);
     lv_obj_set_style_text_color(
-        s_dm_search_textarea, lv_color_hex(0x8EA0AE),
+        s_dm_search_textarea, lv_color_hex(0xA6B0B7),
         LV_PART_TEXTAREA_PLACEHOLDER);
 
     s_dm_search_keyboard = create_keyboard(
@@ -9952,7 +9958,7 @@ static void create_storage_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_storage_sheet, 480, 424);
     lv_obj_set_pos(s_storage_sheet, 0, 56);
     lv_obj_set_style_radius(s_storage_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_storage_sheet, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_bg_color(s_storage_sheet, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_border_width(s_storage_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_storage_sheet, 0, 0);
     lv_obj_clear_flag(s_storage_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -9968,8 +9974,8 @@ static void create_route_detail_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_route_detail_sheet, 448, 250);
     lv_obj_set_pos(s_route_detail_sheet, 16, 132);
     lv_obj_set_style_radius(s_route_detail_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_route_detail_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_route_detail_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_route_detail_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_route_detail_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_route_detail_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_route_detail_sheet, 12, 0);
     lv_obj_clear_flag(s_route_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -9985,7 +9991,7 @@ static void create_route_trace_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_route_trace_sheet, 480, 424);
     lv_obj_set_pos(s_route_trace_sheet, 0, 56);
     lv_obj_set_style_radius(s_route_trace_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_route_trace_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_bg_color(s_route_trace_sheet, lv_color_hex(0x20262B), 0);
     lv_obj_set_style_border_width(s_route_trace_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_route_trace_sheet, 0, 0);
     lv_obj_set_scroll_dir(s_route_trace_sheet, LV_DIR_VER);
@@ -10004,7 +10010,7 @@ static void create_finder_sheet(lv_obj_t *screen)
     lv_obj_set_pos(s_finder_sheet, 0, 56);
     lv_obj_set_style_radius(s_finder_sheet, 0, 0);
     lv_obj_set_style_bg_color(
-        s_finder_sheet, lv_color_hex(0x111923), 0);
+        s_finder_sheet, lv_color_hex(0x20262B), 0);
     lv_obj_set_style_border_width(s_finder_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_finder_sheet, 0, 0);
     lv_obj_set_scroll_dir(s_finder_sheet, LV_DIR_VER);
@@ -10022,8 +10028,8 @@ static void create_packet_detail_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_packet_detail_sheet, 448, 326);
     lv_obj_set_pos(s_packet_detail_sheet, 16, 76);
     lv_obj_set_style_radius(s_packet_detail_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_packet_detail_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_packet_detail_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_packet_detail_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_packet_detail_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_packet_detail_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_packet_detail_sheet, 12, 0);
     lv_obj_set_scrollbar_mode(s_packet_detail_sheet, LV_SCROLLBAR_MODE_AUTO);
@@ -10039,8 +10045,8 @@ static void create_packet_search_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_packet_search_sheet, 448, 320);
     lv_obj_set_pos(s_packet_search_sheet, 16, 82);
     lv_obj_set_style_radius(s_packet_search_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_packet_search_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_packet_search_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_packet_search_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_packet_search_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_packet_search_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_packet_search_sheet, 12, 0);
     lv_obj_clear_flag(s_packet_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -10064,10 +10070,10 @@ static void create_packet_search_sheet(lv_obj_t *screen)
     lv_textarea_set_max_length(s_packet_search_textarea, D1L_PACKET_LOG_QUERY_TEXT_LEN - 1U);
     lv_textarea_set_placeholder_text(s_packet_search_textarea, "Search kind, note, raw hex");
     lv_obj_set_style_radius(s_packet_search_textarea, 8, 0);
-    lv_obj_set_style_bg_color(s_packet_search_textarea, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_color(s_packet_search_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(s_packet_search_textarea, lv_color_hex(0x17191A), 0);
+    lv_obj_set_style_border_color(s_packet_search_textarea, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_text_color(s_packet_search_textarea, lv_color_hex(0xF4F7FB), 0);
-    lv_obj_set_style_text_color(s_packet_search_textarea, lv_color_hex(0x8EA0AE), LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_text_color(s_packet_search_textarea, lv_color_hex(0xA6B0B7), LV_PART_TEXTAREA_PLACEHOLDER);
 
     s_packet_search_keyboard = create_keyboard(s_packet_search_sheet, "packet search keyboard");
     if (!s_packet_search_keyboard) {
@@ -10091,8 +10097,8 @@ static void create_nodes_search_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_nodes_search_sheet, 448, 320);
     lv_obj_set_pos(s_nodes_search_sheet, 16, 82);
     lv_obj_set_style_radius(s_nodes_search_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_nodes_search_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_nodes_search_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(s_nodes_search_sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_nodes_search_sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(s_nodes_search_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_nodes_search_sheet, 12, 0);
     lv_obj_clear_flag(s_nodes_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -10123,13 +10129,13 @@ static void create_nodes_search_sheet(lv_obj_t *screen)
         s_nodes_search_textarea, "Name, role, fingerprint, or public key");
     lv_obj_set_style_radius(s_nodes_search_textarea, 8, 0);
     lv_obj_set_style_bg_color(
-        s_nodes_search_textarea, lv_color_hex(0x071018), 0);
+        s_nodes_search_textarea, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_border_color(
-        s_nodes_search_textarea, lv_color_hex(0x263241), 0);
+        s_nodes_search_textarea, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_text_color(
         s_nodes_search_textarea, lv_color_hex(0xF4F7FB), 0);
     lv_obj_set_style_text_color(
-        s_nodes_search_textarea, lv_color_hex(0x8EA0AE),
+        s_nodes_search_textarea, lv_color_hex(0xA6B0B7),
         LV_PART_TEXTAREA_PLACEHOLDER);
 
     s_nodes_search_keyboard = create_keyboard(
@@ -10156,7 +10162,7 @@ static void create_mesh_roles_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_mesh_roles_sheet, 480, 424);
     lv_obj_set_pos(s_mesh_roles_sheet, 0, 56);
     lv_obj_set_style_radius(s_mesh_roles_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_mesh_roles_sheet, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_bg_color(s_mesh_roles_sheet, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_border_width(s_mesh_roles_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_mesh_roles_sheet, 0, 0);
     lv_obj_clear_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -10173,7 +10179,7 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     lv_obj_set_size(s_onboarding_sheet, 480, 480);
     lv_obj_set_pos(s_onboarding_sheet, 0, 0);
     lv_obj_set_style_radius(s_onboarding_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_onboarding_sheet, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_bg_color(s_onboarding_sheet, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_border_width(s_onboarding_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_onboarding_sheet, 12, 0);
     lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -10182,10 +10188,10 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_pos(title, 8, 4);
 
-    lv_obj_t *subtitle = create_label(s_onboarding_sheet, "First boot setup", 0x5EEAD4);
+    lv_obj_t *subtitle = create_label(s_onboarding_sheet, "First boot setup", 0x20D9ED);
     lv_obj_set_pos(subtitle, 8, 38);
 
-    lv_obj_t *name_label = create_label(s_onboarding_sheet, "Node name", 0x8EA0AE);
+    lv_obj_t *name_label = create_label(s_onboarding_sheet, "Node name", 0xA6B0B7);
     lv_obj_set_pos(name_label, 8, 68);
 
     s_onboarding_name_textarea = create_textarea(s_onboarding_sheet, "onboarding name textarea");
@@ -10201,13 +10207,13 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     (void)d1l_settings_public_snapshot(&settings);
     lv_textarea_set_text(s_onboarding_name_textarea, settings.node_name);
     lv_obj_set_style_radius(s_onboarding_name_textarea, 8, 0);
-    lv_obj_set_style_bg_color(s_onboarding_name_textarea, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_onboarding_name_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(s_onboarding_name_textarea, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(s_onboarding_name_textarea, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_text_color(s_onboarding_name_textarea, lv_color_hex(0xF4F7FB), 0);
 
     lv_obj_t *preset = create_label(s_onboarding_sheet,
                                     "Canada/USA preset confirmed  910.525 BW62.5 SF7 CR5",
-                                    0xE5EDF5);
+                                    0xF4F7FB);
     lv_label_set_long_mode(preset, LV_LABEL_LONG_DOT);
     lv_obj_set_width(preset, 424);
     lv_obj_set_pos(preset, 8, 152);
@@ -10221,7 +10227,7 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     const char *role_text = optional_transports_available ?
         "Role Desk Companion  Wi-Fi off  BLE off  Observer off" :
         "Role Desk Companion  Core radio profile";
-    lv_obj_t *role = create_label(s_onboarding_sheet, role_text, 0x8EA0AE);
+    lv_obj_t *role = create_label(s_onboarding_sheet, role_text, 0xA6B0B7);
     lv_label_set_long_mode(role, LV_LABEL_LONG_DOT);
     lv_obj_set_width(role, 424);
     lv_obj_set_pos(role, 8, 180);
@@ -10256,7 +10262,7 @@ static void create_lock_overlay(lv_obj_t *screen)
     }
     lv_obj_set_size(s_lock_overlay, 480, 480);
     lv_obj_set_pos(s_lock_overlay, 0, 0);
-    lv_obj_set_style_bg_color(s_lock_overlay, lv_color_hex(0x02060A), 0);
+    lv_obj_set_style_bg_color(s_lock_overlay, lv_color_hex(0x0E0F10), 0);
     lv_obj_set_style_border_width(s_lock_overlay, 0, 0);
     lv_obj_clear_flag(s_lock_overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_lock_overlay, unlock_event_cb, LV_EVENT_CLICKED, NULL);
@@ -10264,7 +10270,7 @@ static void create_lock_overlay(lv_obj_t *screen)
     lv_obj_t *title = create_label(s_lock_overlay, "MeshCore DeskOS", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, -24);
-    lv_obj_t *hint = create_label(s_lock_overlay, "Tap to unlock", 0x5EEAD4);
+    lv_obj_t *hint = create_label(s_lock_overlay, "Tap to unlock", 0x20D9ED);
     lv_obj_align(hint, LV_ALIGN_CENTER, 0, 24);
     s_lock_visible = false;
     lv_obj_add_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -10343,7 +10349,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     if (!s_screen) {
         return ESP_ERR_NO_MEM;
     }
-    lv_obj_set_style_bg_color(s_screen, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_bg_color(s_screen, lv_color_hex(0x17191A), 0);
     lv_obj_set_style_pad_all(s_screen, 0, 0);
     lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -10436,6 +10442,12 @@ esp_err_t d1l_ui_phase1_show_home(void)
 #endif
 
     render_active_tab();
+    if (!s_boot_scene_played) {
+        s_boot_scene_played = true;
+        if (!d1l_ui_boot_scene_create(&s_boot_scene, s_screen)) {
+            ESP_LOGW(TAG, "boot scene unavailable; continuing to Home");
+        }
+    }
     const uint64_t initial_unread =
         (uint64_t)s_snapshot.public_unread_count +
         (uint64_t)s_snapshot.dm_unread_count;

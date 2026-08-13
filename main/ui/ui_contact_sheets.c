@@ -141,7 +141,7 @@ static lv_obj_t *create_sheet(lv_obj_t *parent)
     lv_obj_set_size(sheet, 480, 480);
     lv_obj_set_pos(sheet, 0, 0);
     lv_obj_set_style_radius(sheet, 0, 0);
-    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x20262B), 0);
     lv_obj_set_style_border_width(sheet, 0, 0);
     lv_obj_set_style_pad_all(sheet, 0, 0);
     lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -348,8 +348,8 @@ static lv_obj_t *create_panel(lv_obj_t *parent, int x, int y,
     lv_obj_set_size(panel, width, height);
     lv_obj_set_pos(panel, x, y);
     lv_obj_set_style_radius(panel, 8, 0);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(panel, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(panel, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_border_width(panel, 1, 0);
     lv_obj_set_style_pad_all(panel, 12, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -377,8 +377,8 @@ static lv_obj_t *create_button(
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label(button, text, 0xF4F7FB);
     if (!label) {
@@ -423,7 +423,7 @@ static bool style_option_button(lv_obj_t *button, uint32_t accent,
     }
     lv_obj_set_style_text_color(label, lv_color_hex(accent), 0);
     lv_obj_align(label, LV_ALIGN_LEFT_MID, 12, 0);
-    lv_obj_t *detail_label = create_label(button, detail ? detail : "", 0x8EA0AE);
+    lv_obj_t *detail_label = create_label(button, detail ? detail : "", 0xA6B0B7);
     if (!detail_label) {
         return false;
     }
@@ -518,14 +518,14 @@ bool d1l_ui_contact_sheets_render_detail(
              entry->type[0] ? entry->type : "node",
              entry->favorite ? "favorite" : "normal",
              entry->muted ? "unread excluded" : "unread counted");
-    lv_obj_t *flags = create_label(sheet, line, 0x8EA0AE);
+    lv_obj_t *flags = create_label(sheet, line, 0xA6B0B7);
     if (flags) {
         lv_obj_set_pos(flags, 16, 64);
     } else {
         complete = false;
     }
     snprintf(line, sizeof(line), "Identity  %.16s", entry->fingerprint);
-    lv_obj_t *fingerprint = create_label(sheet, line, 0xE5EDF5);
+    lv_obj_t *fingerprint = create_label(sheet, line, 0xF4F7FB);
     if (fingerprint) {
         lv_obj_set_pos(fingerprint, 16, 98);
     } else {
@@ -538,7 +538,7 @@ bool d1l_ui_contact_sheets_render_detail(
     } else {
         snprintf(line, sizeof(line), "Broadcast route  |  no saved direct path");
     }
-    lv_obj_t *key = create_label(sheet, line, 0x8EA0AE);
+    lv_obj_t *key = create_label(sheet, line, 0xA6B0B7);
     if (key) {
         lv_label_set_long_mode(key, LV_LABEL_LONG_DOT);
         lv_obj_set_width(key, 448);
@@ -553,7 +553,7 @@ bool d1l_ui_contact_sheets_render_detail(
              entry->last_snr_tenths < 0 ? "-" : "",
              snr_abs / 10, snr_abs % 10,
              entry->heard_name[0] ? entry->heard_name : "-");
-    lv_obj_t *signal = create_label(sheet, line, 0x8EA0AE);
+    lv_obj_t *signal = create_label(sheet, line, 0xA6B0B7);
     if (signal) {
         lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
         lv_obj_set_width(signal, 448);
@@ -561,7 +561,7 @@ bool d1l_ui_contact_sheets_render_detail(
     } else {
         complete = false;
     }
-    lv_obj_t *actions = create_label(sheet, "Contact actions", 0x5EEAD4);
+    lv_obj_t *actions = create_label(sheet, "Contact actions", 0x20D9ED);
     if (actions) {
         lv_obj_set_pos(actions, 16, 210);
     } else {
@@ -584,7 +584,7 @@ bool d1l_ui_contact_sheets_render_detail(
             sheet,
             d1l_ui_dm_identity_reason_text(
                 controller->rendered.dm_identity_reason),
-            0x8EA0AE);
+            0xA6B0B7);
         if (reason) {
             lv_label_set_long_mode(reason, LV_LABEL_LONG_WRAP);
             lv_obj_set_size(reason, 448, 42);
@@ -619,7 +619,7 @@ bool d1l_ui_contact_sheets_render_options(
     complete = configure_title(create_label(sheet, "Contact Options", 0xF4F7FB), 8) &&
         complete;
     lv_obj_t *subtitle = create_label(
-        sheet, entry->alias[0] ? entry->alias : entry->fingerprint, 0x8EA0AE);
+        sheet, entry->alias[0] ? entry->alias : entry->fingerprint, 0xA6B0B7);
     if (subtitle) {
         lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
         lv_obj_set_width(subtitle, 364);
@@ -634,13 +634,13 @@ bool d1l_ui_contact_sheets_render_options(
         button = create_button(
             controller, sheet, "Route trace", 16, 64, 448, 48,
             BINDING_OPTIONS_ROUTE, D1L_UI_CONTACT_ACTION_ROUTE_TRACE);
-        complete = style_option_button(button, 0x93C5FD, "Trace path  >") &&
+        complete = style_option_button(button, 0x4D7FFF, "Trace path  >") &&
             complete;
     }
     button = create_button(
         controller, sheet, "Rename", 16, 118, 448, 48,
         BINDING_OPTIONS_RENAME, D1L_UI_CONTACT_ACTION_RENAME);
-    complete = style_option_button(button, 0x5EEAD4, "Change alias  >") && complete;
+    complete = style_option_button(button, 0x20D9ED, "Change alias  >") && complete;
     button = create_button(
         controller, sheet,
         entry->favorite ? "Remove from favorites" : "Add to favorites",
@@ -654,7 +654,7 @@ bool d1l_ui_contact_sheets_render_options(
         16, 226, 448, 48, BINDING_OPTIONS_MUTE,
         D1L_UI_CONTACT_ACTION_TOGGLE_MUTE);
     complete = style_option_button(
-        button, 0xC4B5FD,
+        button, 0x7D93FF,
         entry->muted ? "Excluded  >" : "Included  >") && complete;
     if (d1l_ui_contact_action_available(D1L_UI_CONTACT_ACTION_EXPORT)) {
         if (controller->rendered.can_export) {
@@ -662,7 +662,7 @@ bool d1l_ui_contact_sheets_render_options(
                 controller, sheet, "Export QR", 16, 280, 448, 48,
                 BINDING_OPTIONS_EXPORT, D1L_UI_CONTACT_ACTION_EXPORT);
             complete = style_option_button(
-                button, 0xA7F3D0, "Share QR  >") && complete;
+                button, 0x84FF2E, "Share QR  >") && complete;
         } else {
             lv_obj_t *panel = create_panel(sheet, 16, 280, 448, 48);
             if (!panel) {
@@ -670,9 +670,9 @@ bool d1l_ui_contact_sheets_render_options(
             } else {
                 lv_obj_set_style_pad_all(panel, 0, 0);
                 lv_obj_t *title = create_label(
-                    panel, "Export unavailable", 0x8EA0AE);
+                    panel, "Export unavailable", 0xA6B0B7);
                 lv_obj_t *reason = create_label(
-                    panel, "Missing key or role", 0x8EA0AE);
+                    panel, "Missing key or role", 0xA6B0B7);
                 if (title && reason) {
                     lv_obj_align(title, LV_ALIGN_LEFT_MID, 12, 0);
                     lv_obj_align(reason, LV_ALIGN_RIGHT_MID, -12, 0);
@@ -726,7 +726,7 @@ bool d1l_ui_contact_sheets_render_forget(
             warning, "This removes the saved contact and its routing preferences.",
             0xF4F7FB);
         lv_obj_t *line2 = create_label(
-            warning, "Message history remains on this device.", 0x8EA0AE);
+            warning, "Message history remains on this device.", 0xA6B0B7);
         if (line1 && line2) {
             lv_label_set_long_mode(line1, LV_LABEL_LONG_WRAP);
             lv_obj_set_width(line1, 424);
@@ -774,7 +774,7 @@ bool d1l_ui_contact_sheets_render_export(
     char subtitle_text[96];
     snprintf(subtitle_text, sizeof(subtitle_text), "MeshCore QR  %.16s  type %u",
              entry->fingerprint, (unsigned)controller->rendered.meshcore_type_id);
-    lv_obj_t *subtitle = create_label(sheet, subtitle_text, 0x8EA0AE);
+    lv_obj_t *subtitle = create_label(sheet, subtitle_text, 0xA6B0B7);
     if (subtitle) {
         lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
         lv_obj_set_width(subtitle, 448);
@@ -795,7 +795,7 @@ bool d1l_ui_contact_sheets_render_export(
 
 #if LV_USE_QRCODE
     lv_obj_t *qr = lv_qrcode_create(
-        sheet, 166, lv_color_hex(0x02060A), lv_color_hex(0xF8FAFC));
+        sheet, 166, lv_color_hex(0x0E0F10), lv_color_hex(0xF8FAFC));
     if (!qr) {
         complete = false;
     } else {
@@ -825,7 +825,7 @@ bool d1l_ui_contact_sheets_render_export(
 #endif
 
     lv_obj_t *name = create_label(
-        sheet, entry->alias[0] ? entry->alias : entry->fingerprint, 0xE5EDF5);
+        sheet, entry->alias[0] ? entry->alias : entry->fingerprint, 0xF4F7FB);
     if (name) {
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
         lv_obj_set_width(name, 264);
@@ -833,20 +833,20 @@ bool d1l_ui_contact_sheets_render_export(
     } else {
         complete = false;
     }
-    lv_obj_t *key = create_label(sheet, "Public key saved", 0x5EEAD4);
+    lv_obj_t *key = create_label(sheet, "Public key saved", 0x20D9ED);
     if (key) {
         lv_obj_set_pos(key, 200, 134);
     } else {
         complete = false;
     }
-    lv_obj_t *uri_title = create_label(sheet, "URI", 0x8EA0AE);
+    lv_obj_t *uri_title = create_label(sheet, "URI", 0xA6B0B7);
     if (uri_title) {
         lv_obj_set_pos(uri_title, 200, 168);
     } else {
         complete = false;
     }
     lv_obj_t *uri = create_label(
-        sheet, controller->rendered.export_uri, 0x93C5FD);
+        sheet, controller->rendered.export_uri, 0x4D7FFF);
     if (uri) {
         lv_label_set_long_mode(uri, LV_LABEL_LONG_DOT);
         lv_obj_set_width(uri, 264);
@@ -855,7 +855,7 @@ bool d1l_ui_contact_sheets_render_export(
         complete = false;
     }
     lv_obj_t *note = create_label(
-        sheet, "Scan with a MeshCore client or copy from serial", 0x8EA0AE);
+        sheet, "Scan with a MeshCore client or copy from serial", 0xA6B0B7);
     if (note) {
         lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
         lv_obj_set_width(note, 448);
@@ -905,7 +905,7 @@ bool d1l_ui_contact_sheets_render_edit(
         controller, sheet, "Save", 16, 360, 448, 52, BINDING_EDIT_SAVE,
         D1L_UI_CONTACT_ACTION_SAVE_EDIT) != NULL && complete;
     lv_obj_t *meta = create_label(
-        sheet, "Only the name changes; messages stay saved", 0x8EA0AE);
+        sheet, "Only the name changes; messages stay saved", 0xA6B0B7);
     if (meta) {
         lv_obj_set_pos(meta, 16, 60);
     } else {
@@ -924,13 +924,13 @@ bool d1l_ui_contact_sheets_render_edit(
             controller->edit_textarea, "Contact alias");
         lv_obj_set_style_radius(controller->edit_textarea, 8, 0);
         lv_obj_set_style_bg_color(
-            controller->edit_textarea, lv_color_hex(0x071018), 0);
+            controller->edit_textarea, lv_color_hex(0x17191A), 0);
         lv_obj_set_style_border_color(
-            controller->edit_textarea, lv_color_hex(0x263241), 0);
+            controller->edit_textarea, lv_color_hex(0x33404A), 0);
         lv_obj_set_style_text_color(
             controller->edit_textarea, lv_color_hex(0xF4F7FB), 0);
         lv_obj_set_style_text_color(
-            controller->edit_textarea, lv_color_hex(0x8EA0AE),
+            controller->edit_textarea, lv_color_hex(0xA6B0B7),
             LV_PART_TEXTAREA_PLACEHOLDER);
         lv_textarea_set_text(
             controller->edit_textarea,

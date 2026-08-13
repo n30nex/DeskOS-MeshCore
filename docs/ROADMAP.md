@@ -7,7 +7,8 @@
 | **1.0 / RC1** | Published baseline (`v1.0.0`, corrected package `v1.0.1`) | Historical and complete |
 | **1.2 / RC2** | Corrective release: working channel selection, mobile-style Contacts, complete parity ledger, actual-device screenshots, and explicit update/fresh-install downloads | Historical (`v1.2.0`) |
 | **1.5 / RC3** | Secure BLE companion, signed local update/rollback, public-data QR sharing, diagnostics, and full-feature production activation | Historical (`v1.5.0`) |
-| **1.6** | Compact Home, five Contacts sort modes, UI ownership cleanup, truthful simulator states, and touch/copy refinement | Current (`v1.6.0`) |
+| **1.6** | Compact Home, five Contacts sort modes, UI ownership cleanup, truthful simulator states, and touch/copy refinement | Historical (`v1.6.0`) |
+| **1.7** | Branded animated opening, distinct DeskOS mark, and coherent product-wide palette | Current (`v1.7.0`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -75,3 +76,11 @@ boundaries while improving the 480x480 product surface. Home now owns its
 compact status bar and lock action, Contacts exposes search and five useful
 sort orders, common actions use shorter labels, diagnostics fit without
 clipping, and simulator state matches the full-feature firmware profile.
+
+## 1.7: product identity
+
+DeskOS 1.7 adds a non-blocking 3.2-second LVGL opening scene and applies the
+DeskOS cyan, cobalt, lime, and charcoal palette across the complete interface.
+The repository now carries the transparent production mark, deterministic boot
+preview, and clearly labeled simulator images. The loader remains bounded and
+falls through to Home if its small object tree cannot be allocated.

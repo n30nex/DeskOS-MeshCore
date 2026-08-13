@@ -26,7 +26,7 @@ static void test_default_view_is_bounded_and_truthful(void)
     assert(strcmp(view.sd_value, "fallback") == 0);
     assert(strcmp(view.sd_compact_value, "Internal") == 0);
     assert(strcmp(view.attention_value, "OK") == 0);
-    assert(view.messages_status_color == 0x5EEAD4U);
+    assert(view.messages_status_color == 0x20D9EDU);
     assert(view.map_status_color == 0xFBBF24U);
     assert(!view.storage_needs_attention);
 }
@@ -68,7 +68,7 @@ static void test_ready_view_owns_all_rendered_strings(void)
     assert(strcmp(view.sd_value, "ready") == 0);
     assert(strcmp(view.sd_compact_value, "Ready") == 0);
     assert(strcmp(view.attention_value, "OK") == 0);
-    assert(view.sd_value_color == 0x5EEAD4U);
+    assert(view.sd_value_color == 0x20D9EDU);
 }
 
 static void test_storage_and_map_fail_closed_states(void)
@@ -144,7 +144,7 @@ static void test_connecting_unavailable_and_mesh_error_states_are_explicit(void)
     assert(strcmp(view.wifi_value, "Connecting") == 0);
     assert(view.wifi_value_color == 0xFBBF24U);
     assert(strcmp(view.ble_value, "Unavailable") == 0);
-    assert(view.ble_value_color == 0x8EA0AEU);
+    assert(view.ble_value_color == 0xA6B0B7U);
     assert(strcmp(view.sd_compact_value, "Setup") == 0);
     assert(strcmp(view.attention_value, "Check") == 0);
     assert(view.attention_required);
@@ -185,7 +185,7 @@ static void test_unknown_mesh_and_storage_reconnect_fail_closed(void)
     input.mesh_state = "waiting_for_radio";
     d1l_ui_home_view(&input, &view);
     assert(strcmp(view.mesh_value, "Offline") == 0);
-    assert(view.mesh_value_color == 0x8EA0AEU);
+    assert(view.mesh_value_color == 0xA6B0B7U);
 }
 
 static void test_tx_busy_requires_ready_radio_and_stays_healthy(void)
@@ -198,7 +198,7 @@ static void test_tx_busy_requires_ready_radio_and_stays_healthy(void)
     d1l_ui_home_view_model_t view;
     d1l_ui_home_view(&input, &view);
     assert(strcmp(view.mesh_value, "Busy") == 0);
-    assert(view.mesh_value_color == 0x5EEAD4U);
+    assert(view.mesh_value_color == 0x20D9EDU);
     assert(!view.mesh_needs_attention);
     assert(!view.attention_required);
     assert(strcmp(view.attention_value, "OK") == 0);
@@ -246,7 +246,7 @@ static void test_muted_unread_stays_separate_from_attention_count(void)
     input.dm_unread_count = 0U;
     d1l_ui_home_view(&input, &view);
     assert(strcmp(view.messages_status, "4 excluded") == 0);
-    assert(view.messages_status_color == 0x8EA0AEU);
+    assert(view.messages_status_color == 0xA6B0B7U);
 }
 
 static void test_release_profile_strips_hidden_sd_failures(void)

@@ -203,7 +203,7 @@ static lv_obj_t *create_sheet(lv_obj_t *parent)
     lv_obj_set_size(sheet, 480, 424);
     lv_obj_set_pos(sheet, 0, 56);
     lv_obj_set_style_radius(sheet, 0, 0);
-    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x20262B), 0);
     lv_obj_set_style_border_width(sheet, 0, 0);
     lv_obj_set_style_pad_all(sheet, 0, 0);
     lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -399,8 +399,8 @@ static lv_obj_t *create_button(
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label(button, text, 0xF4F7FB);
     if (!label) {
@@ -549,7 +549,7 @@ static bool render_input_sheet(
     complete = create_button(controller, sheet, "Back", 12, 6, 72, 44,
                              back_slot, cancel_action) != NULL && complete;
     complete = configure_title(create_label(sheet, title, 0xF4F7FB)) && complete;
-    lv_obj_t *help = create_label(sheet, hint, 0x8EA0AE);
+    lv_obj_t *help = create_label(sheet, hint, 0xA6B0B7);
     if (help) {
         lv_label_set_long_mode(help, LV_LABEL_LONG_DOT);
         lv_obj_set_width(help, 448);
@@ -569,10 +569,10 @@ static bool render_input_sheet(
         lv_textarea_set_placeholder_text(*out_textarea, placeholder);
         lv_textarea_set_text(*out_textarea, initial ? initial : "");
         lv_obj_set_style_radius(*out_textarea, 8, 0);
-        lv_obj_set_style_bg_color(*out_textarea, lv_color_hex(0x071018), 0);
-        lv_obj_set_style_border_color(*out_textarea, lv_color_hex(0x263241), 0);
+        lv_obj_set_style_bg_color(*out_textarea, lv_color_hex(0x17191A), 0);
+        lv_obj_set_style_border_color(*out_textarea, lv_color_hex(0x33404A), 0);
         lv_obj_set_style_text_color(*out_textarea, lv_color_hex(0xF4F7FB), 0);
-        lv_obj_set_style_text_color(*out_textarea, lv_color_hex(0x8EA0AE),
+        lv_obj_set_style_text_color(*out_textarea, lv_color_hex(0xA6B0B7),
                                     LV_PART_TEXTAREA_PLACEHOLDER);
     }
     *out_keyboard = lv_keyboard_create(sheet);
@@ -692,7 +692,7 @@ bool d1l_ui_channel_sheets_render_options(
         sheet,
         is_public ? "Public cannot be renamed, disabled, or removed."
                   : "Channel details are redacted; secrets are never shown here.",
-        is_public ? 0xFBBF24 : 0x8EA0AE);
+        is_public ? 0xFBBF24 : 0xA6B0B7);
     if (note) {
         lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
         lv_obj_set_width(note, 448);
@@ -743,7 +743,7 @@ bool d1l_ui_channel_sheets_render_export(
     complete = configure_title(create_label(sheet, "One-time Channel QR", 0xF4F7FB)) && complete;
 #if LV_USE_QRCODE
     lv_obj_t *qr = lv_qrcode_create(
-        sheet, 238, lv_color_hex(0x02060A), lv_color_hex(0xF8FAFC));
+        sheet, 238, lv_color_hex(0x0E0F10), lv_color_hex(0xF8FAFC));
     if (!qr) {
         complete = false;
     } else {
@@ -760,7 +760,7 @@ bool d1l_ui_channel_sheets_render_export(
     complete = false;
 #endif
     d1l_ui_channel_sheets_clear_export_uri(controller);
-    lv_obj_t *name = create_label(sheet, controller->selected.name, 0xE5EDF5);
+    lv_obj_t *name = create_label(sheet, controller->selected.name, 0xF4F7FB);
     if (name) {
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
         lv_obj_set_width(name, 448);
@@ -770,7 +770,7 @@ bool d1l_ui_channel_sheets_render_export(
         complete = false;
     }
     lv_obj_t *note = create_label(
-        sheet, "URI is held only long enough to encode this QR.", 0x8EA0AE);
+        sheet, "URI is held only long enough to encode this QR.", 0xA6B0B7);
     if (note) {
         lv_obj_set_width(note, 448);
         lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
@@ -810,7 +810,7 @@ bool d1l_ui_channel_sheets_render_remove(
         sheet,
         "This removes channel access from this device. Stored message history "
         "is not erased by this action.",
-        0xE5EDF5);
+        0xF4F7FB);
     if (warning) {
         lv_label_set_long_mode(warning, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(warning, 448);

@@ -64,7 +64,7 @@ void d1l_ui_connectivity_wifi_view(const d1l_ui_wifi_view_input_t *input,
              sizeof(out_view->password_placeholder), "%s",
              input->password_saved ? "Saved; enter to replace" : "Optional");
     out_view->state_color = input->build_enabled && input->enabled ?
-        0x5EEAD4U : 0xFBBF24U;
+        0x20D9EDU : 0xFBBF24U;
 }
 
 void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
@@ -114,5 +114,5 @@ void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
     out_view->forget_available =
         runtime_available && input->peer_known;
     out_view->state_color = runtime_available && input->companion_enabled ?
-        0xA7F3D0U : 0xFBBF24U;
+        0x84FF2EU : 0xFBBF24U;
 }

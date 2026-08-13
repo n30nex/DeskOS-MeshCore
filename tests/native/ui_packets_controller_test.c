@@ -126,7 +126,7 @@ static void test_packet_presentation_is_deterministic(void)
     d1l_packet_log_entry_t entry = {0};
     snprintf(entry.direction, sizeof(entry.direction), "RX");
     assert(strcmp(d1l_ui_packets_entry_status(&entry), "RX") == 0);
-    assert(d1l_ui_packets_entry_color(&entry) == 0x5EEAD4U);
+    assert(d1l_ui_packets_entry_color(&entry) == 0x20D9EDU);
 
     snprintf(entry.direction, sizeof(entry.direction), "tx");
     snprintf(entry.kind, sizeof(entry.kind), "control");
