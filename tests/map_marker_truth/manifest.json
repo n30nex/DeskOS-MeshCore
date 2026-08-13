@@ -144,11 +144,11 @@
     "main/platform/time_service_core.h": "f3af332807f433d49344eaf45cee29473940a988c47e3c02c44fd44cd0306d75",
     "main/storage/map_tile_store.c": "dd382feb8ac4a36eab0ba9514bdbab611cd39b9a82831f20aa1a50c0c6f9922a",
     "main/storage/map_tile_store.h": "6be24bbf0af09711f7fd877b51518fb267c4007ea82f9067bc60e2cceea2d992",
-    "main/ui/ui_map.c": "c7b33c1d67dfd0164927be73e4ff5c7a3fc1a5ace72b7bfe75d44e2176b19362",
+    "main/ui/ui_map.c": "30ff49fafa6f0be2ae1d00a1da5cff8696ae50bf01b3a57426ae718c9b229f03",
     "main/ui/ui_map.h": "1e18d81b50dd1c4a22e73afb8d295b96c57171fbb601adebf931f1c8e75e7949",
-    "main/ui/ui_node_detail.c": "2ca7489a5fc29bf9cfc884bda382cf5d40ea98bc867de41d11496711e6293a16",
+    "main/ui/ui_node_detail.c": "5c85b930c08f05b2dba50729fdf9e3514aa296dcf63cad110b8a9e27835679ac",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "dc0e57b35b81fbfd03b6d9efb79b6ae4c03ea909c2fd22bc4ec4bad9ed0316ba",
-    "tools/ui_simulator.py": "5d1597a9369b00bd01cb9bbafb3431bd7f8380cc441b8ea1d2cb909fc674c5a5"
+    "main/ui/ui_phase1.c": "8d1c33d4880670f81ba903fd0d2edb87ed835829441820ba5c8a91cd98f1958c",
+    "tools/ui_simulator.py": "12e27d3429b60a278b0c69d31ff9661e2b77592d97532edecc6b5ec1faf69d61"
   }
 }

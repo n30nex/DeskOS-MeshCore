@@ -16,8 +16,8 @@ void d1l_ui_connectivity_wifi_view(const d1l_ui_wifi_view_input_t *input,
     }
     memset(out_view, 0, sizeof(*out_view));
     snprintf(out_view->state_line, sizeof(out_view->state_line),
-             "State %s  build %s", safe_text(input->state, "off"),
-             input->build_enabled ? "enabled" : "not built");
+             "Wi-Fi %s  |  %s", safe_text(input->state, "off"),
+             input->build_enabled ? "available" : "unavailable");
     if (input->connected && input->ip && input->ip[0]) {
         if (input->rssi_dbm < 0) {
             snprintf(out_view->link_line, sizeof(out_view->link_line),
@@ -75,15 +75,15 @@ void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
     }
     memset(out_view, 0, sizeof(*out_view));
     snprintf(out_view->state_line, sizeof(out_view->state_line),
-             "State %s  build %s", safe_text(input->state, "off"),
-             input->build_enabled ? "enabled" : "not built");
+             "Bluetooth %s  |  %s", safe_text(input->state, "off"),
+             input->build_enabled ? "available" : "unavailable");
     const bool runtime_available =
         input->build_enabled && input->transport_supported;
     out_view->controls_available = runtime_available;
     snprintf(out_view->purpose, sizeof(out_view->purpose), "%s",
              runtime_available ?
-                 "Secure MeshCore companion transport is available." :
-                 "BLE companion transport is unavailable in this release.");
+                 "Bluetooth companion connections are available." :
+                 "Bluetooth companion connections are unavailable.");
     if (runtime_available && input->pairing_passkey >= 100000U &&
         input->pairing_passkey <= 999999U &&
         strcmp(safe_text(input->state, "off"), "pairing") == 0) {
@@ -92,23 +92,23 @@ void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
                  (unsigned long)input->pairing_passkey);
     } else if (runtime_available && input->protocol_ready) {
         snprintf(out_view->runtime_note, sizeof(out_view->runtime_note),
-                 "Encrypted, bonded, and ready for companion sync.");
+                 "Paired securely and ready to sync.");
     } else if (runtime_available && input->companion_enabled) {
         snprintf(out_view->runtime_note, sizeof(out_view->runtime_note),
-                 "Advertising securely; tap Pair to renew discovery.");
+                 "Ready to pair securely. Tap Pair to make this device visible.");
     } else {
         snprintf(out_view->runtime_note, sizeof(out_view->runtime_note), "%s",
                  runtime_available ?
                      "Enable Bluetooth, then tap Pair from this screen." :
-                     "No BLE pairing or transport runtime is present.");
+                     "Bluetooth pairing is unavailable.");
     }
     snprintf(out_view->toggle_label, sizeof(out_view->toggle_label), "%s",
              runtime_available && input->companion_enabled ?
                  "Disable" : "Enable");
     snprintf(out_view->production_note, sizeof(out_view->production_note), "%s",
              runtime_available && input->protocol_running ?
-                 "Official MeshCore framing; Wi-Fi switches off while BLE is active." :
-                 "USB remains available for recovery and diagnostics.");
+                 "Using the MeshCore connection. Wi-Fi turns off while Bluetooth is active." :
+                 "USB stays available for recovery and diagnostics.");
     out_view->pairing_available =
         runtime_available && input->companion_enabled;
     out_view->forget_available =

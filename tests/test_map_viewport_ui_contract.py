@@ -300,8 +300,8 @@ def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view
         "static void show_node_detail_view",
     )
 
-    assert '"Advert location %s, %s"' in detail
-    assert '"Advert location not provided"' in detail
+    assert '"Shared location %s, %s"' in detail
+    assert '"Location not shared"' in detail
     assert "entry->location_valid" in detail
     assert "entry->lat_e6" in detail
     assert "entry->lon_e6" in detail
@@ -344,7 +344,7 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
     assert "if (!eligibility.can_open_compose)" in compose
     assert "show_dm_identity_reason(eligibility)" in compose
     assert "if (controller->rendered.can_dm)" in detail
-    assert '"Messaging unavailable [%s]"' in detail
+    assert '"Messaging unavailable"' in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
 
     nodes_source = read("main/ui/ui_nodes.c")

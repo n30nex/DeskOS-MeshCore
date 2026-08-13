@@ -137,7 +137,7 @@ def test_public_conversation_bubbles_align_and_show_truthful_time_and_state():
     assert "messages_public_time_label(" in bubble
     assert '"time unknown"' in source
     assert "no persisted boot epoch" in source
-    assert 'return "Sent over RF";' in source
+    assert 'return "Sent by radio";' in source
     assert 'return unread ? "New" : "Received";' in source
     assert "outgoing ? 76 : 8" in bubble
     assert "LV_LABEL_LONG_WRAP" in bubble
@@ -194,11 +194,11 @@ def test_public_tx_truth_is_consistent_in_bubble_history_and_detail():
         "static void show_message_detail_for", 1
     )[0]
 
-    assert 'return "sent over RF";' in delivery
-    assert '"sent over RF"' in history
+    assert 'return "sent by radio";' in delivery
+    assert '"sent"' in history
     assert '"queued"' not in delivery
     assert '"queued"' not in history
-    assert '"Signal  not measured for retained channel TxDone"' in detail
-    assert '"Path hops  not measured for retained channel TxDone"' in detail
-    assert "retained after %s" in detail
+    assert '"Signal was not recorded for this sent message"' in detail
+    assert '"Hop count was not recorded for this sent message"' in detail
+    assert "saved after %s" in detail
     assert '"delivered"' not in detail

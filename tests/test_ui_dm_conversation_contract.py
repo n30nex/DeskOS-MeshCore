@@ -65,10 +65,10 @@ def test_dm_primary_delivery_labels_cover_every_persisted_outbound_state():
         "QUEUED": "Queued",
         "WAITING_RADIO": "Waiting for radio",
         "TX_ACTIVE": "Sending",
-        "TX_DONE": "Sent over RF",
-        "AWAITING_ACK": "Sent over RF / awaiting delivery",
+        "TX_DONE": "Sent by radio",
+        "AWAITING_ACK": "Sent / checking delivery",
         "ACKNOWLEDGED": "Delivered",
-        "RETRY_WAIT": "Retry scheduled",
+        "RETRY_WAIT": "Will retry",
         "RETRY_TX": "Retrying",
         "FAILED_RADIO": "Failed",
         "FAILED_TIMEOUT": "Failed",
@@ -85,7 +85,7 @@ def test_dm_primary_delivery_labels_cover_every_persisted_outbound_state():
     assert "entry->delivered" not in label
     assert "entry->ack_dispatch_count == 0U" in inbound
     assert "entry->ack_last_error == ESP_OK" in inbound
-    assert 'return "Received / ACK needed";' in inbound
+    assert 'return "Received / confirming";' in inbound
 
 
 def test_dm_bubbles_wrap_align_and_disclose_exact_persisted_technical_state():
@@ -124,9 +124,9 @@ def test_dm_bubbles_wrap_align_and_disclose_exact_persisted_technical_state():
         assert f"entry->{field}" in bubble or (
             field == "snr_tenths" and "messages_format_snr" in bubble
         )
-    assert "Bounded delivery retry is active; no manual resend is needed." in bubble
-    assert "Final delivery failure is retained." in bubble
-    assert "no automatic retry is pending." in bubble
+    assert "Delivery retry is in progress. You do not need to resend." in bubble
+    assert "Delivery failed. Your message is saved" in bubble
+    assert "replying sends a new message." in bubble
     detail_format = bubble.split("if (outgoing) {", 1)[1].split(
         "if (!messages_create_wrapped_label(bubble, technical", 1
     )[0]
@@ -191,10 +191,10 @@ def test_simulator_projects_direction_and_every_delivery_state_truthfully():
         "queued": "Queued",
         "waiting_radio": "Waiting for radio",
         "tx_active": "Sending",
-        "tx_done": "Sent over RF",
-        "awaiting_ack": "Sent over RF / awaiting delivery",
+        "tx_done": "Sent by radio",
+        "awaiting_ack": "Sent / checking delivery",
         "acknowledged": "Delivered",
-        "retry_wait": "Retry scheduled",
+        "retry_wait": "Will retry",
         "retry_tx": "Retrying",
         "failed_radio": "Failed",
         "failed_timeout": "Failed",
@@ -205,12 +205,12 @@ def test_simulator_projects_direction_and_every_delivery_state_truthfully():
     list_expected = {
         "not_applicable": "Status unknown",
         "queued": "Queued",
-        "waiting_radio": "Waiting radio",
+        "waiting_radio": "Waiting for radio",
         "tx_active": "Sending",
-        "tx_done": "Sent RF",
-        "awaiting_ack": "Awaiting ACK",
+        "tx_done": "Sent",
+        "awaiting_ack": "Checking delivery",
         "acknowledged": "Delivered",
-        "retry_wait": "Retry waiting",
+        "retry_wait": "Will retry",
         "retry_tx": "Retrying",
         "failed_radio": "Failed",
         "failed_timeout": "Failed",
@@ -235,7 +235,7 @@ def test_simulator_projects_direction_and_every_delivery_state_truthfully():
     ) == "Received"
     surface = ui_simulator.Surface("messages_dm")
     ui_simulator.render_messages_dm(surface, ui_simulator.sample_snapshot())
-    assert "1 unread | Awaiting ACK" in surface.metrics["dm_rendered_states"]
+    assert "1 unread | Checking delivery" in surface.metrics["dm_rendered_states"]
     details = ui_simulator.Surface("dm_thread_details_sheet")
     ui_simulator.render_dm_thread_details_sheet(details, ui_simulator.sample_snapshot())
     assert details.metrics["dm_thread_details_expanded"] is True

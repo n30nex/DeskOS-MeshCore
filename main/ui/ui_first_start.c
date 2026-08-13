@@ -465,7 +465,7 @@ static void render_radio(d1l_ui_first_start_controller_t *controller)
     create_header(controller, "Confirm Canadian radio", "STEP 4 OF 6");
     create_label(
         controller->overlay,
-        "This production preset is fixed for the initial setup:",
+        "Recommended starting settings:",
         D1L_FIRST_START_COLOR_MUTED, 16, 82, 448, false);
     lv_obj_t *preset = create_label(
         controller->overlay,
@@ -498,24 +498,23 @@ static void render_storage_map(
     create_header(controller, "Verify storage & maps", "STEP 5 OF 6 - REQUIRED");
     create_label(
         controller->overlay,
-        "1.0 requires a prepared FAT32 SD card. Prepare it on a computer, "
-        "then insert it. DeskOS firmware never formats cards.",
+        "DeskOS uses a prepared FAT32 SD card for saved data and offline maps. "
+        "Prepare it on a computer, then insert it. DeskOS never formats cards.",
         D1L_FIRST_START_COLOR_MUTED, 16, 74, 448, true);
     create_label(
         controller->overlay,
-        "NRCan tiles use map/offline-provider.json. The prepared-card tool "
-        "installs the authorized Natural Resources Canada provider manifest.",
+        "The SD card preparation tool can add authorized Natural Resources "
+        "Canada maps for offline use.",
         D1L_FIRST_START_COLOR_MUTED, 16, 154, 448, true);
     controller->media_line = create_label(
         controller->overlay, "SD card: checking...",
         D1L_FIRST_START_COLOR_AMBER, 16, 246, 448, true);
     controller->status_line = create_label(
-        controller->overlay, "NRCan provider: checking...",
+        controller->overlay, "Offline maps: checking...",
         D1L_FIRST_START_COLOR_AMBER, 16, 302, 448, true);
     create_label(
         controller->overlay,
-        "Continue unlocks when both the prepared card and NRCan provider "
-        "manifest are ready.",
+        "Continue unlocks when the prepared card and offline maps are ready.",
         D1L_FIRST_START_COLOR_MUTED, 16, 370, 448, true);
     create_navigation(controller, true, false, "Continue");
     if (controller->next_button && !controller->media_ready) {
@@ -544,9 +543,8 @@ static void render_channels(d1l_ui_first_start_controller_t *controller)
     }
     create_label(
         controller->overlay,
-        "Finish persists your explicit name and seeds the channels through "
-        "the canonical onboarding API. Existing configured users are never "
-        "sent through this wizard.",
+        "Finish saves your name and creates these channels. This setup only "
+        "appears for a new device.",
         D1L_FIRST_START_COLOR_MUTED, 16, 290, 448, true);
     controller->status_line = create_label(
         controller->overlay, "Ready to finish setup.",
@@ -727,7 +725,7 @@ static void update_readiness_rows(
         const bool map_ready = d1l_ui_first_start_map_prepared(snapshot);
         char media[112];
         (void)snprintf(
-            media, sizeof(media), "Prepared SD: %s   NRCan maps: %s",
+            media, sizeof(media), "SD card: %s   Offline maps: %s",
             sd_ready ? "Ready" :
                 (snapshot->storage_sd_needs_fat32 ?
                     "Needs FAT32" : "Not ready"),
@@ -749,11 +747,11 @@ static void update_storage_map_page(
     const bool map_ready = d1l_ui_first_start_map_prepared(snapshot);
     controller->media_ready = sd_ready && map_ready;
     if (object_valid(controller->media_line)) {
-        const char *detail = "not detected; prepare FAT32 externally";
+        const char *detail = "not found; prepare it on a computer";
         if (snapshot->storage_sd_needs_fat32) {
-            detail = "detected, but FAT32 preparation is required";
+            detail = "found; prepare it as FAT32 on a computer";
         } else if (sd_ready) {
-            detail = "prepared FAT32 data root is ready";
+            detail = "ready";
         } else if (snapshot->storage_sd_present) {
             detail = "detected, but not ready";
         }
@@ -769,8 +767,8 @@ static void update_storage_map_page(
         lv_label_set_text(
             controller->status_line,
             map_ready ?
-                "NRCan provider: ready for authorized offline tiles" :
-                "NRCan provider: not ready; install the prepared-card manifest");
+                "Offline maps: ready" :
+                "Offline maps: not ready; run the SD card preparation tool");
         lv_obj_set_style_text_color(
             controller->status_line,
             lv_color_hex(map_ready ? D1L_FIRST_START_COLOR_GREEN :
@@ -1030,7 +1028,7 @@ static void handle_next(d1l_ui_first_start_controller_t *controller)
         if (!controller->media_ready) {
             set_status(
                 controller,
-                "Insert the prepared FAT32 card with its NRCan provider manifest.",
+                "Insert the prepared FAT32 card with offline maps installed.",
                 D1L_FIRST_START_COLOR_RED);
         } else {
             render_channels(controller);

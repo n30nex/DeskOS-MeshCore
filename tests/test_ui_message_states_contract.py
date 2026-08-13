@@ -65,11 +65,11 @@ def test_messages_states_keep_ram_history_readable_and_distinguish_empty_cases()
     messages = read("main/ui/ui_messages.c")
     phase1 = read("main/ui/ui_phase1.c")
 
-    assert "Storage degraded; readable RAM history remains." in messages
-    assert "Persistence unavailable; readable RAM history remains." in messages
-    assert "Loading retained channel history..." in messages
-    assert "Loading retained direct-message history..." in messages
-    assert "No DM contacts available. Add a verified chat contact." in messages
+    assert "Storage needs attention. Recent messages are still available." in messages
+    assert "Messages cannot be saved. Recent messages are still available." in messages
+    assert "Loading saved messages..." in messages
+    assert "Loading saved conversations..." in messages
+    assert "No messaging contacts yet. Add a verified contact." in messages
     assert "No direct-message history yet." in messages
     assert "No readable direct-message history in RAM." in messages
 
@@ -87,7 +87,7 @@ def test_messages_states_keep_ram_history_readable_and_distinguish_empty_cases()
         "bool d1l_ui_messages_expand_thread", 1
     )[0]
     assert "bool reply_available" in render_thread
-    assert "Contact unavailable; retained history remains readable." in render_thread
+    assert "This contact is unavailable. Saved messages remain readable." in render_thread
     assert (
         'sheet, "Message this contact                         >",\n'
         "            16, 360, 448, 52"
@@ -120,10 +120,10 @@ def test_messages_retry_and_final_failure_are_distinct_live_delivery_states() ->
         "D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT",
     ):
         assert terminal in header
-    assert "A bounded delivery retry is in progress." in messages
-    assert "A final delivery failure is retained; open it for details." in messages
-    assert "Bounded delivery retry is active; no manual resend is needed." in messages
-    assert "no automatic retry is pending" in messages
+    assert "Trying to deliver the message again." in messages
+    assert "A message could not be delivered. Open it for details." in messages
+    assert "Delivery retry is in progress. You do not need to resend." in messages
+    assert "Delivery failed. Your message is saved; replying sends a new message." in messages
     app = read("main/app/app_model.c")
     projector = read("main/app/dm_conversation_list.c")
     assert "snapshot->dm_delivery_active &&" in app

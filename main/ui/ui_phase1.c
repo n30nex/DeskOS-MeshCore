@@ -3315,7 +3315,7 @@ static void render_route_trace_sheet(void)
                       s_route_trace_entries[best].confidence,
                       s_route_trace_entries[best].path_hops);
     } else {
-        label_set_fmt(best_label, "No retained route evidence yet");
+        label_set_fmt(best_label, "No saved route information yet");
     }
     lv_label_set_long_mode(best_label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(best_label, 448);
@@ -3431,7 +3431,7 @@ static void render_route_trace_sheet(void)
                 snprintf(result_line, sizeof(result_line),
                          "%s result unavailable", operation);
                 snprintf(snr_line, sizeof(snr_line),
-                         "No matched response retained");
+                         "No matching response was saved");
             }
 
             lv_obj_t *result =
@@ -3887,7 +3887,7 @@ static const char *message_delivery_label(const d1l_message_entry_t *entry)
         return "unknown";
     }
     if (entry->direction[0] == 't') {
-        return "sent over RF";
+        return "sent by radio";
     }
     d1l_channel_info_t channel = {0};
     return snapshot_find_channel(&s_snapshot, entry->channel_id, &channel) &&
@@ -4015,8 +4015,7 @@ static void render_message_detail_sheet(void)
     const d1l_ui_dm_identity_eligibility_t sender_dm =
         public_sender_dm_eligibility();
     char dm_reason[160];
-    snprintf(dm_reason, sizeof(dm_reason), "DM unavailable [%s]: %s",
-             d1l_ui_dm_identity_reason_code(sender_dm.reason),
+    snprintf(dm_reason, sizeof(dm_reason), "Private message unavailable: %s",
              d1l_ui_dm_identity_reason_text(sender_dm.reason));
     create_nested_page_label(body, dm_reason, 0xFBBF24, true);
 
@@ -4036,7 +4035,7 @@ static void render_message_detail_sheet(void)
         if (signal) {
             if (entry->direction[0] == 't') {
                 lv_label_set_text(signal,
-                                  "Signal  not measured for retained channel TxDone");
+                                  "Signal was not recorded for this sent message");
             } else {
                 const int snr_abs = entry->snr_tenths < 0 ?
                     -entry->snr_tenths : entry->snr_tenths;
@@ -4050,7 +4049,7 @@ static void render_message_detail_sheet(void)
         if (path) {
             if (entry->direction[0] == 't') {
                 lv_label_set_text(path,
-                                  "Path hops  not measured for retained channel TxDone");
+                                  "Hop count was not recorded for this sent message");
             } else {
                 label_set_fmt(path, "Path  %u hop%s",
                               entry->path_hops,
@@ -4066,10 +4065,10 @@ static void render_message_detail_sheet(void)
         }
         lv_obj_t *hash = create_nested_page_label(body, "", 0x8EA0AE, true);
         if (hash) {
-            label_set_fmt(hash, "Path hash  %u byte%s  retained after %s",
+            label_set_fmt(hash, "Path signature  %u byte%s  saved after %s",
                           entry->path_hash_bytes,
                           entry->path_hash_bytes == 1 ? "" : "s",
-                          entry->direction[0] == 't' ? "TxDone" : "receive");
+                          entry->direction[0] == 't' ? "send" : "receive");
         }
     }
 
@@ -4536,7 +4535,8 @@ static void render_mesh_roles_root(void)
 
     lv_obj_t *note = create_panel(s_mesh_roles_sheet, 16, 288, 448, 76);
     lv_obj_set_style_pad_all(note, 12, 0);
-    lv_obj_t *note_title = create_label(note, "Large meshes stay bounded", 0x93C5FD);
+    lv_obj_t *note_title = create_label(
+        note, "Large networks show recent results first", 0x93C5FD);
     lv_obj_align(note_title, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_t *note_text = create_label(
         note, "Read-only lists. Each role scrolls separately.", 0x8EA0AE);
@@ -4802,8 +4802,7 @@ static const char *public_row_state(const d1l_message_entry_t *entry)
     if (entry && entry->direction[0] == 'r' && entry->seq > read_seq) {
         return "new";
     }
-    return entry && entry->direction[0] == 't' ?
-        "sent over RF" : "received";
+    return entry && entry->direction[0] == 't' ? "sent" : "received";
 }
 
 static void close_public_history_event_cb(lv_event_t *event)
@@ -4847,10 +4846,9 @@ static void render_public_history_sheet(void)
     d1l_channel_info_t history_channel = {0};
     const bool channel_found = snapshot_find_channel(
         &s_snapshot, s_public_history_channel_id, &history_channel);
-    char history_title[64];
-    snprintf(history_title, sizeof(history_title), "%.32s History",
-             channel_found && history_channel.name[0] ?
-                 history_channel.name : "Channel");
+    const bool public_history =
+        s_public_history_channel_id == D1L_CHANNEL_PUBLIC_ID;
+    const char *history_title = public_history ? "Public History" : "History";
     lv_obj_t *title = create_label(
         s_public_history_sheet, history_title, 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
@@ -4879,11 +4877,24 @@ static void render_public_history_sheet(void)
             &total_matches) : 0U;
     lv_obj_t *meta = create_label(s_public_history_sheet, "", 0x8EA0AE);
     if (s_public_search_text[0]) {
-        label_set_fmt(meta, "showing %u/%u  find %.18s",
-                      (unsigned)history_count, (unsigned)total_matches,
-                      s_public_search_text);
+        if (public_history) {
+            label_set_fmt(meta, "Showing %u of %u  Search: %.18s",
+                          (unsigned)history_count, (unsigned)total_matches,
+                          s_public_search_text);
+        } else {
+            label_set_fmt(meta, "%.18s | %u of %u | Search: %.12s",
+                          channel_found && history_channel.name[0] ?
+                              history_channel.name : "Channel",
+                          (unsigned)history_count, (unsigned)total_matches,
+                          s_public_search_text);
+        }
+    } else if (!public_history) {
+        label_set_fmt(meta, "%.24s | Showing %u of %u saved",
+                      channel_found && history_channel.name[0] ?
+                          history_channel.name : "Channel",
+                      (unsigned)history_count, (unsigned)total_matches);
     } else {
-        label_set_fmt(meta, "showing %u/%u retained",
+        label_set_fmt(meta, "Showing %u of %u saved",
                       (unsigned)history_count, (unsigned)total_matches);
     }
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
@@ -4931,8 +4942,8 @@ static void render_public_history_sheet(void)
                                        !channel_found ?
                                        "Channel unavailable" :
                                        s_public_search_text[0] ?
-                                       "No channel rows match" :
-                                       "No retained channel rows",
+                                       "No messages match this search" :
+                                       "No saved messages",
                                        0x8EA0AE);
         lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
     } else {
@@ -6724,7 +6735,7 @@ static void render_storage_root(void)
     render_storage_header("Storage", close_storage_sheet_event_cb);
     lv_obj_t *subtitle = create_label(s_storage_sheet,
         d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY) ?
-            "Card and saved-data overview" : "Retained internal storage",
+            "Card and saved-data overview" : "Built-in storage",
         0x8EA0AE);
     lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
     lv_obj_set_width(subtitle, 360);
@@ -6738,13 +6749,13 @@ static void render_storage_root(void)
                 internal, "Current storage", 0x8EA0AE);
             lv_obj_set_pos(eyebrow, 0, 0);
             lv_obj_t *state = create_label(
-                internal, "Internal NVS", 0x5EEAD4);
+                internal, "Built-in storage", 0x5EEAD4);
             lv_obj_set_style_text_font(state, &lv_font_montserrat_24, 0);
             lv_obj_set_pos(state, 0, 26);
             lv_obj_t *detail = create_label(
                 internal,
                 "Settings, contacts, Public and direct messages, routes, and "
-                "read markers use the retained Core store.",
+                "read markers are saved on this device.",
                 0xE5EDF5);
             lv_label_set_long_mode(detail, LV_LABEL_LONG_WRAP);
             lv_obj_set_size(detail, 424, 58);
@@ -6758,8 +6769,8 @@ static void render_storage_root(void)
             lv_obj_set_pos(title, 0, 0);
             lv_obj_t *copy = create_label(
                 recovery,
-                "Use the checksum-verified USB install and recovery guide. "
-                "Normal upgrades preserve retained state.",
+                "Use the verified USB install and recovery guide. "
+                "Normal upgrades keep your saved data.",
                 0xE5EDF5);
             lv_label_set_long_mode(copy, LV_LABEL_LONG_WRAP);
             lv_obj_set_size(copy, 424, 56);
@@ -8067,7 +8078,7 @@ static void advert_zero_event_cb(lv_event_t *event)
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
-    show_toast("Zero advert", d1l_app_model_request_advert(false));
+    show_toast("Nearby share", d1l_app_model_request_advert(false));
 }
 
 static void advert_flood_event_cb(lv_event_t *event)
@@ -8080,7 +8091,7 @@ static void advert_flood_event_cb(lv_event_t *event)
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
-    show_toast("Flood advert", d1l_app_model_request_advert(true));
+    show_toast("Wide-area share", d1l_app_model_request_advert(true));
 }
 
 static void open_sheet_event_cb(lv_event_t *event)
@@ -9657,9 +9668,9 @@ static void create_sheet(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_sheet, 14, 0);
     lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_SCROLLABLE);
 
-    create_label(s_sheet, "Advert", 0xF4F7FB);
-    create_button(s_sheet, "Zero Hop", 16, 52, 118, 52, advert_zero_event_cb, NULL);
-    create_button(s_sheet, "Flood", 156, 52, 118, 52, advert_flood_event_cb, NULL);
+    create_label(s_sheet, "Share Node", 0xF4F7FB);
+    create_button(s_sheet, "Nearby", 16, 52, 118, 52, advert_zero_event_cb, NULL);
+    create_button(s_sheet, "Wide Area", 156, 52, 118, 52, advert_flood_event_cb, NULL);
     create_button(s_sheet, "Close", 296, 52, 96, 52, close_sheet_event_cb, NULL);
     d1l_ui_modal_hide(s_sheet);
 }

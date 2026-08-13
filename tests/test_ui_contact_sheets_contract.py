@@ -172,11 +172,11 @@ def test_contact_progressive_disclosure_layout_and_truth_are_preserved():
         "Contact options",
     ):
         assert f'"{label}"' in detail
-    assert '"Messaging unavailable [%s]"' in detail
+    assert '"Messaging unavailable"' in detail
     assert '"Direct route  |  %u hop%s"' in detail
-    assert '"Flood route  |  no saved direct path"' in detail
+    assert '"Broadcast route  |  no saved direct path"' in detail
     assert '"Identity  %.16s"' in detail
-    assert "d1l_ui_dm_identity_reason_code(" in detail
+    assert "d1l_ui_dm_identity_reason_code(" not in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
     assert "controller->rendered.dm_identity_reason" in detail
     for hidden in ("Route trace", "Rename", "Export QR", "Forget contact"):
@@ -196,8 +196,8 @@ def test_contact_progressive_disclosure_layout_and_truth_are_preserved():
     for label in (
         "This removes the saved contact and its routing preferences.",
         "Message history remains on this device.",
-        "Alias only; retained history remains",
-        "No retained public key for QR export",
+        "Only the name changes; messages stay saved",
+        "No saved public key is available to export",
         "Scan with a MeshCore client or copy from serial",
     ):
         assert f'"{label}"' in source

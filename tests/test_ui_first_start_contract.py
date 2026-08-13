@@ -61,7 +61,7 @@ def test_every_boot_readiness_overlay_gates_on_five_truthful_essential_rows():
     assert "snapshot->onboarding_complete" in rows
     assert "d1l_ui_first_start_map_prepared(snapshot)" in rows
     assert '"%u of 5 essential systems ready"' in rows
-    assert '"Prepared SD: %s   NRCan maps: %s"' in rows
+    assert '"SD card: %s   Offline maps: %s"' in rows
     assert '"Needs FAT32"' in rows
     assert '"Not ready"' in rows
     assert "d1l_ui_first_start_sd_prepared(snapshot)" in rows
@@ -164,11 +164,11 @@ def test_radio_storage_map_and_channels_are_production_truth_not_test_gates():
     assert "d1l_app_model_save_radio_profile" in confirm
     assert "910525000UL" in source
     assert "625U" in source
-    assert "DeskOS firmware never formats cards." in storage
+    assert "DeskOS never formats cards." in storage
     assert '"STEP 5 OF 6 - REQUIRED"' in storage
-    assert '"1.0 requires a prepared FAT32 SD card.' in storage
-    assert "map/offline-provider.json" in storage
-    assert "Natural Resources Canada provider manifest." in storage
+    assert '"DeskOS uses a prepared FAT32 SD card for saved data and offline maps.' in storage
+    assert '"Canada maps for offline use."' in storage
+    assert "map/offline-provider.json" not in storage
     assert "controller->next_button, LV_STATE_DISABLED" in storage
     assert "d1l_storage_status_mount" not in source
     assert "d1l_storage_manager_request_remount" not in source
@@ -194,7 +194,7 @@ def test_required_prepared_media_gates_channel_and_finish_steps():
     assert "lv_obj_clear_state(" in update
     assert "lv_obj_add_state(" in update
     assert "if (!controller->media_ready)" in next_action
-    assert "Insert the prepared FAT32 card with its NRCan provider manifest." in next_action
+    assert "Insert the prepared FAT32 card with offline maps installed." in next_action
 
 
 def test_finish_uses_canonical_onboarding_and_existing_users_bypass_wizard():

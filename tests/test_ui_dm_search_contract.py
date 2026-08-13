@@ -34,8 +34,8 @@ def test_dm_thread_controller_owns_bounded_search_state() -> None:
     assert "controller->thread_fingerprint" not in render.split(
         "char meta_text[96];", 1
     )[1].split("lv_obj_t *meta", 1)[0]
-    assert "No retained messages match this search." in render
-    assert "No retained messages in this conversation." in render
+    assert "No saved messages match this search." in render
+    assert "No saved messages in this conversation." in render
 
     setter = source.split("bool d1l_ui_messages_set_thread_search", 1)[1].split(
         "const char *d1l_ui_messages_thread_search", 1

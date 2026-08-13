@@ -231,7 +231,7 @@ bool d1l_ui_ble_render(d1l_ui_ble_controller_t *controller,
     lv_obj_clean(controller->sheet);
 
     bool complete = true;
-    lv_obj_t *title = create_label(controller->sheet, "BLE Setup", 0xF4F7FB);
+    lv_obj_t *title = create_label(controller->sheet, "Bluetooth", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
         lv_obj_set_pos(title, 8, 4);

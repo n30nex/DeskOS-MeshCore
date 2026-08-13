@@ -134,9 +134,9 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "LV_EVENT_VALUE_CHANGED" in ui
     assert "No messages in this channel yet" in messages_ui
     assert "No direct-message history yet." in messages_ui
-    assert "Loading retained direct-message history..." in messages_ui
-    assert "Storage degraded; readable RAM history remains." in messages_ui
-    assert "Persistence unavailable; readable RAM history remains." in messages_ui
+    assert "Loading saved messages..." in messages_ui
+    assert "Storage needs attention. Recent messages are still available." in messages_ui
+    assert "Messages cannot be saved. Recent messages are still available." in messages_ui
     assert "static lv_obj_t *s_public_history_sheet" in ui
     assert "static lv_obj_t *s_public_search_sheet" in ui
     assert "d1l_app_model_query_channel_messages_page(" in ui

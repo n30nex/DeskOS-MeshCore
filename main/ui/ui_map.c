@@ -537,8 +537,8 @@ static void map_viewport_update_pin_truth_label(void)
     lv_label_set_text(
         s_viewport_pin_truth_label,
         s_viewport_marker_age_reference_valid ?
-            "Signed advert E6\nage verified\naccuracy unknown" :
-            "Signed advert E6\npins hidden\nage unverified");
+            "Location shared by node\nrecently verified\naccuracy unknown" :
+            "Location hidden\nsource not verified");
     lv_obj_set_style_text_color(
         s_viewport_pin_truth_label,
         lv_color_hex(s_viewport_marker_age_reference_valid ?

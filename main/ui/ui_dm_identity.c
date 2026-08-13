@@ -148,22 +148,22 @@ const char *d1l_ui_dm_identity_reason_text(d1l_ui_dm_identity_reason_t reason)
 {
     switch (reason) {
     case D1L_UI_DM_IDENTITY_READY:
-        return "Verified canonical chat Contact.";
+        return "Verified contact. Ready for private messages.";
     case D1L_UI_DM_IDENTITY_SENDER_NAME_UNVERIFIED:
-        return "Public sender names have no verified full key.";
+        return "This sender has not been verified for private messages.";
     case D1L_UI_DM_IDENTITY_INCOMPLETE:
-        return "Identity has no complete verified full key.";
+        return "This identity is incomplete and cannot receive private messages.";
     case D1L_UI_DM_IDENTITY_HEARD_ONLY:
-        return "Heard node only; add or import a verified chat Contact.";
+        return "Add this nearby node as a verified contact to message it.";
     case D1L_UI_DM_IDENTITY_CONTACT_MISSING:
-        return "Contact is no longer retained; refresh Contacts.";
+        return "This contact is no longer available. Refresh Contacts.";
     case D1L_UI_DM_IDENTITY_CONTACT_NOT_CANONICAL:
-        return "Contact is not verified by signed advert or import.";
+        return "This contact could not be verified.";
     case D1L_UI_DM_IDENTITY_MISMATCH:
-        return "Identity full key does not match this Contact.";
+        return "This contact does not match the saved identity.";
     case D1L_UI_DM_IDENTITY_ROLE_UNSUPPORTED:
         return "This verified role does not support direct chat.";
     default:
-        return "Identity has no complete verified full key.";
+        return "This identity is incomplete and cannot receive private messages.";
     }
 }
