@@ -23,7 +23,7 @@ def test_radio_settings_has_one_bounded_persistent_owner():
     assert '"ui/ui_radio_settings.c"' in cmake
     assert '#include "ui_radio_settings.h"' in phase1
     assert "D1L_UI_RADIO_SETTINGS_CONTROLLER_MAX_BYTES 320U" in header
-    assert "D1L_UI_RADIO_SETTINGS_BINDING_COUNT 13U" in header
+    assert "D1L_UI_RADIO_SETTINGS_BINDING_COUNT 12U" in header
     assert "_Static_assert(sizeof(d1l_ui_radio_settings_controller_t)" in source
     assert "s_radio_settings_controller EXT_RAM_BSS_ATTR" in phase1
     assert "static lv_obj_t *s_radio_settings_sheet" not in phase1
@@ -147,7 +147,7 @@ def test_radio_renderer_preserves_layout_labels_and_all_touch_bindings():
         assert f'"{label}"' in source
     assert "lv_obj_set_size(controller->sheet, 480, 480);" in source
     assert "lv_obj_set_pos(controller->sheet, 0, 0);" in source
-    assert source.count("BINDING_") >= 26
+    assert source.count("BINDING_") >= 25
     assert "BINDING_TOP_CLOSE = 0" in source
-    assert "BINDING_BOTTOM_CLOSE" in source
+    assert "BINDING_BOTTOM_CLOSE" not in source
     assert "lv_obj_add_event_cb(button, action_event_cb, LV_EVENT_CLICKED, binding);" in source

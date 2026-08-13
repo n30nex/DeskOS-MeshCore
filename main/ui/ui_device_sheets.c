@@ -389,58 +389,52 @@ bool d1l_ui_device_sheets_render_diagnostics(
     complete = health != NULL && complete;
 
     char text[128];
-    snprintf(text, sizeof(text), "reset %s  heap %luK/%luK  ui stk %lu",
+    snprintf(text, sizeof(text), "reset %s  uptime %lus  mesh %s",
              snapshot->reset_reason ? snapshot->reset_reason : "UNKNOWN",
-             (unsigned long)(snapshot->heap_free / 1024U),
-             (unsigned long)(snapshot->heap_min_free / 1024U),
-             (unsigned long)snapshot->ui_task_stack_free_words);
-    complete = create_diagnostic_line(sheet, text, 0, 76, 0x8EA0AE, 390) != NULL &&
-               complete;
-    snprintf(text, sizeof(text), "uptime %lus  mesh %s",
              (unsigned long)(snapshot->uptime_ms / 1000U),
              snapshot->mesh_state ? snapshot->mesh_state : "unknown");
-    complete = create_diagnostic_line(sheet, text, 8, 104, 0xE5EDF5, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 76, 0xE5EDF5, 408) != NULL &&
                complete;
     snprintf(text, sizeof(text), "heap %luK free  min %luK  largest %luK",
              (unsigned long)(snapshot->heap_free / 1024U),
              (unsigned long)(snapshot->heap_min_free / 1024U),
              (unsigned long)(snapshot->heap_largest_free / 1024U));
-    complete = create_diagnostic_line(sheet, text, 8, 132, 0x8EA0AE, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 104, 0x8EA0AE, 408) != NULL &&
                complete;
     snprintf(text, sizeof(text), "LVGL free %lu  largest %lu  used %u%%",
              (unsigned long)snapshot->lvgl_free_bytes,
              (unsigned long)snapshot->lvgl_largest_free_bytes,
              (unsigned)snapshot->lvgl_used_pct);
-    complete = create_diagnostic_line(sheet, text, 8, 160, 0x8EA0AE, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 132, 0x8EA0AE, 408) != NULL &&
                complete;
     snprintf(text, sizeof(text), "ui stack %lu words  console stack %lu",
              (unsigned long)snapshot->ui_task_stack_free_words,
              (unsigned long)snapshot->current_task_stack_free_words);
-    complete = create_diagnostic_line(sheet, text, 8, 188, 0x8EA0AE, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 160, 0x8EA0AE, 408) != NULL &&
                complete;
     snprintf(text, sizeof(text), "packets rx %lu tx %lu  rejected %lu",
              (unsigned long)snapshot->rx_packets,
              (unsigned long)snapshot->tx_packets,
              (unsigned long)snapshot->rejected_commands);
-    complete = create_diagnostic_line(sheet, text, 8, 216, 0x93C5FD, 408) != NULL &&
+    complete = create_diagnostic_line(sheet, text, 8, 188, 0x93C5FD, 408) != NULL &&
                complete;
 
     lv_obj_t *stores = create_label(sheet, "Crashlog  Events  Serial", 0xF4F7FB);
     if (stores) {
-        lv_obj_set_pos(stores, 8, 246);
+        lv_obj_set_pos(stores, 8, 210);
     }
     complete = stores != NULL && complete;
     lv_obj_t *note = create_label(
         sheet,
-        "Open Terminal for the bounded redacted event ring and runtime log level.",
+        "Terminal shows redacted events and runtime log level.",
         0xFBBF24);
-    configure_wrapped_label(note, 8, 268);
+    configure_wrapped_label(note, 8, 230);
     complete = note != NULL && complete;
 
     if (d1l_release_feature_available(
             D1L_RELEASE_FEATURE_MUTABLE_TERMINAL)) {
         complete = create_button(
-            controller, sheet, "Open Terminal", 8, 316, 150, 44,
+            controller, sheet, "Open Terminal", 8, 250, 150, 44,
             BINDING_OPEN_TERMINAL,
             D1L_UI_DEVICE_SHEETS_ACTION_OPEN_TERMINAL) != NULL && complete;
     }

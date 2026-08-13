@@ -4,9 +4,10 @@ This tracks public product deliverables. Controlled peers, credentials, admin
 passwords, soak runs, internal evidence, and qualification firmware are not
 release deliverables and must not appear in the public package.
 
-The RC2 production profile remains `core_1_0` with `conditional` storage:
+The current production profile is `full_feature` with `conditional` storage:
 SD-primary retained history when prepared storage is ready, visible live-only
-operation otherwise, and without silent default-NVS fallback.
+operation otherwise, and without silent default-NVS fallback. Historical RC2
+artifacts remain bound to their original `core_1_0` profile.
 
 ## 1.0 / RC1 record
 
@@ -60,3 +61,11 @@ Actions run `31260655342`.
 BLE companion transport, richer QR/deep-link sharing, signed update/recovery,
 localization expansion, broad UI architecture, optional telemetry, and debt in
 [`RC3_BACKLOG.md`](RC3_BACKLOG.md) remain outside RC2.
+
+## 1.6 release boundary
+
+The 1.6 release keeps the established full-feature radio and storage safety
+boundaries. Its release proof requires green host and Actions checks, exact-SHA
+artifacts, a non-erasing flash to the stable D1L USB identity, and physical
+480x480 UI acceptance. It never formats SD or substitutes an arbitrary serial
+device.

@@ -115,7 +115,7 @@ def test_wifi_renderer_preserves_available_and_unavailable_surfaces():
     assert '"Network name (SSID)"' in source
     assert '"Password"' in source
     for label in (
-        "Close", "Save network", "Delete", "Next saved", "Scan", "Connect"
+        "Close", "Save network", "Delete", "Next", "Scan", "Connect"
     ):
         assert f'"{label}"' in source
     assert "lv_obj_set_size(controller->sheet, 480, 480)" in source

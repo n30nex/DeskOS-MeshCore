@@ -281,7 +281,7 @@ def test_ui_console_and_smoke_expose_contacts():
     )[1].split("static void nodes_render_node_row", 1)[0]
     assert "nodes_role_badge_text(entry->type)" in contact_row
     assert "nodes_contact_route_label(entry)" in contact_row
-    assert 'nodes_create_button(row, "Message"' in contact_row
+    assert 'nodes_create_button(row, "Chat"' in contact_row
     assert "entry->public_key_hex" not in contact_row
     assert "entry->fingerprint" not in contact_row
     assert "d1l_ui_contact_sheets_create(" in ui

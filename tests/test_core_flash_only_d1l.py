@@ -3445,6 +3445,10 @@ def test_posix_admission_holds_exclusive_serial_lock(monkeypatch):
     master_fd, slave_fd = flash.os.openpty()
     slave_path = flash.os.ttyname(slave_fd)
     monkeypatch.setattr(flash.time, "sleep", lambda _seconds: None)
+    # A Linux PTY supports exclusive locking but not USB-UART modem-line ioctls.
+    # This test isolates the lock contract; hardware tests cover reset signalling.
+    monkeypatch.setattr(serial.Serial, "_update_dtr_state", lambda _self: None)
+    monkeypatch.setattr(serial.Serial, "_update_rts_state", lambda _self: None)
     try:
         with flash.open_posix_admitted_serial(
             slave_path,

@@ -6,7 +6,8 @@
 |---|---|---|
 | **1.0 / RC1** | Published baseline (`v1.0.0`, corrected package `v1.0.1`) | Historical and complete |
 | **1.2 / RC2** | Corrective release: working channel selection, mobile-style Contacts, complete parity ledger, actual-device screenshots, and explicit update/fresh-install downloads | Historical (`v1.2.0`) |
-| **1.5 / RC3** | Secure BLE companion, signed local update/rollback, public-data QR sharing, diagnostics, and full-feature production activation | Current (`v1.5.0`) |
+| **1.5 / RC3** | Secure BLE companion, signed local update/rollback, public-data QR sharing, diagnostics, and full-feature production activation | Historical (`v1.5.0`) |
+| **1.6** | Compact Home, five Contacts sort modes, UI ownership cleanup, truthful simulator states, and touch/copy refinement | Current (`v1.6.0`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -66,3 +67,11 @@ profile. Its source is [`RC3_BACKLOG.md`](RC3_BACKLOG.md):
 The production Actions candidate uses the `full_feature` profile. Pull requests
 compile and test that profile without receiving the update-signing secret;
 trusted branch builds alone produce the signed release package.
+
+## 1.6: daily-use refinement
+
+DeskOS 1.6 keeps the 1.5 radio, BLE, storage, sharing, and signed-update
+boundaries while improving the 480x480 product surface. Home now owns its
+compact status bar and lock action, Contacts exposes search and five useful
+sort orders, common actions use shorter labels, diagnostics fit without
+clipping, and simulator state matches the full-feature firmware profile.

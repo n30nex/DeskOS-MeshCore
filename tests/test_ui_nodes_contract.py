@@ -76,7 +76,6 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
         '"Find nearby"',
         '"No saved contacts yet"',
         '"No other nearby nodes"',
-        '"Message"',
         '"Manage"',
         '"Chat"',
         '"Repeater"',
@@ -96,7 +95,7 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
     assert "static uint32_t nodes_role_color" in source
     assert "NODES_ROW_HEIGHT 58" in source
     assert "NODES_MIN_TOUCH_HEIGHT 44" in source
-    assert 'nodes_create_button(row, "Message", 340, 7, 84, 44' in source
+    assert 'nodes_create_button(row, "Chat", 340, 7, 84, 44' in source
     assert "entry->public_key_hex" not in source
     assert '"Fingerprint' not in source
     contact_row = source.split("static void nodes_render_contact_row", 1)[1].split(

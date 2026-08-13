@@ -8,12 +8,12 @@ static void test_home_uses_full_height_without_dock(void)
 {
     const d1l_ui_chrome_layout_t layout =
         d1l_ui_chrome_layout_for_screen(D1L_UI_SCREEN_HOME);
-    assert(layout.content_y == 16U);
-    assert(layout.content_height == 464U);
+    assert(layout.content_y == 0U);
+    assert(layout.content_height == 480U);
     assert(!layout.content_scrollable);
     assert(!layout.dock_visible);
     assert(!layout.header_detail_visible);
-    assert(strcmp(layout.title, "DeskOS") == 0);
+    assert(strcmp(layout.title, "") == 0);
 }
 
 static void test_docked_screens_gain_height_without_overlap(void)

@@ -163,12 +163,12 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "layout.header_detail_visible ? 8 : 1" in source
     assert "set_object_hidden(s_title_label, layout.content_y == 0U)" in source
     assert "lv_obj_align(s_title_label, LV_ALIGN_TOP_LEFT, 10, 0)" in source
-    assert ".content_y = 16" in chrome
-    assert ".content_height = 464" in chrome
+    assert ".content_y = 0" in chrome
+    assert ".content_height = 480" in chrome
     assert ".content_scrollable = false" in chrome
     assert ".dock_visible = false" in chrome
     assert ".header_detail_visible = false" in chrome
-    assert ".title = \"DeskOS\"" in chrome
+    assert chrome.count('.title = ""') == 2
     assert ".content_y = D1L_UI_DOCKED_CONTENT_Y" in chrome
     assert ".content_height = D1L_UI_DOCKED_CONTENT_HEIGHT" in chrome
     assert "D1L_UI_DOCKED_CONTENT_Y 0U" in chrome_header
@@ -208,11 +208,11 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "static const d1l_ui_home_box_t k_destination_boxes" in home_module
     assert "static const d1l_ui_home_box_t k_device_box" in home_module
     assert "static const d1l_ui_home_box_t k_status_boxes" in home_module
-    assert "[D1L_UI_HOME_DESTINATION_MESSAGES] = {12, 0, 222, 140}" in home_module
-    assert "[D1L_UI_HOME_DESTINATION_NETWORK] = {246, 0, 222, 140}" in home_module
-    assert "[D1L_UI_HOME_DESTINATION_MAP] = {12, 148, 222, 140}" in home_module
-    assert "[D1L_UI_HOME_DESTINATION_MORE] = {246, 148, 222, 140}" in home_module
-    assert "static const d1l_ui_home_box_t k_device_box = {12, 296, 456, 88}" in home_module
+    assert "[D1L_UI_HOME_DESTINATION_MESSAGES] = {12, 52, 222, 136}" in home_module
+    assert "[D1L_UI_HOME_DESTINATION_NETWORK] = {246, 52, 222, 136}" in home_module
+    assert "[D1L_UI_HOME_DESTINATION_MAP] = {12, 196, 222, 136}" in home_module
+    assert "[D1L_UI_HOME_DESTINATION_MORE] = {246, 196, 222, 136}" in home_module
+    assert "static const d1l_ui_home_box_t k_device_box = {12, 340, 456, 128}" in home_module
     assert "render_destination_card" in home_module
     assert "render_device_status" in home_module
     assert "lv_obj_set_style_border_width(panel, 1, 0)" in home_module
@@ -231,6 +231,7 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "D1L_UI_HOME_ACTION_BLE" in home_header
     assert "D1L_UI_HOME_ACTION_STORAGE" in home_header
     assert "D1L_UI_HOME_ACTION_ATTENTION" in home_header
+    assert "D1L_UI_HOME_ACTION_LOCK" in home_header
     assert "D1L_UI_HOME_LAUNCHER_" not in home_header
     assert "D1L_UI_HOME_STATUS_COUNT" in home_header
     assert "render_home_launcher_tile" not in source
@@ -271,6 +272,7 @@ def test_home_screen_is_user_first_companion_dashboard():
         ("D1L_UI_HOME_ACTION_BLE", "open_ble_sheet_event_cb(NULL);"),
         ("D1L_UI_HOME_ACTION_STORAGE", "open_storage_sheet_event_cb(NULL);"),
         ("D1L_UI_HOME_ACTION_ATTENTION", "open_diagnostics_sheet_event_cb(NULL);"),
+        ("D1L_UI_HOME_ACTION_LOCK", "lock_event_cb(NULL);"),
     ):
         route_body = source.split(f"case {action}:", 1)[1].split("break;", 1)[0]
         assert callback in route_body
@@ -1014,7 +1016,7 @@ def test_dm_composer_opens_from_contact_rows():
     assert "static bool s_compose_dm" in source
     assert "static d1l_contact_entry_t s_compose_contact" in source
     assert "D1L_UI_NODES_ACTION_OPEN_CONTACT_DM" in source
-    assert 'nodes_create_button(row, "Message"' in nodes_source
+    assert 'nodes_create_button(row, "Chat"' in nodes_source
     assert "nodes_dispatch_contact_dm_event_cb" in nodes_source
     assert "open_dm_compose_for_contact(event->contact);" in source
     assert "selected = *entry" in source
@@ -1191,7 +1193,7 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "nodes_role_color" in nodes_source
     assert "node_view_can_dm" in source
     assert "role_is_managed_service" in node_detail_source
-    assert 'nodes_create_button(row, "Message", 340, 7, 84, 44' in nodes_source
+    assert 'nodes_create_button(row, "Chat", 340, 7, 84, 44' in nodes_source
     assert "lv_obj_set_style_pad_all(panel, 0, 0);" in nodes_source
     assert "render_role_badge" in node_detail_source
     assert "nodes_dispatch_node_open_event_cb" in nodes_source
@@ -1806,8 +1808,8 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
     assert '"Fixed UTC offset only; daylight saving is not automatic.' in device_sheets
-    assert '"Open Terminal for the bounded redacted event ring and runtime log level."' in device_sheets
-    assert '"reset %s  heap %luK/%luK  ui stk %lu"' in device_sheets
+    assert '"Terminal shows redacted events and runtime log level."' in device_sheets
+    assert '"reset %s  uptime %lus  mesh %s"' in device_sheets
 
 
 def test_settings_screen_has_safe_touch_radio_editor():

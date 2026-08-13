@@ -317,7 +317,7 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
 
     category = set_category(out_view, D1L_UI_MORE_CATEGORY_ADVANCED,
                             "Advanced", "Radio and authenticated server tools",
-                            COLOR_WARNING_TEXT, true, 3U);
+                            COLOR_WARNING_TEXT, false, 3U);
     set_item(&category->items[0], "Radio", radio_status,
              input->radio_ready ? COLOR_GREEN : COLOR_TEXT,
              D1L_UI_SETTINGS_ACTION_RADIO, false);
@@ -326,9 +326,9 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
                  input->admin_state : "Idle",
              text_equals(input->admin_state, "authenticated") ?
                  COLOR_GREEN : COLOR_TEXT,
-             D1L_UI_SETTINGS_ACTION_ADMIN, true);
+             D1L_UI_SETTINGS_ACTION_ADMIN, false);
     set_item(&category->items[2], "Mesh advertise", "Broadcast presence",
-             COLOR_WARNING_TEXT, D1L_UI_SETTINGS_ACTION_ADVANCED, true);
+             COLOR_WARNING_TEXT, D1L_UI_SETTINGS_ACTION_ADVANCED, false);
 
     return d1l_ui_more_view_model_is_valid(out_view);
 }

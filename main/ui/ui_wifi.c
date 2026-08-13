@@ -396,7 +396,7 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
                   D1L_UI_WIFI_ACTION_SAVE);
     create_button(controller, "Scan", 16, 322, 104, 44, BINDING_SCAN,
                   D1L_UI_WIFI_ACTION_SCAN);
-    create_button(controller, "Next saved", 128, 322, 104, 44,
+    create_button(controller, "Next", 128, 322, 104, 44,
                   BINDING_NEXT_PROFILE,
                   D1L_UI_WIFI_ACTION_NEXT_PROFILE);
     create_button(controller, "Delete", 240, 322, 104, 44, BINDING_CLEAR,

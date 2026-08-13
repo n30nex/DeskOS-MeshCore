@@ -1,7 +1,8 @@
 # Full Feature Install and Recovery
 
 > **SUPERSEDED INSTALL/RECOVERY HISTORY — NOT CURRENT RC1 INSTRUCTIONS.**
-> Signed OTA/update/recovery product workflows are deferred to 1.5 / RC3.
+> Signed local-SD update and rollback shipped in 1.5; this historical guide is
+> still superseded by the exact current release package.
 > Do not execute the historical package, port, recovery or soak directions
 > below. Use the exact downloaded GitHub Actions package README together with
 > the [project README](../README.md), [RC1 user guide](USER_GUIDE_D1L.md),

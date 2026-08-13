@@ -147,7 +147,7 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     node_row = nodes_ui.split(
         "static void nodes_render_node_row", 1
     )[1].split("static void nodes_render_empty_state", 1)[0]
-    assert 'nodes_create_button(row, "Message"' in node_row
+    assert 'nodes_create_button(row, "Chat"' in node_row
     message_branch = node_row.split("if (can_dm)", 1)[1].split("else if", 1)[0]
     assert "view->keyed" not in message_branch
     assert "const bool can_manage = view->keyed" in node_row
