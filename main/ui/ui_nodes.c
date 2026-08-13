@@ -10,6 +10,7 @@
 #define NODES_ROW_HEIGHT 58
 #define NODES_ROW_GAP 4
 #define NODES_MIN_TOUCH_HEIGHT 44
+#define NODES_MAX_RENDERED_ROWS 24U
 
 static lv_obj_t *nodes_create_label(lv_obj_t *parent,
                                     const char *text,
@@ -434,6 +435,22 @@ static void nodes_render_section_label(lv_obj_t *parent,
     }
 }
 
+static void nodes_render_limit_note(lv_obj_t *parent,
+                                    int y,
+                                    size_t rendered,
+                                    size_t total,
+                                    const char *kind)
+{
+    char text[80];
+    snprintf(text, sizeof(text), "Showing %u of %u %s. Search to narrow.",
+             (unsigned)rendered, (unsigned)total, kind);
+    lv_obj_t *label = nodes_create_label(parent, text, 0x8EA0AE);
+    nodes_set_dot_width(label, 424);
+    if (label) {
+        lv_obj_set_pos(label, 20, y);
+    }
+}
+
 static void nodes_render_contact_row(
     d1l_ui_nodes_controller_t *controller,
     lv_obj_t *parent,
@@ -662,6 +679,7 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
     int y = 112;
     nodes_render_section_label(parent, y, "Saved contacts");
     y += 24;
+    size_t rendered_total = 0U;
     if (controller->rendered.contact_row_count == 0U) {
         nodes_render_empty_section(
             parent, y, "No saved contacts yet",
@@ -669,9 +687,17 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
         y += NODES_ROW_HEIGHT + NODES_ROW_GAP;
     } else {
         for (size_t i = 0U;
-             i < controller->rendered.contact_row_count; ++i) {
+             i < controller->rendered.contact_row_count &&
+                 rendered_total < NODES_MAX_RENDERED_ROWS; ++i) {
             nodes_render_contact_row(controller, parent, y, i);
             y += NODES_ROW_HEIGHT + NODES_ROW_GAP;
+            rendered_total++;
+        }
+        if (rendered_total < controller->rendered.contact_row_count) {
+            nodes_render_limit_note(
+                parent, y, rendered_total,
+                controller->rendered.contact_row_count, "contacts");
+            y += 24;
         }
     }
 
@@ -679,7 +705,9 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
     nodes_render_section_label(parent, y, "Nearby");
     y += 24;
     size_t rendered_nearby = 0U;
-    for (size_t i = 0U; i < controller->rendered.node_row_count; ++i) {
+    for (size_t i = 0U;
+         i < controller->rendered.node_row_count &&
+             rendered_total < NODES_MAX_RENDERED_ROWS; ++i) {
         if (nodes_node_matches_contact(
                 controller, &controller->rendered.node_rows[i])) {
             continue;
@@ -687,11 +715,15 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
         nodes_render_node_row(controller, parent, y, i);
         y += NODES_ROW_HEIGHT + NODES_ROW_GAP;
         rendered_nearby++;
+        rendered_total++;
     }
-    if (rendered_nearby == 0U) {
+    if (rendered_nearby == 0U && nearby_count == 0U) {
         nodes_render_empty_section(
             parent, y, "No other nearby nodes",
             "Listening for signed adverts.");
+    } else if (rendered_nearby < nearby_count) {
+        nodes_render_limit_note(
+            parent, y, rendered_nearby, nearby_count, "nearby");
     }
 }
 
