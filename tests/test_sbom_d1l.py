@@ -205,6 +205,47 @@ def test_package_sbom_round_trips_and_detects_input_tampering(tmp_path):
     assert any("manifest checksum does not match" in error for error in errors)
 
 
+def test_full_feature_package_uses_production_sbom_surface(tmp_path):
+    write_source_inputs(tmp_path)
+    internal_source = tmp_path / ".github/d1l-build-inputs.json"
+    internal_source.unlink()
+    identity = source_identity()
+    package_dir, manifest = write_package_inputs(tmp_path)
+    manifest["release_profile"] = "full_feature"
+
+    allowed_notices = set(sbom_d1l.PRODUCTION_REQUIRED_NOTICE_SOURCES)
+    removed = [
+        item
+        for item in manifest["notice_files"]
+        if item["source"] not in allowed_notices
+    ]
+    manifest["notice_files"] = [
+        item
+        for item in manifest["notice_files"]
+        if item["source"] in allowed_notices
+    ]
+    for item in removed:
+        (package_dir / item["path"]).unlink()
+
+    document = sbom_d1l.build_spdx_document(
+        tmp_path,
+        identity,
+        package_dir=package_dir,
+        package_manifest=manifest,
+    )
+
+    filenames = {item["fileName"] for item in document["files"]}
+    assert "./source/.github/d1l-build-inputs.json" not in filenames
+    release = next(
+        item
+        for item in document["packages"]
+        if item["SPDXID"] == sbom_d1l.RELEASE_PACKAGE_ID
+    )
+    attribution = release["attributionTexts"][0]
+    assert "docs/ATTRIBUTIONS.md" in attribution
+    assert "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md" not in attribution
+
+
 def test_package_sbom_uses_posix_order_for_mixed_case_paths(tmp_path):
     source_root = tmp_path / "source"
     write_source_inputs(source_root)

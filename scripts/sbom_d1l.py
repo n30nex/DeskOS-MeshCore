@@ -22,6 +22,7 @@ CREATOR = "Tool: SIGUI-sbom-d1l-1"
 PROJECT_NAME = "MeshCore DeskOS D1L"
 PROJECT_LICENSE = "GPL-3.0-or-later"
 PROJECT_REPOSITORY = "https://github.com/n30nex/DeskOS-MeshCore"
+PRODUCTION_RELEASE_PROFILES = frozenset({"core_1_0", "full_feature"})
 ROOT_PACKAGE_ID = "SPDXRef-Package-MeshCore-DeskOS-D1L"
 SOURCE_INPUT_PACKAGE_ID = "SPDXRef-Package-D1L-Source-Inputs"
 RELEASE_PACKAGE_ID = "SPDXRef-Package-D1L-Release-Bundle"
@@ -425,7 +426,7 @@ def validate_manifest_inputs(manifest: dict, package_dir: Path, source_commit: s
     }
     required_notice_sources = (
         PRODUCTION_REQUIRED_NOTICE_SOURCES
-        if manifest.get("release_profile") == "core_1_0"
+        if manifest.get("release_profile") in PRODUCTION_RELEASE_PROFILES
         else REQUIRED_NOTICE_SOURCES
     )
     if not set(required_notice_sources).issubset(notice_sources):
@@ -525,7 +526,8 @@ def build_spdx_document(
         root,
         production_only=(
             isinstance(package_manifest, dict)
-            and package_manifest.get("release_profile") == "core_1_0"
+            and package_manifest.get("release_profile")
+            in PRODUCTION_RELEASE_PROFILES
         ),
     )
     package_files: list[dict[str, Any]] = []
@@ -617,7 +619,7 @@ def build_spdx_document(
                 f"./provenance_{identity['commit']}.json",
             ],
         )
-        if package_manifest.get("release_profile") == "core_1_0":
+        if package_manifest.get("release_profile") in PRODUCTION_RELEASE_PROFILES:
             release["attributionTexts"] = [
                 "See notices/LICENSE, notices/THIRD_PARTY_NOTICES.md, "
                 "notices/ORLP_ED25519_ZLIB_LICENSE.txt, and "
