@@ -201,8 +201,8 @@ static lv_obj_t *create_button(
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label(button, text, 0xF4F7FB);
     if (!label) {
@@ -255,8 +255,8 @@ bool d1l_ui_radio_settings_create(
     lv_obj_set_size(controller->sheet, 480, 480);
     lv_obj_set_pos(controller->sheet, 0, 0);
     lv_obj_set_style_radius(controller->sheet, 0, 0);
-    lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(controller->sheet, 1, 0);
     lv_obj_set_style_pad_all(controller->sheet, 12, 0);
     lv_obj_clear_flag(controller->sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -327,14 +327,14 @@ bool d1l_ui_radio_settings_render(
         controller, "Close", 372, 4, 76, 44, BINDING_TOP_CLOSE,
         D1L_UI_RADIO_SETTINGS_ACTION_CLOSE) != NULL && complete;
     lv_obj_t *preset = create_label(
-        controller->sheet, "Canada preset", 0x5EEAD4);
+        controller->sheet, "Canada preset", 0x20D9ED);
     if (preset) {
         lv_obj_set_style_text_font(preset, &lv_font_montserrat_24, 0);
         lv_obj_set_pos(preset, 8, 58);
     } else {
         complete = false;
     }
-    lv_obj_t *summary = create_label(controller->sheet, profile, 0x5EEAD4);
+    lv_obj_t *summary = create_label(controller->sheet, profile, 0x20D9ED);
     if (summary) {
         lv_label_set_long_mode(summary, LV_LABEL_LONG_DOT);
         lv_obj_set_width(summary, 408);
@@ -349,7 +349,7 @@ bool d1l_ui_radio_settings_render(
             "Radio status unavailable";
     lv_obj_t *warning = create_label(
         controller->sheet, apply_text,
-        radio_applied ? 0x5EEAD4 : 0xFBBF24);
+        radio_applied ? 0x20D9ED : 0xFBBF24);
     if (warning) {
         lv_label_set_long_mode(warning, LV_LABEL_LONG_DOT);
         lv_obj_set_width(warning, 408);
@@ -361,7 +361,7 @@ bool d1l_ui_radio_settings_render(
     char line[96];
     snprintf(line, sizeof(line), "Frequency %.3f MHz",
              ((double)controller->edit.frequency_hz) / 1000000.0);
-    complete = create_required_label(controller->sheet, line, 0xE5EDF5,
+    complete = create_required_label(controller->sheet, line, 0xF4F7FB,
                                      8, 158) && complete;
     complete = create_button(
         controller, "-25k", 246, 146, 84, 44, BINDING_FREQ_DOWN,
@@ -372,7 +372,7 @@ bool d1l_ui_radio_settings_render(
 
     snprintf(line, sizeof(line), "Bandwidth %.1f kHz",
              ((double)controller->edit.bandwidth_tenths_khz) / 10.0);
-    complete = create_required_label(controller->sheet, line, 0xE5EDF5,
+    complete = create_required_label(controller->sheet, line, 0xF4F7FB,
                                      8, 208) && complete;
     complete = create_button(
         controller, "Change bandwidth", 246, 196, 176, 44, BINDING_BANDWIDTH,
@@ -380,7 +380,7 @@ bool d1l_ui_radio_settings_render(
 
     snprintf(line, sizeof(line), "Spread %u",
              (unsigned)controller->edit.spreading_factor);
-    complete = create_required_label(controller->sheet, line, 0xE5EDF5,
+    complete = create_required_label(controller->sheet, line, 0xF4F7FB,
                                      8, 258) && complete;
     complete = create_button(
         controller, "-", 104, 246, 56, 44, BINDING_SF_DOWN,
@@ -390,7 +390,7 @@ bool d1l_ui_radio_settings_render(
         D1L_UI_RADIO_SETTINGS_ACTION_SF_UP) != NULL && complete;
     snprintf(line, sizeof(line), "Coding %u",
              (unsigned)controller->edit.coding_rate);
-    complete = create_required_label(controller->sheet, line, 0xE5EDF5,
+    complete = create_required_label(controller->sheet, line, 0xF4F7FB,
                                      238, 258) && complete;
     complete = create_button(
         controller, "Change", 318, 246, 104, 44, BINDING_CODING_RATE,
@@ -398,7 +398,7 @@ bool d1l_ui_radio_settings_render(
 
     snprintf(line, sizeof(line), "Power %d dBm",
              (int)controller->edit.tx_power_dbm);
-    complete = create_required_label(controller->sheet, line, 0xE5EDF5,
+    complete = create_required_label(controller->sheet, line, 0xF4F7FB,
                                      8, 308) && complete;
     complete = create_button(
         controller, "-", 112, 296, 56, 44, BINDING_TX_DOWN,

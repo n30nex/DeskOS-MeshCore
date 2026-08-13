@@ -196,7 +196,7 @@ bool d1l_ui_packets_can_load_newer(const d1l_ui_packets_controller_t *controller
 uint32_t d1l_ui_packets_entry_color(const d1l_packet_log_entry_t *entry)
 {
     if (!entry) {
-        return 0x8EA0AE;
+        return 0xA6B0B7;
     }
     if (packets_text_has_token(entry->kind, "fail") ||
         packets_text_has_token(entry->note, "fail") ||
@@ -209,12 +209,12 @@ uint32_t d1l_ui_packets_entry_color(const d1l_packet_log_entry_t *entry)
         return 0xFBBF24;
     }
     if (packets_text_has_token(entry->direction, "tx")) {
-        return 0x93C5FD;
+        return 0x4D7FFF;
     }
     if (packets_text_has_token(entry->direction, "rx")) {
-        return 0x5EEAD4;
+        return 0x20D9ED;
     }
-    return 0xA7F3D0;
+    return 0x84FF2E;
 }
 
 const char *d1l_ui_packets_entry_status(const d1l_packet_log_entry_t *entry)

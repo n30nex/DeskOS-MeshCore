@@ -128,10 +128,10 @@ static lv_obj_t *settings_create_row(lv_obj_t *parent, int width, int height, bo
     }
     lv_obj_set_size(row, width, height);
     lv_obj_set_style_radius(row, 10, 0);
-    lv_obj_set_style_bg_color(row, lv_color_hex(warning ? 0x231317 : 0x111923), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(warning ? 0x231317 : 0x20262B), 0);
     lv_obj_set_style_bg_color(row, lv_color_hex(warning ? 0x321820 : 0x182533),
                               LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(row, lv_color_hex(warning ? 0x7F1D1D : 0x263241), 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(warning ? 0x7F1D1D : 0x33404A), 0);
     lv_obj_set_style_border_width(row, 1, 0);
     lv_obj_set_style_pad_all(row, 0, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -246,7 +246,7 @@ static lv_obj_t *render_menu_item(lv_obj_t *parent,
 
     if (item->actionable) {
         lv_obj_t *chevron = settings_create_label(row, ">",
-                                                   item->warning ? 0xFCA5A5 : 0x8EA0AE);
+                                                   item->warning ? 0xFCA5A5 : 0xA6B0B7);
         if (chevron) {
             lv_obj_set_pos(chevron, 418, 17);
         }
@@ -357,7 +357,7 @@ bool d1l_ui_settings_render(d1l_ui_settings_controller_t *controller,
         lv_obj_set_pos(title, 18, 8);
     }
     lv_obj_t *subtitle = settings_create_label(
-        parent, "Device, radio, network and support", 0x8EA0AE);
+        parent, "Device, radio, network and support", 0xA6B0B7);
     settings_set_dot_width(subtitle, 400);
     if (subtitle) {
         lv_obj_set_pos(subtitle, 18, 36);

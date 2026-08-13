@@ -180,8 +180,8 @@ static lv_obj_t *create_button(d1l_ui_wifi_controller_t *controller,
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label(button, text, 0xF4F7FB);
     if (label) {
@@ -212,8 +212,8 @@ static lv_obj_t *create_textarea(d1l_ui_wifi_controller_t *controller,
         textarea, password ? D1L_WIFI_PASSWORD_LEN - 1U :
                              D1L_WIFI_SSID_LEN - 1U);
     lv_obj_set_style_radius(textarea, 8, 0);
-    lv_obj_set_style_bg_color(textarea, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_color(textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_bg_color(textarea, lv_color_hex(0x17191A), 0);
+    lv_obj_set_style_border_color(textarea, lv_color_hex(0x33404A), 0);
     lv_obj_set_style_text_color(textarea, lv_color_hex(0xF4F7FB), 0);
     d1l_ui_wifi_binding_t *binding =
         set_binding(controller, binding_slot, D1L_UI_WIFI_ACTION_NONE);
@@ -286,8 +286,8 @@ bool d1l_ui_wifi_create(d1l_ui_wifi_controller_t *controller, lv_obj_t *parent)
     lv_obj_set_size(controller->sheet, 480, 480);
     lv_obj_set_pos(controller->sheet, 0, 0);
     lv_obj_set_style_radius(controller->sheet, 0, 0);
-    lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(controller->sheet, 1, 0);
     lv_obj_set_style_pad_all(controller->sheet, 12, 0);
     d1l_ui_modal_configure_scroll(controller->sheet);
@@ -328,7 +328,7 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
     create_button(controller, "Close", 392, 10, 72, 40, BINDING_CLOSE,
                   D1L_UI_WIFI_ACTION_CLOSE);
     lv_obj_t *subtitle = create_label(controller->sheet,
-                                      "Connection and saved network", 0x8EA0AE);
+                                      "Connection and saved network", 0xA6B0B7);
     if (subtitle) {
         lv_obj_set_pos(subtitle, 16, 36);
     }
@@ -340,14 +340,14 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
         lv_obj_set_pos(state, 16, 58);
     }
     lv_obj_t *link = create_label(controller->sheet,
-                                  controller->rendered.link_line, 0x8EA0AE);
+                                  controller->rendered.link_line, 0xA6B0B7);
     label_set_dot_width(link, 448);
     if (link) {
         lv_obj_set_pos(link, 16, 80);
     }
     lv_obj_t *profile = create_label(controller->sheet,
                                      controller->rendered.profile_line,
-                                     0xE5EDF5);
+                                     0xF4F7FB);
     label_set_dot_width(profile, 448);
     if (profile) {
         lv_obj_set_pos(profile, 16, 102);
@@ -365,7 +365,7 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
     }
 
     lv_obj_t *ssid_label = create_label(controller->sheet,
-                                        "Network name (SSID)", 0x5EEAD4);
+                                        "Network name (SSID)", 0x20D9ED);
     if (ssid_label) {
         lv_obj_set_pos(ssid_label, 16, 130);
     }
@@ -377,7 +377,7 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
     }
 
     lv_obj_t *password_label = create_label(controller->sheet,
-                                            "Password", 0x5EEAD4);
+                                            "Password", 0x20D9ED);
     if (password_label) {
         lv_obj_set_pos(password_label, 16, 198);
     }
@@ -406,7 +406,7 @@ bool d1l_ui_wifi_render(d1l_ui_wifi_controller_t *controller,
                   D1L_UI_WIFI_ACTION_TOGGLE);
 
     lv_obj_t *scan = create_label(controller->sheet,
-                                  controller->rendered.scan_line, 0x8EA0AE);
+                                  controller->rendered.scan_line, 0xA6B0B7);
     label_set_dot_width(scan, 448);
     if (scan) {
         lv_obj_set_pos(scan, 16, 374);

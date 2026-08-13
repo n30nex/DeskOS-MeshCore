@@ -286,8 +286,8 @@ static lv_obj_t *create_button(
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545),
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43),
                               LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label(button, text, 0xF4F7FB);
@@ -309,8 +309,8 @@ static lv_obj_t *create_sheet(lv_obj_t *parent, bool scrollable)
     lv_obj_set_size(sheet, 448, 320);
     lv_obj_set_pos(sheet, 16, 82);
     lv_obj_set_style_radius(sheet, 8, 0);
-    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(sheet, 1, 0);
     lv_obj_set_style_pad_all(sheet, 12, 0);
     if (scrollable) {
@@ -453,7 +453,7 @@ bool d1l_ui_service_sheets_render_terminal(
              (unsigned)input->status.capacity,
              d1l_event_log_level_name(input->status.runtime_level),
              (unsigned long)input->status.dropped_oldest);
-    lv_obj_t *status = create_label(sheet, summary, 0x5EEAD4);
+    lv_obj_t *status = create_label(sheet, summary, 0x20D9ED);
     position_dot(status, 8, 50, 408);
     complete = status && complete;
     char level_button[40];
@@ -485,8 +485,8 @@ bool d1l_ui_service_sheets_render_terminal(
         const uint32_t color =
             entry->level == D1L_EVENT_LOG_LEVEL_ERROR ? 0xF87171 :
             entry->level == D1L_EVENT_LOG_LEVEL_WARN ? 0xFBBF24 :
-            entry->level == D1L_EVENT_LOG_LEVEL_INFO ? 0xE5EDF5 :
-                                                       0x8EA0AE;
+            entry->level == D1L_EVENT_LOG_LEVEL_INFO ? 0xF4F7FB :
+                                                       0xA6B0B7;
         lv_obj_t *label = create_label(sheet, line, color);
         position_wrap(label, 8, y, 408);
         complete = label && complete;
@@ -516,25 +516,25 @@ bool d1l_ui_service_sheets_render_observer(
              (unsigned long)status->queue_capacity,
              (unsigned long)status->acknowledged_total);
     lv_obj_t *state = create_label(sheet, line,
-                                   status->connected ? 0x5EEAD4 : 0xFBBF24);
+                                   status->connected ? 0x20D9ED : 0xFBBF24);
     position_dot(state, 8, 54, 408);
     complete = state && complete;
     snprintf(line, sizeof(line), "Broker %.152s",
              status->broker_host[0] ? status->broker_host :
                                       "not configured");
-    lv_obj_t *broker = create_label(sheet, line, 0xE5EDF5);
+    lv_obj_t *broker = create_label(sheet, line, 0xF4F7FB);
     position_dot(broker, 8, 84, 408);
     complete = broker && complete;
     snprintf(line, sizeof(line), "Topic %s%s",
              status->topic[0] ? status->topic : "-",
              status->include_location ? "  + location" : "");
-    lv_obj_t *topic = create_label(sheet, line, 0x8EA0AE);
+    lv_obj_t *topic = create_label(sheet, line, 0xA6B0B7);
     position_dot(topic, 8, 112, 408);
     complete = topic && complete;
     lv_obj_t *privacy = create_label(
         sheet,
         "Opt-in TLS only. Publishes device health counters and optional manual/companion location; never message text, keys, contacts, or RF forwarding.",
-        0x93C5FD);
+        0x4D7FFF);
     position_wrap(privacy, 8, 146, 408);
     complete = privacy && complete;
     if (status->configured) {
@@ -578,27 +578,27 @@ bool d1l_ui_service_sheets_render_update(
     lv_obj_t *state = create_label(
         sheet, line,
         status->state == D1L_UPDATE_STATE_ERROR ? 0xF87171 :
-        status->state == D1L_UPDATE_STATE_REBOOT_REQUIRED ? 0x5EEAD4 :
+        status->state == D1L_UPDATE_STATE_REBOOT_REQUIRED ? 0x20D9ED :
                                                             0xFBBF24);
     position_dot(state, 8, 54, 408);
     complete = state && complete;
     snprintf(line, sizeof(line), "Running %s  target %s",
              status->running_partition[0] ? status->running_partition : "-",
              status->target_partition[0] ? status->target_partition : "-");
-    lv_obj_t *partitions = create_label(sheet, line, 0xE5EDF5);
+    lv_obj_t *partitions = create_label(sheet, line, 0xF4F7FB);
     position_dot(partitions, 8, 84, 408);
     complete = partitions && complete;
     snprintf(line, sizeof(line), "Version %s  sequence %lu/%lu",
              status->version[0] ? status->version : "not staged",
              (unsigned long)status->security_sequence,
              (unsigned long)status->highest_security_sequence);
-    lv_obj_t *version = create_label(sheet, line, 0x8EA0AE);
+    lv_obj_t *version = create_label(sheet, line, 0xA6B0B7);
     position_dot(version, 8, 112, 408);
     complete = version && complete;
     lv_obj_t *policy = create_label(
         sheet,
         "Local SD only. Manifest, target, partition table, image hash, Ed25519 signature, and anti-downgrade sequence are verified before the inactive slot is written.",
-        0x93C5FD);
+        0x4D7FFF);
     position_wrap(policy, 8, 148, 408);
     complete = policy && complete;
 
@@ -646,18 +646,18 @@ bool d1l_ui_service_sheets_render_notifications(
              (unsigned long)input->muted_unread);
     lv_obj_t *counts = create_label(
         sheet, line,
-        input->public_unread || input->dm_unread ? 0xFBBF24 : 0x5EEAD4);
+        input->public_unread || input->dm_unread ? 0xFBBF24 : 0x20D9ED);
     position_dot(counts, 8, 58, 408);
     complete = counts && complete;
     snprintf(line, sizeof(line), "Backlight: %s",
              d1l_notification_mode_name(input->mode));
-    lv_obj_t *mode = create_label(sheet, line, 0xE5EDF5);
+    lv_obj_t *mode = create_label(sheet, line, 0xF4F7FB);
     position_dot(mode, 8, 96, 408);
     complete = mode && complete;
     lv_obj_t *privacy = create_label(
         sheet,
         "Badges follow retained read cursors. Duplicate packets do not create duplicate counts. Quiet hours suppress only the backlight pulse from 22:00 to 07:00; no audio is claimed.",
-        0x93C5FD);
+        0x4D7FFF);
     position_wrap(privacy, 8, 132, 408);
     complete = privacy && complete;
     complete = create_button(
@@ -743,7 +743,7 @@ bool d1l_ui_service_sheets_render_admin(
              (unsigned)status->permissions);
     lv_obj_t *state = create_label(
         sheet, line,
-        status->state == D1L_MESHCORE_ADMIN_AUTHENTICATED ? 0x5EEAD4 :
+        status->state == D1L_MESHCORE_ADMIN_AUTHENTICATED ? 0x20D9ED :
                                                             0xFBBF24);
     position_dot(state, 8, 54, 408);
     complete = state && complete;
@@ -754,7 +754,7 @@ bool d1l_ui_service_sheets_render_admin(
     snprintf(line, sizeof(line), "Server %.16s  firmware level %u",
              display_fingerprint,
              (unsigned)status->firmware_level);
-    lv_obj_t *server = create_label(sheet, line, 0xE5EDF5);
+    lv_obj_t *server = create_label(sheet, line, 0xF4F7FB);
     position_dot(server, 8, 84, 408);
     complete = server && complete;
     char status_details[512] = {0};
@@ -824,7 +824,7 @@ bool d1l_ui_service_sheets_render_admin(
             "No authenticated status response yet");
     }
     lv_obj_t *metrics =
-        create_label(sheet, status_details, 0x8EA0AE);
+        create_label(sheet, status_details, 0xA6B0B7);
     position_wrap(metrics, 8, 114, 408);
     int32_t metrics_height = 24;
     if (metrics) {
@@ -841,14 +841,14 @@ bool d1l_ui_service_sheets_render_admin(
         status->last_mutation == D1L_MESHCORE_ADMIN_MUTATION_NONE ?
             "not_run" :
             (status->last_mutation_success ? "confirmed" : "not_confirmed"));
-    lv_obj_t *mutation = create_label(sheet, line, 0x8EA0AE);
+    lv_obj_t *mutation = create_label(sheet, line, 0xA6B0B7);
     position_dot(mutation, 8, mutation_y, 408);
     complete = mutation && complete;
     const int32_t policy_y = mutation_y + 26;
     lv_obj_t *policy = create_label(
         sheet,
         "Compatible verified room/repeater only. Credentials stay volatile and redacted. Login is sent from this device using a fresh saved route when available, with flood fallback.",
-        0x93C5FD);
+        0x4D7FFF);
     position_wrap(policy, 8, policy_y, 408);
     int32_t policy_height = 56;
     if (policy) {
@@ -917,7 +917,7 @@ bool d1l_ui_service_sheets_render_admin(
         const int32_t query_buttons_y = query_title_y + 28;
         const int32_t query_result_y = query_buttons_y + 60;
         lv_obj_t *query_title = create_label(
-            sheet, "Authenticated server data", 0x5EEAD4);
+            sheet, "Authenticated server data", 0x20D9ED);
         position_dot(query_title, 8, query_title_y, 408);
         complete = query_title && complete;
         complete = create_button(
@@ -944,7 +944,7 @@ bool d1l_ui_service_sheets_render_admin(
         if (status->query_result.valid) {
             lv_obj_t *query_result = create_label(
                 sheet, status->query_result.text,
-                status->query_result.truncated ? 0xFBBF24 : 0xE5EDF5);
+                status->query_result.truncated ? 0xFBBF24 : 0xF4F7FB);
             position_wrap(query_result, 8, query_result_y, 408);
             int32_t result_height = 48;
             if (query_result) {
@@ -976,7 +976,7 @@ bool d1l_ui_service_sheets_render_admin(
             lv_obj_t *query_help = create_label(
                 sheet,
                 "Read telemetry for any authenticated session. Repeater neighbours are paged. Access-list reads require admin permission.",
-                0x93C5FD);
+                0x4D7FFF);
             position_wrap(query_help, 8, query_result_y, 408);
             complete = query_help && complete;
         }
@@ -986,7 +986,7 @@ bool d1l_ui_service_sheets_render_admin(
             int32_t room_y = content_y;
             if (can_mutate) {
                 lv_obj_t *room_access_title = create_label(
-                    sheet, "Room guest access", 0x5EEAD4);
+                    sheet, "Room guest access", 0x20D9ED);
                 position_dot(room_access_title, 8, room_y, 408);
                 complete = room_access_title && complete;
                 complete = create_button(
@@ -1008,13 +1008,13 @@ bool d1l_ui_service_sheets_render_admin(
                 lv_obj_t *room_access_help = create_label(
                     sheet,
                     "Controls allow.read.only. Each change requires a second tap and a peer-confirmed response.",
-                    0x93C5FD);
+                    0x4D7FFF);
                 position_wrap(room_access_help, 8, room_y + 82, 408);
                 complete = room_access_help && complete;
                 room_y += 132;
             }
             lv_obj_t *room_title = create_label(
-                sheet, "Live room console", 0x5EEAD4);
+                sheet, "Live room console", 0x20D9ED);
             position_dot(room_title, 8, room_y, 408);
             complete = room_title && complete;
 
@@ -1022,7 +1022,7 @@ bool d1l_ui_service_sheets_render_admin(
                 sheet,
                 room_transcript && room_transcript[0] ?
                     room_transcript : "No room posts received yet.",
-                0xE5EDF5);
+                0xF4F7FB);
             position_wrap(transcript, 8, room_y + 26, 408);
             if (transcript) {
                 lv_obj_set_height(transcript, 132);
@@ -1031,7 +1031,7 @@ bool d1l_ui_service_sheets_render_admin(
 
             if (can_post_room) {
                 lv_obj_t *post_label = create_label(
-                    sheet, "Room message", 0xE5EDF5);
+                    sheet, "Room message", 0xF4F7FB);
                 position_dot(post_label, 8, room_y + 166, 408);
                 complete = post_label && complete;
 
@@ -1057,10 +1057,10 @@ bool d1l_ui_service_sheets_render_admin(
                         controller->admin_room_textarea, 8, 0);
                     lv_obj_set_style_bg_color(
                         controller->admin_room_textarea,
-                        lv_color_hex(0x071018), 0);
+                        lv_color_hex(0x17191A), 0);
                     lv_obj_set_style_border_color(
                         controller->admin_room_textarea,
-                        lv_color_hex(0x263241), 0);
+                        lv_color_hex(0x33404A), 0);
                     lv_obj_set_style_text_color(
                         controller->admin_room_textarea,
                         lv_color_hex(0xF4F7FB), 0);
@@ -1089,7 +1089,7 @@ bool d1l_ui_service_sheets_render_admin(
                 lv_obj_t *room_help = create_label(
                     sheet,
                     "Posts use the authenticated room session. Guest permission is read-only.",
-                    0x93C5FD);
+                    0x4D7FFF);
                 position_wrap(room_help, 8, room_y + 294, 408);
                 complete = room_help && complete;
                 needs_keyboard = true;
@@ -1110,13 +1110,13 @@ bool d1l_ui_service_sheets_render_admin(
 
         if (can_mutate) {
             lv_obj_t *acl_title = create_label(
-                sheet, "Access-list editor", 0x5EEAD4);
+                sheet, "Access-list editor", 0x20D9ED);
             position_dot(acl_title, 8, cli_y, 408);
             complete = acl_title && complete;
             lv_obj_t *acl_help = create_label(
                 sheet,
                 "Enter the full 64-hex public key and permission: 0 remove, 1 read, 2 write, 3 admin.",
-                0x93C5FD);
+                0x4D7FFF);
             position_wrap(acl_help, 8, cli_y + 26, 408);
             complete = acl_help && complete;
 
@@ -1140,10 +1140,10 @@ bool d1l_ui_service_sheets_render_admin(
                     controller->admin_acl_textarea, 8, 0);
                 lv_obj_set_style_bg_color(
                     controller->admin_acl_textarea,
-                    lv_color_hex(0x071018), 0);
+                    lv_color_hex(0x17191A), 0);
                 lv_obj_set_style_border_color(
                     controller->admin_acl_textarea,
-                    lv_color_hex(0x263241), 0);
+                    lv_color_hex(0x33404A), 0);
                 lv_obj_set_style_text_color(
                     controller->admin_acl_textarea,
                     lv_color_hex(0xF4F7FB), 0);
@@ -1175,7 +1175,7 @@ bool d1l_ui_service_sheets_render_admin(
             cli_y += 190;
 
             lv_obj_t *cli_title = create_label(
-                sheet, "Authenticated server command", 0x5EEAD4);
+                sheet, "Authenticated server command", 0x20D9ED);
             position_dot(cli_title, 8, cli_y, 408);
             complete = cli_title && complete;
 
@@ -1185,8 +1185,8 @@ bool d1l_ui_service_sheets_render_admin(
             lv_obj_t *reply = create_label(
                 sheet, reply_text,
                 status->cli_reply_valid ?
-                    (status->cli_reply_success ? 0xE5EDF5 : 0xFCA5A5) :
-                    0x8EA0AE);
+                    (status->cli_reply_success ? 0xF4F7FB : 0xFCA5A5) :
+                    0xA6B0B7);
             position_wrap(reply, 8, cli_y + 26, 408);
             if (reply) {
                 lv_obj_set_height(reply, 104);
@@ -1198,7 +1198,7 @@ bool d1l_ui_service_sheets_render_admin(
                 cli_secure_input ?
                     "Command (secure masked input)" :
                     "Command (visible input)",
-                cli_secure_input ? 0xFBBF24 : 0xE5EDF5);
+                cli_secure_input ? 0xFBBF24 : 0xF4F7FB);
             position_dot(command_label, 8, cli_y + 142, 408);
             complete = command_label && complete;
 
@@ -1226,10 +1226,10 @@ bool d1l_ui_service_sheets_render_admin(
                     controller->admin_cli_textarea, 8, 0);
                 lv_obj_set_style_bg_color(
                     controller->admin_cli_textarea,
-                    lv_color_hex(0x071018), 0);
+                    lv_color_hex(0x17191A), 0);
                 lv_obj_set_style_border_color(
                     controller->admin_cli_textarea,
-                    lv_color_hex(cli_secure_input ? 0xB45309 : 0x263241),
+                    lv_color_hex(cli_secure_input ? 0xB45309 : 0x33404A),
                     0);
                 lv_obj_set_style_text_color(
                     controller->admin_cli_textarea,
@@ -1265,7 +1265,7 @@ bool d1l_ui_service_sheets_render_admin(
             lv_obj_t *cli_help = create_label(
                 sheet,
                 "Read-only commands send immediately. Only documented role-compatible commands are accepted; unsupported, serial-only, OTA, reboot and power commands fail closed. Changes require a second tap. Use Secure Input for passwords, secrets or private keys. Responses are bounded; sensitive responses are hidden.",
-                0x93C5FD);
+                0x4D7FFF);
             position_wrap(cli_help, 8, cli_y + 274, 408);
             complete = cli_help && complete;
 
@@ -1322,7 +1322,7 @@ bool d1l_ui_service_sheets_render_admin(
     } else {
         if (selected_fingerprint && selected_fingerprint[0]) {
             lv_obj_t *password_label = create_label(
-                sheet, "Password (empty allowed by peer)", 0x5EEAD4);
+                sheet, "Password (empty allowed by peer)", 0x20D9ED);
             position_dot(password_label, 8, 232, 408);
             complete = password_label && complete;
 
@@ -1347,10 +1347,10 @@ bool d1l_ui_service_sheets_render_admin(
                     controller->admin_password_textarea, 8, 0);
                 lv_obj_set_style_bg_color(
                     controller->admin_password_textarea,
-                    lv_color_hex(0x071018), 0);
+                    lv_color_hex(0x17191A), 0);
                 lv_obj_set_style_border_color(
                     controller->admin_password_textarea,
-                    lv_color_hex(0x263241), 0);
+                    lv_color_hex(0x33404A), 0);
                 lv_obj_set_style_text_color(
                     controller->admin_password_textarea,
                     lv_color_hex(0xF4F7FB), 0);

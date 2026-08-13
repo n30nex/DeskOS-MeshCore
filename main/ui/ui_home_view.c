@@ -200,7 +200,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
                  "All caught up");
     }
     out_view->messages_status_color = unread_count ? 0xFBBF24U :
-        (input->muted_dm_unread_count ? 0x8EA0AEU : 0x5EEAD4U);
+        (input->muted_dm_unread_count ? 0xA6B0B7U : 0x20D9EDU);
 
     const bool node_history_unavailable =
         history_is_live_only(input->node_store_backend);
@@ -215,10 +215,10 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
                  (unsigned long long)input->node_count);
     }
     out_view->network_status_color = node_history_unavailable ? 0xFBBF24U :
-        (input->contact_count ? 0x5EEAD4U : 0x8EA0AEU);
+        (input->contact_count ? 0x20D9EDU : 0xA6B0B7U);
 
     const char *map_status = "Ready to open";
-    out_view->map_status_color = 0x5EEAD4U;
+    out_view->map_status_color = 0x20D9EDU;
     if (!input->map_location_set) {
         map_status = "Set a location";
         out_view->map_status_color = 0xFBBF24U;
@@ -235,7 +235,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
              "%llu packet%s captured",
              (unsigned long long)input->packet_count,
              input->packet_count == 1U ? "" : "s");
-    out_view->more_status_color = input->packet_count ? 0xC4B5FDU : 0x8EA0AEU;
+    out_view->more_status_color = input->packet_count ? 0x7D93FFU : 0xA6B0B7U;
 
     out_view->mesh_needs_attention = mesh_needs_attention(input);
     const char *mesh_value = "Starting";
@@ -248,16 +248,16 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
     } else if (input->radio_ready && input->radio_applied &&
                text_equals(input->mesh_state, "tx_busy")) {
         mesh_value = "Busy";
-        out_view->mesh_value_color = 0x5EEAD4U;
+        out_view->mesh_value_color = 0x20D9EDU;
     } else if (input->radio_ready && input->radio_applied &&
                text_equals(input->mesh_state, "ready")) {
         mesh_value = "Ready";
-        out_view->mesh_value_color = 0x5EEAD4U;
+        out_view->mesh_value_color = 0x20D9EDU;
     } else if (text_equals(input->mesh_state, "waiting_for_radio") ||
                text_equals(input->mesh_state, "offline") ||
                text_equals(input->mesh_state, "unavailable")) {
         mesh_value = "Offline";
-        out_view->mesh_value_color = 0x8EA0AEU;
+        out_view->mesh_value_color = 0xA6B0B7U;
     }
     snprintf(out_view->mesh_value, sizeof(out_view->mesh_value), "%s",
              mesh_value);
@@ -277,14 +277,14 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
              d1l_ui_home_sd_state(input));
 
     out_view->storage_needs_attention = storage_needs_attention(input);
-    out_view->time_value_color = input->time_available ? 0x5EEAD4U : 0x8EA0AEU;
-    out_view->wifi_value_color = input->wifi_connected ? 0x5EEAD4U :
+    out_view->time_value_color = input->time_available ? 0x20D9EDU : 0xA6B0B7U;
+    out_view->wifi_value_color = input->wifi_connected ? 0x20D9EDU :
         (input->wifi_connecting ? 0xFBBF24U :
-         (input->wifi_enabled ? 0xA7F3D0U : 0x8EA0AEU));
+         (input->wifi_enabled ? 0x84FF2EU : 0xA6B0B7U));
     const bool ble_available = input->ble_build_enabled &&
         input->ble_transport_supported;
     out_view->ble_value_color = ble_available && input->ble_companion_enabled ?
-        0xA7F3D0U : 0x8EA0AEU;
+        0x84FF2EU : 0xA6B0B7U;
     const bool sd_notice = input->storage_setup_required ||
         text_equals(out_view->sd_value, "no card") ||
         text_equals(out_view->sd_value, "needs FAT32") ||
@@ -294,7 +294,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
         (input->storage_retained_backup_degraded ? 0xFBBF24U :
          (sd_notice ? 0xFBBF24U :
           ((input->storage_data_enabled || input->storage_sd_data_root_ready) ?
-               0x5EEAD4U : 0x8EA0AEU)));
+               0x20D9EDU : 0xA6B0B7U)));
 
     const char *sd_compact = out_view->sd_value;
     if (out_view->storage_needs_attention) {
@@ -338,5 +338,5 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
              (out_view->attention_required ? "Check" :
              (attention_notice ? "Notice" : "OK")));
     out_view->attention_value_color = out_view->attention_required ? 0xF87171U :
-        (attention_notice ? 0xFBBF24U : 0x5EEAD4U);
+        (attention_notice ? 0xFBBF24U : 0x20D9EDU);
 }

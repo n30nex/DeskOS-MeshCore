@@ -87,6 +87,8 @@ idf_component_register(
         "storage/storage_status.c"
         "storage/storage_status_policy.c"
         "ui/ui_ble.c"
+        "ui/ui_boot_scene.c"
+        "ui/ui_boot_scene_model.c"
         "ui/ui_chrome.c"
         "ui/ui_channel_sheets.c"
         "ui/ui_compose_eligibility.c"

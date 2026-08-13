@@ -155,8 +155,8 @@ static lv_obj_t *create_button(d1l_ui_ble_controller_t *controller,
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label(button, text, 0xF4F7FB);
     if (!label) {
@@ -199,8 +199,8 @@ bool d1l_ui_ble_create(d1l_ui_ble_controller_t *controller, lv_obj_t *parent)
     lv_obj_set_size(controller->sheet, 448, 320);
     lv_obj_set_pos(controller->sheet, 16, 82);
     lv_obj_set_style_radius(controller->sheet, 8, 0);
-    lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(controller->sheet, 1, 0);
     lv_obj_set_style_pad_all(controller->sheet, 12, 0);
     lv_obj_clear_flag(controller->sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -253,7 +253,7 @@ bool d1l_ui_ble_render(d1l_ui_ble_controller_t *controller,
         complete = false;
     }
     lv_obj_t *purpose = create_label(controller->sheet,
-                                     controller->rendered.purpose, 0xE5EDF5);
+                                     controller->rendered.purpose, 0xF4F7FB);
     configure_wrapped_label(purpose, 8, 88);
     complete = purpose != NULL && complete;
     lv_obj_t *runtime = create_label(controller->sheet,
@@ -287,9 +287,9 @@ bool d1l_ui_ble_render(d1l_ui_ble_controller_t *controller,
         lv_obj_t *enable_status = create_label(
             controller->sheet, "Enable unavailable", 0xFBBF24);
         lv_obj_t *pair = create_label(controller->sheet,
-                                      "Pair unavailable", 0x8EA0AE);
+                                      "Pair unavailable", 0xA6B0B7);
         lv_obj_t *forget = create_label(controller->sheet,
-                                        "Forget unavailable", 0x8EA0AE);
+                                        "Forget unavailable", 0xA6B0B7);
         if (enable_status) {
             lv_obj_set_pos(enable_status, 8, 206);
         }
@@ -304,7 +304,7 @@ bool d1l_ui_ble_render(d1l_ui_ble_controller_t *controller,
 
     lv_obj_t *note = create_label(controller->sheet,
                                   controller->rendered.production_note,
-                                  0x8EA0AE);
+                                  0xA6B0B7);
     configure_wrapped_label(note, 8, 278);
     complete = note != NULL && complete;
     if (!complete) {

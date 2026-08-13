@@ -1,4 +1,4 @@
-# DeskOS D1L 1.6 limitations
+# DeskOS D1L 1.7 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:

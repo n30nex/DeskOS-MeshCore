@@ -7,14 +7,14 @@
 #include "lvgl.h"
 #include "ui_keyboard.h"
 
-#define D1L_FIRST_START_COLOR_BACKGROUND 0x071018U
-#define D1L_FIRST_START_COLOR_PANEL 0x111923U
+#define D1L_FIRST_START_COLOR_BACKGROUND 0x17191AU
+#define D1L_FIRST_START_COLOR_PANEL 0x20262BU
 #define D1L_FIRST_START_COLOR_TEXT 0xF4F7FBU
-#define D1L_FIRST_START_COLOR_MUTED 0x93A4B5U
-#define D1L_FIRST_START_COLOR_GREEN 0x4ADE80U
+#define D1L_FIRST_START_COLOR_MUTED 0xA6B0B7U
+#define D1L_FIRST_START_COLOR_GREEN 0x84FF2EU
 #define D1L_FIRST_START_COLOR_AMBER 0xFBBF24U
 #define D1L_FIRST_START_COLOR_RED 0xFB7185U
-#define D1L_FIRST_START_COLOR_CYAN 0x22D3EEU
+#define D1L_FIRST_START_COLOR_CYAN 0x20D9EDU
 #define D1L_FIRST_START_READY_HOLD_MS 650U
 #define D1L_FIRST_START_CANADIAN_FREQUENCY_HZ 910525000UL
 #define D1L_FIRST_START_CANADIAN_BANDWIDTH_TENTHS_KHZ 625U
@@ -167,10 +167,10 @@ static lv_obj_t *create_button(
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_set_style_bg_color(
         button,
-        lv_color_hex(primary ? 0x0E7490U : 0x1E2A36U), 0);
+        lv_color_hex(primary ? 0x1E5AEFU : 0x252D33U), 0);
     lv_obj_set_style_bg_color(
         button,
-        lv_color_hex(primary ? 0x0891B2U : 0x2A3A4AU),
+        lv_color_hex(primary ? 0x356BF2U : 0x2A3A4AU),
         LV_STATE_PRESSED);
     lv_obj_t *label = create_label(
         button, text, D1L_FIRST_START_COLOR_TEXT, 0, 0, width - 8, false);
@@ -294,7 +294,7 @@ static lv_obj_t *create_textarea(
     lv_obj_set_style_bg_color(
         textarea, lv_color_hex(D1L_FIRST_START_COLOR_PANEL), 0);
     lv_obj_set_style_border_color(
-        textarea, lv_color_hex(0x334155U), 0);
+        textarea, lv_color_hex(0x3C4A54U), 0);
     lv_obj_set_style_text_color(
         textarea, lv_color_hex(D1L_FIRST_START_COLOR_TEXT), 0);
     d1l_ui_first_start_binding_t *binding =

@@ -1701,8 +1701,8 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
 
     for style in (
         "lv_obj_set_style_radius(row, 10, 0)",
-        "lv_obj_set_style_bg_color(row, lv_color_hex(warning ? 0x231317 : 0x111923), 0)",
-        "lv_obj_set_style_border_color(row, lv_color_hex(warning ? 0x7F1D1D : 0x263241), 0)",
+        "lv_obj_set_style_bg_color(row, lv_color_hex(warning ? 0x231317 : 0x20262B), 0)",
+        "lv_obj_set_style_border_color(row, lv_color_hex(warning ? 0x7F1D1D : 0x33404A), 0)",
         "lv_obj_set_style_border_width(row, 1, 0)",
         "lv_obj_set_style_pad_all(row, 0, 0)",
     ):

@@ -6,10 +6,10 @@
 #include "app/release_profile.h"
 
 enum {
-    COLOR_GREEN = 0xA7F3D0,
+    COLOR_GREEN = 0x84FF2E,
     COLOR_AMBER = 0xFBBF24,
     COLOR_RED = 0xFCA5A5,
-    COLOR_BLUE = 0x93C5FD,
+    COLOR_BLUE = 0x4D7FFF,
 };
 
 _Static_assert(sizeof(d1l_ui_storage_view_model_t) <=

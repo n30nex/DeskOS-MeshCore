@@ -69,3 +69,10 @@ boundaries. Its release proof requires green host and Actions checks, exact-SHA
 artifacts, a non-erasing flash to the stable D1L USB identity, and physical
 480x480 UI acceptance. It never formats SD or substitutes an arbitrary serial
 device.
+
+## 1.7 release boundary
+
+The 1.7 release keeps every 1.6 radio, storage, update, and device-safety
+boundary. The animated opening must remain non-blocking, allocation failure
+must fall through to Home, and the exact Actions-built `1.7.0` image must pass
+a non-erasing flash and physical D1L UI check on the stable USB identity.

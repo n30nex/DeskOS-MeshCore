@@ -208,8 +208,8 @@ static lv_obj_t *create_button(d1l_ui_node_detail_controller_t *controller,
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545),
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x252D33), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x2E3A43),
                               LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = create_label(button, text, 0xF4F7FB);
@@ -267,21 +267,21 @@ static const char *role_display_label(const char *role)
 static uint32_t role_color(const char *role)
 {
     if (!role || role[0] == '\0') {
-        return 0x93C5FD;
+        return 0x4D7FFF;
     }
     if (strcmp(role, "room") == 0) {
-        return 0xA7F3D0;
+        return 0x84FF2E;
     }
     if (strcmp(role, "repeater") == 0) {
         return 0xFBBF24;
     }
     if (strcmp(role, "sensor") == 0) {
-        return 0xC4B5FD;
+        return 0x7D93FF;
     }
     if (strcmp(role, "companion") == 0) {
-        return 0x5EEAD4;
+        return 0x20D9ED;
     }
-    return 0x93C5FD;
+    return 0x4D7FFF;
 }
 
 static lv_obj_t *render_role_badge(lv_obj_t *parent, const char *role)
@@ -345,8 +345,8 @@ bool d1l_ui_node_detail_create(d1l_ui_node_detail_controller_t *controller,
     lv_obj_set_size(controller->sheet, 480, 480);
     lv_obj_set_pos(controller->sheet, 0, 0);
     lv_obj_set_style_radius(controller->sheet, 0, 0);
-    lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_bg_color(controller->sheet, lv_color_hex(0x20262B), 0);
+    lv_obj_set_style_border_color(controller->sheet, lv_color_hex(0x3C4A54), 0);
     lv_obj_set_style_border_width(controller->sheet, 1, 0);
     lv_obj_set_style_pad_all(controller->sheet, 12, 0);
     lv_obj_clear_flag(controller->sheet, LV_OBJ_FLAG_SCROLLABLE);
@@ -403,7 +403,7 @@ bool d1l_ui_node_detail_render(
                              BINDING_CLOSE,
                              D1L_UI_NODE_DETAIL_ACTION_CLOSE) != NULL && complete;
 
-    lv_obj_t *name_label = create_label(controller->sheet, name, 0xE5EDF5);
+    lv_obj_t *name_label = create_label(controller->sheet, name, 0xF4F7FB);
     configure_dot_label(name_label, 392, 8, 48);
     complete = name_label != NULL && complete;
 
@@ -418,7 +418,7 @@ bool d1l_ui_node_detail_render(
              (unsigned)entry->path_hops,
              entry->path_hops == 1U ? "" : "s",
              view->reachable ? "reachable" : "quiet");
-    lv_obj_t *route = create_label(controller->sheet, line, 0x93C5FD);
+    lv_obj_t *route = create_label(controller->sheet, line, 0x4D7FFF);
     configure_dot_label(route, 392, 8, 116);
     complete = route != NULL && complete;
 
@@ -427,7 +427,7 @@ bool d1l_ui_node_detail_render(
     snprintf(line, sizeof(line), "Last signal %d dBm  |  SNR %s%d.%d",
              entry->rssi_dbm, entry->snr_tenths < 0 ? "-" : "",
              snr_abs / 10, snr_abs % 10);
-    lv_obj_t *signal = create_label(controller->sheet, line, 0x8EA0AE);
+    lv_obj_t *signal = create_label(controller->sheet, line, 0xA6B0B7);
     configure_dot_label(signal, 392, 8, 150);
     complete = signal != NULL && complete;
 
@@ -442,7 +442,7 @@ bool d1l_ui_node_detail_render(
         } else {
             snprintf(line, sizeof(line), "Location not shared");
         }
-        lv_obj_t *location = create_label(controller->sheet, line, 0x93C5FD);
+        lv_obj_t *location = create_label(controller->sheet, line, 0x4D7FFF);
         configure_dot_label(location, 392, 8, 184);
         complete = location != NULL && complete;
     }
@@ -450,7 +450,7 @@ bool d1l_ui_node_detail_render(
     snprintf(line, sizeof(line), "Heard on this boot  |  %lu sighting%s",
              (unsigned long)entry->heard_count,
              entry->heard_count == 1U ? "" : "s");
-    lv_obj_t *heard = create_label(controller->sheet, line, 0x8EA0AE);
+    lv_obj_t *heard = create_label(controller->sheet, line, 0xA6B0B7);
     configure_dot_label(heard, 392, 8, 218);
     complete = heard != NULL && complete;
 
@@ -459,7 +459,7 @@ bool d1l_ui_node_detail_render(
              d1l_ui_dm_identity_reason_text(controller->rendered.dm_reason));
     lv_obj_t *dm_reason = create_label(
         controller->sheet, line,
-        controller->rendered.dm_can_open_compose ? 0x5EEAD4 : 0xFBBF24);
+        controller->rendered.dm_can_open_compose ? 0x20D9ED : 0xFBBF24);
     if (dm_reason) {
         lv_label_set_long_mode(dm_reason, LV_LABEL_LONG_WRAP);
         lv_obj_set_size(dm_reason, 392, 54);
@@ -470,7 +470,7 @@ bool d1l_ui_node_detail_render(
     snprintf(line, sizeof(line), "Advanced identity  %.16s  |  key %s",
              entry->fingerprint[0] ? entry->fingerprint : "-",
              view->keyed ? "saved" : "missing");
-    lv_obj_t *identity = create_label(controller->sheet, line, 0x8EA0AE);
+    lv_obj_t *identity = create_label(controller->sheet, line, 0xA6B0B7);
     configure_dot_label(identity, 392, 8, 314);
     complete = identity != NULL && complete;
     if (controller->rendered.management_gated &&
@@ -481,7 +481,7 @@ bool d1l_ui_node_detail_render(
             D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN) != NULL && complete;
         lv_obj_t *managed_reason = create_label(
             controller->sheet, "Verified server; local authenticated login required.",
-            0x8EA0AE);
+            0xA6B0B7);
         if (managed_reason) {
             lv_label_set_long_mode(managed_reason, LV_LABEL_LONG_DOT);
             lv_obj_set_size(managed_reason, 276, 40);
