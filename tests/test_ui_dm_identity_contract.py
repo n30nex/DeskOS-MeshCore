@@ -169,5 +169,6 @@ def test_user_guide_documents_sender_identity_and_usb_import_boundary() -> None:
     assert "remain read-only" in guide
     assert "Contacts can be imported from the USB console" in guide
     assert "`contacts import <meshcore-uri>`" in guide
-    assert "Rich contact/channel QR sharing remains 1.5/RC3 work" in guide
-    assert "richer on-device QR/sharing is deferred" in parity
+    assert "Export QR" in guide
+    assert "temporary payload after rendering" in guide
+    assert "privacy-safe contact/channel QR" in parity

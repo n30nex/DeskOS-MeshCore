@@ -1,12 +1,13 @@
-# MeshCore DeskOS D1L 1.2 User Guide
+# MeshCore DeskOS D1L 1.5 User Guide
 
-This guide covers the production `core_1_0` firmware with `conditional` SD
+This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.2/RC2 corrects the RC1 channel-selection and Contacts navigation
-defects. The remaining intentional limits and mobile-to-D1L adaptations are in
+DeskOS 1.5/RC3 includes the corrected 1.2 channel and Contacts workflows plus
+secure BLE companion access, public-data QR sharing, and signed local updates
+with rollback. The remaining intentional limits and D1L adaptations are in
 [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) and
 [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md).
 
@@ -37,7 +38,7 @@ settings. A factory-fresh device opens the first-start wizard:
    **Finish setup**.
 
 Wi-Fi remains optional for offline MeshCore use. The prepared FAT32 card and
-NRCan provider manifest are required for the complete 1.2 setup.
+NRCan provider manifest are required for the complete 1.5 setup.
 
 The dock is **Home**, **Channels**, **Contacts**, **Map**, and **Settings**.
 Home is a summary page; lists and long pages scroll vertically.
@@ -57,8 +58,8 @@ reseeded.
 The Public channel is always configured. Open **Channels** and tap Public or
 any other enabled channel to select it and immediately open its conversation.
 Use the channel controls to create or import, select, enable, rename, make
-default, and remove with local confirmation. Rich on-device QR sharing is
-deferred to 1.5/RC3; URI import remains available.
+default, and remove with local confirmation. A selected channel can display a
+one-time QR containing only its supported public import URI.
 
 Public and channel views support send, receive, retained history, search and
 unread state. Public display names have the `sender_name_unverified` boundary.
@@ -82,7 +83,8 @@ mute, and confirmed removal.
 **Message** opens the existing DM composer/thread for a verified Chat or
 Companion contact. **Manage** opens node detail for a Repeater or Room and
 provides its status/login workflow even when the contact has no current
-heard-node row. Rich contact/channel QR sharing remains 1.5/RC3 work.
+heard-node row. **Export QR** displays only the selected contact's supported
+public MeshCore URI and clears the temporary payload after rendering.
 
 The same Contacts area provides:
 
@@ -145,6 +147,48 @@ are never printed by status, logs or exports.
 Mesh messaging does not require Wi-Fi. If Wi-Fi is unavailable, cached Map
 tiles remain usable and RF chat continues.
 
+## BLE companion
+
+Open **Settings -> Connections -> BLE**, enable BLE, then choose **Pair**. The
+screen shows the current advertising, pairing, security, protocol, and failure
+state. Confirm the displayed six-digit passkey in the companion client. Use
+**Forget** to remove the retained bond before changing owners or clients.
+
+Transport does not become ready until the connection is encrypted,
+authenticated, bonded, and subscribed to notifications. The implementation
+uses the official MeshCore service/RX/TX UUIDs and presents the existing
+three-byte companion protocol to the single-owner MeshCore runtime. Enabling
+BLE and Wi-Fi is mutually exclusive so both network stacks cannot silently
+compete for ownership and memory.
+
+The BLE client can use normal supported messaging, contact, channel, time,
+radio, advert, and status operations. Private-key import/export, remote reboot,
+and factory reset fail closed over BLE. Pairing secrets and private material
+are not written to status, logs, screenshots, or exports.
+
+## Signed local update and rollback
+
+Each trusted 1.5 release package includes one matching set under `update/`:
+
+```text
+d1l-update.manifest
+d1l-update.sig
+d1l-update.bin
+```
+
+Copy all three files from the same release to `updates/` on the prepared SD
+card. Open **Settings -> Signed Update**, choose **Install from SD**, and tap
+the second confirmation within five seconds. DeskOS verifies the product,
+target, partition-table hash, image size/hash, signer, Ed25519 signature, and
+anti-downgrade security sequence before writing the inactive slot. It never
+accepts an RF-triggered update.
+
+When the write completes, choose **Reboot to Update** and confirm it. The new
+image starts in pending-verification state. A successful normal boot confirms
+it; a failed boot rolls back to the previous working slot. The published USB
+app BIN and full-clean 8 MB BIN remain the recovery paths if local update is
+unavailable.
+
 ## Repeater and room administration
 
 The administration capability uses an exact verified Repeater or Room key and
@@ -182,7 +226,7 @@ reset state. Retained history is not redirected there.
 
 - The firmware never formats an SD card.
 - Prepare a 32GB-or-larger FAT32 card with the checked-in
-  `scripts/prepare_deskos_sd.py` workflow. The 1.2 first-start flow requires
+  `scripts/prepare_deskos_sd.py` workflow. The 1.5 first-start flow requires
   the authorized NRCan provider manifest for background/offline Map download.
 - Foreign, non-FAT32 or unmountable media is preserved and reported.
 - A missing/unusable card activates a prominent degraded notice.
@@ -203,17 +247,6 @@ radio, storage, Wi-Fi, Map and crash state is available under Diagnostics.
 Observer is optional and uses `mqtts://`, TLS, QoS 1 and a bounded queue. It
 may publish device health and explicitly enabled location state. It never
 publishes message text, keys, contacts or forwarded RF traffic.
-
-## Deferred to 1.5 / RC3
-
-DeskOS D1L 1.2 does not expose:
-
-- BLE companion pairing and transport;
-- contact/channel QR sharing;
-- signed OTA/update and recovery workflows.
-
-Normal non-erasing flashing and bounded USB recovery diagnostics are separate
-from those deferred product workflows.
 
 ## Useful USB diagnostics
 
@@ -246,7 +279,7 @@ local screen navigation: it wakes the display and clears the ordinary
 tap-to-unlock idle cover before showing the requested page. It does not bypass
 first-start setup, protected actions, or confirmation prompts.
 
-DeskOS 1.2 also provides a read-only production framebuffer export for support
+DeskOS 1.5 also provides a read-only production framebuffer export for support
 and documentation. It copies the current 480x480 RGB565 screen only; it cannot
 transmit RF, format storage, or enable developer/qualification behavior. From a
 repository checkout with `pyserial` and Pillow installed:
@@ -265,7 +298,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the published DeskOS D1L 1.2 download and follow its `START_HERE.md`.
+Use the published DeskOS D1L 1.5 download and follow its `START_HERE.md`.
 On Linux, select the D1L only through the stable by-id path:
 
 ```text

@@ -1,106 +1,97 @@
 # MeshCore DeskOS for SenseCAP Indicator D1L
 
-DeskOS **1.2 / RC2** is the current corrective `core_1_0` release for the
-SenseCAP Indicator D1L. Download the public `v1.2.0` files from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.2.0).
+DeskOS **1.5 / RC3** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.5.0` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.5.0).
+The Actions release is compiled with the immutable `full_feature` profile and
+`conditional` SD history mode.
 
-DeskOS is a standalone, dark, touch-first MeshCore client. Public binaries are
-built and packaged by GitHub Actions. GitHub Releases provides the complete
-user package, standalone ESP32 BIN files, the RP2040 UF2, checksums, and
-installation instructions.
+DeskOS is a standalone, dark, touch-first MeshCore client. Firmware is built
+and packaged by GitHub Actions. The release provides the ESP32 update and
+full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
+update bundle, and end-user instructions.
+
+## What 1.5 adds
+
+DeskOS 1.5 includes the complete corrected 1.2 product plus:
+
+- secure BLE companion pairing, bonding, reconnect, disconnect, and forget;
+- the current MeshCore companion protocol over an encrypted BLE transport;
+- deliberate one-time contact and channel QR sharing with public data only;
+- Ed25519-signed local SD updates, inactive-slot installation, anti-downgrade
+  sequencing, first-boot confirmation, and automatic rollback;
+- expanded bounded diagnostics, event history, display preferences, and
+  notification controls; and
+- the corrected channel, Contacts, Finder, Ping, PATH, TRACE, Map, Wi-Fi,
+  storage, administration, Observer/MQTT, and messaging workflows from 1.2.
+
+DeskOS is a non-forwarding client. It sends user-requested traffic but does not
+repeat other devices' traffic. Its conditional SD-primary retained history
+becomes visibly live-only when storage is missing; history is never silently
+redirected into default NVS.
+
+## Security boundaries
+
+- BLE requires Secure Connections, MITM protection, encryption,
+  authentication, bonding, and an explicit notification subscription before
+  the companion protocol becomes ready.
+- BLE cannot export or import private keys, factory-reset the device, or reboot
+  it remotely.
+- QR codes contain only the public contact or channel material selected by the
+  owner. Their temporary URI buffer is cleared after rendering.
+- Signed updates are read from local SD, verified before the inactive slot is
+  written, and require two deliberate on-device confirmations.
+- USB remains the recovery path. DeskOS never formats the user's SD card.
+
+See the [user guide](docs/USER_GUIDE_D1L.md),
+[known limitations](docs/KNOWN_LIMITATIONS.md), and
+[companion security/protocol notes](docs/COMPANION_3BYTE_COMPATIBILITY.md).
 
 ## Release train
 
 | Release | Purpose | State |
 |---|---|---|
-| **1.0 / RC1** | Published baseline, including the `v1.0.1` packaging correction | Shipped/historical |
-| **1.2 / RC2** | Correct channel selection and Contacts, document mobile-to-D1L parity, add actual-device screenshots, and retain explicit update/fresh-install paths | Current public release (`v1.2.0`) |
-| **1.5 / RC3** | Fold deferred features, architecture work, localization, and technical debt into the corrected product | Planned after RC2 |
+| **1.0 / RC1** | Initial production baseline | Historical |
+| **1.2 / RC2** | Channel, Contacts, parity, packaging, and screenshot correction | Historical (`v1.2.0`) |
+| **1.5 / RC3** | BLE, signed update/rollback, sharing, diagnostics, and full-feature activation | Current (`v1.5.0`) |
 
-## 1.2 / RC2 product
+## Device UI
 
-RC2 includes the complete 1.0 product plus:
-
-- selecting Public or another enabled channel immediately opens its chat;
-- Contacts search across name, role, fingerprint, and key;
-- Recent, A-Z, Role, and Signal contact sorting;
-- direct Message and Manage actions for companion DMs and repeater/room detail,
-  status, and login; and
-- a read-only production framebuffer export for support and actual-device
-  documentation.
-
-The retained product includes Home and core navigation; Public/channel and
-direct messaging; contacts, Nodes, Finder, PATH/Ping/TRACE; repeater/room
-administration; Map/location; Wi-Fi and radio/device settings; diagnostics;
-and opt-in Observer/MQTT. It uses conditional SD-primary retained history with
-visible live-only fallback.
-
-If prepared SD storage is unavailable, DeskOS does not silently redirect
-retained history to default NVS.
-
-The exact product boundary is [`docs/RC2_SCOPE.md`](docs/RC2_SCOPE.md). The
-current mobile-to-D1L outcome matrix is
-[`docs/DESKOS_MESHCORE_FEATURE_PARITY.md`](docs/DESKOS_MESHCORE_FEATURE_PARITY.md).
-
-## RC2 correction status
-
-- The [#320](https://github.com/n30nex/DeskOS-MeshCore/issues/320)
-  channel-selection root cause is fixed in 1.2.
-- The [#321](https://github.com/n30nex/DeskOS-MeshCore/issues/321) Contacts
-  search/sort/action workflows are included in 1.2.
-- The full current mobile baseline and explicit D1L adaptations are recorded
-  under [#322](https://github.com/n30nex/DeskOS-MeshCore/issues/322).
-- The exact Actions package, attached-device update, actual-device screenshots,
-  update BIN, full-clean BIN, and RP2040 UF2 are published with `v1.2.0`.
-
-## Actual-device screenshots
-
-These are native 480x480 production framebuffer captures from the attached D1L
-running DeskOS `1.2.0`, build
-`e15aff9eed9feb94bef6a81f90d62ac0f9fd9610`. The Map image was captured only
-after all 9 local SD tiles were loaded and rendered. Full capture provenance is
-recorded in
+These native 480x480 captures show the production touch shell introduced in
+1.2 and retained by 1.5. Their exact 1.2 provenance is recorded in
 [`docs/screenshots/DEVICE_1_2_CAPTURE.md`](docs/screenshots/DEVICE_1_2_CAPTURE.md).
 
 | Home | Channels |
 |---|---|
-| ![DeskOS 1.2 Home on the attached D1L](docs/screenshots/device-1.2-home.png) | ![DeskOS 1.2 Channels with Public on the attached D1L](docs/screenshots/device-1.2-channels.png) |
+| ![DeskOS Home](docs/screenshots/device-1.2-home.png) | ![DeskOS Channels](docs/screenshots/device-1.2-channels.png) |
 
 | Contacts | Settings |
 |---|---|
-| ![DeskOS 1.2 Contacts search, sort, and actions on the attached D1L](docs/screenshots/device-1.2-contacts.png) | ![DeskOS 1.2 Settings on the attached D1L](docs/screenshots/device-1.2-settings.png) |
+| ![DeskOS Contacts](docs/screenshots/device-1.2-contacts.png) | ![DeskOS Settings](docs/screenshots/device-1.2-settings.png) |
 
-![DeskOS 1.2 Map with all local SD tiles loaded on the attached D1L](docs/screenshots/device-1.2-map-local-tiles.png)
+![DeskOS Map](docs/screenshots/device-1.2-map-local-tiles.png)
 
-Locations and public node labels are intentionally visible. Private messages,
-passwords, private keys, and admin credentials are not shown.
+Locations and public node labels may be visible. Private messages, passwords,
+private keys, and admin credentials must never be included in screenshots.
 
-## Deferred to 1.5 / RC3
+## Install
 
-BLE companion transport, signed OTA/update/recovery, richer QR/deep-link
-sharing, localization expansion, broad UI architecture work, and optional
-telemetry expansion follow RC2. They are tracked in
-[`docs/RC3_BACKLOG.md`](docs/RC3_BACKLOG.md).
+Extract the complete release package and begin with `START_HERE.md`.
 
-## Install and use
-
-Download the `v1.2.0` package from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.2.0),
-extract it fully, and follow its `START_HERE.md`. The repository
-[`user guide`](docs/USER_GUIDE_D1L.md) describes the current release; the
-[`SD preparation guide`](docs/D1L_SD_CARD_GUIDED_INSTALL.md) applies to both
-lines. The firmware never formats an SD card.
-
-Every release package has two explicit ESP32 paths:
-
-- **Update:** the app BIN for an existing DeskOS installation; it preserves
+- **Update an existing DeskOS install:** use the app update path. It preserves
   unrelated retained flash regions.
-- **Fresh clean install:** the full 8 MB BIN at `0x0` for a blank device,
-  another firmware, or an intentional clean start.
+- **Fresh clean install or recovery:** use the full 8 MB image at `0x0`.
+- **RP2040 bridge:** copy the complete production UF2 through BOOTSEL.
+- **On-device signed update:** place the exact manifest, signature, and app BIN
+  from one release under `updates/` on the prepared SD card, then use
+  **Settings -> Signed Update**.
 
-The same complete RP2040 SD-bridge UF2 is used with either ESP32 path because a
-UF2 copy installs the full RP2040 image. Standalone BIN and UF2 assets are also
-published for experienced installers.
+On Linux, only the stable D1L identity is supported for flashing:
 
-The [historical 1.0 release runbook](docs/RC1_RELEASE_EXECUTION_D1L.md) is for
-maintainers. End users should use `START_HERE.md` from the downloaded package.
+```text
+/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+VID:PID 1a86:7523
+```
+
+Never substitute a guessed `/dev/ttyUSB*` path. The firmware never formats an
+SD card.

@@ -65,7 +65,7 @@ def test_release_authority_is_product_delivery_not_a_lab_gate():
         if "python ./tools/ui_simulator.py" in line
     ]
     assert len(simulator_commands) == 4
-    assert all("--release-profile core_1_0" in line for line in simulator_commands)
+    assert all("--release-profile full_feature" in line for line in simulator_commands)
 
     assert re.findall(r"^## .+$", docs_index, flags=re.MULTILINE) == [
         "## Current release truth",

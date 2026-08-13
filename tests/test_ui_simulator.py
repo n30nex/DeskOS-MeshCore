@@ -2413,10 +2413,10 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     )
     assert ".github/d1l-build-inputs.json" in workflow
     assert "python -m pip install --disable-pip-version-check --require-hashes" in workflow
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --out artifacts/ui-sim" in workflow
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario large-mesh --out artifacts/ui-sim-large" in workflow
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario storage-states --out artifacts/ui-sim-storage" in workflow
-    assert "python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --out artifacts/ui-sim-map-ready" in workflow
+    assert "python ./tools/ui_simulator.py --release-profile full_feature --out artifacts/ui-sim" in workflow
+    assert "python ./tools/ui_simulator.py --release-profile full_feature --scenario large-mesh --out artifacts/ui-sim-large" in workflow
+    assert "python ./tools/ui_simulator.py --release-profile full_feature --scenario storage-states --out artifacts/ui-sim-storage" in workflow
+    assert "python ./tools/ui_simulator.py --release-profile full_feature --scenario map-ready --out artifacts/ui-sim-map-ready" in workflow
     assert "focused source checks" in active_test_plan
     assert "simulator images" in active_test_plan
     assert "alone do not pass" in active_test_plan

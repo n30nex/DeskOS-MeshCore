@@ -118,7 +118,7 @@ jobs:
             event = $env:GITHUB_EVENT_NAME
             include_sd_bridge = [System.Convert]::ToBoolean($env:D1L_INCLUDE_SD_BRIDGE)
             scope_reason = $env:D1L_SCOPE_REASON
-            release_profile = "core_1_0"
+            release_profile = "full_feature"
             sd_history_mode = "conditional"
           }
           $path = "artifacts/build-inputs/d1l-candidate-scope.json"
@@ -141,10 +141,10 @@ jobs:
       - name: UI simulator screenshots
         shell: bash
         run: |
-          python ./tools/ui_simulator.py --release-profile core_1_0 --out artifacts/ui-sim
-          python ./tools/ui_simulator.py --release-profile core_1_0 --scenario large-mesh --out artifacts/ui-sim-large
-          python ./tools/ui_simulator.py --release-profile core_1_0 --scenario storage-states --out artifacts/ui-sim-storage
-          python ./tools/ui_simulator.py --release-profile core_1_0 --scenario map-ready --out artifacts/ui-sim-map-ready
+          python ./tools/ui_simulator.py --release-profile full_feature --out artifacts/ui-sim
+          python ./tools/ui_simulator.py --release-profile full_feature --scenario large-mesh --out artifacts/ui-sim-large
+          python ./tools/ui_simulator.py --release-profile full_feature --scenario storage-states --out artifacts/ui-sim-storage
+          python ./tools/ui_simulator.py --release-profile full_feature --scenario map-ready --out artifacts/ui-sim-map-ready
 
       - name: Checksum contract tests
         run: python -m pytest -q tests/test_checksum_manifest.py tests/test_package_release_d1l.py
@@ -502,7 +502,7 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           . /opt/esp/idf/export.sh
-          idf.py -D D1L_RELEASE_PROFILE=core_1_0 -D D1L_SD_HISTORY_MODE=conditional build
+          idf.py -D D1L_RELEASE_PROFILE=full_feature -D D1L_SD_HISTORY_MODE=conditional build
 
       - name: Capture ESP-IDF migration state
         if: ${{ always() }}
@@ -581,18 +581,36 @@ jobs:
             "${audit_args[@]}" | tee artifacts/production-payload-audit.json
 
       - name: Package D1L release
+        if: github.event_name != 'pull_request'
+        env:
+          D1L_UPDATE_SIGNING_KEY_PEM: ${{ secrets.D1L_UPDATE_SIGNING_KEY_PEM }}
         shell: bash
         run: |
           set -euo pipefail
-          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --release-profile core_1_0 --sd-history-mode conditional --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON" --meshcore-signed-advert-runtime-json "$D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON")
+          if [[ -z "${D1L_UPDATE_SIGNING_KEY_PEM:-}" ]]; then
+            printf 'D1L_UPDATE_SIGNING_KEY_PEM is required for trusted release packaging\n' >&2
+            exit 1
+          fi
+          signing_key="$(mktemp)"
+          chmod 600 "$signing_key"
+          cleanup_signing_key() {
+            rm -f "$signing_key"
+          }
+          trap cleanup_signing_key EXIT
+          printf '%s\n' "$D1L_UPDATE_SIGNING_KEY_PEM" > "$signing_key"
+          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --release-profile full_feature --sd-history-mode conditional --update-signing-key "$signing_key" --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON" --meshcore-signed-advert-runtime-json "$D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON")
           if [[ "${{ needs.change-filter.outputs.include_sd_bridge }}" == "true" ]]; then
             package_args+=(--rp2040-artifact-root artifacts/rp2040-release-inputs)
           fi
           python scripts/package_release_d1l.py "${package_args[@]}"
 
-      - name: Verify firmware and release checksums
+      - name: Verify firmware checksums
         run: |
           python scripts/verify_checksums.py artifacts/firmware
+
+      - name: Verify signed release checksums
+        if: github.event_name != 'pull_request'
+        run: |
           python scripts/verify_checksums.py "artifacts/release/d1l-release-${GITHUB_SHA}"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -603,6 +621,7 @@ jobs:
           retention-days: 14
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: github.event_name != 'pull_request'
         with:
           name: d1l-release-package
           path: artifacts/release/**

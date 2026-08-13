@@ -778,7 +778,7 @@ def test_active_release_docs_keep_ui_in_normal_product_use():
     assert "| C7 | Publication |" in roadmap
     assert "not a public release" in test_plan
     assert "requirement" in test_plan
-    assert "--release-profile core_1_0" in workflow
+    assert "--release-profile full_feature" in workflow
 
 
 def test_smoke_knows_ui_console_commands():
