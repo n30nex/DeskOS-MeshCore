@@ -476,6 +476,8 @@ def test_storage_and_wifi_transitions_refresh_non_map_ui_without_tearing_down_ma
     assert "if (map_active)" in changed
     assert "remember_rendered_content_generation(&s_snapshot);" in map_branch
     assert "request_content_refresh();" in non_map_branch
+    assert "ui_capture_in_progress()" in non_map_branch
+    assert "nodes_content_generation_changed_from_rendered(&s_snapshot)" in non_map_branch
 
 
 def test_map_ui_releases_before_covers_and_automation_is_fail_closed():

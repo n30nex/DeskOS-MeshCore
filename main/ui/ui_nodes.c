@@ -10,7 +10,7 @@
 #define NODES_ROW_HEIGHT 58
 #define NODES_ROW_GAP 4
 #define NODES_MIN_TOUCH_HEIGHT 44
-#define NODES_MAX_RENDERED_ROWS 24U
+#define NODES_MAX_RENDERED_ROWS 12U
 
 static lv_obj_t *nodes_create_label(lv_obj_t *parent,
                                     const char *text,
@@ -442,7 +442,7 @@ static void nodes_render_limit_note(lv_obj_t *parent,
                                     const char *kind)
 {
     char text[80];
-    snprintf(text, sizeof(text), "Showing %u of %u %s. Search to narrow.",
+    snprintf(text, sizeof(text), "Showing %u of %u %s. Use Search to find more.",
              (unsigned)rendered, (unsigned)total, kind);
     lv_obj_t *label = nodes_create_label(parent, text, 0x8EA0AE);
     nodes_set_dot_width(label, 424);

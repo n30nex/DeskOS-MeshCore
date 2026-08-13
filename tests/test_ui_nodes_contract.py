@@ -95,9 +95,9 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
     assert "static uint32_t nodes_role_color" in source
     assert "NODES_ROW_HEIGHT 58" in source
     assert "NODES_MIN_TOUCH_HEIGHT 44" in source
-    assert "NODES_MAX_RENDERED_ROWS 24U" in source
+    assert "NODES_MAX_RENDERED_ROWS 12U" in source
     assert "rendered_total < NODES_MAX_RENDERED_ROWS" in source
-    assert '"Showing %u of %u %s. Search to narrow."' in source
+    assert '"Showing %u of %u %s. Use Search to find more."' in source
     assert "rendered_nearby == 0U && nearby_count == 0U" in source
     assert 'nodes_create_button(row, "Chat", 340, 7, 84, 44' in source
     assert "entry->public_key_hex" not in source
