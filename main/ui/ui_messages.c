@@ -321,17 +321,17 @@ static const char *messages_inbound_state(const d1l_dm_entry_t *entry,
     }
     switch (entry->ack_state) {
     case D1L_DM_ACK_STATE_PENDING:
-        return "Received / ACK queued";
+        return "Received / confirming";
     case D1L_DM_ACK_STATE_SENT:
-        return "Received / ACK sent";
+        return "Received / confirmed";
     case D1L_DM_ACK_STATE_RETRYABLE:
         if (entry->ack_dispatch_count == 0U &&
             entry->ack_last_error == ESP_OK) {
-            return "Received / ACK needed";
+            return "Received / confirming";
         }
-        return "Received / ACK retry";
+        return "Received / confirming";
     case D1L_DM_ACK_STATE_TERMINAL:
-        return "Received / ACK failed";
+        return "Received / confirmation failed";
     case D1L_DM_ACK_STATE_LEGACY_UNVERIFIED:
     default:
         return "Received";
@@ -355,13 +355,13 @@ const char *d1l_ui_messages_delivery_label(const d1l_dm_entry_t *entry,
     case D1L_DM_DELIVERY_TX_ACTIVE:
         return "Sending";
     case D1L_DM_DELIVERY_TX_DONE:
-        return "Sent over RF";
+        return "Sent by radio";
     case D1L_DM_DELIVERY_AWAITING_ACK:
-        return "Sent over RF / awaiting delivery";
+        return "Sent / checking delivery";
     case D1L_DM_DELIVERY_ACKNOWLEDGED:
         return "Delivered";
     case D1L_DM_DELIVERY_RETRY_WAIT:
-        return "Retry scheduled";
+        return "Will retry";
     case D1L_DM_DELIVERY_RETRY_TX:
         return "Retrying";
     case D1L_DM_DELIVERY_FAILED_RADIO:
@@ -433,7 +433,7 @@ static const char *messages_public_state(const d1l_message_entry_t *entry,
     }
     if (entry->direction[0] == 't') {
         /* Public rows are retained only after the radio reports TxDone. */
-        return "Sent over RF";
+        return "Sent by radio";
     }
     return unread ? "New" : "Received";
 }
@@ -541,22 +541,22 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
             latest_state = "Queued";
             break;
         case D1L_DM_DELIVERY_WAITING_RADIO:
-            latest_state = "Waiting radio";
+            latest_state = "Waiting for radio";
             break;
         case D1L_DM_DELIVERY_TX_ACTIVE:
             latest_state = "Sending";
             break;
         case D1L_DM_DELIVERY_TX_DONE:
-            latest_state = "Sent RF";
+            latest_state = "Sent";
             break;
         case D1L_DM_DELIVERY_AWAITING_ACK:
-            latest_state = "Awaiting ACK";
+            latest_state = "Checking delivery";
             break;
         case D1L_DM_DELIVERY_ACKNOWLEDGED:
             latest_state = "Delivered";
             break;
         case D1L_DM_DELIVERY_RETRY_WAIT:
-            latest_state = "Retry waiting";
+            latest_state = "Will retry";
             break;
         case D1L_DM_DELIVERY_RETRY_TX:
             latest_state = "Retrying";
@@ -757,16 +757,16 @@ static int messages_render_store_notice(
     switch (state) {
     case D1L_UI_MESSAGES_STORE_LOADING:
         return messages_render_notice(
-            parent, y, "Loading retained history...", 0x93C5FD);
+            parent, y, "Loading saved messages...", 0x93C5FD);
     case D1L_UI_MESSAGES_STORE_DEGRADED:
         return messages_render_notice(
             parent, y,
-            "Storage degraded; readable RAM history remains.",
+            "Storage needs attention. Recent messages are still available.",
             0xFBBF24);
     case D1L_UI_MESSAGES_STORE_UNAVAILABLE:
         return messages_render_notice(
             parent, y,
-            "Persistence unavailable; readable RAM history remains.",
+            "Messages cannot be saved. Recent messages are still available.",
             0xF87171);
     case D1L_UI_MESSAGES_STORE_READY:
     default:
@@ -823,7 +823,7 @@ static void messages_render_public(d1l_ui_messages_controller_t *controller,
                 "Channel unavailable or disabled." :
             controller->rendered.public_store_state ==
                     D1L_UI_MESSAGES_STORE_LOADING ?
-                "Loading retained channel history..." :
+                "Loading saved messages..." :
             controller->rendered.public_store_state ==
                     D1L_UI_MESSAGES_STORE_UNAVAILABLE ?
                 "No readable channel history in RAM." :
@@ -880,13 +880,13 @@ static void messages_render_direct(d1l_ui_messages_controller_t *controller,
         body, 8, controller->rendered.dm_store_state);
     if (controller->rendered.dm_retry_active) {
         row_y = messages_render_notice(
-            body, row_y, "A bounded delivery retry is in progress.",
+            body, row_y, "Trying to deliver the message again.",
             0x93C5FD);
     }
     if (controller->rendered.dm_failure_latched) {
         row_y = messages_render_notice(
             body, row_y,
-            "A final delivery failure is retained; open it for details.",
+            "A message could not be delivered. Open it for details.",
             0xF87171);
     }
     for (size_t i = 0; i < controller->rendered.dm_row_count; ++i) {
@@ -896,12 +896,12 @@ static void messages_render_direct(d1l_ui_messages_controller_t *controller,
         const char *empty_text;
         if (controller->rendered.dm_store_state ==
             D1L_UI_MESSAGES_STORE_LOADING) {
-            empty_text = "Loading retained direct-message history...";
+            empty_text = "Loading saved conversations...";
         } else if (controller->rendered.dm_store_state ==
                    D1L_UI_MESSAGES_STORE_UNAVAILABLE) {
             empty_text = "No readable direct-message history in RAM.";
         } else if (controller->rendered.dm_capable_contact_count == 0U) {
-            empty_text = "No DM contacts available. Add a verified chat contact.";
+            empty_text = "No messaging contacts yet. Add a verified contact.";
         } else {
             empty_text = "No direct-message history yet.";
         }
@@ -1341,7 +1341,7 @@ static bool messages_render_thread_bubble(
             entry->delivery_state)) {
         if (!messages_create_wrapped_label(
                 bubble,
-                "Bounded delivery retry is active; no manual resend is needed.",
+                "Delivery retry is in progress. You do not need to resend.",
                 0x93C5FD)) {
             return false;
         }
@@ -1349,7 +1349,7 @@ static bool messages_render_thread_bubble(
                    entry->delivery_state)) {
         if (!messages_create_wrapped_label(
                 bubble,
-                "Final delivery failure is retained. Reply starts a new explicit message; no automatic retry is pending.",
+                "Delivery failed. Your message is saved; replying sends a new message.",
                 0xFBBF24)) {
             return false;
         }
@@ -1449,7 +1449,7 @@ bool d1l_ui_messages_render_thread(
         if (!reply_available) {
             (void)messages_render_notice(
                 body, 0,
-                "Contact unavailable; retained history remains readable.",
+                "This contact is unavailable. Saved messages remain readable.",
                 0xFBBF24);
         }
         char meta_text[96];
@@ -1482,10 +1482,10 @@ bool d1l_ui_messages_render_thread(
             complete = messages_create_wrapped_label(
                 body, controller->rendered.dm_store_state ==
                         D1L_UI_MESSAGES_STORE_LOADING ?
-                    "Loading retained messages..." :
+                    "Loading saved messages..." :
                 controller->thread_search_text[0] ?
-                    "No retained messages match this search." :
-                    "No retained messages in this conversation.",
+                    "No saved messages match this search." :
+                    "No saved messages in this conversation.",
                 0x8EA0AE) != NULL && complete;
         }
         for (size_t i = 0U; i < controller->thread_row_count; ++i) {

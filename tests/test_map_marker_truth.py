@@ -45,7 +45,7 @@ def test_marker_truth_is_registered_and_wired_to_verified_runtime_inputs():
     assert "d1l_map_marker_truth_evaluate(" in ui_map
     assert "d1l_map_marker_role_label(truth.role)" in ui_map
     assert "d1l_map_marker_format_age(truth.age_sec" in ui_map
-    assert '"Signed advert E6\\nage verified\\naccuracy unknown"' in ui_map
+    assert '"Location shared by node\\nrecently verified\\naccuracy unknown"' in ui_map
     assert "d1l_ui_map_viewport_update_truth_context(&s_snapshot)" in phase1
     assert "d1l_map_viewport_truth_apply(&state, &input, &transition)" in ui_map
     assert "backward_reference_correction" in transition

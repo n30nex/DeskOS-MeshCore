@@ -29,7 +29,7 @@ d1l_ui_compose_eligibility_t d1l_ui_compose_eligibility(
 {
     if (!input) {
         return result(false, false, D1L_UI_COMPOSE_RADIO_UNAVAILABLE,
-                      "Runtime unavailable");
+                      "Device is still starting");
     }
     switch (input->text_result) {
     case D1L_USER_TEXT_EMPTY:
@@ -45,21 +45,21 @@ d1l_ui_compose_eligibility_t d1l_ui_compose_eligibility(
     case D1L_USER_TEXT_CONTROL_CHARACTER:
     default:
         return result(false, false, D1L_UI_COMPOSE_INVALID_TEXT,
-                      "Invalid text");
+                      "Unsupported text");
     }
     if (!input->board_ready) {
         return result(false, false, D1L_UI_COMPOSE_RADIO_UNAVAILABLE,
-                      "Runtime unavailable");
+                      "Device is still starting");
     }
 
     const char *mesh_state = input->mesh_state ? input->mesh_state : "unknown";
     if (strcmp(mesh_state, "tx_busy") == 0) {
         return result(false, false, D1L_UI_COMPOSE_RADIO_BUSY,
-                      "Radio busy");
+                      "Please wait for the current send");
     }
     if (strcmp(mesh_state, "radio_error") == 0) {
         return result(false, false, D1L_UI_COMPOSE_RADIO_ERROR,
-                      "Radio error");
+                      "Radio needs attention");
     }
     if (strcmp(mesh_state, "initializing") == 0) {
         return result(false, false, D1L_UI_COMPOSE_RADIO_STARTING,
@@ -75,11 +75,11 @@ d1l_ui_compose_eligibility_t d1l_ui_compose_eligibility(
     }
     if (input->path_hash_bytes < 1U || input->path_hash_bytes > 3U) {
         return result(false, false, D1L_UI_COMPOSE_ROUTE_POLICY_INVALID,
-                      "Route settings invalid");
+                      "Check the route settings");
     }
     if (!input->protocol_tx_ready) {
         return result(false, false, D1L_UI_COMPOSE_PROTOCOL_TIME_UNAVAILABLE,
-                      "Protocol time unavailable");
+                      "Time is not ready yet");
     }
 
     if (!input->is_dm) {
@@ -94,11 +94,11 @@ d1l_ui_compose_eligibility_t d1l_ui_compose_eligibility(
     } else {
         if (input->settings_load_status != ESP_OK) {
             return result(false, false, D1L_UI_COMPOSE_SETTINGS_UNAVAILABLE,
-                          "Settings need recovery");
+                          "Settings need attention");
         }
         if (input->identity_state == D1L_IDENTITY_STATE_INCONSISTENT) {
             return result(false, false, D1L_UI_COMPOSE_IDENTITY_INCONSISTENT,
-                          "Identity needs recovery");
+                          "Identity needs attention");
         }
         if (!input->contact_found) {
             return result(false, false, D1L_UI_COMPOSE_CONTACT_MISSING,
@@ -106,26 +106,26 @@ d1l_ui_compose_eligibility_t d1l_ui_compose_eligibility(
         }
         if (!input->contact_sendable) {
             return result(false, false, D1L_UI_COMPOSE_CONTACT_NOT_SENDABLE,
-                          "Contact cannot receive DM");
+                          "This contact cannot receive messages");
         }
         if (input->dm_delivery_active) {
             return result(false, false, D1L_UI_COMPOSE_DM_DELIVERY_ACTIVE,
-                          "Prior DM still active");
+                          "Previous message is still sending");
         }
     }
 
     if (input->previous_send_error != ESP_OK) {
         if (input->previous_send_error == ESP_ERR_TIMEOUT) {
             return result(true, true, D1L_UI_COMPOSE_RETRY_TIMEOUT,
-                          "Retry ready: timeout");
+                          "Not sent. Tap Retry");
         }
         if (input->previous_send_error == ESP_ERR_NO_MEM) {
             return result(true, true, D1L_UI_COMPOSE_RETRY_MEMORY,
-                          "Retry ready: low memory");
+                          "Not sent. Tap Retry");
         }
         if (input->previous_send_error == ESP_ERR_INVALID_STATE) {
             return result(true, true, D1L_UI_COMPOSE_RETRY_REJECTED,
-                          "Retry ready: rejected");
+                          "Not sent. Tap Retry");
         }
         if (input->previous_send_error == ESP_ERR_INVALID_ARG ||
             input->previous_send_error == ESP_ERR_INVALID_SIZE) {
@@ -134,10 +134,10 @@ d1l_ui_compose_eligibility_t d1l_ui_compose_eligibility(
         }
         if (input->previous_send_error == ESP_ERR_NOT_FOUND && input->is_dm) {
             return result(false, false, D1L_UI_COMPOSE_RESELECT_CONTACT,
-                          "Reselect contact to retry");
+                          "Choose the contact again");
         }
         return result(false, false, D1L_UI_COMPOSE_RECOVERY_REQUIRED,
-                      "Recovery required before retry");
+                      "Fix the issue before retrying");
     }
 
     return result(true, false, D1L_UI_COMPOSE_READY, "Ready to send");

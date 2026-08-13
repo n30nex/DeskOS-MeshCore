@@ -123,12 +123,12 @@ def test_core_storage_is_internal_until_sd_is_exactly_qualified():
     home = read("main/ui/ui_home.c")
     settings = read("main/ui/ui_settings.c")
 
-    assert '"Internal NVS"' in phase1
-    assert '"Retained internal storage"' in phase1
+    assert '"Built-in storage"' in phase1
+    assert '"Card and saved-data overview"' in phase1
     assert "D1L_RELEASE_FEATURE_SD_HISTORY" in phase1
     assert 'sd_history_available ? "SD" : "Storage"' in home
     assert 'sd_history_available ?' in home
-    assert '"Internal NVS"' in settings
+    assert '"Built-in storage"' in settings
     assert "d1l_ui_home_view_apply_release_profile(out_input)" in phase1
     assert "d1l_ui_more_view_apply_release_profile(out_input)" in phase1
     assert "d1l_ui_storage_location_available(location->location)" in phase1

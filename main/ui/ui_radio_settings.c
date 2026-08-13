@@ -343,10 +343,10 @@ bool d1l_ui_radio_settings_render(
         complete = false;
     }
     const char *apply_text = radio_applied ?
-        "Live RF matches saved profile" :
+        "Radio matches saved settings" :
         radio_apply_pending ?
-            "Saved profile pending next radio start/apply" :
-            "Radio apply status unavailable";
+            "Saved settings apply when the radio restarts" :
+            "Radio status unavailable";
     lv_obj_t *warning = create_label(
         controller->sheet, apply_text,
         radio_applied ? 0x5EEAD4 : 0xFBBF24);
@@ -359,7 +359,7 @@ bool d1l_ui_radio_settings_render(
     }
 
     char line[96];
-    snprintf(line, sizeof(line), "Freq %.3f MHz",
+    snprintf(line, sizeof(line), "Frequency %.3f MHz",
              ((double)controller->edit.frequency_hz) / 1000000.0);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
                                      8, 158) && complete;
@@ -370,7 +370,7 @@ bool d1l_ui_radio_settings_render(
         controller, "+25k", 338, 146, 84, 44, BINDING_FREQ_UP,
         D1L_UI_RADIO_SETTINGS_ACTION_FREQ_UP) != NULL && complete;
 
-    snprintf(line, sizeof(line), "BW %.1f kHz",
+    snprintf(line, sizeof(line), "Bandwidth %.1f kHz",
              ((double)controller->edit.bandwidth_tenths_khz) / 10.0);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
                                      8, 208) && complete;
@@ -378,17 +378,17 @@ bool d1l_ui_radio_settings_render(
         controller, "Change bandwidth", 246, 196, 176, 44, BINDING_BANDWIDTH,
         D1L_UI_RADIO_SETTINGS_ACTION_BANDWIDTH) != NULL && complete;
 
-    snprintf(line, sizeof(line), "SF %u",
+    snprintf(line, sizeof(line), "Spread %u",
              (unsigned)controller->edit.spreading_factor);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
                                      8, 258) && complete;
     complete = create_button(
-        controller, "SF-", 72, 246, 64, 44, BINDING_SF_DOWN,
+        controller, "-", 104, 246, 56, 44, BINDING_SF_DOWN,
         D1L_UI_RADIO_SETTINGS_ACTION_SF_DOWN) != NULL && complete;
     complete = create_button(
-        controller, "SF+", 144, 246, 64, 44, BINDING_SF_UP,
+        controller, "+", 168, 246, 56, 44, BINDING_SF_UP,
         D1L_UI_RADIO_SETTINGS_ACTION_SF_UP) != NULL && complete;
-    snprintf(line, sizeof(line), "CR %u",
+    snprintf(line, sizeof(line), "Coding %u",
              (unsigned)controller->edit.coding_rate);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
                                      238, 258) && complete;
@@ -396,19 +396,19 @@ bool d1l_ui_radio_settings_render(
         controller, "Change", 318, 246, 104, 44, BINDING_CODING_RATE,
         D1L_UI_RADIO_SETTINGS_ACTION_CODING_RATE) != NULL && complete;
 
-    snprintf(line, sizeof(line), "TX %d dBm",
+    snprintf(line, sizeof(line), "Power %d dBm",
              (int)controller->edit.tx_power_dbm);
     complete = create_required_label(controller->sheet, line, 0xE5EDF5,
                                      8, 308) && complete;
     complete = create_button(
-        controller, "TX-", 96, 296, 64, 44, BINDING_TX_DOWN,
+        controller, "-", 112, 296, 56, 44, BINDING_TX_DOWN,
         D1L_UI_RADIO_SETTINGS_ACTION_TX_DOWN) != NULL && complete;
     complete = create_button(
-        controller, "TX+", 168, 296, 64, 44, BINDING_TX_UP,
+        controller, "+", 176, 296, 56, 44, BINDING_TX_UP,
         D1L_UI_RADIO_SETTINGS_ACTION_TX_UP) != NULL && complete;
     complete = create_button(
         controller,
-        controller->edit.rx_boost ? "RX Boost On" : "RX Boost Off",
+        controller->edit.rx_boost ? "Receive boost: On" : "Receive boost: Off",
         246, 296, 176, 44, BINDING_RX_BOOST,
         D1L_UI_RADIO_SETTINGS_ACTION_RX_BOOST) != NULL && complete;
 

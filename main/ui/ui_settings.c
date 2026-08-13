@@ -222,7 +222,7 @@ static lv_obj_t *render_menu_item(lv_obj_t *parent,
         !d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY);
     const char *title_text = internal_storage ? "Storage" : item->title;
     const char *status_text = internal_storage ?
-        (item->warning ? "Internal NVS issue" : "Internal NVS") :
+        (item->warning ? "Built-in storage issue" : "Built-in storage") :
         item->status;
     lv_obj_t *row = settings_create_row(parent, 444, 54, item->warning);
     if (!row) {
@@ -292,7 +292,7 @@ static bool render_category(d1l_ui_settings_controller_t *controller,
         !d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
     const char *category_title = storage_only ? "Storage" : category->title;
     const char *category_summary = radio_only ? "Radio profile" :
-        (storage_only ? "Retained internal storage" : category->summary);
+        (storage_only ? "Built-in storage" : category->summary);
     lv_obj_t *title_label = settings_create_label(category_row, category_title,
                                                    category->warning ? 0xFCA5A5 : 0xF4F7FB);
     settings_set_dot_width(title_label, 410);

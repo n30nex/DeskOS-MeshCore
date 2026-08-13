@@ -331,10 +331,10 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert detail.index('entry->text[0] ? entry->text : "-"') < detail.index('"Technical details"')
     assert '"Hide technical details" : "Technical details"' in detail
     assert '"Sequence  %lu  uptime %lums  direction %s"' in detail
-    assert '"Path hash  %u byte%s  retained after %s"' in detail
-    assert 'return "sent over RF";' in source
-    assert '"Signal  not measured for retained channel TxDone"' in detail
-    assert '"Path hops  not measured for retained channel TxDone"' in detail
+    assert '"Path signature  %u byte%s  saved after %s"' in detail
+    assert 'return "sent by radio";' in source
+    assert '"Signal was not recorded for this sent message"' in detail
+    assert '"Hop count was not recorded for this sent message"' in detail
 
     compose = source.split("static void create_compose_sheet", 1)[1].split(
         "static void create_public_history_sheet", 1
@@ -1163,9 +1163,9 @@ def test_public_message_detail_sheet_opens_from_public_rows():
     assert "show_channel_compose_sheet(" in source
     assert "entry.channel_id, title, placeholder" in source
     assert '"Signal  rssi %d  snr %s%d.%d"' in render
-    assert '"Signal  not measured for retained channel TxDone"' in render
+    assert '"Signal was not recorded for this sent message"' in render
     assert '"Path  %u hop%s"' in render
-    assert '"Path hops  not measured for retained channel TxDone"' in render
+    assert '"Hop count was not recorded for this sent message"' in render
     assert '"Hide technical details" : "Technical details"' in render
     assert '"Sequence  %lu  uptime %lums  direction %s"' in source
     assert "message_delivery_label" in source
@@ -1459,7 +1459,8 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert "D1L_PUBLIC_HISTORY_UI_LOAD_OLDER_STEP" in source
     assert "lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF)" in source
     assert 'create_button(s_public_history_sheet, "Load Older"' in source
-    assert 'snprintf(history_title, sizeof(history_title), "%.32s History"' in source
+    assert 'public_history ? "Public History" : "History"' in source
+    assert '"%.24s | Showing %u of %u saved"' in source
     assert '"Public Search"' in source
     assert '"Search author or message"' in source
 
@@ -1516,7 +1517,7 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     assert "route_trace_request_event_cb" in source
     assert "d1l_app_model_send_trace_contact(" in source
     assert 'create_button(s_route_trace_sheet, "Trace"' in source
-    assert '"Alias only; retained history remains"' in contact_source
+    assert '"Only the name changes; messages stay saved"' in contact_source
     assert '"Probe and TRACE are contact-only RF; Reset forgets only this contact; no Public RF"' in source
     assert '"Authenticated TRACE' not in source
     assert '"Contact Export"' in contact_source
@@ -1533,7 +1534,7 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
         '"Contact options"',
     ):
         assert label in detail
-    assert '"Messaging unavailable [%s]"' in detail
+    assert '"Messaging unavailable"' in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
     for hidden_action in ('"Route trace"', '"Rename"', '"Export QR"', '"Forget contact"'):
         assert hidden_action not in detail
@@ -1771,7 +1772,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "open_display_sheet_event_cb" in source
     assert "open_diagnostics_sheet_event_cb" in source
     assert '"Wi-Fi"' in wifi_module
-    assert '"BLE Setup"' in ble_module
+    assert '"Bluetooth"' in ble_module
     assert '"Display"' in device_sheets
     assert '"Diagnostics"' in device_sheets
     assert "lv_obj_t *ssid_textarea;" in wifi_header
@@ -1800,15 +1801,15 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Connect"' in wifi_module
     assert "D1L_UI_WIFI_ACTION_SCAN" in source
     assert "D1L_UI_WIFI_ACTION_CONNECT" in source
-    assert '"BLE companion transport is unavailable in this release."' in connectivity
-    assert '"Secure MeshCore companion transport is available."' in connectivity
-    assert '"No BLE pairing or transport runtime is present."' in connectivity
+    assert '"Bluetooth companion connections are unavailable."' in connectivity
+    assert '"Bluetooth companion connections are available."' in connectivity
+    assert '"Bluetooth pairing is unavailable."' in connectivity
     assert '"Enable unavailable"' in ble_module
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
     assert '"Fixed UTC offset only; daylight saving is not automatic.' in device_sheets
-    assert '"Terminal shows redacted events and runtime log level."' in device_sheets
+    assert '"Terminal shows recent events and the current log level."' in device_sheets
     assert '"reset %s  uptime %lus  mesh %s"' in device_sheets
 
 
@@ -1832,12 +1833,12 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert '"Radio", radio_status' in more_module
     assert '"Radio"' in radio_module
     assert '"Canada preset"' in radio_module
-    assert '"Live RF matches saved profile"' in radio_module
-    assert '"Saved profile pending next radio start/apply"' in radio_module
+    assert '"Radio matches saved settings"' in radio_module
+    assert '"Saved settings apply when the radio restarts"' in radio_module
     assert '"Radio saved; RF apply pending"' in source
     assert '"Restore Canada"' in radio_module
     assert '"Save"' in radio_module
-    assert '"RX Boost On"' in radio_module
+    assert '"Receive boost: On"' in radio_module
     assert "lv_obj_set_size(controller->sheet, 480, 480)" in radio_module
     assert "D1L_UI_RADIO_SETTINGS_ACTION_FREQ_DOWN" in radio_header
     assert "controller->edit.frequency_hz -= 25000UL" in radio_module

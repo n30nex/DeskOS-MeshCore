@@ -118,7 +118,7 @@ def test_diagnostics_render_is_snapshot_only_and_read_only():
     ):
         assert f'"{line}"' in render
     assert '"Crashlog  Events  Serial"' in render
-    assert '"Terminal shows redacted events and runtime log level."' in render
+    assert '"Terminal shows recent events and the current log level."' in render
     assert '"Open Terminal"' in render
     assert "D1L_UI_DEVICE_SHEETS_ACTION_OPEN_TERMINAL" in render
     assert "D1L_RELEASE_FEATURE_MUTABLE_TERMINAL" in render

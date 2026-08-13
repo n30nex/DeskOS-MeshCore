@@ -20,8 +20,8 @@ const char *d1l_ui_dm_identity_reason_text(
     d1l_ui_dm_identity_reason_t reason)
 {
     return reason == D1L_UI_DM_IDENTITY_READY ?
-        "Verified canonical chat Contact." :
-        "Heard node only; add or import a verified chat Contact.";
+        "Verified contact. Ready for private messages." :
+        "Add this nearby node as a verified contact to message it.";
 }
 
 void d1l_ui_modal_hide(lv_obj_t *object)
@@ -103,14 +103,14 @@ static void test_truthful_render_actions_generation_and_cleanup(void)
     assert(lv_test_has_label(controller.sheet,
                              "Last signal -88 dBm  |  SNR -3.5"));
     assert(lv_test_has_label(controller.sheet,
-                             "Advert location 43.675000, -79.440000"));
+                             "Shared location 43.675000, -79.440000"));
     assert(lv_test_has_label(controller.sheet,
                              "Heard on this boot  |  3 sightings"));
     assert(lv_test_has_label(controller.sheet,
-                             "Advanced identity  0123456789abcdef  |  key retained"));
+                             "Advanced identity  0123456789abcdef  |  key saved"));
     assert(lv_test_has_label(
         controller.sheet,
-        "Messaging unavailable [heard_only]: Heard node only; add or import a verified chat Contact."));
+        "Messaging unavailable: Add this nearby node as a verified contact to message it."));
     assert(lv_test_has_label(controller.sheet, "Admin"));
     assert(lv_test_has_label(controller.sheet,
                              "Verified server; local authenticated login required."));
@@ -164,7 +164,7 @@ static void test_ready_dm_close_and_invalid_models_fail_closed(void)
         &controller, &view_model, handle_action, (void *)0x1234));
     assert(lv_test_has_label(
         controller.sheet,
-        "Messaging ready [ready]: Verified canonical chat Contact."));
+        "Messaging ready: Verified contact. Ready for private messages."));
     assert(!lv_test_has_label(controller.sheet, "Admin"));
 
     const size_t before = s_action_count;

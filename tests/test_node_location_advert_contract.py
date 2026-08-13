@@ -328,7 +328,7 @@ def test_product_contract_has_manual_center_and_no_onboard_gps_claim():
     assert "GPS/location" in core_guide
     assert "saved manual location" not in core_guide
     assert "D1L has no onboard GPS" in ui_spec
-    assert "Advert location" in ui_spec
+    assert "Shared location" in ui_spec
 
 
 def test_legacy_node_and_contact_roles_migrate_fail_closed():

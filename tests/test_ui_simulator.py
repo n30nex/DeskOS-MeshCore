@@ -33,6 +33,58 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
     report = ui_simulator.generate(tmp_path)
 
     assert report["ok"] is True
+
+
+def test_primary_surfaces_use_end_user_copy(tmp_path):
+    report = ui_simulator.generate(tmp_path)
+    primary_views = {
+        "home",
+        "messages",
+        "messages_public",
+        "messages_channel_private",
+        "messages_dm",
+        "nodes",
+        "map",
+        "settings",
+        "settings_advanced_expanded",
+        "compose_sheet",
+        "compose_invalid_sheet",
+        "compose_busy_sheet",
+        "compose_retry_sheet",
+        "compose_protocol_time_sheet",
+        "public_history_sheet",
+        "public_search_sheet",
+        "radio_settings_sheet",
+        "storage_setup_sheet",
+        "display_settings_sheet",
+        "ble_setup_sheet",
+        "contact_detail_sheet",
+        "contact_incomplete_detail_sheet",
+        "contact_noncanonical_detail_sheet",
+        "node_detail_sheet",
+        "first_start_radio",
+        "first_start_storage_map",
+        "first_start_channels",
+    }
+    banned = (
+        "retained history",
+        "sent over rf",
+        "protocol time",
+        "txdone",
+        "runtime artifact",
+        "canonical onboarding api",
+        "signed advert e6",
+        "contact_not_canonical",
+        "identity_incomplete",
+        "live rf matches",
+        "rx boost",
+    )
+    for view in report["views"]:
+        if view["name"] not in primary_views:
+            continue
+        copy = "\n".join(view["labels"]).lower()
+        for phrase in banned:
+            assert phrase not in copy, (view["name"], phrase)
     assert report["scenario"] == "default"
     assert report["display"] == {"width": 480, "height": 480}
     assert report["snapshot_counts"]["heard"] == 3
@@ -215,7 +267,7 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert public_history["public_history_page_limit"] == 5
     assert public_history["public_history_load_older_available"] is True
     assert "Load Older" in set(views["public_history_sheet"]["labels"])
-    assert "Sent over RF" in public_history["public_history_rendered_states"]
+    assert "Sent by radio" in public_history["public_history_rendered_states"]
 
 
 def test_nodes_role_summary_uses_exact_render_query_roles(tmp_path):
@@ -312,7 +364,7 @@ def test_dm_simulator_projects_one_latest_row_per_conversation() -> None:
     assert surface.metrics["dm_conversation_count"] == 1
     assert surface.metrics["dm_rendered_count"] == 1
     assert surface.metrics["dm_rendered_states"] == [
-        "1 unread | Awaiting ACK"
+        "1 unread | Checking delivery"
     ]
 
 
@@ -474,7 +526,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     public_metrics = views_by_name["messages_public"]["metrics"]
     assert public_metrics["public_outgoing_bubbles"] == 1
     assert public_metrics["public_incoming_bubbles"] == 1
-    assert public_metrics["public_rendered_states"] == ["New", "Sent over RF"]
+    assert public_metrics["public_rendered_states"] == ["New", "Sent by radio"]
     assert public_metrics["public_time_validity_truthful"] is True
     assert public_metrics["public_sticky_compose"] is True
     assert {
@@ -531,7 +583,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Settings", "Storage & maps", "SD Card", "Map options", "Signed update"} <= labels_by_view["settings_storage_maps_expanded"]
     assert {"Settings", "Device", "Display", "Notifications", "Identity"} <= labels_by_view["settings_device_expanded"]
     assert {"Settings", "Support", "About", "Version 1.0.0"} <= labels_by_view["settings_support_expanded"]
-    assert {"Settings", "Advanced", "Radio", "Server admin", "Mesh advertise"} <= labels_by_view["settings_advanced_expanded"]
+    assert {"Settings", "Advanced", "Radio", "Server admin", "Share this node"} <= labels_by_view["settings_advanced_expanded"]
     assert {
         "Wi-Fi",
         "Connection and saved network",
@@ -549,10 +601,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Enable",
     } <= labels_by_view["wifi_setup_sheet"]
     assert {
-        "BLE Setup",
-        "Companion state",
-        "Companion BLE is available for measured local setup.",
-        "Pairing controls require a measured BLE runtime artifact.",
+        "Bluetooth",
+        "Companion connection",
+        "Bluetooth companion connections are available.",
+        "Enable Bluetooth, then tap Pair from this screen.",
         "Enable",
         "Pair",
         "Forget",
@@ -561,7 +613,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Diagnostics", "Health", "Crashlog  Events  Serial", "Open Terminal"} <= labels_by_view["diagnostics_sheet"]
     assert {"Message Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
     assert {"DM YKF Corebot", "Direct message", "reply to YKF Corebot", "20 chars | 20/138 B", "Send", "Clear", "Close"} <= labels_by_view["compose_dm_sheet"]
-    assert {"Radio", "Canada preset", "Freq 910.525 MHz", "-25k", "+25k", "Change bandwidth", "Restore Canada", "Save"} <= labels_by_view["radio_settings_sheet"]
+    assert {"Radio", "Canada preset", "Frequency 910.525 MHz", "-25k", "+25k", "Change bandwidth", "Restore Canada", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
         "Storage",
         "Back",
@@ -600,17 +652,17 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Map tiles",
         "Exports",
     }
-    assert {"Mesh Roles", "Back", "Rooms", "Repeaters", "Large meshes stay bounded"} <= labels_by_view["mesh_roles_sheet"]
+    assert {"Mesh Roles", "Back", "Rooms", "Repeaters", "Large networks show recent results first"} <= labels_by_view["mesh_roles_sheet"]
     assert {"Rooms", "Back", "Room servers", "All shown"} <= labels_by_view["mesh_rooms_page"]
     assert {"Repeaters", "Back", "Repeater candidates", "All shown"} <= labels_by_view["mesh_repeaters_page"]
-    assert {"Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"} <= labels_by_view["advert_sheet"]
+    assert {"Share Node", "Nearby", "Wide area", "Wide Area", "Close"} <= labels_by_view["advert_sheet"]
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
     assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
     assert {"Message Detail", "Back", "Sender", "Message", "Technical details", "Reply"} <= labels_by_view["message_detail_sheet"]
     assert {
-        "DM unavailable [sender_name_unverified]",
-        "Public sender names have no verified full key.",
+        "Private message unavailable",
+        "This sender has not been verified for private messages.",
         "DM sender",
     } <= labels_by_view["message_detail_sheet"]
     assert {
@@ -636,14 +688,14 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Contact options",
     } <= labels_by_view["contact_detail_sheet"]
     assert {
-        "Messaging unavailable [identity_incomplete]",
-        "Identity has no complete verified full key.",
+        "Messaging unavailable",
+        "This identity is incomplete and cannot receive private messages.",
         "Contact options",
     } <= labels_by_view["contact_incomplete_detail_sheet"]
     assert "Message" not in labels_by_view["contact_incomplete_detail_sheet"]
     assert {
-        "Messaging unavailable [contact_not_canonical]",
-        "Contact is not verified by signed advert or import.",
+        "Messaging unavailable",
+        "This contact could not be verified.",
         "Contact options",
     } <= labels_by_view["contact_noncanonical_detail_sheet"]
     assert "Message" not in labels_by_view["contact_noncanonical_detail_sheet"]
@@ -676,7 +728,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Role Chat",
         "Direct route  |  reachable",
         "Last signal -41 dBm / 30 dB",
-        "Advert location not provided",
+        "Location not shared",
         "Heard on this boot  |  24 sightings",
         "Close",
     } <= labels_by_view["node_detail_sheet"]
@@ -698,8 +750,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert "new" not in labels_by_view["dm_thread_sheet"]
     assert {"YKF Corebot", "Back", "Less detail", "Search", "Technical details", "Message this contact"} <= labels_by_view["dm_thread_details_sheet"]
     assert {"DM Search", "Search this conversation", "Apply", "Clear", "Close"} <= labels_by_view["dm_search_sheet"]
-    assert "No retained messages match this search." in labels_by_view["dm_thread_search_no_match"]
-    assert "No retained messages in this conversation." in labels_by_view["dm_thread_empty_sheet"]
+    assert "No saved messages match this search." in labels_by_view["dm_thread_search_no_match"]
+    assert "No saved messages in this conversation." in labels_by_view["dm_thread_empty_sheet"]
     assert {"Route Trace", "YKF Corebot", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Trace"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {
@@ -742,8 +794,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     } <= labels_by_view["first_start_radio"]
     assert {
         "Prepare storage & maps",
-        "SD card: not ready; prepare FAT32 externally",
-        "NRCan provider: not ready; install the prepared-card manifest",
+        "SD card: not ready; prepare it on a computer",
+        "Offline maps: not ready; run the SD card preparation tool",
         "Both checks are required before Continue.",
         "Continue",
     } <= labels_by_view["first_start_storage_map"]
@@ -890,7 +942,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert views["message_detail_technical_page"]["metrics"]["message_sticky_reply"] is True
     tx_detail = views["public_tx_detail_technical_page"]["metrics"]
     assert tx_detail["message_direction"] == "tx"
-    assert tx_detail["message_delivery_state"] == "Sent over RF"
+    assert tx_detail["message_delivery_state"] == "Sent by radio"
     assert tx_detail["message_signal_measured"] is False
     assert tx_detail["message_path_hops_measured"] is False
     assert tx_detail["message_reply_available"] is False
@@ -1295,24 +1347,24 @@ def test_first_start_storage_required_labels_follow_scenario(tmp_path):
         (
             "storage-no-card",
             {
-                "SD card: not ready; prepare FAT32 externally",
-                "NRCan provider: not ready; install the prepared-card manifest",
+                "SD card: not ready; prepare it on a computer",
+                "Offline maps: not ready; run the SD card preparation tool",
                 "Both checks are required before Continue.",
             },
         ),
         (
             "storage-ready-pending-migration",
             {
-                "SD card: ready (prepared FAT32)",
-                "NRCan provider: not ready; install the prepared-card manifest",
+                "SD card: ready",
+                "Offline maps: not ready; run the SD card preparation tool",
                 "Both checks are required before Continue.",
             },
         ),
         (
             "storage-ready-map-tiles-sd",
             {
-                "SD card: ready (prepared FAT32)",
-                "NRCan provider: manifest ready",
+                "SD card: ready",
+                "Offline maps: ready",
                 "Storage and maps are ready. Continue to channels.",
             },
         ),
@@ -2194,7 +2246,7 @@ def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_pat
     assert map_view["metrics"]["map_trust_loss_invalidates_retained_view"] is True
     assert map_view["metrics"]["map_backward_time_rechecks_future_pins"] is True
     assert map_view["metrics"]["map_pin_truth_legend"] == (
-        "Signed advert E6\nage verified\naccuracy unknown"
+        "Location shared by node\nrecently verified\naccuracy unknown"
     )
     assert map_view["metrics"]["map_saved_center_pin"] == "omitted"
     assert len(set(map_view["metrics"]["map_marker_colors"])) == 3
@@ -2218,7 +2270,7 @@ def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_pat
     assert all(target["destination"] == "map_node_detail_sheet" for target in marker_targets)
     assert all(target["rf_tx"] is False and target["formats_sd"] is False for target in marker_targets)
     assert "Krabs Lagoo..." in map_view["labels"]
-    assert any(label.startswith("Advert location ") for label in detail["labels"])
+    assert any(label.startswith("Shared location ") for label in detail["labels"])
     assert detail["metrics"]["node_detail_location_provenance"] == "advert"
     assert detail["metrics"]["node_detail_advert_location"] == "43.675000, -79.440000"
     assert detail["metrics"]["node_detail_dm_available"] is True
@@ -2246,7 +2298,7 @@ def test_ui_simulator_map_markers_fail_closed_without_verified_age():
     assert surface.metrics["map_marker_displayed_count"] == 0
     assert surface.metrics["map_marker_age_verified"] is False
     assert surface.metrics["map_pin_truth_legend"] == (
-        "Signed advert E6\npins hidden\nage unverified"
+        "Location hidden\nsource not verified"
     )
 
 

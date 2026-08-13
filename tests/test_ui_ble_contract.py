@@ -96,7 +96,7 @@ def test_ble_renderer_preserves_unavailable_truth_and_enables_real_actions():
     source = read("main/ui/ui_ble.c")
     connectivity = read("main/ui/ui_connectivity.c")
 
-    assert '"BLE Setup"' in source
+    assert '"Bluetooth"' in source
     assert '"Enable unavailable"' in source
     assert '"Pair unavailable"' in source
     assert '"Forget unavailable"' in source
@@ -108,6 +108,6 @@ def test_ble_renderer_preserves_unavailable_truth_and_enables_real_actions():
     assert "D1L_UI_BLE_ACTION_FORGET" in source
     assert "pairing_available" in source
     assert "forget_available" in source
-    assert '"BLE companion transport is unavailable in this release."' in connectivity
-    assert '"No BLE pairing or transport runtime is present."' in connectivity
-    assert '"USB remains available for recovery and diagnostics."' in connectivity
+    assert '"Bluetooth companion connections are unavailable."' in connectivity
+    assert '"Bluetooth pairing is unavailable."' in connectivity
+    assert '"USB stays available for recovery and diagnostics."' in connectivity

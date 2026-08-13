@@ -437,10 +437,10 @@ bool d1l_ui_node_detail_render(
             char longitude[16];
             format_advert_coordinate(latitude, sizeof(latitude), entry->lat_e6);
             format_advert_coordinate(longitude, sizeof(longitude), entry->lon_e6);
-            snprintf(line, sizeof(line), "Advert location %s, %s", latitude,
+            snprintf(line, sizeof(line), "Shared location %s, %s", latitude,
                      longitude);
         } else {
-            snprintf(line, sizeof(line), "Advert location not provided");
+            snprintf(line, sizeof(line), "Location not shared");
         }
         lv_obj_t *location = create_label(controller->sheet, line, 0x93C5FD);
         configure_dot_label(location, 392, 8, 184);
@@ -454,9 +454,8 @@ bool d1l_ui_node_detail_render(
     configure_dot_label(heard, 392, 8, 218);
     complete = heard != NULL && complete;
 
-    snprintf(line, sizeof(line), "Messaging %s [%s]: %s",
+    snprintf(line, sizeof(line), "Messaging %s: %s",
              controller->rendered.dm_can_open_compose ? "ready" : "unavailable",
-             d1l_ui_dm_identity_reason_code(controller->rendered.dm_reason),
              d1l_ui_dm_identity_reason_text(controller->rendered.dm_reason));
     lv_obj_t *dm_reason = create_label(
         controller->sheet, line,
@@ -470,7 +469,7 @@ bool d1l_ui_node_detail_render(
     }
     snprintf(line, sizeof(line), "Advanced identity  %.16s  |  key %s",
              entry->fingerprint[0] ? entry->fingerprint : "-",
-             view->keyed ? "retained" : "missing");
+             view->keyed ? "saved" : "missing");
     lv_obj_t *identity = create_label(controller->sheet, line, 0x8EA0AE);
     configure_dot_label(identity, 392, 8, 314);
     complete = identity != NULL && complete;

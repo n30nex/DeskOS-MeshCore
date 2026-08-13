@@ -344,13 +344,13 @@ def compose_eligibility(
     if validation == "too_long":
         return result(False, False, "too_long", "Message too long")
     if validation not in ("valid", "valid_utf8", "valid_boundary"):
-        return result(False, False, "invalid_text", "Invalid text")
+        return result(False, False, "invalid_text", "Unsupported text")
     if not snap.board_ready:
-        return result(False, False, "radio_unavailable", "Runtime unavailable")
+        return result(False, False, "radio_unavailable", "Device is still starting")
     if snap.mesh_service_state == "tx_busy":
-        return result(False, False, "radio_busy", "Radio busy")
+        return result(False, False, "radio_busy", "Please wait for the current send")
     if snap.mesh_service_state == "radio_error":
-        return result(False, False, "radio_error", "Radio error")
+        return result(False, False, "radio_error", "Radio needs attention")
     if snap.mesh_service_state == "initializing":
         return result(False, False, "radio_starting", "Radio starting")
     if snap.mesh_service_state == "waiting_for_radio":
@@ -358,9 +358,9 @@ def compose_eligibility(
     if snap.mesh_service_state != "ready" or not snap.radio_ready:
         return result(False, False, "radio_unavailable", "Radio unavailable")
     if snap.path_hash_bytes < 1 or snap.path_hash_bytes > 3:
-        return result(False, False, "route_policy_invalid", "Route settings invalid")
+        return result(False, False, "route_policy_invalid", "Check the route settings")
     if not snap.protocol_tx_ready:
-        return result(False, False, "protocol_time_unavailable", "Protocol time unavailable")
+        return result(False, False, "protocol_time_unavailable", "Time is not ready yet")
     if not is_dm:
         if not channel_found:
             return result(False, False, "channel_missing", "Channel unavailable")
@@ -368,27 +368,27 @@ def compose_eligibility(
             return result(False, False, "channel_not_sendable", "Channel disabled")
     else:
         if not snap.settings_load_ok:
-            return result(False, False, "settings_unavailable", "Settings need recovery")
+            return result(False, False, "settings_unavailable", "Settings need attention")
         if snap.identity_state == "inconsistent":
-            return result(False, False, "identity_inconsistent", "Identity needs recovery")
+            return result(False, False, "identity_inconsistent", "Identity needs attention")
         if not contact_found:
             return result(False, False, "contact_missing", "Contact unavailable")
         if not contact_sendable:
-            return result(False, False, "contact_not_sendable", "Contact cannot receive DM")
+            return result(False, False, "contact_not_sendable", "This contact cannot receive messages")
         if snap.dm_delivery_active:
-            return result(False, False, "dm_delivery_active", "Prior DM still active")
+            return result(False, False, "dm_delivery_active", "Previous message is still sending")
     if previous_send_error == "timeout":
-        return result(True, True, "retry_timeout", "Retry ready: timeout")
+        return result(True, True, "retry_timeout", "Not sent. Tap Retry")
     if previous_send_error == "no_memory":
-        return result(True, True, "retry_memory", "Retry ready: low memory")
+        return result(True, True, "retry_memory", "Not sent. Tap Retry")
     if previous_send_error == "invalid_state":
-        return result(True, True, "retry_rejected", "Retry ready: rejected")
+        return result(True, True, "retry_rejected", "Not sent. Tap Retry")
     if previous_send_error in ("invalid_arg", "invalid_size"):
         return result(False, False, "edit_required", "Edit message before retry")
     if previous_send_error == "not_found" and is_dm:
-        return result(False, False, "reselect_contact", "Reselect contact to retry")
+        return result(False, False, "reselect_contact", "Choose the contact again")
     if previous_send_error != "none":
-        return result(False, False, "recovery_required", "Recovery required before retry")
+        return result(False, False, "recovery_required", "Fix the issue before retrying")
     return result(True, False, "ready", "Ready to send")
 
 
@@ -424,10 +424,10 @@ def sample_snapshot() -> Snapshot:
         contacts=(bot, room),
         heard=(bot, room, repeater),
         public_messages=(
-            Message("YKF Corebot", "Public test reply received", "RX new, RSSI -41", True, seq=1),
-            Message("Local Meshcorebot", "test ack on Public", "RX new, 1 hop", True, seq=2),
+            Message("YKF Corebot", "Public test reply received", "Received, strong signal", True, seq=1),
+            Message("Local Meshcorebot", "test ack on Public", "Received, 1 hop", True, seq=2),
             Message(
-                "D1L Desk", "test", "TX done, seq 31",
+                "D1L Desk", "test", "Sent, message 31",
                 direction="tx", delivery_state="tx_done",
                 seq=3,
             ),
@@ -460,7 +460,7 @@ def sample_snapshot() -> Snapshot:
         ),
         routes=(
             Packet("Public route", "RX", "target Public hop 1", "via Krabs Lagoon", ""),
-            Packet("DM route", "TX", "target 0BF0A direct", "direct path retained", ""),
+            Packet("DM route", "TX", "target 0BF0A direct", "direct route saved", ""),
         ),
         storage_sd_present=False,
         storage_sd_mounted=False,
@@ -503,12 +503,12 @@ def sample_snapshot() -> Snapshot:
         channel_messages=(
             Message(
                 "Ops Relay", "private channel row stays isolated",
-                "RX new, exact channel 2", unread=True, seq=40,
+                "Received on this channel", unread=True, seq=40,
                 channel_id=2,
             ),
             Message(
                 "D1L Desk", "ops-only acknowledgement",
-                "TX done, exact channel 2", direction="tx",
+                "Sent on this channel", direction="tx",
                 delivery_state="tx_done", seq=41, channel_id=2,
             ),
         ),
@@ -697,7 +697,7 @@ def large_mesh_snapshot() -> Snapshot:
             "Public" if i % 3 else f"Long Alias Sender {i:02d}",
             f"large simulated public message {i:02d} with enough text to truncate safely",
             (
-                f"TX done seq {200 + i}, path retained"
+                f"Sent message {200 + i}, route saved"
                 if i % 3 == 1 else
                 f"RX seq {200 + i}, RSSI -{40 + (i % 9)}, hop {i % 4}"
             ),
@@ -809,12 +809,12 @@ def large_mesh_snapshot() -> Snapshot:
         channel_messages=(
             Message(
                 "Ops Relay", "private channel row stays isolated",
-                "RX new, exact channel 2", unread=True, seq=40,
+                "Received on this channel", unread=True, seq=40,
                 channel_id=2,
             ),
             Message(
                 "D1L Desk", "ops-only acknowledgement",
-                "TX done, exact channel 2", direction="tx",
+                "Sent on this channel", direction="tx",
                 delivery_state="tx_done", seq=41, channel_id=2,
             ),
         ),
@@ -1481,13 +1481,13 @@ def node_role_counts(nodes: tuple[Node, ...]) -> dict[str, int]:
 
 
 DM_IDENTITY_REASON_TEXT = {
-    "ready": "Verified canonical chat Contact.",
-    "sender_name_unverified": "Public sender names have no verified full key.",
-    "identity_incomplete": "Identity has no complete verified full key.",
-    "heard_only": "Heard node only; add or import a verified chat Contact.",
-    "contact_missing": "Contact is no longer retained; refresh Contacts.",
-    "contact_not_canonical": "Contact is not verified by signed advert or import.",
-    "identity_mismatch": "Identity full key does not match this Contact.",
+    "ready": "Verified contact. Ready for private messages.",
+    "sender_name_unverified": "This sender has not been verified for private messages.",
+    "identity_incomplete": "This identity is incomplete and cannot receive private messages.",
+    "heard_only": "Add this nearby node as a verified contact to message it.",
+    "contact_missing": "This contact is no longer available. Refresh Contacts.",
+    "contact_not_canonical": "This contact could not be verified.",
+    "identity_mismatch": "This contact does not match the saved identity.",
     "role_not_dm_capable": "This verified role does not support direct chat.",
 }
 
@@ -2667,7 +2667,7 @@ def render_messages(s: Surface, snap: Snapshot):
 
 def public_message_state(msg: Message) -> str:
     if msg.direction == "tx":
-        return "Sent over RF"
+        return "Sent by radio"
     return "New" if msg.unread else "Received"
 
 
@@ -2675,8 +2675,8 @@ def snapshot_after_incoming_public(snap: Snapshot) -> Snapshot:
     next_seq = max((message.seq for message in snap.public_messages), default=0) + 1
     incoming = Message(
         "Incoming peer",
-        "incoming Public event retained while this surface stays open",
-        "RX new, refresh only",
+        "incoming Public message while this screen stays open",
+        "Received just now",
         unread=True,
         direction="rx",
         seq=next_seq,
@@ -2719,14 +2719,14 @@ def render_messages_public(s: Surface, snap: Snapshot):
     visible = selected_messages[-visible_limit:]
     y = 68
     if store_state == "loading":
-        y = draw_messages_notice(s, y, "Loading retained history...", BLUE)
+        y = draw_messages_notice(s, y, "Loading saved messages...", BLUE)
     elif store_state == "degraded":
         y = draw_messages_notice(
-            s, y, "Storage degraded; readable RAM history remains.", AMBER
+            s, y, "Storage needs attention. Recent messages are still available.", AMBER
         )
     elif store_state == "unavailable":
         y = draw_messages_notice(
-            s, y, "Persistence unavailable; readable RAM history remains.", RED
+            s, y, "Messages cannot be saved. Recent messages are still available.", RED
         )
     outgoing_bubbles = 0
     incoming_bubbles = 0
@@ -2759,7 +2759,7 @@ def render_messages_public(s: Surface, snap: Snapshot):
         )
         s.wrapped_text(msg.text, (bubble[0] + 8, y + 28, bubble[2] - 8, y + 58), 11, TEXT, line_height=14)
         s.text(
-            ("path retained | details >" if outgoing else f"{msg.meta} | details >"),
+            ("Route saved | details >" if outgoing else f"{msg.meta} | details >"),
             (bubble[0] + 8, y + 60, bubble[2] - 8, y + 76),
             9,
             MUTED,
@@ -2774,7 +2774,7 @@ def render_messages_public(s: Surface, snap: Snapshot):
         y += 86
     if not visible:
         empty_text = (
-            "Loading retained channel history..."
+            "Loading saved messages..."
             if store_state == "loading" else
             "No readable channel history in RAM."
             if store_state == "unavailable" else
@@ -2949,8 +2949,8 @@ def snapshot_after_incoming_selected_dm(snap: Snapshot) -> Snapshot:
     next_seq = max((message.seq for message in snap.dm_messages), default=0) + 1
     incoming = Message(
         alias,
-        "incoming DM retained while the selected conversation stays open",
-        "RX new, exact conversation refresh",
+        "incoming message while the selected conversation stays open",
+        "Received just now",
         unread=True,
         direction="rx",
         seq=next_seq,
@@ -2994,22 +2994,22 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
         for message in snap.dm_messages
     )
     if store_state == "loading":
-        y = draw_messages_notice(s, y, "Loading retained history...", BLUE)
+        y = draw_messages_notice(s, y, "Loading saved messages...", BLUE)
     elif store_state == "degraded":
         y = draw_messages_notice(
-            s, y, "Storage degraded; readable RAM history remains.", AMBER
+            s, y, "Storage needs attention. Recent messages are still available.", AMBER
         )
     elif store_state == "unavailable":
         y = draw_messages_notice(
-            s, y, "Persistence unavailable; readable RAM history remains.", RED
+            s, y, "Messages cannot be saved. Recent messages are still available.", RED
         )
     if retry_active:
         y = draw_messages_notice(
-            s, y, "A bounded delivery retry is in progress.", BLUE
+            s, y, "Trying to deliver the message again.", BLUE
         )
     if failure_latched:
         y = draw_messages_notice(
-            s, y, "A final delivery failure is retained; open for details.", RED
+            s, y, "A message could not be delivered. Open it for details.", RED
         )
     unread_by_source: dict[str, int] = {}
     for message in snap.dm_messages:
@@ -3061,11 +3061,11 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
         dm_rendered += 1
     if not summaries:
         empty_text = (
-            "Loading retained direct-message history..."
+            "Loading saved conversations..."
             if store_state == "loading" else
             "No readable direct-message history in RAM."
             if store_state == "unavailable" else
-            "No DM contacts available. Add a verified chat contact."
+            "No messaging contacts yet. Add a verified contact."
             if dm_capable_contact_count == 0 else
             "No direct-message history yet."
         )
@@ -3183,7 +3183,7 @@ def messages_delivery_state_snapshot(
 ) -> Snapshot:
     state_message = Message(
         "D1L Desk",
-        "retained delivery state",
+        "saved delivery status",
         "open for exact delivery details",
         direction="tx",
         delivery_state=delivery_state,
@@ -3200,7 +3200,7 @@ def messages_delivery_state_snapshot(
     newer_rows = tuple(
         Message(
             f"Newer contact {index}",
-            f"newer retained row {index}",
+            f"newer saved message {index}",
             "acknowledged",
             direction="tx",
             delivery_state="acknowledged",
@@ -3269,9 +3269,9 @@ def node_route_display(node: Node) -> str:
     if "2 hop" in meta or "two hop" in meta:
         return "2 hops"
     if "flood" in meta:
-        return "Flood"
+        return "Broadcast"
     if "quiet" in meta:
-        return "Quiet"
+        return "Not heard"
     return "Heard"
 
 
@@ -3805,9 +3805,9 @@ def render_map(s: Surface, snap: Snapshot):
         draw_button(s, (420, 92, 472, 144), "-", TEXT, action="map_zoom_out")
 
     pin_truth = (
-        "Signed advert E6\nage verified\naccuracy unknown"
+        "Location shared by node\nrecently verified\naccuracy unknown"
         if snap.map_marker_age_reference_valid
-        else "Signed advert E6\npins hidden\nage unverified"
+        else "Location hidden\nsource not verified"
     )
     s.round_rect((112, 298, 224, 356), (7, 16, 24), (7, 16, 24), 4)
     s.wrapped_text(
@@ -4252,8 +4252,8 @@ def more_category_specs(
     if not core:
         advanced_leaves.append(
             (
-                "Mesh advertise",
-                "Broadcast presence",
+                "Share this node",
+                "Let nearby devices find you",
                 AMBER,
                 "open_advert_sheet",
                 "advert_sheet",
@@ -4403,16 +4403,16 @@ def more_category_specs(
             {
                 "key": "storage_maps",
                 "title": "Storage",
-                "summary": "Retained internal storage",
+                "summary": "Built-in storage",
                 "color": AMBER,
                 "warning": snap.storage_retained_backup_degraded,
                 "action": "toggle_more_storage_maps",
                 "leaves": (
                     (
                         "Storage",
-                        "Internal NVS issue"
+                        "Built-in storage issue"
                         if snap.storage_retained_backup_degraded
-                        else "Internal NVS",
+                        else "Built-in storage",
                         RED if snap.storage_retained_backup_degraded else TEXT,
                         "open_storage_setup",
                         "storage_setup_sheet",
@@ -4535,7 +4535,7 @@ def more_category_specs(
             "color": AMBER,
             "warning": False,
             "action": "toggle_more_advanced",
-            "leaves": (("Mesh advertise", "Broadcast presence", AMBER, "open_advert_sheet", "advert_sheet", False),),
+            "leaves": (("Share this node", "Let nearby devices find you", AMBER, "open_advert_sheet", "advert_sheet", False),),
         },
     )
 
@@ -4802,8 +4802,8 @@ def render_compose_oversize_sheet(s: Surface, snap: Snapshot):
 
 def render_compose_invalid_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
-        s, snap, sample="Invalid UTF-8 input rejected",
-        counter="Invalid text | 3/138 B", validation="invalid_utf8",
+        s, snap, sample="This text is not supported",
+        counter="Unsupported text | 3/138 B", validation="invalid_utf8",
         byte_count=3, character_count=None,
     )
 
@@ -4824,11 +4824,11 @@ def render_compose_busy_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s,
         replace(snap, mesh_service_state="tx_busy"),
-        sample="send after current TX",
+        sample="send this after the current message",
         counter="",
         validation="valid",
-        byte_count=21,
-        character_count=21,
+        byte_count=35,
+        character_count=35,
     )
 
 
@@ -4836,11 +4836,11 @@ def render_compose_retry_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s,
         snap,
-        sample="draft retained after timeout",
+        sample="my draft is still here",
         counter="",
         validation="valid",
-        byte_count=28,
-        character_count=28,
+        byte_count=22,
+        character_count=22,
         previous_send_error="timeout",
     )
 
@@ -4875,11 +4875,11 @@ def render_compose_protocol_time_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s,
         replace(snap, protocol_tx_ready=False),
-        sample="draft retained safely",
+        sample="my draft is still here",
         counter="",
         validation="valid",
-        byte_count=21,
-        character_count=21,
+        byte_count=22,
+        character_count=22,
     )
 
 
@@ -4887,11 +4887,11 @@ def render_compose_dm_no_contact_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s,
         snap,
-        sample="private draft retained",
+        sample="private draft stays here",
         counter="",
         validation="valid",
-        byte_count=22,
-        character_count=22,
+        byte_count=24,
+        character_count=24,
         is_dm=True,
         contact_found=False,
         contact_sendable=False,
@@ -4932,19 +4932,19 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(
         s,
         "Public History" if selected_channel.channel_id == 1
-        else "Channel History",
-        (f"showing {min(len(selected_messages), public_page_limit)}/{len(selected_messages)} retained"
+        else "History",
+        (f"Showing {min(len(selected_messages), public_page_limit)} of {len(selected_messages)} saved"
          if selected_channel.channel_id == 1 else
-         f"{selected_channel.name}  showing {min(len(selected_messages), public_page_limit)}/{len(selected_messages)} retained"),
+         f"{selected_channel.name}  Showing {min(len(selected_messages), public_page_limit)} of {len(selected_messages)} saved"),
     )
     draw_button(
-        s, (246, 94, 306, 134), "Search", BLUE,
+        s, (232, 94, 300, 134), "Search", BLUE,
         action="open_public_search" if selected_channel.channel_id == 1
         else "open_channel_search",
         destination="public_search_sheet" if selected_channel.channel_id == 1
         else "channel_search_private_sheet",
     )
-    draw_button(s, (312, 94, 368, 134), "Clear", ACCENT, action="clear_public_search")
+    draw_button(s, (306, 94, 368, 134), "Clear", ACCENT, action="clear_public_search")
     draw_button(
         s, (374, 94, 436, 134), "Close", MUTED,
         action="close_public_history",
@@ -4992,7 +4992,7 @@ def render_public_search_sheet(s: Surface, snap: Snapshot):
         s,
         "Public Search" if selected_channel.channel_id == 1
         else f"Search {selected_channel.name}",
-        "Filter retained channel rows",
+        "Search saved messages",
     )
     s.round_rect((44, 158, 436, 210), SURFACE_2, BORDER, 8)
     s.touch_target("Search author or message", (44, 158, 436, 210), kind="text_field", action="edit_public_search")
@@ -5035,7 +5035,7 @@ def render_message_detail_page(s: Surface, snap: Snapshot, *, technical_details:
     s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
     s.text("Sender", (28, 128, 160, 148), 13, MUTED, True)
     s.text(f"{msg.source}  received", (28, 148, 452, 174), 16, TEXT)
-    s.text("DM unavailable [sender_name_unverified]", (28, 178, 452, 198), 12, AMBER, True)
+    s.text("Private message unavailable", (28, 178, 452, 198), 12, AMBER, True)
     s.text(DM_IDENTITY_REASON_TEXT["sender_name_unverified"], (28, 198, 452, 218), 11, MUTED)
     s.text("Message", (28, 224, 160, 244), 13, MUTED, True)
     wrapped_lines, message_end_y = s.wrapped_text(
@@ -5104,7 +5104,7 @@ def render_message_detail_technical_page(s: Surface, snap: Snapshot):
 def render_public_tx_detail_technical_page(s: Surface, snap: Snapshot):
     msg = next(
         (entry for entry in reversed(snap.public_messages) if entry.direction == "tx"),
-        Message("You", "No retained outbound message", "", direction="tx"),
+        Message("You", "No saved outbound message", "", direction="tx"),
     )
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
@@ -5114,24 +5114,24 @@ def render_public_tx_detail_technical_page(s: Surface, snap: Snapshot):
     )
     s.text("Message Detail", (112, 62, 464, 90), 22, TEXT, True)
     s.text("You", (112, 90, 180, 112), 12, ACCENT)
-    s.text("Sent over RF", (188, 90, 320, 112), 12, MUTED)
+    s.text("Sent by radio", (188, 90, 320, 112), 12, MUTED)
     s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
     s.text("Message", (28, 132, 160, 152), 13, MUTED, True)
     s.wrapped_text(msg.text, (28, 156, 452, 206), 15, TEXT, line_height=22)
     s.text("Technical details", (28, 220, 300, 244), 14, BLUE, True)
     s.text(
-        "Signal not measured for retained Public TxDone",
+        "Signal was not recorded for this sent message",
         (28, 252, 452, 278), 12, MUTED,
     )
     s.text(
-        "Path hops not measured for retained Public TxDone",
+        "Hop count was not recorded for this sent message",
         (28, 286, 452, 312), 12, MUTED,
     )
-    s.text("Path hash retained | result TxDone", (28, 320, 452, 346), 12, MUTED)
+    s.text("Path signature saved after send", (28, 320, 452, 346), 12, MUTED)
     s.metrics.update(
         {
             "message_direction": "tx",
-            "message_delivery_state": "Sent over RF",
+            "message_delivery_state": "Sent by radio",
             "message_signal_measured": False,
             "message_path_hops_measured": False,
             "message_reply_available": False,
@@ -5184,7 +5184,7 @@ def render_contact_detail_page(s: Surface, snap: Snapshot, dm_reason: str):
             action="open_dm_compose", destination="compose_dm_sheet",
         )
     else:
-        s.text(f"Messaging unavailable [{dm_reason}]", (16, 238, 464, 260), 13, AMBER, True)
+        s.text("Messaging unavailable", (16, 238, 464, 260), 13, AMBER, True)
         s.wrapped_text(
             DM_IDENTITY_REASON_TEXT[dm_reason],
             (16, 262, 464, 304),
@@ -5355,11 +5355,14 @@ def render_node_detail_page(
         if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
         else "not provided"
     )
-    s.text(f"Advert location {location}", (20, 184, 412, 206), 13, BLUE)
+    s.text(
+        f"Shared location {location}" if location != "not provided" else "Location not shared",
+        (20, 184, 412, 206), 13, BLUE,
+    )
     s.text("Heard on this boot  |  24 sightings", (20, 218, 412, 240), 13, MUTED)
-    status = "DM ready" if dm_available else "DM unavailable"
+    status = "Messaging ready" if dm_available else "Messaging unavailable"
     s.wrapped_text(
-        f"{status} [{dm_reason}]: {DM_IDENTITY_REASON_TEXT[dm_reason]}",
+        f"{status}: {DM_IDENTITY_REASON_TEXT[dm_reason]}",
         (20, 250, 412, 304),
         12,
         GREEN if dm_available else AMBER,
@@ -5367,7 +5370,7 @@ def render_node_detail_page(
     )
     s.text(
         f"Advanced identity  {node.fingerprint}  |  key "
-        f"{'retained' if node.public_key_hex else 'missing'}",
+        f"{'saved' if node.public_key_hex else 'missing'}",
         (20, 314, 412, 336),
         11,
         MUTED,
@@ -5490,28 +5493,28 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
         action="close_radio_settings", destination="active_tab",
     )
     s.text("Canada preset", (20, 58, 280, 88), 22, GREEN, True)
-    s.text("910.525 MHz  |  BW 62.5  |  SF7 / CR5", (20, 88, 428, 110), 13, GREEN)
+    s.text("910.525 MHz | 62.5 kHz | Spread 7 | Coding 5", (20, 88, 428, 110), 13, GREEN)
     s.text(
-        "Live RF matches saved profile" if snap.radio_applied
-        else "Saved profile pending next radio start/apply",
+        "Radio matches saved settings" if snap.radio_applied
+        else "Saved settings apply when the radio restarts",
         (20, 112, 428, 134),
         12,
         GREEN if snap.radio_applied else AMBER,
     )
-    s.text("Freq 910.525 MHz", (20, 158, 238, 180), 13, TEXT, True)
+    s.text("Frequency 910.525 MHz", (20, 158, 238, 180), 13, TEXT, True)
     draw_button(s, (246, 146, 330, 190), "-25k", ACCENT, action="radio_freq_down")
     draw_button(s, (338, 146, 422, 190), "+25k", ACCENT, action="radio_freq_up")
-    s.text("BW 62.5 kHz", (20, 208, 238, 230), 13, TEXT, True)
+    s.text("Bandwidth 62.5 kHz", (20, 208, 238, 230), 13, TEXT, True)
     draw_button(s, (246, 196, 422, 240), "Change bandwidth", ACCENT, action="radio_cycle_bandwidth")
-    s.text("SF 7", (20, 258, 68, 280), 13, TEXT, True)
-    draw_button(s, (72, 246, 136, 290), "SF-", ACCENT, action="radio_sf_down")
-    draw_button(s, (144, 246, 208, 290), "SF+", ACCENT, action="radio_sf_up")
-    s.text("CR 5", (238, 258, 310, 280), 13, TEXT, True)
+    s.text("Spread 7", (20, 258, 100, 280), 13, TEXT, True)
+    draw_button(s, (104, 246, 160, 290), "-", ACCENT, action="radio_sf_down")
+    draw_button(s, (168, 246, 224, 290), "+", ACCENT, action="radio_sf_up")
+    s.text("Coding 5", (238, 258, 310, 280), 13, TEXT, True)
     draw_button(s, (318, 246, 422, 290), "Change", ACCENT, action="radio_cycle_cr")
-    s.text("TX 20 dBm", (20, 308, 100, 330), 13, TEXT, True)
-    draw_button(s, (96, 296, 160, 340), "TX-", ACCENT, action="radio_tx_power_down")
-    draw_button(s, (168, 296, 232, 340), "TX+", ACCENT, action="radio_tx_power_up")
-    draw_button(s, (246, 296, 422, 340), "RX Boost On", GREEN, action="radio_toggle_rx_boost")
+    s.text("Power 20 dBm", (20, 308, 108, 330), 13, TEXT, True)
+    draw_button(s, (112, 296, 168, 340), "-", ACCENT, action="radio_tx_power_down")
+    draw_button(s, (176, 296, 232, 340), "+", ACCENT, action="radio_tx_power_up")
+    draw_button(s, (246, 296, 422, 340), "Receive boost: On", GREEN, action="radio_toggle_rx_boost")
     draw_button(s, (8, 378, 208, 426), "Restore Canada", BLUE, action="radio_defaults")
     draw_button(
         s, (216, 378, 422, 426), "Save", GREEN,
@@ -5824,7 +5827,7 @@ def render_display_settings_sheet(s: Surface, snap: Snapshot):
     s.text("Screen controls", (44, 154, 436, 178), 15, GREEN, True)
     s.text("Brightness, night mode, contrast, and timeout belong here.", (44, 194, 436, 236), 13, TEXT)
     s.wrapped_text(
-        "Touch display controls are staged until backlight/runtime persistence is wired.",
+        "Touch the screen to wake it. Night mode keeps your daytime brightness setting.",
         (44, 252, 436, 300),
         13,
         AMBER,
@@ -5846,7 +5849,7 @@ def render_diagnostics_sheet(s: Surface, snap: Snapshot):
     s.text("ui stack 3052 words  console stack 3216", (44, 254, 436, 276), 12, MUTED)
     s.text("packets rx 128 tx 34  rejected 0", (44, 282, 436, 304), 12, BLUE)
     s.text("Crashlog  Events  Serial", (44, 310, 436, 330), 13, TEXT, True)
-    s.text("Terminal shows redacted events and runtime log level.", (44, 326, 436, 342), 11, AMBER)
+    s.text("Terminal shows recent events and the current log level.", (44, 326, 436, 342), 11, AMBER)
     draw_button(s, (44, 344, 194, 388), "Open Terminal", BLUE, action="open_terminal")
     s.metrics["modal_return_policy"] = "active_tab"
 
@@ -5891,35 +5894,35 @@ def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
 
 
 def render_ble_setup_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "BLE Setup", "Companion state")
+    draw_sheet_frame(s, "Bluetooth", "Companion connection")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="active_tab")
     state = "on" if snap.ble_companion_enabled else "off"
-    build = "enabled" if snap.ble_build_enabled else "disabled"
-    s.text(f"State {state}  build {build}", (44, 154, 436, 178), 15, GREEN if snap.ble_companion_enabled else AMBER, True)
+    availability = "available" if snap.ble_build_enabled else "unavailable"
+    s.text(f"Bluetooth {state}  |  {availability}", (44, 154, 436, 178), 15, GREEN if snap.ble_companion_enabled else AMBER, True)
     if snap.ble_transport_supported:
-        s.text("Companion BLE is available for measured local setup.", (44, 194, 436, 236), 13, TEXT)
-        s.text("Pairing controls require a measured BLE runtime artifact.", (44, 252, 436, 294), 13, AMBER)
+        s.text("Bluetooth companion connections are available.", (44, 194, 436, 236), 13, TEXT)
+        s.text("Enable Bluetooth, then tap Pair from this screen.", (44, 252, 436, 294), 13, AMBER)
         draw_button(s, (44, 318, 142, 360), "Enable", BLUE, action="ble_enable")
         draw_button(s, (154, 318, 252, 360), "Pair", GREEN, action="ble_pair")
         draw_button(s, (264, 318, 362, 360), "Forget", AMBER, action="ble_forget")
     else:
-        s.text("BLE companion transport is unavailable in this release.", (44, 194, 436, 236), 13, TEXT)
-        s.text("No BLE pairing or transport artifact is present for public release.", (44, 252, 436, 294), 13, AMBER)
+        s.text("Bluetooth companion connections are unavailable.", (44, 194, 436, 236), 13, TEXT)
+        s.text("Bluetooth pairing is unavailable.", (44, 252, 436, 294), 13, AMBER)
         s.text("Enable unavailable", (44, 318, 210, 340), 13, AMBER, True)
         s.text("Pair unavailable", (44, 346, 210, 366), 12, MUTED)
         s.text("Forget unavailable", (224, 346, 436, 366), 12, MUTED)
-    s.text("USB remains the reliable companion path for production validation.", (44, 386, 436, 416), 12, MUTED)
+    s.text("USB stays available for recovery and diagnostics.", (44, 386, 436, 416), 12, MUTED)
     s.metrics["modal_return_policy"] = "active_tab"
 
 
 def render_advert_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Advert", "Share this node with nearby MeshCore clients")
-    s.text("Zero-hop advert", (44, 162, 220, 184), 13, MUTED, True)
-    s.text("Use when the peer is nearby and Public should stay quiet.", (44, 186, 436, 208), 12, TEXT)
-    draw_button(s, (44, 222, 184, 274), "Zero Hop", GREEN, action="send_advert_zero", rf_tx=True)
-    s.text("Flood advert", (44, 292, 220, 314), 13, MUTED, True)
-    s.text("Intentional wider RF advert for controlled tests only.", (44, 316, 436, 338), 12, AMBER)
-    draw_button(s, (44, 352, 184, 386), "Flood", AMBER, action="send_advert_flood", rf_tx=True)
+    draw_sheet_frame(s, "Share Node", "Let other MeshCore devices find this node")
+    s.text("Nearby", (44, 162, 220, 184), 13, MUTED, True)
+    s.text("Share only with devices that are close by.", (44, 186, 436, 208), 12, TEXT)
+    draw_button(s, (44, 222, 184, 274), "Nearby", GREEN, action="send_advert_zero", rf_tx=True)
+    s.text("Wide area", (44, 292, 220, 314), 13, MUTED, True)
+    s.text("Share farther during a controlled test.", (44, 316, 436, 338), 12, AMBER)
+    draw_button(s, (44, 352, 184, 386), "Wide Area", AMBER, action="send_advert_flood", rf_tx=True)
     draw_button(s, (316, 94, 436, 134), "Close", MUTED, action="close_advert_sheet", destination="settings")
 
 
@@ -5955,7 +5958,7 @@ def render_forget_contact_confirm_page(s: Surface, snap: Snapshot):
     )
     s.round_rect((16, 132, 464, 326), (35, 19, 23), (127, 29, 29), 10)
     s.text("Remove this contact?", (32, 150, 448, 180), 20, RED, True)
-    warning = "The saved alias and contact key will be removed from this device. Retained message history is not deleted."
+    warning = "The saved name and contact key will be removed. Message history stays on this device."
     warning_lines, warning_end_y = s.wrapped_text(warning, (32, 192, 448, 274), 14, TEXT, line_height=23)
     s.text("This cannot be undone.", (32, 286, 448, 312), 13, RED, True)
     draw_button(
@@ -5990,10 +5993,10 @@ DM_DELIVERY_LABELS = {
     "queued": "Queued",
     "waiting_radio": "Waiting for radio",
     "tx_active": "Sending",
-    "tx_done": "Sent over RF",
-    "awaiting_ack": "Sent over RF / awaiting delivery",
+    "tx_done": "Sent by radio",
+    "awaiting_ack": "Sent / checking delivery",
     "acknowledged": "Delivered",
-    "retry_wait": "Retry scheduled",
+    "retry_wait": "Will retry",
     "retry_tx": "Retrying",
     "failed_radio": "Failed",
     "failed_timeout": "Failed",
@@ -6005,12 +6008,12 @@ DM_DELIVERY_LABELS = {
 DM_LIST_DELIVERY_LABELS = {
     "not_applicable": "Status unknown",
     "queued": "Queued",
-    "waiting_radio": "Waiting radio",
+    "waiting_radio": "Waiting for radio",
     "tx_active": "Sending",
-    "tx_done": "Sent RF",
-    "awaiting_ack": "Awaiting ACK",
+    "tx_done": "Sent",
+    "awaiting_ack": "Checking delivery",
     "acknowledged": "Delivered",
-    "retry_wait": "Retry waiting",
+    "retry_wait": "Will retry",
     "retry_tx": "Retrying",
     "failed_radio": "Failed",
     "failed_timeout": "Failed",
@@ -6085,7 +6088,7 @@ def render_dm_thread_state(
     if not contact_available:
         y = draw_messages_notice(
             s, y,
-            "Contact unavailable; retained history remains readable.",
+            "This contact is unavailable. Saved messages remain readable.",
             AMBER,
         )
     rendered_states: list[str] = []
@@ -6130,9 +6133,9 @@ def render_dm_thread_state(
         y += 74
     if not visible_messages:
         empty_text = (
-            "No retained messages match this search."
+            "No saved messages match this search."
             if query else
-            "No retained messages in this conversation."
+            "No saved messages in this conversation."
         )
         s.text(empty_text, (36, 180, 444, 210), 14, MUTED, True, "center")
     if load_older_available:
@@ -6238,7 +6241,7 @@ def render_dm_search_sheet(s: Surface, snap: Snapshot):
 def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
     selected_conversation, selected_messages = dm_selected_thread(snap.dm_messages)
     msg = selected_messages[-1] if selected_messages else Message(
-        "Direct message", "No retained message", "",
+        "Direct message", "No saved message", "",
     )
     alias = selected_conversation.source if selected_conversation else msg.source
     outgoing = msg.direction == "tx"
@@ -6302,7 +6305,7 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
                 else (
                     f"ACK dispatch {msg.ack_state} | count {msg.ack_dispatch_count} | "
                     f"error {msg.ack_last_error} | hash {msg.ack_hash:08X} | "
-                    f"identity {'retained' if msg.identity_valid else 'legacy'}"
+                    f"identity {'saved' if msg.identity_valid else 'legacy'}"
                 )
             )
         ),
@@ -6376,7 +6379,7 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
     s.text("Fingerprint", (28, 132, 160, 152), 13, MUTED, True)
     s.text(contact.fingerprint, (28, 154, 452, 178), 16, TEXT)
     s.text("Contact Path", (28, 194, 180, 214), 13, MUTED, True)
-    s.text("Key retained  /  path known  /  0 hops", (28, 216, 452, 240), 14, GREEN)
+    s.text("Key saved  /  path known  /  0 hops", (28, 216, 452, 240), 14, GREEN)
     s.text("Best Evidence", (28, 256, 180, 276), 13, MUTED, True)
     s.text("Direct packet  /  confidence 100", (28, 278, 452, 302), 14, ACCENT)
     y = 320
@@ -6467,7 +6470,7 @@ def render_mesh_roles_sheet(s: Surface, snap: Snapshot):
         destination="mesh_repeaters_page",
     )
     s.round_rect((16, 344, 464, 420), (13, 22, 31), BORDER, 8)
-    s.text("Large meshes stay bounded", (28, 354, 452, 378), 14, BLUE, True)
+    s.text("Large networks show recent results first", (28, 354, 452, 378), 14, BLUE, True)
     s.text("Read-only lists. Each role scrolls separately.", (28, 384, 452, 408), 12, MUTED)
     s.metrics.update(
         {
@@ -6800,7 +6803,7 @@ def render_first_start_wifi(s: Surface, snap: Snapshot):
 def render_first_start_radio(s: Surface, snap: Snapshot):
     draw_first_start_header(s, "Confirm Canadian radio", "STEP 4 OF 6")
     s.text(
-        "This production preset is fixed for initial setup:",
+        "Recommended starting settings:",
         (16, 82, 464, 108),
         14,
         MUTED,
@@ -6851,14 +6854,14 @@ def first_start_storage_status(
         prepared_sd_ready,
         nrcan_provider_ready,
         (
-            "SD card: ready (prepared FAT32)"
+            "SD card: ready"
             if prepared_sd_ready
-            else "SD card: not ready; prepare FAT32 externally"
+            else "SD card: not ready; prepare it on a computer"
         ),
         (
-            "NRCan provider: manifest ready"
+            "Offline maps: ready"
             if nrcan_provider_ready
-            else "NRCan provider: not ready; install the prepared-card manifest"
+            else "Offline maps: not ready; run the SD card preparation tool"
         ),
         (
             "Storage and maps are ready. Continue to channels."
@@ -6879,13 +6882,13 @@ def render_first_start_storage_map(s: Surface, snap: Snapshot):
     media_ready = prepared_sd_ready and nrcan_provider_ready
     draw_first_start_header(s, "Prepare storage & maps", "STEP 5 OF 6")
     s.wrapped_text(
-        "Prepare a FAT32 SD card on a computer, then insert it. DeskOS firmware never formats cards.",
+        "DeskOS uses a prepared FAT32 SD card for saved data and offline maps. Prepare it on a computer, then insert it. DeskOS never formats cards.",
         (16, 74, 464, 136),
         13,
         MUTED,
     )
     s.wrapped_text(
-        "NRCan tiles use map/offline-provider.json from the prepared-card tool.",
+        "The SD card preparation tool can add authorized Natural Resources Canada maps for offline use.",
         (16, 150, 464, 204),
         13,
         MUTED,
@@ -6946,7 +6949,7 @@ def render_first_start_channels(s: Surface, snap: Snapshot):
         s.text(name, (34, y + 6, 180, y + 30), 16, TEXT, True)
         s.text(detail, (190, y + 6, 444, y + 30), 13, MUTED, False, "right")
     s.wrapped_text(
-        "Finish persists the explicit name and seeds channels through the canonical onboarding API.",
+        "Finish saves your name and creates these channels. This setup only appears for a new device.",
         (16, 338, 464, 402),
         13,
         MUTED,
@@ -7207,16 +7210,16 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "messages_public_storage_degraded": (
         "Public",
-        "Storage degraded; readable RAM history remains.",
+        "Storage needs attention. Recent messages are still available.",
         "Message this channel",
     ),
     "messages_dm_storage_unavailable": (
         "Direct messages",
-        "Persistence unavailable; readable RAM history remains.",
+        "Messages cannot be saved. Recent messages are still available.",
     ),
     "messages_dm_no_contact": (
         "Direct messages",
-        "No DM contacts available. Add a verified chat contact.",
+        "No messaging contacts yet. Add a verified contact.",
     ),
     "messages_dm_no_history": (
         "Direct messages",
@@ -7224,11 +7227,11 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "messages_dm_retry": (
         "Direct messages",
-        "A bounded delivery retry is in progress.",
+        "Trying to deliver the message again.",
     ),
     "messages_dm_failure": (
         "Direct messages",
-        "A final delivery failure is retained; open for details.",
+        "A message could not be delivered. Open it for details.",
     ),
     "nodes": (
         "Contacts",
@@ -7325,42 +7328,43 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Advanced",
         "Radio",
         "Server admin",
-        "Mesh advertise",
+        "Share this node",
     ),
     "compose_sheet": ("Message Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"),
     "compose_utf8_sheet": ("Message Public", "Café 東京", "7 chars | 12/138 B", "Send"),
     "compose_byte_limit_sheet": ("Message Public", "46 chars | 138/138 B", "Send"),
     "compose_oversize_sheet": ("Message Public", "Too long | 140/138 B", "Send"),
-    "compose_invalid_sheet": ("Message Public", "Invalid text | 3/138 B", "Send"),
+    "compose_invalid_sheet": ("Message Public", "Unsupported text | 3/138 B", "Send"),
     "compose_offline_sheet": ("Message Public", "Radio unavailable | 16/138 B", "Send"),
-    "compose_busy_sheet": ("Message Public", "Radio busy | 21/138 B", "Send"),
-    "compose_retry_sheet": ("Message Public", "Retry ready: timeout | 28/138 B", "Send"),
+    "compose_busy_sheet": ("Message Public", "Please wait for the current send | 35/138 B", "Send"),
+    "compose_retry_sheet": ("Message Public", "Not sent. Tap Retry | 22/138 B", "Send"),
     "compose_channel_private_sheet": ("Message Ops Café 東京", "private channel draft", "Send"),
     "compose_channel_disabled_sheet": ("Message Disabled Lab", "Channel disabled | 19/138 B", "Send"),
-    "compose_protocol_time_sheet": ("Message Public", "Protocol time unavailable | 21/138 B", "Send"),
+    "compose_protocol_time_sheet": ("Message Public", "Time is not ready yet | 22/138 B", "Send"),
     "compose_dm_sheet": ("DM YKF Corebot", "Direct message", "reply to YKF Corebot", "20 chars | 20/138 B", "Send"),
-    "compose_dm_no_contact_sheet": ("DM YKF Corebot", "Direct message", "Contact unavailable | 22/138 B", "Send"),
-    "compose_dm_active_sheet": ("DM YKF Corebot", "Prior DM still active | 20/138 B", "Send"),
+    "compose_dm_no_contact_sheet": ("DM YKF Corebot", "Direct message", "Contact unavailable | 24/138 B", "Send"),
+    "compose_dm_active_sheet": ("DM YKF Corebot", "Previous message is still sending | 20/138 B", "Send"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
     "channel_history_private_sheet": (
-        "Channel History", "Ops Café 東京  showing 2/2 retained",
+        "History", "Ops Café 東京  Showing 2 of 2 saved",
         "Channel scrollback", "Search", "Close",
     ),
     "channel_search_private_sheet": ("Search Ops Café 東京", "Search author or message", "Apply", "Close"),
     "radio_settings_sheet": (
         "Radio",
         "Canada preset",
-        "Freq 910.525 MHz",
+        "Frequency 910.525 MHz",
         "-25k",
         "+25k",
         "Change bandwidth",
-        "SF-",
-        "SF+",
+        "Spread 7",
+        "-",
+        "+",
+        "Coding 5",
         "Change",
-        "TX-",
-        "TX+",
-        "RX Boost On",
+        "Power 20 dBm",
+        "Receive boost: On",
         "Restore Canada",
         "Save",
         "Close",
@@ -7429,17 +7433,17 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Close",
     ),
     "ble_setup_sheet": (
-        "BLE Setup",
-        "Companion state",
-        "State off  build enabled",
-        "Companion BLE is available for measured local setup.",
-        "Pairing controls require a measured BLE runtime artifact.",
+        "Bluetooth",
+        "Companion connection",
+        "Bluetooth off  |  available",
+        "Bluetooth companion connections are available.",
+        "Enable Bluetooth, then tap Pair from this screen.",
         "Enable",
         "Pair",
         "Forget",
         "Close",
     ),
-    "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),
+    "advert_sheet": ("Share Node", "Nearby", "Wide area", "Wide Area", "Close"),
     "contact_detail_sheet": (
         "Back",
         "Contact detail",
@@ -7450,15 +7454,15 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "contact_incomplete_detail_sheet": (
         "Back",
         "Contact detail",
-        "Messaging unavailable [identity_incomplete]",
-        "Identity has no complete verified full key.",
+        "Messaging unavailable",
+        "This identity is incomplete and cannot receive private messages.",
         "Contact options",
     ),
     "contact_noncanonical_detail_sheet": (
         "Back",
         "Contact detail",
-        "Messaging unavailable [contact_not_canonical]",
-        "Contact is not verified by signed advert or import.",
+        "Messaging unavailable",
+        "This contact could not be verified.",
         "Contact options",
     ),
     "contact_options_page": (
@@ -7508,7 +7512,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Message Detail",
         "Back",
         "Sender",
-        "DM unavailable [sender_name_unverified]",
+        "Private message unavailable",
         "Message",
         "Technical details",
         "Reply",
@@ -7529,11 +7533,11 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "public_tx_detail_technical_page": (
         "Message Detail",
         "Back",
-        "Sent over RF",
+        "Sent by radio",
         "Message",
         "Technical details",
-        "Signal not measured for retained Public TxDone",
-        "Path hops not measured for retained Public TxDone",
+        "Signal was not recorded for this sent message",
+        "Hop count was not recorded for this sent message",
     ),
     "dm_thread_sheet": ("Back", "Search", "Message this contact"),
     "dm_thread_details_sheet": (
@@ -7545,12 +7549,12 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "dm_search_sheet": ("DM Search", "Search this conversation", "Apply", "Clear", "Close"),
     "dm_thread_search_results": ("Back", "Search", "Message this contact"),
-    "dm_thread_search_no_match": ("Back", "Search", "No retained messages match this search.", "Message this contact"),
-    "dm_thread_empty_sheet": ("Back", "Search", "No retained messages in this conversation.", "Message this contact"),
+    "dm_thread_search_no_match": ("Back", "Search", "No saved messages match this search.", "Message this contact"),
+    "dm_thread_empty_sheet": ("Back", "Search", "No saved messages in this conversation.", "Message this contact"),
     "dm_thread_no_contact": (
         "Back",
         "Search",
-        "Contact unavailable; retained history remains readable.",
+        "This contact is unavailable. Saved messages remain readable.",
         "Contact unavailable",
     ),
     "compose_incoming_public_refresh": (
@@ -7580,7 +7584,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Trace"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
-    "mesh_roles_sheet": ("Mesh Roles", "Back", "Rooms", "Repeaters", "Large meshes stay bounded"),
+    "mesh_roles_sheet": ("Mesh Roles", "Back", "Rooms", "Repeaters", "Large networks show recent results first"),
     "mesh_rooms_page": ("Rooms", "Back", "Room servers"),
     "mesh_repeaters_page": ("Repeaters", "Back", "Repeater candidates"),
     "lock_overlay": ("MeshCore DeskOS", "Mesh", "Unread", "Tap to unlock"),
@@ -7635,10 +7639,10 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "first_start_storage_map": (
         "Prepare storage & maps",
-        "Prepare a FAT32 SD card on a computer, then insert it. DeskOS firmware never formats cards.",
-        "NRCan tiles use map/offline-provider.json from the prepared-card tool.",
-        "SD card: not ready; prepare FAT32 externally",
-        "NRCan provider: not ready; install the prepared-card manifest",
+        "DeskOS uses a prepared FAT32 SD card for saved data and offline maps. Prepare it on a computer, then insert it. DeskOS never formats cards.",
+        "The SD card preparation tool can add authorized Natural Resources Canada maps for offline use.",
+        "SD card: not ready; prepare it on a computer",
+        "Offline maps: not ready; run the SD card preparation tool",
         "Both checks are required before Continue.",
         "Back",
         "Continue",
@@ -7724,8 +7728,8 @@ def required_labels_for_profile(
                 first_start_storage_status(snap)
             )
             replacements = {
-                "SD card: not ready; prepare FAT32 externally": sd_status,
-                "NRCan provider: not ready; install the prepared-card manifest": nrcan_status,
+                "SD card: not ready; prepare it on a computer": sd_status,
+                "Offline maps: not ready; run the SD card preparation tool": nrcan_status,
                 "Both checks are required before Continue.": readiness_status,
             }
             labels = tuple(
@@ -9341,17 +9345,18 @@ def build_core_navigation_graph_report(
                 }
             )
 
+        has_shared_location_label = any(
+            label.startswith("Shared location ") for label in surface.labels
+        )
         if (
-            "Advert location" in surface.labels
+            has_shared_location_label
             or surface.metrics.get("node_detail_advert_location") is not None
         ):
             location_claims.append(
                 {
                     "state": state_key,
                     "view": state.current_view,
-                    "advert_location_label": (
-                        "Advert location" in surface.labels
-                    ),
+                    "advert_location_label": has_shared_location_label,
                     "advert_location": surface.metrics.get(
                         "node_detail_advert_location"
                     ),

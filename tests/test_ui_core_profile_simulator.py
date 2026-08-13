@@ -277,7 +277,7 @@ def test_core_profile_exposes_trace_and_location_but_omits_export():
         if target["action"] == "close_node_detail"
     )
     assert close["destination"] == "map"
-    assert any(label.startswith("Advert location ") for label in node_detail.labels)
+    assert any(label.startswith("Shared location ") for label in node_detail.labels)
     assert node_detail.metrics["node_detail_advert_location"] is not None
     assert node_detail.metrics["node_detail_location_provenance"] == "advert"
 

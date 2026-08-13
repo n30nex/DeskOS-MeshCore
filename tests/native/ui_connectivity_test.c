@@ -11,7 +11,7 @@ static void test_wifi_truth_models_offline_connected_and_scan_states(void)
         .last_error = "not_started",
     };
     d1l_ui_connectivity_wifi_view(&input, &view);
-    assert(strcmp(view.state_line, "State off  build not built") == 0);
+    assert(strcmp(view.state_line, "Wi-Fi off  |  unavailable") == 0);
     assert(strcmp(view.link_line, "Last not_started") == 0);
     assert(strcmp(view.profile_line,
                   "Profile 0/0  not saved  password open/empty") == 0);
@@ -67,7 +67,7 @@ static void test_ble_never_implies_unmeasured_transport(void)
     d1l_ui_connectivity_ble_view(&input, &view);
     assert(!view.controls_available);
     assert(strstr(view.purpose, "unavailable") != NULL);
-    assert(strstr(view.runtime_note, "No BLE pairing") != NULL);
+    assert(strstr(view.runtime_note, "Bluetooth pairing") != NULL);
 
     input = (d1l_ui_ble_view_input_t) {
         .build_enabled = false,

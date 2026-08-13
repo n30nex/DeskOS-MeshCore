@@ -327,7 +327,7 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
              text_equals(input->admin_state, "authenticated") ?
                  COLOR_GREEN : COLOR_TEXT,
              D1L_UI_SETTINGS_ACTION_ADMIN, false);
-    set_item(&category->items[2], "Mesh advertise", "Broadcast presence",
+    set_item(&category->items[2], "Share this node", "Let nearby devices find you",
              COLOR_WARNING_TEXT, D1L_UI_SETTINGS_ACTION_ADVANCED, false);
 
     return d1l_ui_more_view_model_is_valid(out_view);

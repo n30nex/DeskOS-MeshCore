@@ -536,7 +536,7 @@ bool d1l_ui_contact_sheets_render_detail(
                  (unsigned)entry->path_hops,
                  entry->path_hops == 1U ? "" : "s");
     } else {
-        snprintf(line, sizeof(line), "Flood route  |  no saved direct path");
+        snprintf(line, sizeof(line), "Broadcast route  |  no saved direct path");
     }
     lv_obj_t *key = create_label(sheet, line, 0x8EA0AE);
     if (key) {
@@ -573,11 +573,8 @@ bool d1l_ui_contact_sheets_render_detail(
             BINDING_DETAIL_MESSAGE, D1L_UI_CONTACT_ACTION_MESSAGE) != NULL &&
             complete;
     } else {
-        char dm_status[96];
-        snprintf(dm_status, sizeof(dm_status), "Messaging unavailable [%s]",
-                 d1l_ui_dm_identity_reason_code(
-                     controller->rendered.dm_identity_reason));
-        lv_obj_t *unavailable = create_label(sheet, dm_status, 0xFBBF24);
+        lv_obj_t *unavailable = create_label(
+            sheet, "Messaging unavailable", 0xFBBF24);
         if (unavailable) {
             lv_obj_set_pos(unavailable, 16, 238);
         } else {
@@ -787,7 +784,7 @@ bool d1l_ui_contact_sheets_render_export(
     }
     if (controller->rendered.export_uri[0] == '\0') {
         lv_obj_t *missing = create_label(
-            sheet, "No retained public key for QR export", 0xF87171);
+            sheet, "No saved public key is available to export", 0xF87171);
         if (missing) {
             lv_obj_set_pos(missing, 16, 104);
         } else {
@@ -836,7 +833,7 @@ bool d1l_ui_contact_sheets_render_export(
     } else {
         complete = false;
     }
-    lv_obj_t *key = create_label(sheet, "public key retained", 0x5EEAD4);
+    lv_obj_t *key = create_label(sheet, "Public key saved", 0x5EEAD4);
     if (key) {
         lv_obj_set_pos(key, 200, 134);
     } else {
@@ -908,7 +905,7 @@ bool d1l_ui_contact_sheets_render_edit(
         controller, sheet, "Save", 16, 360, 448, 52, BINDING_EDIT_SAVE,
         D1L_UI_CONTACT_ACTION_SAVE_EDIT) != NULL && complete;
     lv_obj_t *meta = create_label(
-        sheet, "Alias only; retained history remains", 0x8EA0AE);
+        sheet, "Only the name changes; messages stay saved", 0x8EA0AE);
     if (meta) {
         lv_obj_set_pos(meta, 16, 60);
     } else {

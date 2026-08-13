@@ -426,7 +426,7 @@ bool d1l_ui_device_sheets_render_diagnostics(
     complete = stores != NULL && complete;
     lv_obj_t *note = create_label(
         sheet,
-        "Terminal shows redacted events and runtime log level.",
+        "Terminal shows recent events and the current log level.",
         0xFBBF24);
     configure_wrapped_label(note, 8, 230);
     complete = note != NULL && complete;

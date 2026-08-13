@@ -207,7 +207,7 @@ static const char *nodes_contact_route_label(
     const d1l_contact_entry_t *entry)
 {
     if (!entry || !entry->out_path_valid) {
-        return "Flood";
+        return "Broadcast";
     }
     return entry->path_hops == 0U ? "Direct" : "Saved path";
 }
@@ -220,7 +220,7 @@ static void nodes_node_route_label(const d1l_node_view_t *view,
         return;
     }
     if (!view || !view->reachable) {
-        snprintf(dest, dest_size, "%s", "Quiet");
+        snprintf(dest, dest_size, "%s", "Not heard");
     } else if (view->node.path_hops == 0U) {
         snprintf(dest, dest_size, "%s", "Direct");
     } else {

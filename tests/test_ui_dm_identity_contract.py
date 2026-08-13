@@ -91,7 +91,7 @@ def test_invalid_identity_taps_explain_without_compose_or_rf_and_controls_are_to
     )[0]
     assert '"Reply", 16, 360, 216, 52' in render_message
     assert '"DM sender", 248, 360, 216, 52' in render_message
-    assert '"DM unavailable [%s]: %s"' in render_message
+    assert '"Private message unavailable: %s"' in render_message
 
 
 def test_node_detail_geometry_contains_all_reason_and_management_copy() -> None:
@@ -148,8 +148,8 @@ def test_contact_sheet_carries_exact_identity_reason_instead_of_generic_role_cop
     detail = contact_ui.split("bool d1l_ui_contact_sheets_render_detail", 1)[1].split(
         "bool d1l_ui_contact_sheets_render_options", 1
     )[0]
-    assert '"Messaging unavailable [%s]"' in detail
-    assert "d1l_ui_dm_identity_reason_code(" in detail
+    assert '"Messaging unavailable"' in detail
+    assert "d1l_ui_dm_identity_reason_code(" not in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
     assert "Messaging unavailable for this role" not in detail
     selected = phase1.split("static bool set_selected_contact", 1)[1].split(
