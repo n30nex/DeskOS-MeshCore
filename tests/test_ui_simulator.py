@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 93
+    assert len(views) == 94
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -1287,6 +1287,54 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
             assert target["unexpected_dock"] is False, (view["name"], target["label"])
 
 
+def test_first_start_storage_required_labels_follow_scenario(tmp_path):
+    cases = (
+        (
+            "storage-no-card",
+            {
+                "SD card: not ready; prepare FAT32 externally",
+                "NRCan provider: not ready; install the prepared-card manifest",
+                "Both checks are required before Continue.",
+            },
+        ),
+        (
+            "storage-ready-pending-migration",
+            {
+                "SD card: ready (prepared FAT32)",
+                "NRCan provider: not ready; install the prepared-card manifest",
+                "Both checks are required before Continue.",
+            },
+        ),
+        (
+            "storage-ready-map-tiles-sd",
+            {
+                "SD card: ready (prepared FAT32)",
+                "NRCan provider: manifest ready",
+                "Storage and maps are ready. Continue to channels.",
+            },
+        ),
+    )
+    for scenario, expected_statuses in cases:
+        report = ui_simulator.generate(
+            tmp_path / scenario,
+            views=("first_start_storage_map",),
+            scenario=scenario,
+        )
+        view = report["views"][0]
+
+        assert view["missing_required_labels"] == []
+        assert expected_statuses <= set(view["labels"])
+
+
+def test_history_title_does_not_overlap_controls(tmp_path):
+    report = ui_simulator.generate(
+        tmp_path,
+        views=("public_history_sheet", "channel_history_private_sheet"),
+    )
+
+    assert all(view["sibling_text_overlaps"] == [] for view in report["views"])
+
+
 def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
     internal = {
         "Messages": "Internal",
@@ -2095,11 +2143,13 @@ def test_ui_simulator_built_in_map_states_are_deterministic_and_policy_bounded(t
 
 def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_path):
     report = ui_simulator.generate(
-        tmp_path / "map-markers", views=("map", "node_detail_sheet"), scenario="map-ready"
+        tmp_path / "map-markers",
+        views=("map", "map_node_detail_sheet"),
+        scenario="map-ready",
     )
     views = {view["name"]: view for view in report["views"]}
     map_view = views["map"]
-    detail = views["node_detail_sheet"]
+    detail = views["map_node_detail_sheet"]
 
     assert report["ok"] is True
     assert map_view["metrics"]["map_marker_query_limit"] == 32
@@ -2162,7 +2212,7 @@ def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_pat
     assert len(marker_targets) == 3
     assert all(target["width"] == 44 and target["height"] == 44 for target in marker_targets)
     assert all(target["action"] == "open_map_node_detail" for target in marker_targets)
-    assert all(target["destination"] == "node_detail_sheet" for target in marker_targets)
+    assert all(target["destination"] == "map_node_detail_sheet" for target in marker_targets)
     assert all(target["rf_tx"] is False and target["formats_sd"] is False for target in marker_targets)
     assert "Krabs Lagoo..." in map_view["labels"]
     assert any(label.startswith("Advert location ") for label in detail["labels"])
