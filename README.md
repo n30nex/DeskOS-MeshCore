@@ -1,8 +1,8 @@
 # MeshCore DeskOS for SenseCAP Indicator D1L
 
-DeskOS **1.5 / RC3** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.5.0` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.5.0).
+DeskOS **1.6** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.6.0` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.6.0).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -11,9 +11,21 @@ and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
 
-## What 1.5 adds
+## What 1.6 adds
 
-DeskOS 1.5 includes the complete corrected 1.2 product plus:
+DeskOS 1.6 keeps the complete 1.5 feature set and refines the everyday touch
+experience:
+
+- a compact Home dashboard with an always-visible lock control and live time;
+- directly reachable Contacts search plus Recent, Favorites, A-Z, Role, and
+  Signal sort modes;
+- clearer, shorter labels and consistent 44 px touch targets across Contacts,
+  radio, Wi-Fi, diagnostics, and messaging;
+- truthful full-feature BLE and diagnostics states in the release simulator;
+- safer visual semantics so advanced actions no longer look like failures; and
+- an owned Contacts sorting/search model extracted from the main UI controller.
+
+DeskOS 1.5 previously added:
 
 - secure BLE companion pairing, bonding, reconnect, disconnect, and forget;
 - the current MeshCore companion protocol over an encrypted BLE transport;
@@ -53,12 +65,13 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 |---|---|---|
 | **1.0 / RC1** | Initial production baseline | Historical |
 | **1.2 / RC2** | Channel, Contacts, parity, packaging, and screenshot correction | Historical (`v1.2.0`) |
-| **1.5 / RC3** | BLE, signed update/rollback, sharing, diagnostics, and full-feature activation | Current (`v1.5.0`) |
+| **1.5 / RC3** | BLE, signed update/rollback, sharing, diagnostics, and full-feature activation | Historical (`v1.5.0`) |
+| **1.6** | Compact Home, Contacts search/sorts, UI truthfulness, and diagnostics polish | Current (`v1.6.0`) |
 
 ## Device UI
 
 These native 480x480 captures show the production touch shell introduced in
-1.2 and retained by 1.5. Their exact 1.2 provenance is recorded in
+1.2 and refined by 1.6. Their exact 1.2 provenance is recorded in
 [`docs/screenshots/DEVICE_1_2_CAPTURE.md`](docs/screenshots/DEVICE_1_2_CAPTURE.md).
 
 | Home | Channels |

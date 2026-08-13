@@ -43,6 +43,8 @@ typedef enum {
     D1L_UI_HOME_ACTION_STORAGE,
     D1L_UI_HOME_ACTION_ATTENTION,
     D1L_UI_HOME_ACTION_PACKETS,
+    D1L_UI_HOME_ACTION_LOCK,
+    D1L_UI_HOME_ACTION_COUNT,
 } d1l_ui_home_action_t;
 
 typedef void (*d1l_ui_home_action_handler_t)(d1l_ui_home_action_t action,
@@ -56,7 +58,7 @@ typedef struct {
 } d1l_ui_home_action_binding_t;
 
 #define D1L_UI_HOME_ACTION_BINDING_COUNT \
-    (D1L_UI_HOME_DESTINATION_COUNT + D1L_UI_HOME_STATUS_COUNT)
+    (D1L_UI_HOME_DESTINATION_COUNT + D1L_UI_HOME_STATUS_COUNT + 1U)
 
 typedef struct d1l_ui_home_controller {
     d1l_ui_home_view_model_t rendered;

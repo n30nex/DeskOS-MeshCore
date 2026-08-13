@@ -21,7 +21,6 @@ enum {
     BINDING_RX_BOOST,
     BINDING_DEFAULTS,
     BINDING_SAVE,
-    BINDING_BOTTOM_CLOSE,
 };
 
 _Static_assert(sizeof(d1l_ui_radio_settings_controller_t) <=
@@ -414,14 +413,11 @@ bool d1l_ui_radio_settings_render(
         D1L_UI_RADIO_SETTINGS_ACTION_RX_BOOST) != NULL && complete;
 
     complete = create_button(
-        controller, "Restore Canada", 8, 378, 136, 48, BINDING_DEFAULTS,
+        controller, "Restore Canada", 8, 378, 200, 48, BINDING_DEFAULTS,
         D1L_UI_RADIO_SETTINGS_ACTION_DEFAULTS) != NULL && complete;
     complete = create_button(
-        controller, "Save", 152, 378, 136, 48, BINDING_SAVE,
+        controller, "Save", 216, 378, 206, 48, BINDING_SAVE,
         D1L_UI_RADIO_SETTINGS_ACTION_SAVE) != NULL && complete;
-    complete = create_button(
-        controller, "Close", 296, 378, 126, 48, BINDING_BOTTOM_CLOSE,
-        D1L_UI_RADIO_SETTINGS_ACTION_CLOSE) != NULL && complete;
     if (!complete) {
         invalidate_render(controller);
         return false;

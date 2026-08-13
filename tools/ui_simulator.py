@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 WIDTH = 480
 HEIGHT = 480
 TOP_BAR_H = 56
-HOME_TOP_BAR_H = 16
+HOME_TOP_BAR_H = 44
 DOCK_Y = 432
 DOCK_H = 48
 MIN_TOUCH_TARGET = 44
@@ -416,7 +416,8 @@ def sample_snapshot() -> Snapshot:
         tx_total=34,
         unread_public=2,
         unread_dm=1,
-        ble_transport_supported=False,
+        ble_build_enabled=True,
+        ble_transport_supported=True,
         latest_signal="-41 dBm / 30 dB",
         rooms=(room,),
         repeaters=(repeater,),
@@ -756,7 +757,8 @@ def large_mesh_snapshot() -> Snapshot:
         tx_total=1024,
         unread_public=12,
         unread_dm=7,
-        ble_transport_supported=False,
+        ble_build_enabled=True,
+        ble_transport_supported=True,
         latest_signal="-42 dBm / 30 dB",
         rooms=heard[:6],
         repeaters=heard[6:18],
@@ -1779,7 +1781,17 @@ def storage_size_label(size_kb: int) -> str:
 def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     if compact:
         s.rect((0, 0, WIDTH, HOME_TOP_BAR_H), (11, 18, 28))
-        s.text("DeskOS", (10, 0, 132, 15), 10, TEXT, True)
+        s.text("DeskOS", (12, 7, 180, 38), 24, TEXT, True)
+        s.text("--:--", (246, 12, 370, 34), 13, MUTED, True, "right")
+        s.round_rect((382, 0, 468, 44), SURFACE_2, BORDER, 8)
+        s.text("Lock", (390, 10, 460, 34), 13, TEXT, True, "center")
+        s.touch_target(
+            "Lock",
+            (382, 0, 468, 44),
+            kind="top_bar",
+            action="lock_screen",
+            destination="lock_overlay",
+        )
         s.line(((0, HOME_TOP_BAR_H), (WIDTH, HOME_TOP_BAR_H)))
         return
     s.rect((0, 0, WIDTH, TOP_BAR_H), (11, 18, 28))
@@ -2365,27 +2377,27 @@ def draw_home_body(s: Surface, snap: Snapshot):
     )
     full_feature_tiles = (
         (
-            (12, 16, 234, 156),
+            (12, 52, 234, 188),
             "chat",
             "Messages",
-            "Public, direct, and room conversations",
+            "Public, DMs, and rooms",
             messages_status,
             AMBER if audible_unread else (MUTED if snap.muted_unread_dm else ACCENT),
             "open_messages_root",
             "messages",
         ),
         (
-            (246, 16, 468, 156),
+            (246, 52, 468, 188),
             "signal",
             "Nodes",
-            "Contacts, nearby nodes, and routing",
+            "Contacts, nearby, and routes",
             f"{len(snap.contacts)} contacts | {len(snap.heard)} nearby",
             GREEN if snap.contacts else MUTED,
             "open_nodes",
             "nodes",
         ),
         (
-            (12, 164, 234, 304),
+            (12, 196, 234, 332),
             "map",
             "Map",
             "Location and local map",
@@ -2395,10 +2407,10 @@ def draw_home_body(s: Surface, snap: Snapshot):
             "map",
         ),
         (
-            (246, 164, 468, 304),
+            (246, 196, 468, 332),
             "settings",
             "Tools",
-            "Device settings, utilities, and support",
+            "Settings, utilities, and support",
             f"{len(snap.packets)} packet{'s' if len(snap.packets) != 1 else ''} captured",
             VIOLET if snap.packets else MUTED,
             "open_settings",
@@ -2440,7 +2452,7 @@ def draw_home_body(s: Surface, snap: Snapshot):
     )
     attention_status = "Check" if attention_required else ("Notice" if attention_notice else "OK")
     attention_color = RED if attention_required else (AMBER if attention_notice else GREEN)
-    status_box = (12, 312, 468, 400)
+    status_box = (12, 340, 468, 468)
     s.round_rect(status_box, (13, 23, 18), (31, 55, 46), 8)
     full_feature_status_items = (
         ("Mesh", mesh_status, mesh_color, "mesh", "LV_SYMBOL_LOOP", "open_radio_settings", "radio_settings_sheet"),
@@ -2464,15 +2476,15 @@ def draw_home_body(s: Surface, snap: Snapshot):
     for index, (label, value, color, kind, icon, action, destination) in enumerate(status_items):
         if s.release_profile == CORE_RELEASE_PROFILE:
             x0 = 14 + index * 114
-            item_box = (x0, 314, x0 + 110, 398)
+            item_box = (x0, 342, x0 + 110, 466)
         else:
             x0 = 14 + index * 91
-            item_box = (x0, 314, x0 + 88, 398)
+            item_box = (x0, 342, x0 + 88, 466)
         s.round_rect(item_box, (17, 29, 23), (17, 29, 23), 7)
         x1 = item_box[2]
-        draw_home_status_icon(s, kind, ((x0 + x1) // 2, 327), color)
-        s.text(label, (x0 + 4, 342, x1 - 4, 360), 10, MUTED, True, "center")
-        s.text(value, (x0 + 4, 365, x1 - 4, 388), 10, color, True, "center")
+        draw_home_status_icon(s, kind, ((x0 + x1) // 2, 362), color)
+        s.text(label, (x0 + 4, 390, x1 - 4, 408), 10, MUTED, True, "center")
+        s.text(value, (x0 + 4, 415, x1 - 4, 438), 10, color, True, "center")
         semantic_label = f"{label}: {value}"
         semantic_labels.append(semantic_label)
         s.touch_target(
@@ -3082,21 +3094,15 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
 
 def render_messages_dm(s: Surface, snap: Snapshot):
     draw_button(s, (18, 8, 90, 52), "Back", MUTED, action="open_messages_root", destination="messages")
-    s.text("Direct messages", (104, 10, 292, 40), 22, GREEN, True)
-    conversation_count = len(dm_conversation_summaries(snap.dm_messages))
-    status = (
-        f"{conversation_count} chat{'s' if conversation_count != 1 else ''} | "
-        f"{snap.unread_dm} unread"
-    )
-    if snap.muted_unread_dm:
-        status += f" + {snap.muted_unread_dm} muted"
-    s.text(
-        status,
-        (296, 18, 442, 40),
-        10,
-        MUTED,
-        align="right",
-    )
+    s.text("Direct messages", (104, 10, 342, 40), 22, GREEN, True)
+    if snap.unread_dm:
+        s.text(
+            f"{snap.unread_dm} unread",
+            (342, 18, 442, 40),
+            10,
+            AMBER,
+            align="right",
+        )
     render_messages_dm_list(s, snap)
     draw_dock(s, "Messages")
 
@@ -3313,7 +3319,7 @@ def draw_contacts_node_row(
         draw_button(
             s,
             (368, y + 7, 452, y + 51),
-            "Message",
+            "Chat",
             GREEN,
             action="open_dm_compose" if saved_contact else "open_node_dm",
             destination="compose_dm_sheet",
@@ -3356,18 +3362,32 @@ def render_nodes(s: Surface, snap: Snapshot):
         destructive=heard_query_count > 0,
         enabled=heard_query_count > 0,
     )
+    draw_button(
+        s,
+        (16, 54, 294, 98),
+        "Search contacts",
+        BLUE,
+        action="open_nodes_search",
+    )
+    draw_button(
+        s,
+        (302, 54, 452, 98),
+        "Sort: Recent",
+        VIOLET,
+        action="cycle_nodes_sort",
+    )
 
     contacts_rendered = 0
     nearby_rendered = 0
     duplicate_nodes_hidden = heard_query_count - len(nearby)
     if not snap.contacts and not nearby:
-        s.round_rect((16, 76, 464, 286))
-        s.round_rect((212, 94, 260, 142), (16, 32, 42), ACCENT, 24)
-        s.text("+", (216, 100, 256, 136), 24, ACCENT, True, "center")
-        s.text("No contacts yet", (40, 158, 440, 188), 20, TEXT, True, "center")
+        s.round_rect((16, 112, 464, 330))
+        s.round_rect((212, 130, 260, 178), (16, 32, 42), ACCENT, 24)
+        s.text("+", (216, 136, 256, 172), 24, ACCENT, True, "center")
+        s.text("No contacts yet", (40, 194, 440, 224), 20, TEXT, True, "center")
         s.text(
             "Nearby nodes appear here after a signed advert.",
-            (54, 196, 426, 224),
+            (54, 232, 426, 260),
             12,
             MUTED,
             False,
@@ -3375,15 +3395,15 @@ def render_nodes(s: Surface, snap: Snapshot):
         )
         draw_button(
             s,
-            (142, 232, 338, 280),
+            (142, 274, 338, 322),
             "Find nearby",
             GREEN,
             action="find_nearby",
             destination=None,
         )
     else:
-        s.text("Saved contacts", (20, 62, 220, 82), 12, MUTED, True)
-        y = 86
+        s.text("Saved contacts", (20, 112, 220, 132), 12, MUTED, True)
+        y = 136
         for node in snap.contacts[:2]:
             draw_contacts_node_row(s, snap, node, y, saved_contact=True)
             y += 62
@@ -3434,6 +3454,8 @@ def render_nodes(s: Surface, snap: Snapshot):
             "nodes_clear_confirmation_required": True,
             "nodes_primary_rows_show_fingerprint": False,
             "nodes_test_copy_present": False,
+            "nodes_sort": "recent",
+            "nodes_sort_cycle": ["recent", "favorites", "name", "role", "signal"],
             "contact_dm_shortcut_min_height": 44,
             "node_dm_shortcut_min_height": 44,
             "nodes_row_height": 58,
@@ -4224,7 +4246,7 @@ def more_category_specs(
             AMBER,
             "open_admin",
             None,
-            True,
+            False,
         ),
     ]
     if not core:
@@ -4232,10 +4254,10 @@ def more_category_specs(
             (
                 "Mesh advertise",
                 "Broadcast presence",
-                RED,
+                AMBER,
                 "open_advert_sheet",
                 "advert_sheet",
-                True,
+                False,
             )
         )
     return (
@@ -4318,8 +4340,8 @@ def more_category_specs(
             "key": "advanced",
             "title": "Advanced",
             "summary": "Radio and authenticated server tools",
-            "color": RED,
-            "warning": True,
+            "color": AMBER,
+            "warning": False,
             "action": None,
             "leaves": tuple(advanced_leaves),
         },
@@ -4510,10 +4532,10 @@ def more_category_specs(
             "key": "advanced",
             "title": "Advanced",
             "summary": "Developer options",
-            "color": RED,
-            "warning": True,
+            "color": AMBER,
+            "warning": False,
             "action": "toggle_more_advanced",
-            "leaves": (("Mesh advertise", "Broadcast presence", RED, "open_advert_sheet", "advert_sheet", True),),
+            "leaves": (("Mesh advertise", "Broadcast presence", AMBER, "open_advert_sheet", "advert_sheet", False),),
         },
     )
 
@@ -4663,7 +4685,7 @@ def render_compose_state(
     ):
         counter = f"{eligibility.status} | {byte_count}/138 B"
     selected_channel = active_channel(snap)
-    title = "DM YKF Corebot" if is_dm else f"Compose {selected_channel.name}"
+    title = "DM YKF Corebot" if is_dm else f"Message {selected_channel.name}"
     placeholder = (
         "Direct message" if is_dm else
         "Public message" if selected_channel.channel_id == 1 else
@@ -5486,18 +5508,14 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (144, 246, 208, 290), "SF+", ACCENT, action="radio_sf_up")
     s.text("CR 5", (238, 258, 310, 280), 13, TEXT, True)
     draw_button(s, (318, 246, 422, 290), "Change", ACCENT, action="radio_cycle_cr")
-    s.text("TX 20 dBm", (20, 308, 92, 330), 13, TEXT, True)
+    s.text("TX 20 dBm", (20, 308, 100, 330), 13, TEXT, True)
     draw_button(s, (96, 296, 160, 340), "TX-", ACCENT, action="radio_tx_power_down")
     draw_button(s, (168, 296, 232, 340), "TX+", ACCENT, action="radio_tx_power_up")
     draw_button(s, (246, 296, 422, 340), "RX Boost On", GREEN, action="radio_toggle_rx_boost")
-    draw_button(s, (8, 378, 144, 426), "Restore Canada", BLUE, action="radio_defaults")
+    draw_button(s, (8, 378, 208, 426), "Restore Canada", BLUE, action="radio_defaults")
     draw_button(
-        s, (152, 378, 288, 426), "Save", GREEN,
+        s, (216, 378, 422, 426), "Save", GREEN,
         action="save_radio_profile", destination="radio_settings_sheet",
-    )
-    draw_button(
-        s, (296, 378, 422, 426), "Close", MUTED,
-        action="close_radio_settings", destination="active_tab",
     )
     s.metrics.update(
         {
@@ -5819,18 +5837,17 @@ def render_display_settings_sheet(s: Surface, snap: Snapshot):
 
 
 def render_diagnostics_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Diagnostics", "Advanced health")
+    draw_sheet_frame(s, "Diagnostics")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_diagnostics", destination="active_tab")
-    s.text("Health", (44, 154, 160, 174), 13, GREEN, True)
-    s.text("reset poweron  uptime 122s", (44, 178, 436, 200), 13, TEXT)
-    s.text("heap 184K free  min 169K  largest 80K", (44, 206, 436, 228), 12, MUTED)
-    s.text("LVGL heap backed  ui stack 3052 words", (44, 234, 436, 256), 12, MUTED)
-    s.text("packets rx 128 tx 34  rejected 0", (44, 262, 436, 284), 12, BLUE)
-    s.text("Crashlog  Exports  Serial", (44, 300, 436, 322), 13, TEXT, True)
-    s.text("Advanced details stay here so normal screens remain simple.", (44, 326, 436, 350), 12, AMBER)
-    draw_button(s, (44, 358, 156, 390), "Crashlog", AMBER, action="diagnostics_crashlog")
-    draw_button(s, (168, 358, 264, 390), "Export", BLUE, action="diagnostics_export")
-    draw_button(s, (276, 358, 362, 390), "Soak", GREEN, action="diagnostics_soak")
+    s.text("Health", (44, 142, 160, 162), 13, GREEN, True)
+    s.text("reset poweron  uptime 122s  mesh ready", (44, 170, 436, 192), 12, TEXT)
+    s.text("heap 184K free  min 169K  largest 80K", (44, 198, 436, 220), 12, MUTED)
+    s.text("LVGL free 96K  largest 72K  used 18%", (44, 226, 436, 248), 12, MUTED)
+    s.text("ui stack 3052 words  console stack 3216", (44, 254, 436, 276), 12, MUTED)
+    s.text("packets rx 128 tx 34  rejected 0", (44, 282, 436, 304), 12, BLUE)
+    s.text("Crashlog  Events  Serial", (44, 310, 436, 330), 13, TEXT, True)
+    s.text("Terminal shows redacted events and runtime log level.", (44, 326, 436, 342), 11, AMBER)
+    draw_button(s, (44, 344, 194, 388), "Open Terminal", BLUE, action="open_terminal")
     s.metrics["modal_return_policy"] = "active_tab"
 
 
@@ -5856,7 +5873,7 @@ def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (16, 270, 232, 314), "Connect", GREEN, action="wifi_connect")
     draw_button(s, (240, 270, 464, 314), "Save network", GREEN, action="wifi_save")
     draw_button(s, (16, 322, 120, 366), "Scan", BLUE, action="wifi_scan")
-    draw_button(s, (128, 322, 232, 366), "Next saved", ACCENT, action="wifi_next_profile")
+    draw_button(s, (128, 322, 232, 366), "Next", ACCENT, action="wifi_next_profile")
     draw_button(s, (240, 322, 344, 366), "Delete", AMBER, action="wifi_clear")
     draw_button(s, (352, 322, 464, 366), "Enable", BLUE, action="wifi_enable")
     s.text("Scan to list nearby 2.4 GHz networks", (28, 374, 452, 394), 12, MUTED)
@@ -5876,7 +5893,9 @@ def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
 def render_ble_setup_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "BLE Setup", "Companion state")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="active_tab")
-    s.text("State off  build disabled", (44, 154, 436, 178), 15, AMBER, True)
+    state = "on" if snap.ble_companion_enabled else "off"
+    build = "enabled" if snap.ble_build_enabled else "disabled"
+    s.text(f"State {state}  build {build}", (44, 154, 436, 178), 15, GREEN if snap.ble_companion_enabled else AMBER, True)
     if snap.ble_transport_supported:
         s.text("Companion BLE is available for measured local setup.", (44, 194, 436, 236), 13, TEXT)
         s.text("Pairing controls require a measured BLE runtime artifact.", (44, 252, 436, 294), 13, AMBER)
@@ -6231,7 +6250,7 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
     )
     s.text(alias, (100, 8, 260, 48), 20, TEXT, True)
     draw_button(
-        s, (264, 6, 364, 50), "Hide details", BLUE,
+        s, (264, 6, 364, 50), "Less detail", BLUE,
         action="toggle_dm_details", destination="dm_thread_sheet",
     )
     draw_button(
@@ -7158,6 +7177,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
 REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "DeskOS",
+        "Lock",
         "Messages",
         "Nodes",
         "Map",
@@ -7214,6 +7234,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Contacts",
         "Find",
         "Clear",
+        "Search contacts",
+        "Sort: Recent",
     ),
     "map": (
         "Options",
@@ -7305,17 +7327,17 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Server admin",
         "Mesh advertise",
     ),
-    "compose_sheet": ("Compose Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"),
-    "compose_utf8_sheet": ("Compose Public", "Café 東京", "7 chars | 12/138 B", "Send"),
-    "compose_byte_limit_sheet": ("Compose Public", "46 chars | 138/138 B", "Send"),
-    "compose_oversize_sheet": ("Compose Public", "Too long | 140/138 B", "Send"),
-    "compose_invalid_sheet": ("Compose Public", "Invalid text | 3/138 B", "Send"),
-    "compose_offline_sheet": ("Compose Public", "Radio unavailable | 16/138 B", "Send"),
-    "compose_busy_sheet": ("Compose Public", "Radio busy | 21/138 B", "Send"),
-    "compose_retry_sheet": ("Compose Public", "Retry ready: timeout | 28/138 B", "Send"),
-    "compose_channel_private_sheet": ("Compose Ops Café 東京", "private channel draft", "Send"),
-    "compose_channel_disabled_sheet": ("Compose Disabled Lab", "Channel disabled | 19/138 B", "Send"),
-    "compose_protocol_time_sheet": ("Compose Public", "Protocol time unavailable | 21/138 B", "Send"),
+    "compose_sheet": ("Message Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"),
+    "compose_utf8_sheet": ("Message Public", "Café 東京", "7 chars | 12/138 B", "Send"),
+    "compose_byte_limit_sheet": ("Message Public", "46 chars | 138/138 B", "Send"),
+    "compose_oversize_sheet": ("Message Public", "Too long | 140/138 B", "Send"),
+    "compose_invalid_sheet": ("Message Public", "Invalid text | 3/138 B", "Send"),
+    "compose_offline_sheet": ("Message Public", "Radio unavailable | 16/138 B", "Send"),
+    "compose_busy_sheet": ("Message Public", "Radio busy | 21/138 B", "Send"),
+    "compose_retry_sheet": ("Message Public", "Retry ready: timeout | 28/138 B", "Send"),
+    "compose_channel_private_sheet": ("Message Ops Café 東京", "private channel draft", "Send"),
+    "compose_channel_disabled_sheet": ("Message Disabled Lab", "Channel disabled | 19/138 B", "Send"),
+    "compose_protocol_time_sheet": ("Message Public", "Protocol time unavailable | 21/138 B", "Send"),
     "compose_dm_sheet": ("DM YKF Corebot", "Direct message", "reply to YKF Corebot", "20 chars | 20/138 B", "Send"),
     "compose_dm_no_contact_sheet": ("DM YKF Corebot", "Direct message", "Contact unavailable | 22/138 B", "Send"),
     "compose_dm_active_sheet": ("DM YKF Corebot", "Prior DM still active | 20/138 B", "Send"),
@@ -7383,11 +7405,9 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "diagnostics_sheet": (
         "Diagnostics",
-        "Advanced health",
         "Health",
-        "Crashlog",
-        "Export",
-        "Crashlog  Exports  Serial",
+        "Crashlog  Events  Serial",
+        "Open Terminal",
         "Close",
     ),
     "wifi_setup_sheet": (
@@ -7399,6 +7419,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "SSID",
         "Optional",
         "Scan",
+        "Next",
         "Connect",
         "Scan to list nearby 2.4 GHz networks",
         "Keyboard",
@@ -7410,12 +7431,12 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "ble_setup_sheet": (
         "BLE Setup",
         "Companion state",
-        "State off  build disabled",
-        "BLE companion transport is unavailable in this release.",
-        "No BLE pairing or transport artifact is present for public release.",
-        "Enable unavailable",
-        "Pair unavailable",
-        "Forget unavailable",
+        "State off  build enabled",
+        "Companion BLE is available for measured local setup.",
+        "Pairing controls require a measured BLE runtime artifact.",
+        "Enable",
+        "Pair",
+        "Forget",
         "Close",
     ),
     "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),
@@ -7517,7 +7538,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "dm_thread_sheet": ("Back", "Search", "Message this contact"),
     "dm_thread_details_sheet": (
         "Back",
-        "Hide details",
+        "Less detail",
         "Search",
         "Technical details",
         "Message this contact",
@@ -7533,7 +7554,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Contact unavailable",
     ),
     "compose_incoming_public_refresh": (
-        "Compose Public",
+        "Message Public",
         "draft survives incoming refresh",
         "Keyboard",
         "Send",

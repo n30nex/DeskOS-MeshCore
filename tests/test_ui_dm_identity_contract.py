@@ -124,11 +124,11 @@ def test_direct_contact_and_node_dm_shortcuts_have_unclipped_44px_targets() -> N
     assert "NODES_ROW_WIDTH 448" in nodes
     assert "NODES_ROW_HEIGHT 58" in nodes
     assert "parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT" in contact_row
-    assert 'nodes_create_button(row, "Message", 340, 7, 84, 44' in contact_row
+    assert 'nodes_create_button(row, "Chat", 340, 7, 84, 44' in contact_row
     assert 7 + 44 <= 58
 
     assert "parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT" in node_row
-    assert 'nodes_create_button(row, "Message", 340, 7, 84, 44' in node_row
+    assert 'nodes_create_button(row, "Chat", 340, 7, 84, 44' in node_row
     assert 7 + 44 <= 58
 
 

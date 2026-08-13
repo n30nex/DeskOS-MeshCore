@@ -137,6 +137,8 @@ static const char *nodes_sort_label(d1l_node_sort_t sort)
         return "Sort: Role";
     case D1L_NODE_SORT_SIGNAL:
         return "Sort: Signal";
+    case D1L_NODE_SORT_FAVORITE:
+        return "Sort: Favorites";
     case D1L_NODE_SORT_LAST_HEARD:
     default:
         return "Sort: Recent";
@@ -482,7 +484,7 @@ static void nodes_render_contact_row(
         lv_obj_set_pos(details, 58, 31);
     }
     if (can_dm) {
-        nodes_create_button(row, "Message", 340, 7, 84, 44, 0xA7F3D0, true,
+        nodes_create_button(row, "Chat", 340, 7, 84, 44, 0xA7F3D0, true,
                             nodes_dispatch_contact_dm_event_cb, binding);
     } else if (can_manage) {
         nodes_create_button(row, "Manage", 340, 7, 84, 44, 0xFBBF24, true,
@@ -545,7 +547,7 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
         lv_obj_set_pos(details, 58, 31);
     }
     if (can_dm) {
-        nodes_create_button(row, "Message", 340, 7, 84, 44, 0xA7F3D0, true,
+        nodes_create_button(row, "Chat", 340, 7, 84, 44, 0xA7F3D0, true,
                             nodes_dispatch_node_dm_event_cb, binding);
     } else if (can_manage) {
         nodes_create_button(row, "Manage", 340, 7, 84, 44, 0xFBBF24, true,

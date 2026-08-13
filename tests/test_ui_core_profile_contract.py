@@ -141,7 +141,7 @@ def test_core_copy_describes_only_reachable_conversations_and_unread_behavior():
 
     assert '"Public and direct conversations"' in home
     assert "D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT" in home
-    assert '"Public, direct, and room conversations"' in home
+    assert '"Public, DMs, and rooms"' in home
     assert '"Include in unread count"' in contacts
     assert '"Exclude from unread count"' in contacts
     assert "Mute notifications" not in contacts

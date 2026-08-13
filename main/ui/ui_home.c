@@ -6,26 +6,26 @@
 #include "lvgl.h"
 
 static const d1l_ui_home_box_t k_destination_boxes[D1L_UI_HOME_DESTINATION_COUNT] = {
-    [D1L_UI_HOME_DESTINATION_MESSAGES] = {12, 0, 222, 140},
-    [D1L_UI_HOME_DESTINATION_NETWORK] = {246, 0, 222, 140},
-    [D1L_UI_HOME_DESTINATION_MAP] = {12, 148, 222, 140},
-    [D1L_UI_HOME_DESTINATION_MORE] = {246, 148, 222, 140},
+    [D1L_UI_HOME_DESTINATION_MESSAGES] = {12, 52, 222, 136},
+    [D1L_UI_HOME_DESTINATION_NETWORK] = {246, 52, 222, 136},
+    [D1L_UI_HOME_DESTINATION_MAP] = {12, 196, 222, 136},
+    [D1L_UI_HOME_DESTINATION_MORE] = {246, 196, 222, 136},
 };
 
-static const d1l_ui_home_box_t k_device_box = {12, 296, 456, 88};
+static const d1l_ui_home_box_t k_device_box = {12, 340, 456, 128};
 
 static const d1l_ui_home_box_t k_status_boxes[D1L_UI_HOME_STATUS_COUNT] = {
-    [D1L_UI_HOME_STATUS_MESH] = {14, 298, 88, 84},
-    [D1L_UI_HOME_STATUS_WIFI] = {105, 298, 88, 84},
-    [D1L_UI_HOME_STATUS_BLE] = {196, 298, 88, 84},
-    [D1L_UI_HOME_STATUS_SD] = {287, 298, 88, 84},
-    [D1L_UI_HOME_STATUS_ATTENTION] = {378, 298, 88, 84},
+    [D1L_UI_HOME_STATUS_MESH] = {14, 342, 88, 124},
+    [D1L_UI_HOME_STATUS_WIFI] = {105, 342, 88, 124},
+    [D1L_UI_HOME_STATUS_BLE] = {196, 342, 88, 124},
+    [D1L_UI_HOME_STATUS_SD] = {287, 342, 88, 124},
+    [D1L_UI_HOME_STATUS_ATTENTION] = {378, 342, 88, 124},
 };
 
 static const d1l_ui_home_box_t k_compact_status_boxes[D1L_UI_HOME_STATUS_COUNT] = {
-    [D1L_UI_HOME_STATUS_MESH] = {14, 298, 144, 84},
-    [D1L_UI_HOME_STATUS_SD] = {160, 298, 144, 84},
-    [D1L_UI_HOME_STATUS_ATTENTION] = {306, 298, 144, 84},
+    [D1L_UI_HOME_STATUS_MESH] = {14, 342, 144, 124},
+    [D1L_UI_HOME_STATUS_SD] = {160, 342, 144, 124},
+    [D1L_UI_HOME_STATUS_ATTENTION] = {306, 342, 144, 124},
 };
 
 
@@ -81,8 +81,10 @@ bool d1l_ui_home_action_available(d1l_ui_home_action_t action)
         return d1l_release_feature_available(
             D1L_RELEASE_FEATURE_DIAGNOSTICS);
     case D1L_UI_HOME_ACTION_MORE:
+    case D1L_UI_HOME_ACTION_LOCK:
         return true;
     case D1L_UI_HOME_ACTION_NONE:
+    case D1L_UI_HOME_ACTION_COUNT:
     default:
         return false;
     }
@@ -142,7 +144,7 @@ static void home_action_event_cb(lv_event_t *event)
     }
     const d1l_ui_home_action_t action = binding->action;
     if (action > D1L_UI_HOME_ACTION_NONE &&
-        action <= D1L_UI_HOME_ACTION_PACKETS &&
+        action < D1L_UI_HOME_ACTION_COUNT &&
         d1l_ui_home_action_available(action)) {
         binding->controller->action_handler(
             action, binding->controller->action_context);
@@ -156,7 +158,7 @@ static void home_bind_action(lv_obj_t *object,
 {
     if (!object || !binding || !controller || !controller->action_handler ||
         action <= D1L_UI_HOME_ACTION_NONE ||
-        action > D1L_UI_HOME_ACTION_PACKETS ||
+        action >= D1L_UI_HOME_ACTION_COUNT ||
         !d1l_ui_home_action_available(action)) {
         return;
     }
@@ -166,6 +168,53 @@ static void home_bind_action(lv_obj_t *object,
     lv_obj_set_style_bg_color(object, lv_color_hex(0x17241D), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(object, lv_color_hex(0x5EEAD4), LV_STATE_FOCUSED);
     lv_obj_add_event_cb(object, home_action_event_cb, LV_EVENT_CLICKED, binding);
+}
+
+static void render_home_toolbar(lv_obj_t *parent,
+                                const d1l_ui_home_view_model_t *view_model,
+                                d1l_ui_home_action_binding_t *binding,
+                                d1l_ui_home_controller_t *controller)
+{
+    lv_obj_t *toolbar = lv_obj_create(parent);
+    if (!toolbar) {
+        return;
+    }
+    lv_obj_set_size(toolbar, 480, 44);
+    lv_obj_set_pos(toolbar, 0, 0);
+    lv_obj_set_style_radius(toolbar, 0, 0);
+    lv_obj_set_style_bg_color(toolbar, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(toolbar, lv_color_hex(0x1F372E), 0);
+    lv_obj_set_style_border_width(toolbar, 1, 0);
+    lv_obj_set_style_pad_all(toolbar, 0, 0);
+    lv_obj_clear_flag(toolbar, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = home_create_label(toolbar, "DeskOS", 0xF4F7FB);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_obj_set_pos(title, 12, 8);
+    }
+    lv_obj_t *time = home_create_label(toolbar, view_model->time_value,
+                                       view_model->time_value_color);
+    if (time) {
+        home_set_dot_width(time, 124);
+        lv_obj_set_style_text_align(time, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_pos(time, 246, 14);
+    }
+    lv_obj_t *lock = lv_btn_create(toolbar);
+    if (lock) {
+        lv_obj_set_size(lock, 86, 44);
+        lv_obj_set_pos(lock, 382, 0);
+        lv_obj_set_style_radius(lock, 8, 0);
+        lv_obj_set_style_bg_color(lock, lv_color_hex(0x1E2A36), 0);
+        lv_obj_set_style_bg_color(lock, lv_color_hex(0x263545), LV_STATE_PRESSED);
+        lv_obj_set_style_shadow_width(lock, 0, 0);
+        lv_obj_set_style_pad_all(lock, 0, 0);
+        lv_obj_t *label = home_create_label(lock, "Lock", 0xE5EDF5);
+        if (label) {
+            lv_obj_center(label);
+        }
+        home_bind_action(lock, binding, controller, D1L_UI_HOME_ACTION_LOCK);
+    }
 }
 
 static void render_destination_card(lv_obj_t *parent,
@@ -256,19 +305,19 @@ static void render_status_item(lv_obj_t *card,
     lv_obj_t *icon_label = home_create_label(item, icon, color);
     if (icon_label) {
         lv_obj_set_style_text_font(icon_label, &lv_font_montserrat_24, 0);
-        lv_obj_align(icon_label, LV_ALIGN_TOP_MID, 0, 4);
+        lv_obj_align(icon_label, LV_ALIGN_TOP_MID, 0, 16);
     }
     lv_obj_t *name_label = home_create_label(item, label, 0xA7B4BE);
     if (name_label) {
         home_set_dot_width(name_label, box.width - 8);
         lv_obj_set_style_text_align(name_label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(name_label, 4, 32);
+        lv_obj_set_pos(name_label, 4, 50);
     }
     lv_obj_t *value_label = home_create_label(item, value, color);
     if (value_label) {
         home_set_dot_width(value_label, box.width - 8);
         lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(value_label, 4, 55);
+        lv_obj_set_pos(value_label, 4, 75);
     }
 }
 
@@ -329,6 +378,11 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
     controller->action_handler = action_handler;
     controller->action_context = action_context;
     memset(controller->bindings, 0, sizeof(controller->bindings));
+    render_home_toolbar(
+        parent, &controller->rendered,
+        &controller->bindings[D1L_UI_HOME_DESTINATION_COUNT +
+                              D1L_UI_HOME_STATUS_COUNT],
+        controller);
     const bool map_available =
         d1l_ui_home_action_available(D1L_UI_HOME_ACTION_MAP);
     const char *third_title = map_available ? "Map" : "Packets";
@@ -345,7 +399,7 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
     const char *messages_detail =
         d1l_release_feature_available(
             D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT) ?
-        "Public, direct, and room conversations" :
+        "Public, DMs, and rooms" :
         "Public and direct conversations";
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MESSAGES,
@@ -359,7 +413,7 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_NETWORK,
                             LV_SYMBOL_LIST, "Nodes",
-                            "Contacts, nearby nodes, and routing",
+                            "Contacts, nearby, and routes",
                             controller->rendered.network_status,
                             controller->rendered.network_status_color,
                             D1L_UI_HOME_ACTION_NETWORK,
@@ -375,7 +429,7 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MORE, LV_SYMBOL_SETTINGS,
                             map_available ? "Tools" : "Settings",
-                            "Device settings, utilities, and support",
+                            "Settings, utilities, and support",
                             controller->rendered.more_status,
                             controller->rendered.more_status_color,
                             D1L_UI_HOME_ACTION_MORE,

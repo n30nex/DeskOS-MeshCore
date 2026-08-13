@@ -1,4 +1,4 @@
-# DeskOS D1L 1.5 / RC3 limitations
+# DeskOS D1L 1.6 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -22,7 +22,7 @@ SD-primary storage.
   material. It is not a general QR generator and never exports secrets.
 - Signed update is local-SD only. It does not download firmware or accept an
   RF-triggered update. USB app/full-clean flashing remains the recovery path.
-- The current UI is English-only. Additional localization is RC3 work.
+- The current UI is English-only. Additional localization remains future work.
 - Observer/MQTT is opt-in and is never enabled silently.
 - Time and age labels remain unavailable until the device has a trusted time
   source.

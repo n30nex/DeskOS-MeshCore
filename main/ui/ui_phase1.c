@@ -1,6 +1,5 @@
 #include "ui_phase1.h"
 
-#include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -50,6 +49,7 @@
 #include "ui_navigation.h"
 #include "ui_node_detail.h"
 #include "ui_nodes.h"
+#include "ui_nodes_model.h"
 #include "ui_packets.h"
 #include "ui_radio_settings.h"
 #include "ui_screen.h"
@@ -2328,7 +2328,11 @@ static void handle_home_action(d1l_ui_home_action_t action, void *context)
     case D1L_UI_HOME_ACTION_ATTENTION:
         open_diagnostics_sheet_event_cb(NULL);
         break;
+    case D1L_UI_HOME_ACTION_LOCK:
+        lock_event_cb(NULL);
+        break;
     case D1L_UI_HOME_ACTION_NONE:
+    case D1L_UI_HOME_ACTION_COUNT:
     default:
         break;
     }
@@ -2749,7 +2753,7 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
         char default_title[64];
-        snprintf(default_title, sizeof(default_title), "Compose %.32s",
+        snprintf(default_title, sizeof(default_title), "Message %.32s",
                  channel.name);
         lv_label_set_text(s_compose_title,
                           title && title[0] ? title : default_title);
@@ -4850,12 +4854,12 @@ static void render_public_history_sheet(void)
         s_public_history_sheet, history_title, 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 178);
+    lv_obj_set_width(title, 160);
     lv_obj_set_pos(title, 8, 4);
 
-    create_button(s_public_history_sheet, "Search", 196, 0, 76, 40,
+    create_button(s_public_history_sheet, "Search", 176, 0, 84, 40,
                   open_public_search_event_cb, NULL);
-    create_button(s_public_history_sheet, "Clear", 280, 0, 64, 40,
+    create_button(s_public_history_sheet, "Clear", 268, 0, 76, 40,
                   open_public_search_event_cb, (void *)"clear");
     create_button(s_public_history_sheet, "Close", 352, 0, 72, 40,
                   close_public_history_event_cb, NULL);
@@ -5768,91 +5772,6 @@ static void render_messages(lv_obj_t *content, const d1l_app_snapshot_t *snapsho
                            handle_messages_action, NULL);
 }
 
-static bool nodes_contains_casefold(const char *haystack, const char *needle)
-{
-    if (!needle || needle[0] == '\0') {
-        return true;
-    }
-    if (!haystack) {
-        return false;
-    }
-    for (const char *start = haystack; *start; ++start) {
-        const char *left = start;
-        const char *right = needle;
-        while (*left && *right &&
-               tolower((unsigned char)*left) ==
-                   tolower((unsigned char)*right)) {
-            left++;
-            right++;
-        }
-        if (*right == '\0') {
-            return true;
-        }
-    }
-    return false;
-}
-
-static int nodes_ascii_casecmp(const char *left, const char *right)
-{
-    left = left ? left : "";
-    right = right ? right : "";
-    while (*left && *right) {
-        const int folded_left = tolower((unsigned char)*left);
-        const int folded_right = tolower((unsigned char)*right);
-        if (folded_left != folded_right) {
-            return folded_left < folded_right ? -1 : 1;
-        }
-        left++;
-        right++;
-    }
-    return *left == *right ? 0 : (*left ? 1 : -1);
-}
-
-static const char *nodes_contact_name(const d1l_contact_entry_t *entry)
-{
-    if (!entry) {
-        return "";
-    }
-    return entry->alias[0] ? entry->alias : entry->heard_name;
-}
-
-static bool nodes_contact_matches_search(const d1l_contact_entry_t *entry)
-{
-    return entry &&
-        (nodes_contains_casefold(nodes_contact_name(entry), s_nodes_search_text) ||
-         nodes_contains_casefold(entry->type, s_nodes_search_text) ||
-         nodes_contains_casefold(entry->fingerprint, s_nodes_search_text) ||
-         nodes_contains_casefold(entry->public_key_hex, s_nodes_search_text));
-}
-
-static int nodes_contact_compare(const void *left_ptr, const void *right_ptr)
-{
-    const d1l_contact_entry_t *left = left_ptr;
-    const d1l_contact_entry_t *right = right_ptr;
-    if (s_nodes_sort == D1L_NODE_SORT_SIGNAL &&
-        left->last_rssi_dbm != right->last_rssi_dbm) {
-        return left->last_rssi_dbm > right->last_rssi_dbm ? -1 : 1;
-    }
-    if (s_nodes_sort == D1L_NODE_SORT_ROLE) {
-        const int role_order = nodes_ascii_casecmp(left->type, right->type);
-        if (role_order != 0) {
-            return role_order;
-        }
-    }
-    if (s_nodes_sort == D1L_NODE_SORT_NAME ||
-        s_nodes_sort == D1L_NODE_SORT_ROLE) {
-        const int name_order = nodes_ascii_casecmp(
-            nodes_contact_name(left), nodes_contact_name(right));
-        if (name_order != 0) {
-            return name_order;
-        }
-    }
-    if (left->last_heard_ms != right->last_heard_ms) {
-        return left->last_heard_ms > right->last_heard_ms ? -1 : 1;
-    }
-    return nodes_ascii_casecmp(left->fingerprint, right->fingerprint);
-}
-
 static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
                                            d1l_ui_nodes_view_model_t *view_model)
 {
@@ -5869,14 +5788,16 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
         snapshot->recent_contact_count > D1L_CONTACT_STORE_CAPACITY ?
             D1L_CONTACT_STORE_CAPACITY : snapshot->recent_contact_count;
     for (size_t i = 0; i < source_contact_count; ++i) {
-        if (!nodes_contact_matches_search(&snapshot->recent_contacts[i])) {
+        if (!d1l_ui_nodes_contact_matches_search(
+                &snapshot->recent_contacts[i], s_nodes_search_text)) {
             continue;
         }
         view_model->contact_rows[view_model->contact_row_count++] =
             snapshot->recent_contacts[i];
     }
-    qsort(view_model->contact_rows, view_model->contact_row_count,
-          sizeof(view_model->contact_rows[0]), nodes_contact_compare);
+    d1l_ui_nodes_sort_contacts(view_model->contact_rows,
+                               view_model->contact_row_count,
+                               s_nodes_sort);
     for (size_t i = 0; i < view_model->contact_row_count; ++i) {
         view_model->contact_can_dm[i] = contact_can_dm(&view_model->contact_rows[i]);
     }
@@ -6135,21 +6056,7 @@ static void open_nodes_search_sheet(void)
 
 static void cycle_nodes_sort(void)
 {
-    switch (s_nodes_sort) {
-    case D1L_NODE_SORT_LAST_HEARD:
-        s_nodes_sort = D1L_NODE_SORT_NAME;
-        break;
-    case D1L_NODE_SORT_NAME:
-        s_nodes_sort = D1L_NODE_SORT_ROLE;
-        break;
-    case D1L_NODE_SORT_ROLE:
-        s_nodes_sort = D1L_NODE_SORT_SIGNAL;
-        break;
-    case D1L_NODE_SORT_SIGNAL:
-    default:
-        s_nodes_sort = D1L_NODE_SORT_LAST_HEARD;
-        break;
-    }
+    s_nodes_sort = d1l_ui_nodes_next_sort(s_nodes_sort);
     request_content_refresh();
 }
 
@@ -6185,7 +6092,8 @@ static bool open_managed_contact(const d1l_contact_entry_t *contact)
              contact->heard_name);
     snprintf(node.node.type, sizeof(node.node.type), "%s", contact->type);
     snprintf(node.display_name, sizeof(node.display_name), "%.*s",
-             (int)(sizeof(node.display_name) - 1U), nodes_contact_name(contact));
+             (int)(sizeof(node.display_name) - 1U),
+             d1l_ui_nodes_contact_name(contact));
     snprintf(node.role, sizeof(node.role), "%s", contact->type);
     node.favorite = contact->favorite;
     node.muted = contact->muted;

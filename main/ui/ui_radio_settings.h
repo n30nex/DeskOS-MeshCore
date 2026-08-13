@@ -7,7 +7,7 @@
 
 typedef struct _lv_obj_t lv_obj_t;
 
-#define D1L_UI_RADIO_SETTINGS_BINDING_COUNT 13U
+#define D1L_UI_RADIO_SETTINGS_BINDING_COUNT 12U
 #define D1L_UI_RADIO_SETTINGS_CONTROLLER_MAX_BYTES 320U
 
 typedef enum {

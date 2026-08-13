@@ -445,7 +445,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert "D1L Desk" not in labels_by_view["home"]
     assert not any(label.startswith("--:--  Mesh") for label in labels_by_view["home"])
     assert ui_simulator.TOP_BAR_H == 56
-    assert ui_simulator.HOME_TOP_BAR_H == 16
+    assert ui_simulator.HOME_TOP_BAR_H == 44
     assert ui_simulator.DOCK_Y == 432
     assert ui_simulator.DOCK_H == 48
     assert "RX" not in labels_by_view["home"]
@@ -481,9 +481,11 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Contacts",
         "Find",
         "Clear",
+        "Search contacts",
+        "Sort: Recent",
         "Saved contacts",
         "Nearby",
-        "Message",
+        "Chat",
     } <= labels_by_view["nodes"]
     assert {"Map", "Options", "(c) OpenStreetMap contributors"} <= labels_by_view["map"]
     assert {
@@ -538,6 +540,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "SSID",
         "Optional",
         "Scan",
+        "Next",
         "Connect",
         "Scan to list nearby 2.4 GHz networks",
         "Keyboard",
@@ -548,15 +551,15 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {
         "BLE Setup",
         "Companion state",
-        "BLE companion transport is unavailable in this release.",
-        "No BLE pairing or transport artifact is present for public release.",
-        "Enable unavailable",
-        "Pair unavailable",
-        "Forget unavailable",
+        "Companion BLE is available for measured local setup.",
+        "Pairing controls require a measured BLE runtime artifact.",
+        "Enable",
+        "Pair",
+        "Forget",
     } <= labels_by_view["ble_setup_sheet"]
     assert {"Display", "Screen controls", "Brightness", "Night", "Contrast", "Timeout"} <= labels_by_view["display_settings_sheet"]
-    assert {"Diagnostics", "Advanced health", "Health", "Crashlog", "Export", "Soak"} <= labels_by_view["diagnostics_sheet"]
-    assert {"Compose Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
+    assert {"Diagnostics", "Health", "Crashlog  Events  Serial", "Open Terminal"} <= labels_by_view["diagnostics_sheet"]
+    assert {"Message Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
     assert {"DM YKF Corebot", "Direct message", "reply to YKF Corebot", "20 chars | 20/138 B", "Send", "Clear", "Close"} <= labels_by_view["compose_dm_sheet"]
     assert {"Radio", "Canada preset", "Freq 910.525 MHz", "-25k", "+25k", "Change bandwidth", "Restore Canada", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
@@ -693,7 +696,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert "Read" not in labels_by_view["dm_thread_sheet"]
     assert "DM Thread" not in labels_by_view["dm_thread_sheet"]
     assert "new" not in labels_by_view["dm_thread_sheet"]
-    assert {"YKF Corebot", "Back", "Hide details", "Search", "Technical details", "Message this contact"} <= labels_by_view["dm_thread_details_sheet"]
+    assert {"YKF Corebot", "Back", "Less detail", "Search", "Technical details", "Message this contact"} <= labels_by_view["dm_thread_details_sheet"]
     assert {"DM Search", "Search this conversation", "Apply", "Clear", "Close"} <= labels_by_view["dm_search_sheet"]
     assert "No retained messages match this search." in labels_by_view["dm_thread_search_no_match"]
     assert "No retained messages in this conversation." in labels_by_view["dm_thread_empty_sheet"]
@@ -918,23 +921,23 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["compose_dm_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])
-    assert actions_by_view["home"]["open_messages_root"]["visual_box"] == [12, 16, 234, 156]
-    assert actions_by_view["home"]["open_nodes"]["visual_box"] == [246, 16, 468, 156]
-    assert actions_by_view["home"]["open_map"]["visual_box"] == [12, 164, 234, 304]
-    assert actions_by_view["home"]["open_settings"]["visual_box"] == [246, 164, 468, 304]
+    assert actions_by_view["home"]["open_messages_root"]["visual_box"] == [12, 52, 234, 188]
+    assert actions_by_view["home"]["open_nodes"]["visual_box"] == [246, 52, 468, 188]
+    assert actions_by_view["home"]["open_map"]["visual_box"] == [12, 196, 234, 332]
+    assert actions_by_view["home"]["open_settings"]["visual_box"] == [246, 196, 468, 332]
     home_status_actions = (
-        ("open_radio_settings", [14, 314, 102, 398], "radio_settings_sheet", "LV_SYMBOL_LOOP"),
-        ("open_wifi_settings", [105, 314, 193, 398], "wifi_setup_sheet", "LV_SYMBOL_WIFI"),
-        ("open_ble_settings", [196, 314, 284, 398], "ble_setup_sheet", "LV_SYMBOL_BLUETOOTH"),
-        ("open_storage_setup", [287, 314, 375, 398], "storage_setup_sheet", "LV_SYMBOL_SD_CARD"),
-        ("open_diagnostics", [378, 314, 466, 398], "diagnostics_sheet", "LV_SYMBOL_WARNING"),
+        ("open_radio_settings", [14, 342, 102, 466], "radio_settings_sheet", "LV_SYMBOL_LOOP"),
+        ("open_wifi_settings", [105, 342, 193, 466], "wifi_setup_sheet", "LV_SYMBOL_WIFI"),
+        ("open_ble_settings", [196, 342, 284, 466], "ble_setup_sheet", "LV_SYMBOL_BLUETOOTH"),
+        ("open_storage_setup", [287, 342, 375, 466], "storage_setup_sheet", "LV_SYMBOL_SD_CARD"),
+        ("open_diagnostics", [378, 342, 466, 466], "diagnostics_sheet", "LV_SYMBOL_WARNING"),
     )
     for action, box, destination, icon in home_status_actions:
         target = actions_by_view["home"][action]
         assert target["visual_box"] == box
         assert target["kind"] == "home_status_item"
         assert target["width"] == 88
-        assert target["height"] == 84
+        assert target["height"] == 124
         assert target["destination"] == destination
         assert target["icon"] == icon
         assert ": " in target["semantic_label"]
@@ -955,7 +958,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         actions_by_view["radio_settings_sheet"]["save_radio_profile"]["destination"]
         == "radio_settings_sheet"
     )
-    assert views["home"]["metrics"]["home_status_strip_height"] == 88
+    assert views["home"]["metrics"]["home_status_strip_height"] == 128
     assert views["home"]["metrics"]["home_status_item_count"] == 5
     for docked_view in (
         "messages",
@@ -1834,14 +1837,14 @@ def test_home_status_strip_covers_ready_connecting_absent_and_error_states(tmp_p
         "home-status-no-card": {
             "Mesh: Ready",
             "Wi-Fi: Off",
-            "BLE: Unavailable",
+            "BLE: Off",
             "SD: No card",
             "Attention: Notice",
         },
         "home-status-error": {
             "Mesh: Error",
             "Wi-Fi: Off",
-            "BLE: Unavailable",
+            "BLE: Off",
             "SD: Check",
             "Attention: Check",
         },
@@ -1876,7 +1879,7 @@ def test_home_status_strip_covers_ready_connecting_absent_and_error_states(tmp_p
         assert report["touch_target_issue_count"] == 0, scenario
         assert len(status_targets) == 5, scenario
         assert all(target["width"] == 88 for target in status_targets), scenario
-        assert all(target["height"] == 84 for target in status_targets), scenario
+        assert all(target["height"] == 124 for target in status_targets), scenario
         assert set(view["metrics"]["home_status_semantic_labels"]) == semantic_labels
         assert {target["semantic_label"] for target in status_targets} == semantic_labels
         assert view["metrics"]["home_status_attention_required"] is (
