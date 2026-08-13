@@ -910,6 +910,7 @@ static void map_location_clear_event_cb(lv_event_t *event);
 static void close_map_options_sheet_event_cb(lv_event_t *event);
 static void message_detail_mode_event_cb(lv_event_t *event);
 static void map_location_keyboard_event_cb(lv_event_t *event);
+static void lock_event_cb(lv_event_t *event);
 static void unlock_event_cb(lv_event_t *event);
 static void process_pending_content_refresh(void);
 #if D1L_ENABLE_QUALIFICATION_HOOKS
