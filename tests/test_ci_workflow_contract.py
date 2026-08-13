@@ -42,6 +42,20 @@ def test_ci_avoids_duplicate_branch_push_and_pull_request_runs():
     assert "workflow_dispatch:" in trigger
 
 
+def test_ci_builds_and_records_the_exact_pr_head_commit():
+    workflow = workflow_text()
+
+    assert (
+        "D1L_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}"
+        in workflow
+    )
+    assert workflow.count("ref: ${{ env.D1L_SOURCE_SHA }}") == 5
+    assert "GITHUB_SHA" not in workflow
+    assert 'source_commit = $env:D1L_SOURCE_SHA' in workflow
+    assert 'repository_commit = $env:D1L_SOURCE_SHA' in workflow
+    assert '--commit "$D1L_SOURCE_SHA"' in workflow
+
+
 def test_ci_host_checks_are_host_only_for_sd_bridge():
     host = job_block("host-checks")
 
@@ -218,13 +232,13 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "--toolchain-receipt artifacts/meshcore-conformance/toolchain-inputs.json" in job
     assert (
         '--signed-advert-runtime-receipt "artifacts/meshcore-conformance/'
-        'meshcore_signed_advert_runtime_${GITHUB_SHA}.json"'
+        'meshcore_signed_advert_runtime_${D1L_SOURCE_SHA}.json"'
     ) in job
-    assert '--commit "$GITHUB_SHA"' in job
+    assert '--commit "$D1L_SOURCE_SHA"' in job
     assert "--seed 13746277" in job
     assert "--runs 100000" in job
     assert "--dry-run" not in job
-    assert 'artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json' in job
+    assert 'artifacts/meshcore-conformance/meshcore_conformance_${D1L_SOURCE_SHA}.json' in job
     assert "name: d1l-meshcore-wire-conformance" in job
     assert "path: artifacts/meshcore-conformance/**" in job
     assert "if-no-files-found: error" in job
@@ -315,7 +329,7 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert 'python scripts/package_release_d1l.py "${package_args[@]}"' in job
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job
     assert "python scripts/verify_checksums.py artifacts/firmware" in job
-    assert 'python scripts/verify_checksums.py "artifacts/release/d1l-release-${GITHUB_SHA}"' in job
+    assert 'python scripts/verify_checksums.py "artifacts/release/d1l-release-${D1L_SOURCE_SHA}"' in job
     assert job.count("if: github.event_name != 'pull_request'") >= 3
     assert "python scripts/verify_checksums.py artifacts/release\n" not in job
     assert "test -f sdkconfig" in job
@@ -378,7 +392,7 @@ def test_ci_records_exact_host_success_only_after_all_host_checks_pass():
     assert 'status = "pass"' in host
     assert "passed = $true" in host
     assert "all_prior_steps_completed = $true" in host
-    assert "repository_commit = $env:GITHUB_SHA" in host
+    assert "repository_commit = $env:D1L_SOURCE_SHA" in host
     assert "workflow_run_id = [string]$env:GITHUB_RUN_ID" in host
     assert 'd1l_host_checks_success_{0}.json' in host
     assert host.index("name: Host tests") < host.index("name: Record exact host-check success evidence")
