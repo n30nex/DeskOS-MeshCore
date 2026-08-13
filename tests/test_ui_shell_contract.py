@@ -1233,8 +1233,8 @@ def test_node_detail_sheet_opens_from_heard_node_rows():
     assert '"Heard on this boot  |  %lu sighting%s"' in detail
     assert '"Advanced identity  %.16s  |  key %s"' in detail
     assert 'create_button(controller, "DM"' in detail
-    assert '"Admin"' in detail
-    assert '"Verified server; local authenticated login required."' in detail
+    assert '"Login"' in detail
+    assert '"Sign in to open repeater or room controls."' in detail
     assert 'create_button(controller, "Close"' in detail
     assert "d1l_ui_node_detail_create(&s_node_detail_controller, s_screen)" in source
 

@@ -76,3 +76,12 @@ The 1.7 release keeps every 1.6 radio, storage, update, and device-safety
 boundary. The animated opening must remain non-blocking, allocation failure
 must fall through to Home, and the exact Actions-built `1.7.0` image must pass
 a non-erasing flash and physical D1L UI check on the stable USB identity.
+
+## 1.7.1 release boundary
+
+The exact Actions-built `1.7.1` image must pass the complete host suite, the
+105-view UI audit, a 1,000-transition UI lifecycle run, a non-erasing flash to
+the stable D1L USB identity, and physical checks of direct Login, masked entry,
+saved-password reuse, command navigation, pending animation, and result/error
+states. Qualification must not expose a password, format SD, or transmit an
+unrequested public message.

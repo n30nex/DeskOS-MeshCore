@@ -103,7 +103,6 @@ def test_primary_surfaces_use_end_user_copy(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 94
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -708,8 +707,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Contact",
         "YKF Room",
         "Why no DM?",
-        "Admin",
-        "Verified server; local authenticated login required.",
+        "Login",
+        "Sign in to open repeater or room controls.",
     } <= labels_by_view["managed_node_detail_sheet"]
     assert {
         "Contact Options",

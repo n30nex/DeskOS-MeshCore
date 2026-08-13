@@ -6,9 +6,9 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.7** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.7.0` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.0).
+DeskOS **1.7.1** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.7.1` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.1).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -16,6 +16,20 @@ DeskOS is a standalone, dark, touch-first MeshCore client. Firmware is built
 and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
+
+## What 1.7.1 fixes
+
+Repeater and room management now behaves like a first-class touch workflow:
+
+- saved repeater and room contacts have a direct **Login** button;
+- login opens a large masked password field and on-screen keyboard;
+- passwords can be remembered per server on this D1L, forgotten at any time,
+  and are removed with the contact or a factory reset;
+- successful login opens a dedicated command grid for Status, Telemetry,
+  Neighbours, Access, Tools, Room, and Console functions as permitted;
+- requests show an animated working screen, timeout guidance, and persistent
+  results instead of disappearing into a queued toast; and
+- server changes still require local confirmation and verified replies.
 
 ## What 1.7 adds
 
@@ -92,13 +106,33 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.2 / RC2** | Channel, Contacts, parity, packaging, and screenshot correction | Historical (`v1.2.0`) |
 | **1.5 / RC3** | BLE, signed update/rollback, sharing, diagnostics, and full-feature activation | Historical (`v1.5.0`) |
 | **1.6** | Compact Home, Contacts search/sorts, UI truthfulness, and diagnostics polish | Historical (`v1.6.0`) |
-| **1.7** | DeskOS identity, animated opening, and NeonPocket-inspired product theme | Current (`v1.7.0`) |
+| **1.7** | DeskOS identity, animated opening, and NeonPocket-inspired product theme | Historical (`v1.7.0`) |
+| **1.7.1** | Direct repeater login, saved passwords, and touch-first server management | Current (`v1.7.1`) |
 
 ## Device UI
 
 These native 480x480 captures show the production touch shell introduced in
 1.2 and refined by 1.6. Their exact 1.2 provenance is recorded in
 [`docs/screenshots/DEVICE_1_2_CAPTURE.md`](docs/screenshots/DEVICE_1_2_CAPTURE.md).
+
+### Repeater management in 1.7.1
+
+Managed repeaters and rooms now open directly from their **Login** button.
+After authentication, each server gets a focused command dashboard instead of
+mixing administration into the contact page. Slow mesh requests remain visible
+until they succeed, fail, time out, or are cancelled.
+
+| Login | Working |
+|---|---|
+| ![DeskOS 1.7.1 repeater login preview](docs/screenshots/simulator-1.7.1/repeater_login.png) | ![DeskOS 1.7.1 repeater request progress preview](docs/screenshots/simulator-1.7.1/repeater_login_pending.png) |
+
+| Manager | Status |
+|---|---|
+| ![DeskOS 1.7.1 repeater manager preview](docs/screenshots/simulator-1.7.1/repeater_manager.png) | ![DeskOS 1.7.1 repeater status preview](docs/screenshots/simulator-1.7.1/repeater_status.png) |
+
+These are deterministic 480x480 simulator previews used for layout regression.
+They contain no real password or private radio material; physical 1.7.1 device
+captures are collected separately during release acceptance.
 
 The 1.7 simulator previews below show the refreshed production palette. They
 are visual previews, not substitutes for the physical D1L release check.

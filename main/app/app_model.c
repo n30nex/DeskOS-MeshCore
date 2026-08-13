@@ -10,6 +10,7 @@
 #include "diagnostics/health_monitor.h"
 #include "esp_attr.h"
 #include "hal/display_preferences.h"
+#include "mesh/admin_credential_store.h"
 #include "mesh/channel_message_coordinator.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
@@ -1026,6 +1027,11 @@ esp_err_t d1l_app_model_rename_contact(const char *fingerprint, const char *alia
 
 esp_err_t d1l_app_model_delete_contact(const char *fingerprint, d1l_contact_entry_t *out_contact)
 {
+    const esp_err_t forget_ret =
+        d1l_admin_credential_store_forget(fingerprint);
+    if (forget_ret != ESP_OK && forget_ret != ESP_ERR_NOT_FOUND) {
+        return forget_ret;
+    }
     return d1l_contact_store_delete(fingerprint, out_contact);
 }
 

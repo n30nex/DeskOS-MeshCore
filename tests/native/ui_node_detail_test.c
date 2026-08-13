@@ -111,10 +111,10 @@ static void test_truthful_render_actions_generation_and_cleanup(void)
     assert(lv_test_has_label(
         controller.sheet,
         "Messaging unavailable: Add this nearby node as a verified contact to message it."));
-    assert(lv_test_has_label(controller.sheet, "Admin"));
+    assert(lv_test_has_label(controller.sheet, "Login"));
     assert(lv_test_has_label(controller.sheet,
-                             "Verified server; local authenticated login required."));
-    lv_test_click(lv_test_find_button(controller.sheet, "Admin"));
+                             "Sign in to open repeater or room controls."));
+    lv_test_click(lv_test_find_button(controller.sheet, "Login"));
     assert(s_action_count == 1U);
     assert(s_last_action == D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN);
 
@@ -165,7 +165,7 @@ static void test_ready_dm_close_and_invalid_models_fail_closed(void)
     assert(lv_test_has_label(
         controller.sheet,
         "Messaging ready: Verified contact. Ready for private messages."));
-    assert(!lv_test_has_label(controller.sheet, "Admin"));
+    assert(!lv_test_has_label(controller.sheet, "Login"));
 
     const size_t before = s_action_count;
     lv_test_click(lv_test_find_button(controller.sheet, "DM"));

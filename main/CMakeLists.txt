@@ -52,6 +52,7 @@ idf_component_register(
         "platform/time_display.c"
         "platform/secure_random.c"
         "mesh/advert_data.c"
+        "mesh/admin_credential_store.c"
         "mesh/channel_message_coordinator.c"
         "mesh/channel_store.c"
         "mesh/contact_store.c"

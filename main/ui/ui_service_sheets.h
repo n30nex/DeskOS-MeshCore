@@ -12,8 +12,8 @@
 
 typedef struct _lv_obj_t lv_obj_t;
 
-#define D1L_UI_SERVICE_SHEETS_BINDING_COUNT 33U
-#define D1L_UI_SERVICE_SHEETS_CONTROLLER_MAX_BYTES 640U
+#define D1L_UI_SERVICE_SHEETS_BINDING_COUNT 48U
+#define D1L_UI_SERVICE_SHEETS_CONTROLLER_MAX_BYTES 896U
 #define D1L_UI_TERMINAL_PREVIEW_COUNT 6U
 
 typedef enum {
@@ -46,7 +46,31 @@ typedef enum {
     D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND,
     D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE,
     D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_STATUS,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TELEMETRY,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_NEIGHBOURS,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACCESS,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TOOLS,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ROOM,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TERMINAL,
+    D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACL,
+    D1L_UI_SERVICE_ACTION_ADMIN_REMEMBER_TOGGLE,
+    D1L_UI_SERVICE_ACTION_ADMIN_FORGET_PASSWORD,
 } d1l_ui_service_action_t;
+
+typedef enum {
+    D1L_UI_ADMIN_PAGE_LOGIN = 0,
+    D1L_UI_ADMIN_PAGE_HUB,
+    D1L_UI_ADMIN_PAGE_STATUS,
+    D1L_UI_ADMIN_PAGE_TELEMETRY,
+    D1L_UI_ADMIN_PAGE_NEIGHBOURS,
+    D1L_UI_ADMIN_PAGE_ACCESS,
+    D1L_UI_ADMIN_PAGE_TOOLS,
+    D1L_UI_ADMIN_PAGE_ROOM,
+    D1L_UI_ADMIN_PAGE_TERMINAL,
+    D1L_UI_ADMIN_PAGE_ACL,
+} d1l_ui_admin_page_t;
 
 typedef void (*d1l_ui_service_action_handler_t)(
     d1l_ui_service_action_t action,
@@ -129,6 +153,25 @@ bool d1l_ui_service_sheets_render_admin(
     bool room_read_only_on_armed,
     bool room_read_only_off_armed,
     bool cli_secure_input,
+    const char *room_transcript,
+    d1l_ui_service_action_handler_t action_handler,
+    void *action_context);
+bool d1l_ui_service_sheets_render_admin_compact(
+    d1l_ui_service_sheets_controller_t *controller,
+    const d1l_meshcore_admin_snapshot_t *status,
+    const char *selected_fingerprint,
+    const char *selected_name,
+    d1l_ui_admin_page_t page,
+    bool saved_password_available,
+    bool remember_password,
+    d1l_meshcore_admin_mutation_t armed_mutation,
+    bool cli_command_armed,
+    bool acl_command_armed,
+    bool room_read_only_on_armed,
+    bool room_read_only_off_armed,
+    bool cli_secure_input,
+    const char *feedback,
+    bool feedback_error,
     const char *room_transcript,
     d1l_ui_service_action_handler_t action_handler,
     void *action_context);

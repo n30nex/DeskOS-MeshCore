@@ -147,9 +147,61 @@ def test_server_admin_login_is_available_on_device_and_scrubs_credentials():
     )[0]
     assert "d1l_ui_service_sheets_take_admin_password(" in login
     assert "d1l_meshcore_service_admin_login(" in login
+    assert "d1l_admin_credential_store_load(" in login
+    assert "s_admin_pending_password_valid = true;" in login
     assert "d1l_meshcore_admin_secure_zero(password, sizeof(password));" in login
     assert "show_toast_text(password" not in login
     assert "ESP_LOG" not in login
+
+
+def test_repeater_login_opens_a_compact_saved_session_manager():
+    header = read("main/ui/ui_service_sheets.h")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    for page in (
+        "D1L_UI_ADMIN_PAGE_LOGIN",
+        "D1L_UI_ADMIN_PAGE_HUB",
+        "D1L_UI_ADMIN_PAGE_STATUS",
+        "D1L_UI_ADMIN_PAGE_TELEMETRY",
+        "D1L_UI_ADMIN_PAGE_NEIGHBOURS",
+        "D1L_UI_ADMIN_PAGE_ACCESS",
+        "D1L_UI_ADMIN_PAGE_TOOLS",
+        "D1L_UI_ADMIN_PAGE_ROOM",
+        "D1L_UI_ADMIN_PAGE_TERMINAL",
+        "D1L_UI_ADMIN_PAGE_ACL",
+    ):
+        assert page in header
+
+    for label in (
+        '"Repeater login"',
+        '"Save: On"',
+        '"Forget saved"',
+        '"Repeater manager"',
+        '"\\nStatus"',
+        '"\\nTelemetry"',
+        '"\\nNeighbours"',
+        '"\\nAccess"',
+        '"\\nTools"',
+        '"\\nConsole"',
+        '"Waiting for the command result from the server."',
+    ):
+        assert label in sheets
+
+    assert "lv_textarea_set_password_mode(" in sheets
+    assert "lv_bar_create(sheet)" in sheets
+    assert "lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE)" in sheets
+    assert "d1l_admin_credential_store_has(" in phase1
+    assert "d1l_admin_credential_store_load(" in phase1
+    assert "d1l_admin_credential_store_save(" in phase1
+    assert "d1l_admin_credential_store_forget(" in phase1
+
+    actions = phase1.split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB:", 1
+    )[1].split("case D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT:", 1)[0]
+    assert "show_toast(" not in actions
+    assert "show_toast_text(" not in actions
+    assert "set_admin_feedback(" in actions
 
 
 def test_server_admin_close_preserves_session_and_target_change_logs_out():
@@ -160,15 +212,15 @@ def test_server_admin_close_preserves_session_and_target_change_logs_out():
     )[1].split(
         "case D1L_UI_SERVICE_ACTION_TERMINAL_LEVEL:", 1
     )[0]
-    switch = phase1.split(
-        "case D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN:", 1
-    )[1].split(
-        "case D1L_UI_NODE_DETAIL_ACTION_NONE:", 1
+    switch = phase1.split("static esp_err_t select_admin_target(", 1)[1].split(
+        "static bool admin_cli_allowed_for_current_session", 1
     )[0]
     assert "d1l_meshcore_service_admin_logout();" not in close
     assert "hide_service_sheets();" in close
-    assert "strcmp(admin_status.fingerprint," in switch
+    assert "strcmp(status.fingerprint, fingerprint)" in switch
     assert "d1l_meshcore_service_admin_logout();" in switch
+    assert "d1l_ui_service_sheets_render_admin_compact(" in phase1
+    assert "d1l_admin_credential_store_save(" in phase1
 
     begin_render = sheets.split(
         "static bool begin_render(", 1
@@ -214,7 +266,7 @@ def test_authenticated_server_management_is_available_on_device_and_bounded():
     assert "d1l_meshcore_admin_cli_command_read_only(command)" in cli
     assert "d1l_meshcore_service_admin_request_cli(command, false)" in cli
     assert "d1l_meshcore_service_admin_request_cli(command, true)" in cli
-    assert "Tap Confirm Command within 5 seconds" in cli
+    assert "Tap Confirm within 5 seconds to run this command." in cli
     assert cli.count(
         "d1l_meshcore_admin_secure_zero(command, sizeof(command));"
     ) >= 4

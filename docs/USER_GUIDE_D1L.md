@@ -192,15 +192,21 @@ unavailable.
 ## Repeater and room administration
 
 The administration capability uses an exact verified Repeater or Room key and
-a masked password. Select the saved contact, choose **Manage**, then open the
-Admin action. Repeater and room logins may request empty-password negotiation;
-the peer decides whether to accept it and
-returns the session permissions (guest, read-only, write or admin). Leaving,
-logging out or switching targets clears volatile session authority.
+a masked password. Choose **Login** beside a saved repeater or room contact, or
+open its detail and choose **Login**. DeskOS opens a large password field and
+on-screen keyboard. **Save: On** remembers a non-empty password for that server
+on this D1L after login succeeds; **Forget saved** removes it. Blank-password
+negotiation remains available when supported by the peer.
+
+After authentication, DeskOS opens a command dashboard rather than returning
+to the contact list. The server reports the session permissions (guest,
+read-only, write or admin). Logging out or switching targets clears volatile
+session authority.
 
 The on-device admin surface provides:
 
 - login, logout, session state and selected route;
+- a compact icon dashboard with focused management pages;
 - detailed status/counters and telemetry;
 - paged neighbours;
 - ACL query and confirmed ACL mutations;
@@ -208,10 +214,13 @@ The on-device admin surface provides:
 - device, radio and advert queries/mutations with local confirmation;
 - room posts and current-session transcript.
 
-Guest/admin role checks are enforced locally and by the remote response.
-Sensitive commands and passwords are not persistently retained or logged;
-sensitive replies are redacted and volatile confirmation input is wiped.
-Remote mutations require a second local confirmation.
+Every request opens a visible animated working state and then leaves its result
+on the relevant page. Guest/admin role checks are enforced locally and by the
+remote response. Passwords are never logged or exported. Unsaved and temporary
+password input is wiped; saved passwords are device-local and are removed when
+the contact is forgotten or the device is factory-reset. Sensitive replies are
+redacted and volatile confirmation input is wiped. Remote mutations require a
+second local confirmation.
 The exact role-aware command surface and USB wrapper syntax are listed in
 [ADMIN_REMOTE_CLI_ALLOWLIST.md](ADMIN_REMOTE_CLI_ALLOWLIST.md). Commands
 outside that list fail closed.

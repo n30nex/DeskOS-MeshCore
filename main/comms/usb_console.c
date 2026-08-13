@@ -7008,7 +7008,7 @@ static void cmd_contacts_delete(const char *line)
     }
 
     d1l_contact_entry_t contact = {0};
-    esp_err_t ret = d1l_contact_store_delete(fingerprint, &contact);
+    esp_err_t ret = d1l_app_model_delete_contact(fingerprint, &contact);
     if (ret != ESP_OK) {
         err_result("contacts delete", esp_err_to_name(ret), "could not delete contact");
         return;
