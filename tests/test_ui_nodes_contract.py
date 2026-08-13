@@ -76,7 +76,7 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
         '"Find nearby"',
         '"No saved contacts yet"',
         '"No other nearby nodes"',
-        '"Manage"',
+        '"Login"',
         '"Chat"',
         '"Repeater"',
         '"Room"',
@@ -100,6 +100,7 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
     assert '"Showing %u of %u %s. Use Search to find more."' in source
     assert "rendered_nearby == 0U && nearby_count == 0U" in source
     assert 'nodes_create_button(row, "Chat", 340, 7, 84, 44' in source
+    assert 'nodes_create_button(row, "Login", 340, 7, 84, 44' in source
     assert "entry->public_key_hex" not in source
     assert '"Fingerprint' not in source
     contact_row = source.split("static void nodes_render_contact_row", 1)[1].split(
@@ -115,7 +116,9 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
     assert "%.8s" not in source
     assert "Scroll proof" not in source
     assert "D1L_UI_NODES_ACTION_OPEN_CONTACT_DM" in source
+    assert "D1L_UI_NODES_ACTION_OPEN_CONTACT_ADMIN" in source
     assert "D1L_UI_NODES_ACTION_OPEN_NODE_DM" in source
+    assert "D1L_UI_NODES_ACTION_OPEN_NODE_ADMIN" in source
     assert "D1L_UI_NODES_ACTION_OPEN_SEARCH" in source
     assert "D1L_UI_NODES_ACTION_CYCLE_SORT" in source
 

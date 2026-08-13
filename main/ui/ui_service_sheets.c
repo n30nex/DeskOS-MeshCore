@@ -43,6 +43,17 @@ enum {
     BINDING_ADMIN_CLI_SEND,
     BINDING_ADMIN_CLI_SECURE_TOGGLE,
     BINDING_ADMIN_KEYBOARD,
+    BINDING_ADMIN_SHOW_HUB,
+    BINDING_ADMIN_SHOW_STATUS,
+    BINDING_ADMIN_SHOW_TELEMETRY,
+    BINDING_ADMIN_SHOW_NEIGHBOURS,
+    BINDING_ADMIN_SHOW_ACCESS,
+    BINDING_ADMIN_SHOW_TOOLS,
+    BINDING_ADMIN_SHOW_ROOM,
+    BINDING_ADMIN_SHOW_TERMINAL,
+    BINDING_ADMIN_SHOW_ACL,
+    BINDING_ADMIN_REMEMBER_TOGGLE,
+    BINDING_ADMIN_FORGET_PASSWORD,
 };
 
 _Static_assert(sizeof(d1l_ui_service_sheets_controller_t) <=
@@ -52,7 +63,7 @@ _Static_assert(sizeof(d1l_ui_service_sheets_controller_t) <=
 static bool action_valid(d1l_ui_service_action_t action)
 {
     return action > D1L_UI_SERVICE_ACTION_NONE &&
-           action <= D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT;
+           action <= D1L_UI_SERVICE_ACTION_ADMIN_FORGET_PASSWORD;
 }
 
 static void advance_generation(
@@ -713,6 +724,946 @@ static const char *admin_role_name(d1l_meshcore_admin_role_t role)
 {
     return role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ? "repeater" :
            role == D1L_MESHCORE_ADMIN_ROLE_ROOM ? "room" : "none";
+}
+
+static bool admin_state_pending(d1l_meshcore_admin_state_t state)
+{
+    return state == D1L_MESHCORE_ADMIN_LOGIN_PENDING ||
+        state == D1L_MESHCORE_ADMIN_STATUS_PENDING ||
+        state == D1L_MESHCORE_ADMIN_MUTATION_PENDING ||
+        state == D1L_MESHCORE_ADMIN_CLI_PENDING ||
+        state == D1L_MESHCORE_ADMIN_QUERY_PENDING;
+}
+
+static const char *admin_permission_name(uint8_t permissions)
+{
+    switch (permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) {
+    case D1L_MESHCORE_ADMIN_PERMISSION_ADMIN:
+        return "Admin access";
+    case D1L_MESHCORE_ADMIN_PERMISSION_WRITE:
+        return "Write access";
+    case D1L_MESHCORE_ADMIN_PERMISSION_READ_ONLY:
+        return "Read-only access";
+    case D1L_MESHCORE_ADMIN_PERMISSION_GUEST:
+    default:
+        return "Guest access";
+    }
+}
+
+static const char *admin_failure_message(d1l_meshcore_admin_state_t state)
+{
+    switch (state) {
+    case D1L_MESHCORE_ADMIN_TIMED_OUT:
+        return "The server did not reply. Check the route and try again.";
+    case D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS:
+        return "That password was rejected. Check it and try again.";
+    case D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL:
+        return "This server firmware does not support remote management.";
+    case D1L_MESHCORE_ADMIN_RADIO_BUSY:
+        return "The radio is busy. Wait a moment and try again.";
+    case D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED:
+    case D1L_MESHCORE_ADMIN_DURABLE_REPLAY_REJECTED:
+        return "An old reply was ignored. Start a fresh login.";
+    case D1L_MESHCORE_ADMIN_LOCAL_STORAGE_FAILED:
+        return "DeskOS could not protect this session. Check storage.";
+    case D1L_MESHCORE_ADMIN_DISCONNECTED:
+        return "The management session ended. Sign in again.";
+    case D1L_MESHCORE_ADMIN_IDLE:
+    default:
+        return "Enter the password used by this server.";
+    }
+}
+
+static lv_obj_t *create_admin_panel(lv_obj_t *parent, int x, int y,
+                                    int width, int height, uint32_t border)
+{
+    lv_obj_t *panel = lv_obj_create(parent);
+    if (!panel) {
+        return NULL;
+    }
+    lv_obj_set_size(panel, width, height);
+    lv_obj_set_pos(panel, x, y);
+    lv_obj_set_style_radius(panel, 8, 0);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x171F24), 0);
+    lv_obj_set_style_border_color(panel, lv_color_hex(border), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_pad_all(panel, 8, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    return panel;
+}
+
+static bool render_admin_compact_header(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const char *title_text, bool show_back)
+{
+    lv_obj_t *title = create_label(sheet, title_text, 0xF4F7FB);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        position_dot(title, 8, 4, show_back ? 226 : 290);
+    }
+    bool complete = title != NULL;
+    if (show_back) {
+        complete = create_button(
+            controller, sheet, "Back", 254, 0, 76, 44,
+            BINDING_ADMIN_SHOW_HUB,
+            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB) != NULL && complete;
+    }
+    complete = create_button(
+        controller, sheet, "Close", 340, 0, 76, 44,
+        BINDING_CLOSE_ADMIN,
+        D1L_UI_SERVICE_ACTION_CLOSE_ADMIN) != NULL && complete;
+    return complete;
+}
+
+static bool render_admin_target(
+    lv_obj_t *sheet, const d1l_meshcore_admin_snapshot_t *status,
+    const char *selected_fingerprint, const char *selected_name,
+    int y, int height)
+{
+    lv_obj_t *panel = create_admin_panel(sheet, 8, y, 408, height, 0x34566A);
+    if (!panel) {
+        return false;
+    }
+    const char *name = selected_name && selected_name[0] ? selected_name :
+        (status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?
+             "Room server" : "Repeater");
+    const char *fingerprint = status->fingerprint[0] ? status->fingerprint :
+        (selected_fingerprint && selected_fingerprint[0] ?
+             selected_fingerprint : "-");
+    lv_obj_t *name_label = create_label(panel, name, 0xF4F7FB);
+    position_dot(name_label, 4, 0, 378);
+    char meta[96];
+    snprintf(meta, sizeof(meta), "%s  |  %.16s",
+             status->state == D1L_MESHCORE_ADMIN_AUTHENTICATED ?
+                 admin_permission_name(status->permissions) : "Verified server",
+             fingerprint);
+    lv_obj_t *meta_label = create_label(panel, meta, 0xA6B0B7);
+    position_dot(meta_label, 4, 22, 378);
+    return name_label && meta_label;
+}
+
+static lv_obj_t *create_admin_grid_button(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const char *text, int x, int y, size_t slot,
+    d1l_ui_service_action_t action, uint32_t accent)
+{
+    lv_obj_t *button = create_button(
+        controller, sheet, text, x, y, 128, 62, slot, action);
+    if (!button) {
+        return NULL;
+    }
+    lv_obj_set_style_border_color(button, lv_color_hex(accent), 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x17252C), 0);
+    lv_obj_t *label = lv_obj_get_child(button, 0);
+    if (label) {
+        lv_obj_set_style_text_color(label, lv_color_hex(accent), 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    }
+    return button;
+}
+
+static void admin_progress_value(void *object, int32_t value)
+{
+    lv_obj_t *bar = (lv_obj_t *)object;
+    if (bar && lv_obj_is_valid(bar)) {
+        lv_bar_set_value(bar, value, LV_ANIM_OFF);
+    }
+}
+
+static bool render_admin_pending(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const d1l_meshcore_admin_snapshot_t *status,
+    const char *selected_fingerprint, const char *selected_name)
+{
+    bool complete = render_admin_compact_header(
+        controller, sheet, "Working", false);
+    complete = render_admin_target(
+        sheet, status, selected_fingerprint, selected_name, 48, 52) &&
+        complete;
+    const char *title = "Waiting for the server";
+    const char *detail = "The request was sent. Waiting for a signed reply.";
+    if (status->state == D1L_MESHCORE_ADMIN_LOGIN_PENDING) {
+        title = "Signing in";
+        detail = "Checking the password and opening a secure session.";
+    } else if (status->state == D1L_MESHCORE_ADMIN_STATUS_PENDING) {
+        title = "Updating status";
+        detail = "Reading current radio and traffic information.";
+    } else if (status->state == D1L_MESHCORE_ADMIN_QUERY_PENDING) {
+        title = status->pending_query == D1L_MESHCORE_ADMIN_QUERY_TELEMETRY ?
+            "Loading telemetry" :
+            (status->pending_query == D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS ?
+                 "Loading neighbours" : "Loading access list");
+        detail = "The repeater is preparing the requested information.";
+    } else if (status->state == D1L_MESHCORE_ADMIN_MUTATION_PENDING) {
+        title = status->pending_mutation ==
+                D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS ?
+            "Clearing statistics" : "Sending zero-hop advert";
+        detail = "Waiting for the repeater to confirm the change.";
+    } else if (status->state == D1L_MESHCORE_ADMIN_CLI_PENDING) {
+        title = "Running server command";
+        detail = "Waiting for the command result from the server.";
+    }
+    lv_obj_t *title_label = create_label(sheet, title, 0x20D9ED);
+    if (title_label) {
+        lv_obj_set_style_text_font(title_label, &lv_font_montserrat_24, 0);
+        lv_obj_set_width(title_label, 408);
+        lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(title_label, 8, 118);
+    }
+    complete = title_label && complete;
+    lv_obj_t *progress = lv_bar_create(sheet);
+    if (progress) {
+        lv_obj_set_size(progress, 320, 12);
+        lv_obj_set_pos(progress, 52, 164);
+        lv_bar_set_range(progress, 0, 100);
+        lv_bar_set_value(progress, 8, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(
+            progress, lv_color_hex(0x253447), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(
+            progress, lv_color_hex(0x20D9ED), LV_PART_INDICATOR);
+        lv_anim_t animation;
+        lv_anim_init(&animation);
+        lv_anim_set_var(&animation, progress);
+        lv_anim_set_exec_cb(&animation, admin_progress_value);
+        lv_anim_set_values(&animation, 8, 92);
+        lv_anim_set_time(&animation, 1100);
+        lv_anim_set_playback_time(&animation, 450);
+        lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&animation);
+    }
+    complete = progress && complete;
+    lv_obj_t *detail_label = create_label(sheet, detail, 0xF4F7FB);
+    if (detail_label) {
+        position_wrap(detail_label, 40, 194, 344);
+        lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
+    }
+    complete = detail_label && complete;
+    lv_obj_t *timeout = create_label(
+        sheet, "A slow mesh route can take up to 60 seconds.", 0xA6B0B7);
+    if (timeout) {
+        lv_obj_set_width(timeout, 408);
+        lv_obj_set_style_text_align(timeout, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(timeout, 8, 236);
+    }
+    complete = timeout && complete;
+    complete = create_button(
+        controller, sheet, "Cancel", 132, 254, 160, 44,
+        BINDING_ADMIN_LOGOUT,
+        D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT) != NULL && complete;
+    return complete;
+}
+
+static bool configure_admin_keyboard(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    lv_obj_t *textarea, int y, int height,
+    d1l_ui_service_action_t ready_action)
+{
+    controller->admin_keyboard = lv_keyboard_create(sheet);
+    if (!controller->admin_keyboard) {
+        return false;
+    }
+    d1l_ui_keyboard_configure_compose(controller->admin_keyboard);
+    d1l_ui_keyboard_configure_input(
+        controller->admin_keyboard, textarea, 8, y, 408, height);
+    d1l_ui_service_binding_t *binding = set_binding(
+        controller, BINDING_ADMIN_KEYBOARD, ready_action);
+    if (!binding) {
+        return false;
+    }
+    lv_obj_add_event_cb(
+        controller->admin_keyboard, admin_keyboard_event_cb,
+        LV_EVENT_READY, binding);
+    lv_obj_add_event_cb(
+        controller->admin_keyboard, admin_keyboard_event_cb,
+        LV_EVENT_CANCEL, binding);
+    return true;
+}
+
+static bool render_admin_login_compact(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const d1l_meshcore_admin_snapshot_t *status,
+    const char *selected_fingerprint, const char *selected_name,
+    bool saved_password_available, bool remember_password,
+    const char *feedback, bool feedback_error)
+{
+    const bool room = status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM;
+    bool complete = render_admin_compact_header(
+        controller, sheet, room ? "Room login" : "Repeater login", false);
+    char target[96];
+    snprintf(target, sizeof(target), "%s  |  %.16s",
+             selected_name && selected_name[0] ? selected_name :
+                 (room ? "Room server" : "Verified repeater"),
+             selected_fingerprint && selected_fingerprint[0] ?
+                 selected_fingerprint : "-");
+    lv_obj_t *target_label = create_label(sheet, target, 0x20D9ED);
+    position_dot(target_label, 8, 46, 408);
+    complete = target_label && complete;
+    const char *message = feedback && feedback[0] ? feedback :
+        (saved_password_available ?
+             "Saved password ready. Type to replace it." :
+             admin_failure_message(status->state));
+    lv_obj_t *message_label = create_label(
+        sheet, message,
+        (feedback_error ||
+         (status->state != D1L_MESHCORE_ADMIN_IDLE &&
+          status->state != D1L_MESHCORE_ADMIN_AUTHENTICATED)) ?
+            0xF87171 : 0xA6B0B7);
+    position_dot(message_label, 8, 68, 408);
+    complete = message_label && complete;
+
+    controller->admin_password_textarea = lv_textarea_create(sheet);
+    if (controller->admin_password_textarea) {
+        lv_obj_set_size(controller->admin_password_textarea, 408, 44);
+        lv_obj_set_pos(controller->admin_password_textarea, 8, 90);
+        lv_textarea_set_one_line(controller->admin_password_textarea, true);
+        lv_textarea_set_password_mode(
+            controller->admin_password_textarea, true);
+        lv_textarea_set_max_length(
+            controller->admin_password_textarea,
+            D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES);
+        lv_textarea_set_placeholder_text(
+            controller->admin_password_textarea,
+            saved_password_available ?
+                "Saved password" : "Password (blank is allowed)");
+        lv_textarea_set_text(controller->admin_password_textarea, "");
+        lv_obj_set_style_radius(controller->admin_password_textarea, 8, 0);
+        lv_obj_set_style_bg_color(
+            controller->admin_password_textarea,
+            lv_color_hex(0x101719), 0);
+        lv_obj_set_style_border_color(
+            controller->admin_password_textarea,
+            lv_color_hex(0x20D9ED), 0);
+        lv_obj_set_style_border_width(
+            controller->admin_password_textarea, 2, 0);
+        lv_obj_set_style_text_color(
+            controller->admin_password_textarea,
+            lv_color_hex(0xF4F7FB), 0);
+        d1l_ui_service_binding_t *focus = set_binding(
+            controller, BINDING_ADMIN_PASSWORD_FOCUS,
+            D1L_UI_SERVICE_ACTION_ADMIN_LOGIN);
+        if (focus) {
+            lv_obj_add_event_cb(
+                controller->admin_password_textarea,
+                admin_password_focus_event_cb, LV_EVENT_FOCUSED, focus);
+            lv_obj_add_event_cb(
+                controller->admin_password_textarea,
+                admin_password_focus_event_cb, LV_EVENT_CLICKED, focus);
+        }
+    }
+    complete = controller->admin_password_textarea && complete;
+    complete = configure_admin_keyboard(
+        controller, sheet, controller->admin_password_textarea,
+        140, 104, D1L_UI_SERVICE_ACTION_ADMIN_LOGIN) && complete;
+    complete = create_button(
+        controller, sheet, "Login", 8, 250, 108, 46,
+        BINDING_ADMIN_LOGIN,
+        D1L_UI_SERVICE_ACTION_ADMIN_LOGIN) != NULL && complete;
+    complete = create_button(
+        controller, sheet,
+        remember_password ? "Save: On" : "Save: Off",
+        124, 250, 132, 46,
+        BINDING_ADMIN_REMEMBER_TOGGLE,
+        D1L_UI_SERVICE_ACTION_ADMIN_REMEMBER_TOGGLE) != NULL && complete;
+    if (saved_password_available) {
+        complete = create_button(
+            controller, sheet, "Forget saved", 264, 250, 152, 46,
+            BINDING_ADMIN_FORGET_PASSWORD,
+            D1L_UI_SERVICE_ACTION_ADMIN_FORGET_PASSWORD) != NULL && complete;
+    } else {
+        lv_obj_t *local = create_label(
+            sheet, "Saved only on this D1L", 0x667787);
+        position_dot(local, 270, 264, 140);
+        complete = local && complete;
+    }
+    return complete;
+}
+
+static bool render_admin_hub_compact(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const d1l_meshcore_admin_snapshot_t *status,
+    const char *selected_fingerprint, const char *selected_name,
+    const char *feedback, bool feedback_error)
+{
+    bool complete = render_admin_compact_header(
+        controller, sheet,
+        status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?
+            "Room manager" : "Repeater manager", false);
+    complete = render_admin_target(
+        sheet, status, selected_fingerprint, selected_name, 48, 50) &&
+        complete;
+    if (feedback && feedback[0]) {
+        lv_obj_t *notice = create_label(
+            sheet, feedback, feedback_error ? 0xF87171 : 0x84FF2E);
+        position_dot(notice, 12, 100, 400);
+        complete = notice && complete;
+    }
+    complete = create_admin_grid_button(
+        controller, sheet, LV_SYMBOL_REFRESH "\nStatus",
+        8, 120, BINDING_ADMIN_SHOW_STATUS,
+        D1L_UI_SERVICE_ACTION_ADMIN_SHOW_STATUS, 0x20D9ED) != NULL && complete;
+    complete = create_admin_grid_button(
+        controller, sheet, LV_SYMBOL_CHARGE "\nTelemetry",
+        144, 120, BINDING_ADMIN_SHOW_TELEMETRY,
+        D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TELEMETRY, 0x84FF2E) != NULL &&
+        complete;
+    complete = create_admin_grid_button(
+        controller, sheet,
+        status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?
+            LV_SYMBOL_ENVELOPE "\nRoom" : LV_SYMBOL_LIST "\nNeighbours",
+        280, 120,
+        status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?
+            BINDING_ADMIN_SHOW_ROOM : BINDING_ADMIN_SHOW_NEIGHBOURS,
+        status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?
+            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ROOM :
+            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_NEIGHBOURS,
+        0xFBBF24) != NULL && complete;
+    complete = create_admin_grid_button(
+        controller, sheet, LV_SYMBOL_EYE_OPEN "\nAccess",
+        8, 190, BINDING_ADMIN_SHOW_ACCESS,
+        D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACCESS, 0x7D93FF) != NULL && complete;
+    complete = create_admin_grid_button(
+        controller, sheet, LV_SYMBOL_SETTINGS "\nTools",
+        144, 190, BINDING_ADMIN_SHOW_TOOLS,
+        D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TOOLS, 0xFBBF24) != NULL && complete;
+    complete = create_admin_grid_button(
+        controller, sheet, LV_SYMBOL_EDIT "\nConsole",
+        280, 190, BINDING_ADMIN_SHOW_TERMINAL,
+        D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TERMINAL, 0x20D9ED) != NULL &&
+        complete;
+    char session[96];
+    snprintf(session, sizeof(session), "%s  |  firmware level %u",
+             admin_permission_name(status->permissions),
+             (unsigned)status->firmware_level);
+    lv_obj_t *session_label = create_label(sheet, session, 0xA6B0B7);
+    position_dot(session_label, 8, 270, 286);
+    complete = session_label && complete;
+    complete = create_button(
+        controller, sheet, "Logout", 304, 254, 112, 44,
+        BINDING_ADMIN_LOGOUT,
+        D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT) != NULL && complete;
+    return complete;
+}
+
+static bool render_admin_metric(lv_obj_t *sheet, const char *title,
+                                const char *value, int x, int y,
+                                uint32_t accent)
+{
+    lv_obj_t *panel = create_admin_panel(sheet, x, y, 128, 60, accent);
+    if (!panel) {
+        return false;
+    }
+    lv_obj_t *title_label = create_label(panel, title, 0xA6B0B7);
+    position_dot(title_label, 4, 0, 104);
+    lv_obj_t *value_label = create_label(panel, value, accent);
+    if (value_label) {
+        lv_obj_set_style_text_font(value_label, &lv_font_montserrat_24, 0);
+        position_dot(value_label, 4, 20, 104);
+    }
+    return title_label && value_label;
+}
+
+static bool render_admin_status_compact(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const d1l_meshcore_admin_snapshot_t *status,
+    const char *feedback, bool feedback_error)
+{
+    bool complete = render_admin_compact_header(
+        controller, sheet, "Server status", true);
+    if (!status->status_valid) {
+        lv_obj_t *empty = create_label(
+            sheet, "No current status has been received yet.", 0xFBBF24);
+        position_wrap(empty, 36, 92, 352);
+        complete = empty && complete;
+    } else {
+        char signal[32];
+        const int snr = status->status.last_snr_quarter_db;
+        snprintf(signal, sizeof(signal), "%d / %s%d.%02d",
+                 (int)status->status.last_rssi_dbm,
+                 snr < 0 ? "-" : "", (snr < 0 ? -snr : snr) / 4,
+                 ((snr < 0 ? -snr : snr) % 4) * 25);
+        char queue[24];
+        snprintf(queue, sizeof(queue), "%u queued",
+                 (unsigned)status->status.tx_queue_length);
+        char packets[32];
+        snprintf(packets, sizeof(packets), "%lu / %lu",
+                 (unsigned long)status->status.packets_received,
+                 (unsigned long)status->status.packets_sent);
+        char uptime[24];
+        snprintf(uptime, sizeof(uptime), "%luh %02lum",
+                 (unsigned long)(status->status.uptime_seconds / 3600U),
+                 (unsigned long)((status->status.uptime_seconds / 60U) % 60U));
+        char airtime[28];
+        snprintf(airtime, sizeof(airtime), "%lus / %lus",
+                 (unsigned long)status->status.tx_air_time_seconds,
+                 (unsigned long)status->status.rx_air_time_seconds);
+        char errors[24];
+        snprintf(errors, sizeof(errors), "0x%04x",
+                 (unsigned)status->status.error_flags);
+        complete = render_admin_metric(
+            sheet, "RSSI / SNR", signal, 8, 52, 0x20D9ED) && complete;
+        complete = render_admin_metric(
+            sheet, "Send queue", queue, 144, 52, 0x84FF2E) && complete;
+        complete = render_admin_metric(
+            sheet, "RX / TX packets", packets, 280, 52, 0x7D93FF) &&
+            complete;
+        complete = render_admin_metric(
+            sheet, "Uptime", uptime, 8, 120, 0xFBBF24) && complete;
+        complete = render_admin_metric(
+            sheet, "TX / RX airtime", airtime, 144, 120, 0x20D9ED) &&
+            complete;
+        complete = render_admin_metric(
+            sheet, "Error flags", errors, 280, 120,
+            status->status.error_flags ? 0xF87171 : 0x84FF2E) && complete;
+        char detail[160];
+        snprintf(detail, sizeof(detail),
+                 "Noise %d dBm  |  duplicates %u direct, %u flood  |  voltage %u mV",
+                 (int)status->status.noise_floor_dbm,
+                 (unsigned)status->status.direct_duplicates,
+                 (unsigned)status->status.flood_duplicates,
+                 (unsigned)status->status.battery_millivolts);
+        lv_obj_t *detail_label = create_label(sheet, detail, 0xA6B0B7);
+        position_dot(detail_label, 8, 194, 408);
+        complete = detail_label && complete;
+    }
+    if (feedback && feedback[0]) {
+        lv_obj_t *notice = create_label(
+            sheet, feedback, feedback_error ? 0xF87171 : 0x84FF2E);
+        position_dot(notice, 8, 224, 408);
+        complete = notice && complete;
+    }
+    complete = create_button(
+        controller, sheet, "Refresh status", 112, 254, 200, 44,
+        BINDING_ADMIN_REFRESH,
+        D1L_UI_SERVICE_ACTION_ADMIN_REFRESH) != NULL && complete;
+    return complete;
+}
+
+static d1l_ui_service_action_t admin_query_action(d1l_ui_admin_page_t page)
+{
+    return page == D1L_UI_ADMIN_PAGE_NEIGHBOURS ?
+        D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS :
+        (page == D1L_UI_ADMIN_PAGE_ACCESS ?
+             D1L_UI_SERVICE_ACTION_ADMIN_ACCESS_LIST :
+             D1L_UI_SERVICE_ACTION_ADMIN_TELEMETRY);
+}
+
+static bool render_admin_data_compact(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const d1l_meshcore_admin_snapshot_t *status, d1l_ui_admin_page_t page,
+    const char *feedback, bool feedback_error)
+{
+    const char *title = page == D1L_UI_ADMIN_PAGE_NEIGHBOURS ?
+        "Neighbours" :
+        (page == D1L_UI_ADMIN_PAGE_ACCESS ? "Access list" : "Telemetry");
+    bool complete = render_admin_compact_header(
+        controller, sheet, title, true);
+    lv_obj_t *result = create_admin_panel(sheet, 8, 52, 408, 172, 0x34566A);
+    if (result) {
+        lv_obj_add_flag(result, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(result, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(result, LV_SCROLLBAR_MODE_AUTO);
+        const bool matches = status->query_result.valid &&
+            ((page == D1L_UI_ADMIN_PAGE_TELEMETRY &&
+              status->query_result.kind == D1L_MESHCORE_ADMIN_QUERY_TELEMETRY) ||
+             (page == D1L_UI_ADMIN_PAGE_NEIGHBOURS &&
+              status->query_result.kind == D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS) ||
+             (page == D1L_UI_ADMIN_PAGE_ACCESS &&
+              status->query_result.kind == D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST));
+        lv_obj_t *text = create_label(
+            result, matches ? status->query_result.text :
+                "No result yet. Tap Refresh to ask the server.",
+            matches && status->query_result.truncated ? 0xFBBF24 : 0xF4F7FB);
+        position_wrap(text, 4, 2, 376);
+        complete = text && complete;
+    }
+    complete = result && complete;
+    if (feedback && feedback[0]) {
+        lv_obj_t *notice = create_label(
+            sheet, feedback, feedback_error ? 0xF87171 : 0x84FF2E);
+        position_dot(notice, 8, 230, 408);
+        complete = notice && complete;
+    }
+    if (page == D1L_UI_ADMIN_PAGE_NEIGHBOURS &&
+        status->query_result.valid &&
+        status->query_result.kind == D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS &&
+        status->query_result.count > 0U &&
+        (uint32_t)status->query_result.offset +
+                (uint32_t)status->query_result.count <
+            status->query_result.total) {
+        complete = create_button(
+            controller, sheet, "Next page", 8, 254, 128, 44,
+            BINDING_ADMIN_NEIGHBOURS_NEXT,
+            D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT) != NULL && complete;
+    }
+    complete = create_button(
+        controller, sheet, "Refresh", 146, 254, 128, 44,
+        page == D1L_UI_ADMIN_PAGE_TELEMETRY ? BINDING_ADMIN_TELEMETRY :
+            (page == D1L_UI_ADMIN_PAGE_NEIGHBOURS ?
+                 BINDING_ADMIN_NEIGHBOURS : BINDING_ADMIN_ACCESS_LIST),
+        admin_query_action(page)) != NULL && complete;
+    if (page == D1L_UI_ADMIN_PAGE_ACCESS &&
+        (status->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) ==
+            D1L_MESHCORE_ADMIN_PERMISSION_ADMIN) {
+        complete = create_button(
+            controller, sheet, "Edit access", 284, 254, 132, 44,
+            BINDING_ADMIN_SHOW_ACL,
+            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACL) != NULL && complete;
+    }
+    return complete;
+}
+
+static bool render_admin_tools_compact(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const d1l_meshcore_admin_snapshot_t *status,
+    d1l_meshcore_admin_mutation_t armed_mutation,
+    bool room_read_only_on_armed, bool room_read_only_off_armed,
+    const char *feedback, bool feedback_error)
+{
+    bool complete = render_admin_compact_header(
+        controller, sheet, "Server tools", true);
+    const uint8_t permission =
+        status->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
+    if (permission != D1L_MESHCORE_ADMIN_PERMISSION_ADMIN) {
+        lv_obj_t *readonly = create_label(
+            sheet, "These tools require server administrator access.",
+            0xFBBF24);
+        position_wrap(readonly, 24, 92, 376);
+        complete = readonly && complete;
+    } else {
+        complete = create_button(
+            controller, sheet,
+            armed_mutation == D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS ?
+                "Confirm clear stats" : "Clear statistics",
+            8, 56, 196, 64,
+            BINDING_ADMIN_CLEAR_STATS,
+            D1L_UI_SERVICE_ACTION_ADMIN_CLEAR_STATS) != NULL && complete;
+        complete = create_button(
+            controller, sheet,
+            armed_mutation ==
+                    D1L_MESHCORE_ADMIN_MUTATION_ADVERTISE_ZERO_HOP ?
+                "Confirm advert" : "Zero-hop advert",
+            220, 56, 196, 64,
+            BINDING_ADMIN_ADVERTISE_ZERO_HOP,
+            D1L_UI_SERVICE_ACTION_ADMIN_ADVERTISE_ZERO_HOP) != NULL &&
+            complete;
+        if (status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM) {
+            complete = create_button(
+                controller, sheet,
+                room_read_only_on_armed ?
+                    "Confirm guest read" : "Allow guest reading",
+                8, 132, 196, 54,
+                BINDING_ADMIN_ROOM_READ_ONLY_ON,
+                D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_ON) != NULL &&
+                complete;
+            complete = create_button(
+                controller, sheet,
+                room_read_only_off_armed ?
+                    "Confirm guest off" : "Block guest reading",
+                220, 132, 196, 54,
+                BINDING_ADMIN_ROOM_READ_ONLY_OFF,
+                D1L_UI_SERVICE_ACTION_ADMIN_ROOM_READ_ONLY_OFF) != NULL &&
+                complete;
+        }
+    }
+    char result[128];
+    if (status->last_mutation == D1L_MESHCORE_ADMIN_MUTATION_NONE) {
+        snprintf(result, sizeof(result), "No server change has run this session.");
+    } else {
+        snprintf(result, sizeof(result), "%s: %s",
+                 d1l_meshcore_admin_mutation_name(status->last_mutation),
+                 status->last_mutation_success ?
+                     "confirmed by server" : "not confirmed");
+    }
+    lv_obj_t *result_panel = create_admin_panel(
+        sheet, 8, status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ? 198 : 134,
+        408, 54, status->last_mutation_success ? 0x84FF2E : 0x34566A);
+    if (result_panel) {
+        lv_obj_t *result_label = create_label(result_panel, result, 0xF4F7FB);
+        position_wrap(result_label, 4, 2, 376);
+        complete = result_label && complete;
+    }
+    complete = result_panel && complete;
+    const char *notice_text = feedback && feedback[0] ? feedback :
+        "Changes require a second tap and a confirmed server reply.";
+    lv_obj_t *notice = create_label(
+        sheet, notice_text,
+        feedback_error ? 0xF87171 : (feedback && feedback[0] ?
+            0x84FF2E : 0xA6B0B7));
+    position_wrap(notice, 8, 264, 408);
+    complete = notice && complete;
+    return complete;
+}
+
+static bool render_admin_room_compact(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const d1l_meshcore_admin_snapshot_t *status,
+    const char *room_transcript, const char *feedback, bool feedback_error)
+{
+    bool complete = render_admin_compact_header(
+        controller, sheet, "Room console", true);
+    lv_obj_t *transcript = create_admin_panel(sheet, 8, 48, 408, 72, 0x34566A);
+    if (transcript) {
+        lv_obj_add_flag(transcript, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(transcript, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(transcript, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_t *text = create_label(
+            transcript,
+            room_transcript && room_transcript[0] ?
+                room_transcript : "No room posts received yet.",
+            0xF4F7FB);
+        position_wrap(text, 4, 2, 376);
+        complete = text && complete;
+    }
+    complete = transcript && complete;
+    const bool can_post =
+        (status->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) >=
+        D1L_MESHCORE_ADMIN_PERMISSION_WRITE;
+    if (!can_post) {
+        lv_obj_t *readonly = create_label(
+            sheet, "This guest session can read room posts but cannot send.",
+            0xFBBF24);
+        position_wrap(readonly, 28, 150, 368);
+        complete = readonly && complete;
+        return complete;
+    }
+    controller->admin_room_textarea = lv_textarea_create(sheet);
+    if (controller->admin_room_textarea) {
+        lv_obj_set_size(controller->admin_room_textarea, 300, 44);
+        lv_obj_set_pos(controller->admin_room_textarea, 8, 126);
+        lv_textarea_set_one_line(controller->admin_room_textarea, true);
+        lv_textarea_set_max_length(
+            controller->admin_room_textarea, D1L_USER_TEXT_MAX_BYTES);
+        lv_textarea_set_placeholder_text(
+            controller->admin_room_textarea, "Message the room");
+        lv_textarea_set_text(controller->admin_room_textarea, "");
+        d1l_ui_service_binding_t *focus = set_binding(
+            controller, BINDING_ADMIN_ROOM_FOCUS,
+            D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND);
+        if (focus) {
+            lv_obj_add_event_cb(
+                controller->admin_room_textarea,
+                admin_room_focus_event_cb, LV_EVENT_FOCUSED, focus);
+            lv_obj_add_event_cb(
+                controller->admin_room_textarea,
+                admin_room_focus_event_cb, LV_EVENT_CLICKED, focus);
+        }
+    }
+    complete = controller->admin_room_textarea && complete;
+    complete = create_button(
+        controller, sheet, "Send", 316, 126, 100, 44,
+        BINDING_ADMIN_ROOM_SEND,
+        D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND) != NULL && complete;
+    if (feedback && feedback[0]) {
+        lv_obj_t *notice = create_label(
+            sheet, feedback, feedback_error ? 0xF87171 : 0x84FF2E);
+        position_dot(notice, 8, 174, 408);
+        complete = notice && complete;
+    }
+    complete = configure_admin_keyboard(
+        controller, sheet, controller->admin_room_textarea,
+        188, 106, D1L_UI_SERVICE_ACTION_ADMIN_ROOM_SEND) && complete;
+    return complete;
+}
+
+static bool render_admin_terminal_compact(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    const d1l_meshcore_admin_snapshot_t *status,
+    bool cli_command_armed, bool cli_secure_input,
+    const char *feedback, bool feedback_error)
+{
+    bool complete = render_admin_compact_header(
+        controller, sheet, "Server console", true);
+    lv_obj_t *reply = create_admin_panel(sheet, 8, 48, 408, 48, 0x34566A);
+    if (reply) {
+        lv_obj_t *text = create_label(
+            reply,
+            status->cli_reply_valid ? status->cli_reply :
+                "Command results appear here.",
+            status->cli_reply_valid && !status->cli_reply_success ?
+                0xF87171 : 0xF4F7FB);
+        position_dot(text, 4, 4, 376);
+        complete = text && complete;
+    }
+    complete = reply && complete;
+    complete = create_button(
+        controller, sheet,
+        cli_secure_input ? "Secure input: On" : "Secure input: Off",
+        8, 98, 176, 44,
+        BINDING_ADMIN_CLI_SECURE_TOGGLE,
+        D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE) != NULL && complete;
+    if (feedback && feedback[0]) {
+        lv_obj_t *notice = create_label(
+            sheet, feedback, feedback_error ? 0xF87171 : 0x84FF2E);
+        position_dot(notice, 194, 112, 222);
+        complete = notice && complete;
+    }
+    controller->admin_cli_textarea = lv_textarea_create(sheet);
+    if (controller->admin_cli_textarea) {
+        lv_obj_set_size(controller->admin_cli_textarea, 300, 44);
+        lv_obj_set_pos(controller->admin_cli_textarea, 8, 146);
+        lv_textarea_set_one_line(controller->admin_cli_textarea, true);
+        lv_textarea_set_password_mode(
+            controller->admin_cli_textarea, cli_secure_input);
+        lv_textarea_set_max_length(
+            controller->admin_cli_textarea,
+            D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES);
+        lv_textarea_set_placeholder_text(
+            controller->admin_cli_textarea,
+            cli_command_armed ? "Tap Confirm to run" : "e.g. ver or get name");
+        lv_textarea_set_text(controller->admin_cli_textarea, "");
+        d1l_ui_service_binding_t *focus = set_binding(
+            controller, BINDING_ADMIN_CLI_FOCUS,
+            D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND);
+        if (focus) {
+            lv_obj_add_event_cb(
+                controller->admin_cli_textarea,
+                admin_cli_focus_event_cb, LV_EVENT_FOCUSED, focus);
+            lv_obj_add_event_cb(
+                controller->admin_cli_textarea,
+                admin_cli_focus_event_cb, LV_EVENT_CLICKED, focus);
+        }
+    }
+    complete = controller->admin_cli_textarea && complete;
+    complete = create_button(
+        controller, sheet,
+        cli_command_armed ? "Confirm" : "Send",
+        316, 146, 100, 44,
+        BINDING_ADMIN_CLI_SEND,
+        D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND) != NULL && complete;
+    complete = configure_admin_keyboard(
+        controller, sheet, controller->admin_cli_textarea,
+        196, 98, D1L_UI_SERVICE_ACTION_ADMIN_CLI_SEND) && complete;
+    return complete;
+}
+
+static bool render_admin_acl_compact(
+    d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
+    bool acl_command_armed, const char *feedback, bool feedback_error)
+{
+    bool complete = render_admin_compact_header(
+        controller, sheet, "Edit access", true);
+    lv_obj_t *help = create_label(
+        sheet,
+        "Enter a 64-character public key, a space, then 0 remove, 1 read, 2 write, or 3 admin.",
+        0xA6B0B7);
+    position_wrap(help, 8, 48, 408);
+    complete = help && complete;
+    controller->admin_acl_textarea = lv_textarea_create(sheet);
+    if (controller->admin_acl_textarea) {
+        lv_obj_set_size(controller->admin_acl_textarea, 300, 44);
+        lv_obj_set_pos(controller->admin_acl_textarea, 8, 100);
+        lv_textarea_set_one_line(controller->admin_acl_textarea, true);
+        lv_textarea_set_max_length(
+            controller->admin_acl_textarea,
+            D1L_MESHCORE_ADMIN_ACL_EDIT_MAX_BYTES);
+        lv_textarea_set_placeholder_text(
+            controller->admin_acl_textarea,
+            acl_command_armed ? "Tap Confirm to apply" : "public-key permission");
+        lv_textarea_set_text(controller->admin_acl_textarea, "");
+        d1l_ui_service_binding_t *focus = set_binding(
+            controller, BINDING_ADMIN_ACL_FOCUS,
+            D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY);
+        if (focus) {
+            lv_obj_add_event_cb(
+                controller->admin_acl_textarea,
+                admin_acl_focus_event_cb, LV_EVENT_FOCUSED, focus);
+            lv_obj_add_event_cb(
+                controller->admin_acl_textarea,
+                admin_acl_focus_event_cb, LV_EVENT_CLICKED, focus);
+        }
+    }
+    complete = controller->admin_acl_textarea && complete;
+    complete = create_button(
+        controller, sheet,
+        acl_command_armed ? "Confirm" : "Apply",
+        316, 100, 100, 44,
+        BINDING_ADMIN_ACL_APPLY,
+        D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY) != NULL && complete;
+    if (feedback && feedback[0]) {
+        lv_obj_t *notice = create_label(
+            sheet, feedback, feedback_error ? 0xF87171 : 0x84FF2E);
+        position_dot(notice, 8, 150, 408);
+        complete = notice && complete;
+    }
+    complete = configure_admin_keyboard(
+        controller, sheet, controller->admin_acl_textarea,
+        184, 110, D1L_UI_SERVICE_ACTION_ADMIN_ACL_APPLY) && complete;
+    return complete;
+}
+
+bool d1l_ui_service_sheets_render_admin_compact(
+    d1l_ui_service_sheets_controller_t *controller,
+    const d1l_meshcore_admin_snapshot_t *status,
+    const char *selected_fingerprint,
+    const char *selected_name,
+    d1l_ui_admin_page_t page,
+    bool saved_password_available,
+    bool remember_password,
+    d1l_meshcore_admin_mutation_t armed_mutation,
+    bool cli_command_armed,
+    bool acl_command_armed,
+    bool room_read_only_on_armed,
+    bool room_read_only_off_armed,
+    bool cli_secure_input,
+    const char *feedback,
+    bool feedback_error,
+    const char *room_transcript,
+    d1l_ui_service_action_handler_t action_handler,
+    void *action_context)
+{
+    lv_obj_t *sheet = controller ? controller->admin_sheet : NULL;
+    if (!status || page > D1L_UI_ADMIN_PAGE_ACL ||
+        !begin_render(controller, sheet, action_handler, action_context)) {
+        return false;
+    }
+    controller->admin_scroll_valid = false;
+    lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_scroll_to_y(sheet, 0, LV_ANIM_OFF);
+    if (admin_state_pending(status->state)) {
+        return render_admin_pending(
+            controller, sheet, status, selected_fingerprint, selected_name);
+    }
+    if (status->state != D1L_MESHCORE_ADMIN_AUTHENTICATED) {
+        return render_admin_login_compact(
+            controller, sheet, status, selected_fingerprint, selected_name,
+            saved_password_available, remember_password,
+            feedback, feedback_error);
+    }
+    switch (page) {
+    case D1L_UI_ADMIN_PAGE_STATUS:
+        return render_admin_status_compact(
+            controller, sheet, status, feedback, feedback_error);
+    case D1L_UI_ADMIN_PAGE_TELEMETRY:
+    case D1L_UI_ADMIN_PAGE_NEIGHBOURS:
+    case D1L_UI_ADMIN_PAGE_ACCESS:
+        return render_admin_data_compact(
+            controller, sheet, status, page, feedback, feedback_error);
+    case D1L_UI_ADMIN_PAGE_TOOLS:
+        return render_admin_tools_compact(
+            controller, sheet, status, armed_mutation,
+            room_read_only_on_armed, room_read_only_off_armed,
+            feedback, feedback_error);
+    case D1L_UI_ADMIN_PAGE_ROOM:
+        return render_admin_room_compact(
+            controller, sheet, status, room_transcript,
+            feedback, feedback_error);
+    case D1L_UI_ADMIN_PAGE_TERMINAL:
+        return render_admin_terminal_compact(
+            controller, sheet, status, cli_command_armed,
+            cli_secure_input, feedback, feedback_error);
+    case D1L_UI_ADMIN_PAGE_ACL:
+        return render_admin_acl_compact(
+            controller, sheet, acl_command_armed,
+            feedback, feedback_error);
+    case D1L_UI_ADMIN_PAGE_LOGIN:
+    case D1L_UI_ADMIN_PAGE_HUB:
+    default:
+        return render_admin_hub_compact(
+            controller, sheet, status,
+            selected_fingerprint, selected_name,
+            feedback, feedback_error);
+    }
 }
 
 bool d1l_ui_service_sheets_render_admin(

@@ -476,11 +476,11 @@ bool d1l_ui_node_detail_render(
     if (controller->rendered.management_gated &&
         d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
         complete = create_button(
-            controller, "Admin", 8, 352, 104, 44,
+            controller, "Login", 8, 352, 104, 44,
             BINDING_OPEN_ADMIN,
             D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN) != NULL && complete;
         lv_obj_t *managed_reason = create_label(
-            controller->sheet, "Verified server; local authenticated login required.",
+            controller->sheet, "Sign in to open repeater or room controls.",
             0xA6B0B7);
         if (managed_reason) {
             lv_label_set_long_mode(managed_reason, LV_LABEL_LONG_DOT);

@@ -79,8 +79,8 @@ def test_node_detail_preserves_truthful_fields_geometry_and_actions() -> None:
         "Heard on this boot  |  %lu sighting%s",
         "Messaging %s: %s",
         "Advanced identity  %.16s  |  key %s",
-        "Admin",
-        "Verified server; local authenticated login required.",
+        "Login",
+        "Sign in to open repeater or room controls.",
     ):
         assert f'"{exact}"' in source
     assert "GPS" not in source
@@ -90,7 +90,7 @@ def test_node_detail_preserves_truthful_fields_geometry_and_actions() -> None:
     assert '"Why no DM?", 174, 0, 120, 44' in source
     assert '"DM", 208, 0, 54, 44' in source
     assert '"Close", 316, 0, 76, 44' in source
-    assert '"Admin", 8, 352, 104, 44' in source
+    assert '"Login", 8, 352, 104, 44' in source
     assert "lv_obj_set_pos(managed_reason, 120, 360);" in source
     assert 12 + 360 + 40 <= 480
 
@@ -139,4 +139,4 @@ def test_node_detail_focused_simulator_views_remain_truthful(tmp_path: Path) -> 
     assert managed["metrics"]["node_detail_management_gated"] is True
     assert managed["metrics"]["node_detail_content_bottom"] == 400
     assert managed["metrics"]["node_detail_content_clipped"] is False
-    assert "Verified server; local authenticated login required." in managed["labels"]
+    assert "Sign in to open repeater or room controls." in managed["labels"]

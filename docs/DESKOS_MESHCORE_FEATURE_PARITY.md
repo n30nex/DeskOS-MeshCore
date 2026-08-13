@@ -41,15 +41,15 @@ State meanings:
 | Contacts list | Contacts shows the complete bounded saved-contact list with role, recency, and signal context | Complete |
 | Contact search | Search name, role, fingerprint, or public key from Contacts | Complete (#321) |
 | Contact sort/filter | Cycle Recent, A-Z, Role, and Signal ordering; search narrows the visible list | Complete (#321) |
-| Selected contact actions | Obvious **Message** and **Manage** actions open the DM or node-management workflow | Complete (#321) |
+| Selected contact actions | Obvious **Message** and **Login** actions open the DM or managed-server workflow | Complete (#321, #336) |
 | Contact detail/edit | Inspect canonical identity and role; rename, favorite, mute, or remove a saved contact with confirmation | Complete |
 | Companion DM | A verified Chat/Companion contact opens the existing DM compose/thread path | Complete (#321) |
-| Repeater/room entry | A saved Repeater or Room opens node detail and the existing Admin login path even when no transient heard-node row is present | Complete (#321) |
+| Repeater/room entry | A saved Repeater or Room exposes **Login** directly and from node detail even when no transient heard-node row is present | Complete (#321, #336) |
 | Finder/discovery | Find sends zero-hop discovery and shows key, role, and there/back SNR without treating unverified results as contacts | Complete |
 | PATH/Ping/TRACE | Verified contacts expose PATH/TRACE state; repeaters expose zero-hop Ping with pending, timeout, RTT, RSSI, and hop SNR results | Complete |
 | Path/map relationship | Node/location detail and Map expose signed position truth; no position is inferred from a display name | Complete |
-| Repeater/room login | Masked password or empty-password negotiation, explicit session state/permissions, logout, and target-switch authority clearing | Complete |
-| Repeater status/telemetry | Authenticated status, counters, telemetry, selected route, and paged neighbours | Complete |
+| Repeater/room login | Large masked keyboard, optional per-server device-local password, empty-password negotiation, explicit session state/permissions, logout, and target-switch authority clearing | Complete (1.7.1) |
+| Repeater status/telemetry | Authenticated icon dashboard, status, counters, telemetry, selected route, paged neighbours, visible pending animation, and persistent results | Complete (1.7.1) |
 | Repeater ACL/CLI/settings | Role-gated ACL and device/radio/advert actions plus bounded redacted CLI; mutations require local confirmation | Complete |
 | Room posts | Current-session room posts and transcript; old room traffic is not replayed into a new session | Complete |
 

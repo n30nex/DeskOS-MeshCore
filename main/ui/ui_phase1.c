@@ -28,6 +28,7 @@
 #include "hal/display_preferences.h"
 #include "hal/indicator_board.h"
 #include "map/map_view_service.h"
+#include "mesh/admin_credential_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/user_text.h"
 #include "ui_ble.h"
@@ -191,6 +192,10 @@ static char s_admin_cli_armed[
 static d1l_ui_admin_cli_origin_t s_admin_cli_armed_origin =
     D1L_UI_ADMIN_CLI_ORIGIN_NONE;
 static bool s_admin_cli_secure_input;
+static d1l_ui_admin_page_t s_admin_page = D1L_UI_ADMIN_PAGE_LOGIN;
+static bool s_admin_remember_password = true;
+static bool s_admin_pending_password_valid;
+static bool s_admin_pending_remember;
 static bool s_admin_rendered_generation_valid;
 static uint32_t s_admin_rendered_dm_revision;
 static uint32_t s_terminal_clear_deadline;
@@ -223,6 +228,11 @@ static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
 static char s_admin_target_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static char s_admin_target_name[D1L_CONTACT_ALIAS_LEN];
+static char s_admin_pending_password[
+    D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] EXT_RAM_BSS_ATTR;
+static char s_admin_feedback[96] EXT_RAM_BSS_ATTR;
+static bool s_admin_feedback_error;
 static d1l_dm_entry_t
     s_admin_room_preview[D1L_UI_ADMIN_ROOM_PREVIEW_COUNT] EXT_RAM_BSS_ATTR;
 static char
@@ -1733,6 +1743,96 @@ static void clear_admin_cli_confirmation(void)
     s_admin_cli_deadline = 0U;
 }
 
+static void clear_admin_pending_password(void)
+{
+    d1l_meshcore_admin_secure_zero(
+        s_admin_pending_password, sizeof(s_admin_pending_password));
+    s_admin_pending_password_valid = false;
+    s_admin_pending_remember = false;
+}
+
+static void clear_admin_feedback(void)
+{
+    s_admin_feedback[0] = '\0';
+    s_admin_feedback_error = false;
+}
+
+static void set_admin_feedback(const char *message, bool error)
+{
+    snprintf(s_admin_feedback, sizeof(s_admin_feedback), "%s",
+             message ? message : "");
+    s_admin_feedback_error = error;
+}
+
+static void finalize_admin_login(const d1l_meshcore_admin_snapshot_t *status)
+{
+    if (!status || !s_admin_pending_password_valid) {
+        return;
+    }
+    if (status->state == D1L_MESHCORE_ADMIN_LOGIN_PENDING) {
+        return;
+    }
+    if (status->state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+        strcmp(status->fingerprint, s_admin_target_fingerprint) == 0) {
+        esp_err_t save_result = ESP_OK;
+        if (s_admin_pending_remember &&
+            s_admin_pending_password[0] != '\0') {
+            save_result = d1l_admin_credential_store_save(
+                s_admin_target_fingerprint, s_admin_pending_password);
+        } else {
+            save_result = d1l_admin_credential_store_forget(
+                s_admin_target_fingerprint);
+            if (save_result == ESP_ERR_NOT_FOUND) {
+                save_result = ESP_OK;
+            }
+        }
+        set_admin_feedback(
+            save_result == ESP_OK ?
+                (s_admin_pending_remember &&
+                 s_admin_pending_password[0] != '\0' ?
+                     "Signed in; password saved on this D1L." :
+                     "Signed in.") :
+                "Signed in, but the password could not be saved.",
+            save_result != ESP_OK);
+        s_admin_page = D1L_UI_ADMIN_PAGE_HUB;
+    }
+    clear_admin_pending_password();
+}
+
+static esp_err_t select_admin_target(
+    const char *fingerprint, const char *name)
+{
+    if (!fingerprint || fingerprint[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_meshcore_admin_snapshot_t status = {0};
+    d1l_meshcore_service_admin_snapshot(&status);
+    if (status.fingerprint[0] != '\0' &&
+        strcmp(status.fingerprint, fingerprint) != 0 &&
+        status.state != D1L_MESHCORE_ADMIN_IDLE) {
+        const esp_err_t result = d1l_meshcore_service_admin_logout();
+        if (result != ESP_OK) {
+            return result;
+        }
+    }
+    clear_admin_pending_password();
+    clear_admin_cli_confirmation();
+    clear_admin_feedback();
+    s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+    s_admin_cli_secure_input = false;
+    s_admin_rendered_generation_valid = false;
+    s_admin_remember_password = true;
+    s_admin_page =
+        status.state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+        strcmp(status.fingerprint, fingerprint) == 0 ?
+            D1L_UI_ADMIN_PAGE_HUB : D1L_UI_ADMIN_PAGE_LOGIN;
+    snprintf(s_admin_target_fingerprint,
+             sizeof(s_admin_target_fingerprint), "%s", fingerprint);
+    snprintf(s_admin_target_name, sizeof(s_admin_target_name), "%s",
+             name && name[0] ? name : "Verified server");
+    return ESP_OK;
+}
+
 static bool admin_cli_allowed_for_current_session(const char *command)
 {
     d1l_meshcore_admin_snapshot_t status = {0};
@@ -1763,6 +1863,7 @@ static void hide_service_sheets(void)
     s_update_reboot_armed = false;
     s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
     clear_admin_cli_confirmation();
+    clear_admin_pending_password();
     s_admin_cli_secure_input = false;
     s_admin_rendered_generation_valid = false;
     restore_dock_for_active_tab();
@@ -2417,6 +2518,10 @@ static void handle_settings_action(d1l_ui_settings_action_t action, void *contex
         break;
     case D1L_UI_SETTINGS_ACTION_ADMIN:
         s_admin_target_fingerprint[0] = '\0';
+        s_admin_target_name[0] = '\0';
+        s_admin_page = D1L_UI_ADMIN_PAGE_LOGIN;
+        s_admin_remember_password = true;
+        clear_admin_feedback();
         open_admin_sheet_event_cb(NULL);
         break;
     case D1L_UI_SETTINGS_ACTION_ADVANCED:
@@ -3711,28 +3816,16 @@ static void handle_node_detail_action(
         break;
     case D1L_UI_NODE_DETAIL_ACTION_OPEN_ADMIN:
         if (event->node && event->node->node.fingerprint[0] != '\0') {
-            clear_admin_cli_confirmation();
-            s_admin_cli_secure_input = false;
-            s_admin_rendered_generation_valid = false;
-            d1l_meshcore_admin_snapshot_t admin_status = {0};
-            d1l_meshcore_service_admin_snapshot(&admin_status);
-            if (admin_status.fingerprint[0] != '\0' &&
-                strcmp(admin_status.fingerprint,
-                       event->node->node.fingerprint) != 0 &&
-                admin_status.state != D1L_MESHCORE_ADMIN_IDLE &&
-                admin_status.state != D1L_MESHCORE_ADMIN_TIMED_OUT) {
-                const esp_err_t logout_result =
-                    d1l_meshcore_service_admin_logout();
-                if (logout_result != ESP_OK) {
-                    show_toast("Admin switch", logout_result);
-                    break;
-                }
+            const esp_err_t result = select_admin_target(
+                event->node->node.fingerprint,
+                event->node->display_name[0] ?
+                    event->node->display_name : event->node->node.name);
+            if (result == ESP_OK) {
+                hide_node_detail_sheet();
+                open_admin_sheet_event_cb(NULL);
+            } else {
+                show_toast("Server login", result);
             }
-            snprintf(s_admin_target_fingerprint,
-                     sizeof(s_admin_target_fingerprint), "%s",
-                     event->node->node.fingerprint);
-            hide_node_detail_sheet();
-            open_admin_sheet_event_cb(NULL);
         }
         break;
     case D1L_UI_NODE_DETAIL_ACTION_NONE:
@@ -6155,11 +6248,36 @@ static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
     case D1L_UI_NODES_ACTION_OPEN_CONTACT_DM:
         open_dm_compose_for_contact(event->contact);
         break;
+    case D1L_UI_NODES_ACTION_OPEN_CONTACT_ADMIN:
+        if (event->contact) {
+            const esp_err_t result = select_admin_target(
+                event->contact->fingerprint,
+                d1l_ui_nodes_contact_name(event->contact));
+            if (result == ESP_OK) {
+                open_admin_sheet_event_cb(NULL);
+            } else {
+                show_toast("Server login", result);
+            }
+        }
+        break;
     case D1L_UI_NODES_ACTION_OPEN_NODE:
         show_node_detail_view(event->node, false);
         break;
     case D1L_UI_NODES_ACTION_OPEN_NODE_DM:
         open_node_dm_for(event->node);
+        break;
+    case D1L_UI_NODES_ACTION_OPEN_NODE_ADMIN:
+        if (event->node) {
+            const esp_err_t result = select_admin_target(
+                event->node->node.fingerprint,
+                event->node->display_name[0] ?
+                    event->node->display_name : event->node->node.name);
+            if (result == ESP_OK) {
+                open_admin_sheet_event_cb(NULL);
+            } else {
+                show_toast("Server login", result);
+            }
+        }
         break;
     case D1L_UI_NODES_ACTION_OPEN_SEARCH:
         open_nodes_search_sheet();
@@ -7440,6 +7558,14 @@ static bool render_admin_service_sheet(void)
 {
     d1l_meshcore_admin_snapshot_t status = {0};
     d1l_meshcore_service_admin_snapshot(&status);
+    finalize_admin_login(&status);
+    if (status.state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+        s_admin_page == D1L_UI_ADMIN_PAGE_LOGIN) {
+        s_admin_page = D1L_UI_ADMIN_PAGE_HUB;
+    } else if (status.state != D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+               status.state != D1L_MESHCORE_ADMIN_LOGIN_PENDING) {
+        s_admin_page = D1L_UI_ADMIN_PAGE_LOGIN;
+    }
     if (status.state != D1L_MESHCORE_ADMIN_AUTHENTICATED ||
         !confirmation_active(
             s_admin_mutation_armed != D1L_MESHCORE_ADMIN_MUTATION_NONE,
@@ -7453,9 +7579,16 @@ static bool render_admin_service_sheet(void)
     }
     build_admin_room_transcript(&status);
     const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
-    const bool complete = d1l_ui_service_sheets_render_admin(
+    const bool saved_password_available =
+        s_admin_target_fingerprint[0] != '\0' &&
+        d1l_admin_credential_store_has(s_admin_target_fingerprint);
+    const bool complete = d1l_ui_service_sheets_render_admin_compact(
         &s_service_sheets_controller, &status,
         s_admin_target_fingerprint,
+        s_admin_target_name,
+        s_admin_page,
+        saved_password_available,
+        s_admin_remember_password,
         s_admin_mutation_armed,
         s_admin_cli_armed[0] != '\0' &&
             s_admin_cli_armed_origin ==
@@ -7470,6 +7603,8 @@ static bool render_admin_service_sheet(void)
             s_admin_cli_armed_origin ==
                 D1L_UI_ADMIN_CLI_ORIGIN_ROOM_READ_ONLY_OFF,
         s_admin_cli_secure_input,
+        s_admin_feedback,
+        s_admin_feedback_error,
         s_admin_room_transcript,
         service_sheets_action_handler, NULL);
     if (complete) {
@@ -7606,33 +7741,114 @@ static void service_sheets_action_handler(
         s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
         request_tab_switch(D1L_UI_TAB_MESSAGES);
         return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB:
+        s_admin_page = D1L_UI_ADMIN_PAGE_HUB;
+        s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
+        clear_admin_cli_confirmation();
+        clear_admin_feedback();
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TOOLS:
+        s_admin_page = D1L_UI_ADMIN_PAGE_TOOLS;
+        clear_admin_feedback();
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ROOM:
+        s_admin_page = D1L_UI_ADMIN_PAGE_ROOM;
+        clear_admin_feedback();
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TERMINAL:
+        s_admin_page = D1L_UI_ADMIN_PAGE_TERMINAL;
+        clear_admin_feedback();
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACL:
+        s_admin_page = D1L_UI_ADMIN_PAGE_ACL;
+        clear_admin_feedback();
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_REMEMBER_TOGGLE:
+        s_admin_remember_password = !s_admin_remember_password;
+        set_admin_feedback(
+            s_admin_remember_password ?
+                "Password will be saved after a successful login." :
+                "Password will be used once and not saved.",
+            false);
+        (void)render_admin_service_sheet();
+        return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_FORGET_PASSWORD: {
+        const esp_err_t result = d1l_admin_credential_store_forget(
+            s_admin_target_fingerprint);
+        set_admin_feedback(
+            result == ESP_OK || result == ESP_ERR_NOT_FOUND ?
+                "Saved password removed." :
+                "The saved password could not be removed.",
+            result != ESP_OK && result != ESP_ERR_NOT_FOUND);
+        (void)render_admin_service_sheet();
+        return;
+    }
     case D1L_UI_SERVICE_ACTION_ADMIN_LOGIN: {
         char password[D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] = {0};
         clear_admin_cli_confirmation();
         s_admin_cli_secure_input = false;
         if (s_admin_target_fingerprint[0] == '\0') {
-            show_toast_text("Select a repeater or room first", true);
+            set_admin_feedback(
+                "Choose Login beside a repeater or room contact first.", true);
+            (void)render_admin_service_sheet();
             return;
         }
         if (!d1l_ui_service_sheets_take_admin_password(
                 &s_service_sheets_controller, password, sizeof(password))) {
-            show_toast("Admin login", ESP_ERR_INVALID_STATE);
+            set_admin_feedback("Enter a valid server password.", true);
+            (void)render_admin_service_sheet();
             return;
+        }
+        if (password[0] == '\0' &&
+            d1l_admin_credential_store_has(s_admin_target_fingerprint)) {
+            const esp_err_t load_result = d1l_admin_credential_store_load(
+                s_admin_target_fingerprint, password);
+            if (load_result != ESP_OK) {
+                set_admin_feedback(
+                    "The saved password could not be read. Type it again.",
+                    true);
+                d1l_meshcore_admin_secure_zero(password, sizeof(password));
+                (void)render_admin_service_sheet();
+                return;
+            }
         }
         const esp_err_t result = d1l_meshcore_service_admin_login(
             s_admin_target_fingerprint, password);
+        if (result == ESP_OK) {
+            snprintf(s_admin_pending_password,
+                     sizeof(s_admin_pending_password), "%s", password);
+            s_admin_pending_password_valid = true;
+            s_admin_pending_remember = s_admin_remember_password;
+            clear_admin_feedback();
+        } else {
+            set_admin_feedback(
+                "The login request could not start. Check the radio and try again.",
+                true);
+        }
         d1l_meshcore_admin_secure_zero(password, sizeof(password));
-        show_toast("Admin login", result);
         (void)render_admin_service_sheet();
         return;
     }
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_STATUS:
     case D1L_UI_SERVICE_ACTION_ADMIN_REFRESH:
+        s_admin_page = D1L_UI_ADMIN_PAGE_STATUS;
         s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
         clear_admin_cli_confirmation();
-        show_toast("Admin status",
-                   d1l_meshcore_service_admin_request_status());
+        clear_admin_feedback();
+        if (d1l_meshcore_service_admin_request_status() != ESP_OK) {
+            set_admin_feedback(
+                "Status refresh could not start. Check the session.", true);
+        }
         (void)render_admin_service_sheet();
         return;
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TELEMETRY:
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_NEIGHBOURS:
+    case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACCESS:
     case D1L_UI_SERVICE_ACTION_ADMIN_TELEMETRY:
     case D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS:
     case D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT:
@@ -7642,15 +7858,17 @@ static void service_sheets_action_handler(
         d1l_meshcore_admin_query_t query =
             D1L_MESHCORE_ADMIN_QUERY_TELEMETRY;
         uint16_t offset = 0U;
-        const char *label = "Server telemetry";
-        if (action == D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS ||
+        if (action == D1L_UI_SERVICE_ACTION_ADMIN_SHOW_NEIGHBOURS ||
+            action == D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS ||
             action == D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT) {
             query = D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS;
-            label = "Repeater neighbours";
-        } else if (action ==
-                   D1L_UI_SERVICE_ACTION_ADMIN_ACCESS_LIST) {
+            s_admin_page = D1L_UI_ADMIN_PAGE_NEIGHBOURS;
+        } else if (action == D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACCESS ||
+                   action == D1L_UI_SERVICE_ACTION_ADMIN_ACCESS_LIST) {
             query = D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST;
-            label = "Server access list";
+            s_admin_page = D1L_UI_ADMIN_PAGE_ACCESS;
+        } else {
+            s_admin_page = D1L_UI_ADMIN_PAGE_TELEMETRY;
         }
         if (action == D1L_UI_SERVICE_ACTION_ADMIN_NEIGHBOURS_NEXT) {
             d1l_meshcore_admin_snapshot_t status = {0};
@@ -7664,14 +7882,19 @@ static void service_sheets_action_handler(
                 status.query_result.count == 0U ||
                 next_offset >= status.query_result.total ||
                 next_offset > UINT16_MAX) {
-                show_toast_text("No next neighbour page", true);
+                set_admin_feedback("There are no more neighbours to show.",
+                                   true);
                 (void)render_admin_service_sheet();
                 return;
             }
             offset = (uint16_t)next_offset;
         }
-        show_toast(label,
-                   d1l_meshcore_service_admin_request_query(query, offset));
+        clear_admin_feedback();
+        if (d1l_meshcore_service_admin_request_query(query, offset) != ESP_OK) {
+            set_admin_feedback(
+                "That server request could not start. Check the session.",
+                true);
+        }
         (void)render_admin_service_sheet();
         return;
     }
@@ -7687,18 +7910,19 @@ static void service_sheets_action_handler(
             s_admin_mutation_armed = mutation;
             s_admin_mutation_deadline =
                 lv_tick_get() + D1L_UI_ADMIN_MUTATION_CONFIRM_WINDOW_MS;
-            show_toast_text(
+            set_admin_feedback(
                 mutation == D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS ?
-                    "Tap Confirm Clear Stats within 5 seconds" :
-                    "Tap Confirm Zero-Hop within 5 seconds",
-                true);
+                    "Tap Confirm clear stats within 5 seconds." :
+                    "Tap Confirm advert within 5 seconds.",
+                false);
         } else {
             s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
-            show_toast(
-                mutation == D1L_MESHCORE_ADMIN_MUTATION_CLEAR_STATS ?
-                    "Clear remote stats" : "Send zero-hop advert",
-                d1l_meshcore_service_admin_request_mutation(
-                    mutation, true));
+            clear_admin_feedback();
+            if (d1l_meshcore_service_admin_request_mutation(
+                    mutation, true) != ESP_OK) {
+                set_admin_feedback(
+                    "The server change could not start. Try again.", true);
+            }
         }
         (void)render_admin_service_sheet();
         return;
@@ -7707,14 +7931,18 @@ static void service_sheets_action_handler(
         char text[D1L_USER_TEXT_MAX_BYTES + 1U] = {0};
         if (!d1l_ui_service_sheets_take_admin_room_post(
                 &s_service_sheets_controller, text, sizeof(text))) {
-            show_toast_text("Enter one valid room message", true);
+            set_admin_feedback("Enter one valid room message.", true);
             (void)render_admin_service_sheet();
             return;
         }
         const esp_err_t result =
             d1l_meshcore_service_admin_send_room_post(text);
         d1l_meshcore_admin_secure_zero(text, sizeof(text));
-        show_toast("Room post", result);
+        set_admin_feedback(
+            result == ESP_OK ?
+                "Sent; waiting for delivery confirmation." :
+                "The room message could not be sent.",
+            result != ESP_OK);
         (void)render_admin_service_sheet();
         return;
     }
@@ -7728,7 +7956,11 @@ static void service_sheets_action_handler(
             const esp_err_t result =
                 d1l_meshcore_service_admin_request_cli(command, true);
             d1l_meshcore_admin_secure_zero(command, sizeof(command));
-            show_toast("ACL change", result);
+            clear_admin_feedback();
+            if (result != ESP_OK) {
+                set_admin_feedback(
+                    "The access change could not start.", true);
+            }
             (void)render_admin_service_sheet();
             return;
         }
@@ -7762,7 +7994,7 @@ static void service_sheets_action_handler(
             public_key_hex, sizeof(public_key_hex));
         if (command[0] == '\0') {
             d1l_meshcore_admin_secure_zero(command, sizeof(command));
-            show_toast_text(
+            set_admin_feedback(
                 "Use a full 64-hex public key and permission 0, 1, 2 or 3",
                 true);
             (void)render_admin_service_sheet();
@@ -7770,7 +8002,8 @@ static void service_sheets_action_handler(
         }
         arm_admin_cli_command(command, D1L_UI_ADMIN_CLI_ORIGIN_ACL);
         d1l_meshcore_admin_secure_zero(command, sizeof(command));
-        show_toast_text("Tap Confirm ACL within 5 seconds", true);
+        set_admin_feedback("Tap Confirm within 5 seconds to change access.",
+                           false);
         (void)render_admin_service_sheet();
         return;
     }
@@ -7793,19 +8026,23 @@ static void service_sheets_action_handler(
             const esp_err_t result =
                 d1l_meshcore_service_admin_request_cli(confirmed, true);
             d1l_meshcore_admin_secure_zero(confirmed, sizeof(confirmed));
-            show_toast("Room guest access", result);
+            clear_admin_feedback();
+            if (result != ESP_OK) {
+                set_admin_feedback(
+                    "The guest access change could not start.", true);
+            }
         } else if (!admin_cli_allowed_for_current_session(command)) {
             clear_admin_cli_confirmation();
-            show_toast_text(
+            set_admin_feedback(
                 "Room admin permission and compatible firmware required",
                 true);
         } else {
             arm_admin_cli_command(command, origin);
-            show_toast_text(
+            set_admin_feedback(
                 enable ?
-                    "Tap Confirm Guest On within 5 seconds" :
-                    "Tap Confirm Guest Off within 5 seconds",
-                true);
+                    "Tap Confirm guest read within 5 seconds." :
+                    "Tap Confirm guest off within 5 seconds.",
+                false);
         }
         (void)render_admin_service_sheet();
         return;
@@ -7813,10 +8050,10 @@ static void service_sheets_action_handler(
     case D1L_UI_SERVICE_ACTION_ADMIN_CLI_SECURE_TOGGLE:
         clear_admin_cli_confirmation();
         s_admin_cli_secure_input = !s_admin_cli_secure_input;
-        show_toast_text(
+        set_admin_feedback(
             s_admin_cli_secure_input ?
-                "Secure masked command input enabled" :
-                "Visible command input enabled",
+                "Secure masked command input is on." :
+                "Command input is visible.",
             false);
         (void)render_admin_service_sheet();
         return;
@@ -7831,7 +8068,10 @@ static void service_sheets_action_handler(
             const esp_err_t result =
                 d1l_meshcore_service_admin_request_cli(command, true);
             d1l_meshcore_admin_secure_zero(command, sizeof(command));
-            show_toast("Server command", result);
+            clear_admin_feedback();
+            if (result != ESP_OK) {
+                set_admin_feedback("The command could not start.", true);
+            }
             (void)render_admin_service_sheet();
             return;
         }
@@ -7841,7 +8081,7 @@ static void service_sheets_action_handler(
             !d1l_meshcore_admin_cli_command_valid(command) ||
             !admin_cli_allowed_for_current_session(command)) {
             d1l_meshcore_admin_secure_zero(command, sizeof(command));
-            show_toast_text(
+            set_admin_feedback(
                 "Command is unsupported for this authenticated server",
                 true);
             (void)render_admin_service_sheet();
@@ -7851,7 +8091,7 @@ static void service_sheets_action_handler(
             d1l_meshcore_admin_cli_command_sensitive(command);
         if (sensitive && !s_admin_cli_secure_input) {
             d1l_meshcore_admin_secure_zero(command, sizeof(command));
-            show_toast_text(
+            set_admin_feedback(
                 "Enable Secure Input before entering passwords or keys",
                 true);
             (void)render_admin_service_sheet();
@@ -7861,24 +8101,32 @@ static void service_sheets_action_handler(
             const esp_err_t result =
                 d1l_meshcore_service_admin_request_cli(command, false);
             d1l_meshcore_admin_secure_zero(command, sizeof(command));
-            show_toast("Server command", result);
+            clear_admin_feedback();
+            if (result != ESP_OK) {
+                set_admin_feedback("The command could not start.", true);
+            }
             (void)render_admin_service_sheet();
             return;
         }
         arm_admin_cli_command(
             command, D1L_UI_ADMIN_CLI_ORIGIN_GENERIC);
         d1l_meshcore_admin_secure_zero(command, sizeof(command));
-        show_toast_text(
-            "Tap Confirm Command within 5 seconds", true);
+        set_admin_feedback(
+            "Tap Confirm within 5 seconds to run this command.", false);
         (void)render_admin_service_sheet();
         return;
     }
     case D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT:
         s_admin_mutation_armed = D1L_MESHCORE_ADMIN_MUTATION_NONE;
         clear_admin_cli_confirmation();
+        clear_admin_pending_password();
         s_admin_cli_secure_input = false;
-        show_toast("Admin logout",
-                   d1l_meshcore_service_admin_logout());
+        if (d1l_meshcore_service_admin_logout() == ESP_OK) {
+            s_admin_page = D1L_UI_ADMIN_PAGE_LOGIN;
+            set_admin_feedback("Signed out.", false);
+        } else {
+            set_admin_feedback("The session could not be closed.", true);
+        }
         (void)render_admin_service_sheet();
         return;
     case D1L_UI_SERVICE_ACTION_NONE:

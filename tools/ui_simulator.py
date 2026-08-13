@@ -114,6 +114,17 @@ TOP_BAR_FREE_VIEWS = (
             "map_node_detail_sheet",
             "heard_only_node_detail_sheet",
             "managed_node_detail_sheet",
+            "repeater_login",
+            "repeater_login_saved",
+            "repeater_login_pending",
+            "repeater_manager",
+            "repeater_status",
+            "repeater_telemetry",
+            "repeater_neighbours",
+            "repeater_access",
+            "repeater_tools",
+            "repeater_console",
+            "room_console",
             "dm_thread_sheet",
             "dm_thread_details_sheet",
             "dm_thread_search_results",
@@ -689,6 +700,10 @@ def large_mesh_snapshot() -> Snapshot:
             "room" if i % 5 == 0 else ("repeater" if i % 5 == 1 else "chat"),
             f"-{42 + (i % 20)} dBm / {18 + (i % 12)} dB",
             f"{i % 4} hop, signed advert, seen {i + 1}",
+            public_key_hex=(
+                f"937D290883{i:06X}" + "0" * 48
+                if i % 5 in (0, 1) else ""
+            ),
         )
         for i in range(96)
     )
@@ -3292,7 +3307,10 @@ def draw_contacts_node_row(
     saved_contact: bool,
 ) -> None:
     dm_ready = node_dm_identity_reason(snap, node) == "ready"
-    row_right = 360 if dm_ready else 464
+    managed = node.role.lower() in ("repeater", "room") and bool(
+        node.public_key_hex
+    )
+    row_right = 360 if managed or dm_ready else 464
     row_box = (16, y, row_right, y + 58)
     s.round_rect(row_box, SURFACE_2, BORDER, 8)
     s.touch_target(
@@ -3315,7 +3333,16 @@ def draw_contacts_node_row(
     s.text(node.name, (76, y + 7, row_right - 14, y + 28), 14, TEXT, True)
     detail = f"{node_role_display_name(node.role)} | {node_route_display(node)}"
     s.text(detail, (76, y + 31, row_right - 14, y + 51), 11, MUTED)
-    if dm_ready:
+    if managed:
+        draw_button(
+            s,
+            (368, y + 7, 452, y + 51),
+            "Login",
+            AMBER,
+            action="open_repeater_login",
+            destination="repeater_login",
+        )
+    elif dm_ready:
         draw_button(
             s,
             (368, y + 7, 452, y + 51),
@@ -5379,13 +5406,13 @@ def render_node_detail_page(
         draw_button(
             s,
             (20, 352, 124, 396),
-            "Admin",
+            "Login",
             VIOLET,
-            action="open_server_admin",
-            destination=None,
+            action="open_repeater_login",
+            destination="repeater_login",
         )
         s.text(
-            "Verified server; local authenticated login required.",
+            "Sign in to open repeater or room controls.",
             (132, 360, 408, 400),
             10,
             MUTED,
@@ -5444,6 +5471,272 @@ def render_managed_node_detail_sheet(s: Surface, snap: Snapshot):
         if contact.public_key_hex.lower() != managed.public_key_hex.lower()
     ) + (managed,)
     render_node_detail_page(s, replace(snap, contacts=contacts), managed)
+
+
+ADMIN_SHEET = (16, 82, 464, 402)
+ADMIN_X = 28
+ADMIN_Y = 94
+
+
+def draw_admin_shell(s: Surface, title: str, *, back: bool = False) -> None:
+    s.rect((0, 0, WIDTH, HEIGHT), (17, 25, 35))
+    s.round_rect(ADMIN_SHEET, SURFACE, BORDER, 8)
+    s.text(title, (36, 98, 262 if back else 290, 130), 22, TEXT, True)
+    if back:
+        draw_button(
+            s,
+            (282, 94, 358, 138),
+            "Back",
+            MUTED,
+            action="admin_back",
+            destination="repeater_manager",
+        )
+    draw_button(
+        s,
+        (368, 94, 444, 138),
+        "Close",
+        MUTED,
+        action="close_repeater_admin",
+        destination="nodes",
+    )
+
+
+def draw_admin_target(s: Surface, *, authenticated: bool = False) -> None:
+    s.round_rect((36, 142, 444, 194), (23, 31, 36), (52, 86, 106), 8)
+    s.text("Krabs Lagoon", (48, 146, 424, 168), 14, TEXT, True)
+    detail = "Admin access" if authenticated else "Verified repeater"
+    s.text(f"{detail}  |  60B6ABA17831F883", (48, 170, 424, 190), 10, MUTED)
+
+
+def draw_admin_keyboard(s: Surface, box: tuple[int, int, int, int]) -> None:
+    s.round_rect(box, (11, 18, 23), BORDER, 8)
+    x0, y0, x1, y1 = box
+    rows = ("1 2 3 4 5 6 7 8 9 0", "q w e r t y u i o p", "a s d f g h j k l")
+    for index, row in enumerate(rows):
+        s.text(
+            row,
+            (x0 + 12, y0 + 4 + index * 22, x1 - 12, y0 + 23 + index * 22),
+            12,
+            TEXT,
+            False,
+            "center",
+        )
+    s.text("space      done", (x0 + 20, y1 - 28, x1 - 20, y1 - 6), 12, ACCENT, True, "center")
+
+
+def render_repeater_login(s: Surface, snap: Snapshot, *, saved: bool = False) -> None:
+    del snap
+    draw_admin_shell(s, "Repeater login")
+    s.text("Krabs Lagoon  |  60B6ABA17831F883", (36, 140, 444, 160), 11, ACCENT, True)
+    prompt = "Saved password ready. Type to replace it." if saved else "Enter the password used by this repeater."
+    s.text(prompt, (36, 162, 444, 182), 10, MUTED)
+    password_box = (36, 184, 444, 228)
+    s.round_rect(password_box, (16, 23, 25), ACCENT, 8)
+    s.text("Saved password" if saved else "Password", (50, 194, 430, 218), 14, MUTED)
+    s.touch_target("Repeater password", password_box, kind="password_field", action="edit_repeater_password")
+    draw_admin_keyboard(s, (36, 234, 444, 338))
+    draw_button(
+        s,
+        (36, 348, 144, 392),
+        "Login",
+        GREEN,
+        action="submit_repeater_login",
+        destination="repeater_login_pending",
+    )
+    draw_button(s, (152, 348, 284, 392), "Save: On", ACCENT, action="toggle_save_password")
+    if saved:
+        draw_button(s, (292, 348, 444, 392), "Forget saved", RED, action="forget_repeater_password")
+    else:
+        s.text("Saved only on this D1L", (294, 360, 442, 382), 9, MUTED, False, "center")
+    s.metrics.update(
+        {
+            "admin_page": "login",
+            "admin_password_masked": True,
+            "admin_password_saved": saved,
+            "admin_keyboard_visible": True,
+            "admin_keyboard_height": 112,
+            "admin_global_scroll_required": False,
+            "admin_min_touch_target": 44,
+        }
+    )
+
+
+def render_repeater_login_saved(s: Surface, snap: Snapshot) -> None:
+    render_repeater_login(s, snap, saved=True)
+
+
+def render_repeater_login_pending(s: Surface, snap: Snapshot) -> None:
+    del snap
+    draw_admin_shell(s, "Working")
+    draw_admin_target(s)
+    s.text("Signing in", (36, 212, 444, 242), 22, ACCENT, True, "center")
+    s.round_rect((80, 258, 400, 270), (37, 52, 71), (37, 52, 71), 6)
+    s.round_rect((80, 258, 306, 270), ACCENT, ACCENT, 6)
+    s.wrapped_text(
+        "Checking the password and opening a secure session.",
+        (64, 288, 416, 324),
+        12,
+        TEXT,
+        line_height=18,
+        align="center",
+    )
+    s.text("A slow mesh route can take up to 60 seconds.", (36, 330, 444, 350), 10, MUTED, False, "center")
+    draw_button(s, (160, 348, 320, 392), "Cancel", MUTED, action="cancel_repeater_login", destination="repeater_login")
+    s.metrics.update(
+        {
+            "admin_page": "pending",
+            "admin_progress_animated": True,
+            "admin_operation_visible": True,
+            "admin_timeout_explained": True,
+            "admin_queued_toast_only": False,
+        }
+    )
+
+
+def draw_admin_grid_button(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    icon: str,
+    label: str,
+    color: tuple[int, int, int],
+    action: str,
+    destination: str,
+) -> None:
+    s.round_rect(box, (23, 37, 44), color, 8)
+    x0, y0, x1, y1 = box
+    s.round_rect((x0 + 8, y0 + 8, x0 + 36, y0 + 36), (12, 26, 32), color, 14)
+    s.text(icon, (x0 + 10, y0 + 11, x0 + 34, y0 + 33), 11, color, True, "center")
+    s.text(label, (x0 + 42, y0 + 10, x1 - 6, y1 - 8), 11, TEXT, True, "center")
+    s.touch_target(label, box, kind="admin_command", action=action, destination=destination)
+
+
+def render_repeater_manager(s: Surface, snap: Snapshot) -> None:
+    del snap
+    draw_admin_shell(s, "Repeater manager")
+    draw_admin_target(s, authenticated=True)
+    buttons = (
+        ((36, 214, 164, 276), "S", "Status", ACCENT, "open_admin_status", "repeater_status"),
+        ((172, 214, 300, 276), "T", "Telemetry", GREEN, "open_admin_telemetry", "repeater_telemetry"),
+        ((308, 214, 436, 276), "N", "Neighbours", AMBER, "open_admin_neighbours", "repeater_neighbours"),
+        ((36, 284, 164, 346), "A", "Access", VIOLET, "open_admin_access", "repeater_access"),
+        ((172, 284, 300, 346), "!", "Tools", AMBER, "open_admin_tools", "repeater_tools"),
+        ((308, 284, 436, 346), ">", "Console", ACCENT, "open_admin_console", "repeater_console"),
+    )
+    for args in buttons:
+        draw_admin_grid_button(s, *args)
+    s.text("Admin access  |  firmware level 2", (36, 360, 326, 382), 10, MUTED)
+    draw_button(s, (332, 348, 444, 392), "Logout", RED, action="logout_repeater", destination="repeater_login")
+    s.metrics.update(
+        {
+            "admin_page": "hub",
+            "admin_command_count": 6,
+            "admin_icon_grid": True,
+            "admin_global_scroll_required": False,
+            "admin_results_persistent": True,
+        }
+    )
+
+
+def draw_admin_metric(s: Surface, box: tuple[int, int, int, int], title: str, value: str, color: tuple[int, int, int]) -> None:
+    s.round_rect(box, (23, 31, 36), color, 8)
+    x0, y0, x1, y1 = box
+    s.text(title, (x0 + 8, y0 + 5, x1 - 6, y0 + 24), 9, MUTED, True)
+    s.text(value, (x0 + 8, y0 + 26, x1 - 6, y1 - 6), 14, color, True)
+
+
+def render_repeater_status(s: Surface, snap: Snapshot) -> None:
+    del snap
+    draw_admin_shell(s, "Server status", back=True)
+    metrics = (
+        ((36, 146, 164, 206), "RSSI / SNR", "-52 / 22.00", ACCENT),
+        ((172, 146, 300, 206), "Send queue", "0 queued", GREEN),
+        ((308, 146, 436, 206), "RX / TX", "482 / 91", VIOLET),
+        ((36, 214, 164, 274), "Uptime", "19h 42m", AMBER),
+        ((172, 214, 300, 274), "TX / RX air", "18s / 93s", ACCENT),
+        ((308, 214, 436, 274), "Errors", "None", GREEN),
+    )
+    for args in metrics:
+        draw_admin_metric(s, *args)
+    s.text("Noise -118 dBm  |  voltage 5026 mV", (36, 288, 444, 310), 10, MUTED)
+    draw_button(s, (140, 348, 340, 392), "Refresh status", ACCENT, action="refresh_admin_status", destination="repeater_login_pending")
+    s.metrics.update({"admin_page": "status", "admin_metric_count": 6, "admin_results_persistent": True})
+
+
+def render_admin_data_page(s: Surface, title: str, body: str, page: str) -> None:
+    draw_admin_shell(s, title, back=True)
+    panel = (36, 146, 444, 318)
+    s.round_rect(panel, (23, 31, 36), (52, 86, 106), 8)
+    s.wrapped_text(body, (48, 158, 432, 306), 12, TEXT, line_height=20)
+    s.touch_target(f"{title} result", panel, kind="scroll_region", action=f"scroll_{page}")
+    draw_button(s, (174, 348, 302, 392), "Refresh", ACCENT, action=f"refresh_{page}", destination="repeater_login_pending")
+    if page == "access":
+        draw_button(s, (312, 348, 444, 392), "Edit access", VIOLET, action="edit_admin_access")
+    s.metrics.update(
+        {
+            "admin_page": page,
+            "admin_result_scroll_region": True,
+            "admin_global_scroll_required": False,
+            "admin_results_persistent": True,
+        }
+    )
+
+
+def render_repeater_telemetry(s: Surface, snap: Snapshot) -> None:
+    del snap
+    render_admin_data_page(s, "Telemetry", "Voltage 5.03 V\nTemperature 24.8 C\nPressure 100.8 kPa\nUpdated from signed server reply", "telemetry")
+
+
+def render_repeater_neighbours(s: Surface, snap: Snapshot) -> None:
+    del snap
+    render_admin_data_page(s, "Neighbours", "1. YKF Hilltop  -81 dBm  10 dB\n2. Hespeler  -88 dBm  7 dB\n3. Krab Hut  -94 dBm  4 dB", "neighbours")
+    draw_button(s, (36, 348, 164, 392), "Next page", MUTED, action="next_admin_neighbours", destination="repeater_login_pending")
+
+
+def render_repeater_access(s: Surface, snap: Snapshot) -> None:
+    del snap
+    render_admin_data_page(s, "Access list", "Admin  0BF0A701...7788\nWrite  88B9D10A...41C2\nRead   C7047D29...D0A1", "access")
+
+
+def render_repeater_tools(s: Surface, snap: Snapshot) -> None:
+    del snap
+    draw_admin_shell(s, "Server tools", back=True)
+    draw_button(s, (36, 150, 232, 214), "Clear statistics", RED, action="arm_clear_stats")
+    draw_button(s, (248, 150, 444, 214), "Zero-hop advert", AMBER, action="arm_zero_hop_advert", rf_tx=True)
+    s.round_rect((36, 228, 444, 282), (23, 31, 36), (52, 86, 106), 8)
+    s.text("No server change has run this session.", (48, 244, 432, 268), 11, TEXT)
+    s.wrapped_text("Changes require a second tap and a confirmed server reply.", (36, 346, 444, 390), 11, MUTED, line_height=18)
+    s.metrics.update({"admin_page": "tools", "admin_double_confirm": True, "admin_results_persistent": True})
+
+
+def render_repeater_console(s: Surface, snap: Snapshot) -> None:
+    del snap
+    draw_admin_shell(s, "Server console", back=True)
+    s.round_rect((36, 142, 444, 190), (23, 31, 36), (52, 86, 106), 8)
+    s.text("Firmware: MeshCore repeater 1.12", (48, 154, 432, 178), 11, TEXT)
+    draw_button(s, (36, 192, 212, 236), "Secure input: Off", MUTED, action="toggle_secure_admin_input")
+    s.text("Server command", (222, 204, 444, 228), 10, MUTED, True, "right")
+    field = (36, 240, 336, 284)
+    s.round_rect(field, (16, 23, 25), ACCENT, 8)
+    s.text("e.g. ver or get name", (48, 250, 326, 274), 12, MUTED)
+    s.touch_target("Server command", field, kind="text_field", action="edit_admin_command")
+    draw_button(s, (344, 240, 444, 284), "Send", GREEN, action="send_admin_command", destination="repeater_login_pending")
+    draw_admin_keyboard(s, (36, 290, 444, 390))
+    s.metrics.update({"admin_page": "console", "admin_command_allowlisted": True, "admin_results_persistent": True})
+
+
+def render_room_console(s: Surface, snap: Snapshot) -> None:
+    del snap
+    draw_admin_shell(s, "Room console", back=True)
+    s.round_rect((36, 142, 444, 214), (23, 31, 36), (52, 86, 106), 8)
+    s.text("You: Morning Lagoon [delivered]", (48, 154, 432, 178), 11, TEXT)
+    s.text("YKF: Good copy", (48, 180, 432, 202), 11, TEXT)
+    field = (36, 220, 336, 264)
+    s.round_rect(field, (16, 23, 25), ACCENT, 8)
+    s.text("Message the room", (48, 230, 326, 254), 12, MUTED)
+    s.touch_target("Room message", field, kind="text_field", action="edit_room_message")
+    draw_button(s, (344, 220, 444, 264), "Send", GREEN, action="send_room_message")
+    draw_admin_keyboard(s, (36, 276, 444, 390))
+    s.metrics.update({"admin_page": "room", "admin_delivery_state_visible": True})
 
 
 def render_contact_edit_sheet(s: Surface, snap: Snapshot):
@@ -7145,6 +7438,17 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "map_node_detail_sheet": render_map_node_detail_sheet,
     "heard_only_node_detail_sheet": render_heard_only_node_detail_sheet,
     "managed_node_detail_sheet": render_managed_node_detail_sheet,
+    "repeater_login": render_repeater_login,
+    "repeater_login_saved": render_repeater_login_saved,
+    "repeater_login_pending": render_repeater_login_pending,
+    "repeater_manager": render_repeater_manager,
+    "repeater_status": render_repeater_status,
+    "repeater_telemetry": render_repeater_telemetry,
+    "repeater_neighbours": render_repeater_neighbours,
+    "repeater_access": render_repeater_access,
+    "repeater_tools": render_repeater_tools,
+    "repeater_console": render_repeater_console,
+    "room_console": render_room_console,
     "contact_edit_sheet": render_contact_edit_sheet,
     "contact_export_sheet": render_contact_export_sheet,
     "forget_contact_confirm_page": render_forget_contact_confirm_page,
@@ -7494,10 +7798,31 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Contact",
         "YKF Room",
         "Why no DM?",
-        "Admin",
-        "Verified server; local authenticated login required.",
+        "Login",
+        "Sign in to open repeater or room controls.",
         "Close",
     ),
+    "repeater_login": (
+        "Repeater login", "Krabs Lagoon  |  60B6ABA17831F883", "Password", "Login", "Save: On", "Close",
+    ),
+    "repeater_login_saved": (
+        "Repeater login", "Saved password ready. Type to replace it.", "Saved password", "Forget saved", "Login", "Close",
+    ),
+    "repeater_login_pending": (
+        "Working", "Signing in", "Checking the password and opening a secure session.", "A slow mesh route can take up to 60 seconds.", "Cancel", "Close",
+    ),
+    "repeater_manager": (
+        "Repeater manager", "Krabs Lagoon", "Status", "Telemetry", "Neighbours", "Access", "Tools", "Console", "Logout",
+    ),
+    "repeater_status": (
+        "Server status", "RSSI / SNR", "Send queue", "RX / TX", "Uptime", "Errors", "Refresh status", "Back", "Close",
+    ),
+    "repeater_telemetry": ("Telemetry", "Voltage 5.03 V\nTemperature 24.8 C\nPressure 100.8 kPa\nUpdated from signed server reply", "Refresh", "Back", "Close"),
+    "repeater_neighbours": ("Neighbours", "1. YKF Hilltop  -81 dBm  10 dB\n2. Hespeler  -88 dBm  7 dB\n3. Krab Hut  -94 dBm  4 dB", "Next page", "Refresh", "Back", "Close"),
+    "repeater_access": ("Access list", "Admin  0BF0A701...7788\nWrite  88B9D10A...41C2\nRead   C7047D29...D0A1", "Edit access", "Refresh", "Back", "Close"),
+    "repeater_tools": ("Server tools", "Clear statistics", "Zero-hop advert", "Changes require a second tap and a confirmed server reply.", "Back", "Close"),
+    "repeater_console": ("Server console", "Secure input: Off", "Server command", "Send", "Back", "Close"),
+    "room_console": ("Room console", "You: Morning Lagoon [delivered]", "Message the room", "Send", "Back", "Close"),
     "contact_edit_sheet": ("Rename Contact", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"),
     "contact_export_sheet": ("Export Contact", "Back", "MeshCore QR", "Fingerprint", "URI", "Ready to scan"),
     "forget_contact_confirm_page": (
@@ -8056,6 +8381,24 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "steps": (
             {"view": "nodes", "action": "open_node_detail", "destination": "node_detail_sheet"},
             {"view": "node_detail_sheet", "action": "close_node_detail", "destination": "nodes"},
+        ),
+    },
+    {
+        "name": "repeater_login_and_management",
+        "steps": (
+            {"view": "nodes", "action": "open_repeater_login", "destination": "repeater_login"},
+            {"view": "repeater_login", "action": "edit_repeater_password"},
+            {"view": "repeater_login", "action": "toggle_save_password"},
+            {"view": "repeater_login", "action": "submit_repeater_login", "destination": "repeater_login_pending"},
+            {"view": "repeater_login_pending", "action": "cancel_repeater_login", "destination": "repeater_login"},
+            {"view": "repeater_manager", "action": "open_admin_status", "destination": "repeater_status"},
+            {"view": "repeater_status", "action": "admin_back", "destination": "repeater_manager"},
+            {"view": "repeater_manager", "action": "open_admin_telemetry", "destination": "repeater_telemetry"},
+            {"view": "repeater_manager", "action": "open_admin_neighbours", "destination": "repeater_neighbours"},
+            {"view": "repeater_manager", "action": "open_admin_access", "destination": "repeater_access"},
+            {"view": "repeater_manager", "action": "open_admin_tools", "destination": "repeater_tools"},
+            {"view": "repeater_manager", "action": "open_admin_console", "destination": "repeater_console"},
+            {"view": "repeater_manager", "action": "logout_repeater", "destination": "repeater_login"},
         ),
     },
     {

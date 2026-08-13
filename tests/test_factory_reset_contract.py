@@ -27,7 +27,7 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         re.S,
     )
     entries = [match.groupdict() for match in pattern.finditer(table)]
-    assert len(entries) == 40
+    assert len(entries) == 41
 
     def label(entry):
         value = entry["label"]
@@ -83,6 +83,7 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         ("nvs", "d1l_routes", "routes", clear),
         ("d1l_retained", "d1l_packets", "ring", clear),
         ("nvs", "d1l_packets", "ring", clear),
+        ("nvs", "d1l_admin_pw", "credentials", clear),
         ("nvs", "d1l_settings", "mesh_ts", migration),
         ("nvs", "d1l_settings", "mesh_hi_v2", protocol),
         ("nvs", "d1l_time_mig", "mesh_mig_v1", migration),
@@ -152,7 +153,7 @@ def test_factory_reset_inventory_covers_every_owned_nvs_key_policy():
         ),
     }
     header = read("main/storage/factory_reset.h")
-    assert "D1L_FACTORY_RESET_INVENTORY_COUNT 40U" in header
+    assert "D1L_FACTORY_RESET_INVENTORY_COUNT 41U" in header
     assert "D1L_FACTORY_RESET_SD_STORE_COUNT 7U" in header
     assert "D1L_FACTORY_RESET_RAW_MARKER_COUNT 2U" in header
     assert "D1L_FACTORY_RESET_RAW_MARKER_BYTES 16U" in header

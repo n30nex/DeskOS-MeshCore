@@ -250,7 +250,7 @@ def test_contacts_can_promote_heard_nodes_by_fingerprint():
     assert 'strncmp(line, "contacts set ", 13)' in console
     assert "d1l_contact_store_set_flags(fingerprint, contact.favorite, contact.muted, &contact)" in console
     assert "d1l_contact_store_rename(fingerprint, alias, &contact)" in console
-    assert "d1l_contact_store_delete(fingerprint, &contact)" in console
+    assert "d1l_app_model_delete_contact(fingerprint, &contact)" in console
     assert 'contacts set <fingerprint> <favorite|mute> <0|1>' in console
     assert 'contacts rename <fingerprint> <alias>' in console
     assert 'contacts delete <fingerprint>' in console
@@ -275,6 +275,7 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact)" in app_source
     assert "d1l_contact_store_rename(fingerprint, alias, out_contact)" in app_source
     assert "d1l_contact_store_delete(fingerprint, out_contact)" in app_source
+    assert "d1l_admin_credential_store_forget(fingerprint)" in app_source
     assert "nodes_render_contact_row" in nodes_ui
     contact_row = nodes_ui.split(
         "static void nodes_render_contact_row", 1

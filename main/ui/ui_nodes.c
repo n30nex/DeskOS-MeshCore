@@ -305,6 +305,11 @@ static void nodes_dispatch_contact_event(
         !controller->rendered.contact_can_dm[binding->row_index]) {
         return;
     }
+    if (action == D1L_UI_NODES_ACTION_OPEN_CONTACT_ADMIN &&
+        !d1l_contact_store_can_admin(
+            &controller->rendered.contact_rows[binding->row_index])) {
+        return;
+    }
     const d1l_ui_nodes_action_event_t action_event = {
         .action = action,
         .contact = &controller->rendered.contact_rows[binding->row_index],
@@ -329,6 +334,14 @@ static void nodes_dispatch_contact_dm_event_cb(lv_event_t *event)
         D1L_UI_NODES_ACTION_OPEN_CONTACT_DM);
 }
 
+static void nodes_dispatch_contact_admin_event_cb(lv_event_t *event)
+{
+    nodes_dispatch_contact_event(
+        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) :
+                NULL,
+        D1L_UI_NODES_ACTION_OPEN_CONTACT_ADMIN);
+}
+
 static void nodes_dispatch_node_event(
     d1l_ui_nodes_action_binding_t *binding,
     d1l_ui_nodes_action_t action)
@@ -344,6 +357,13 @@ static void nodes_dispatch_node_event(
     if (action == D1L_UI_NODES_ACTION_OPEN_NODE_DM &&
         !controller->rendered.node_can_dm[binding->row_index]) {
         return;
+    }
+    if (action == D1L_UI_NODES_ACTION_OPEN_NODE_ADMIN) {
+        const d1l_node_view_t *view =
+            &controller->rendered.node_rows[binding->row_index];
+        if (!view->keyed || !nodes_role_is_managed_service(view->role)) {
+            return;
+        }
     }
     const d1l_ui_nodes_action_event_t action_event = {
         .action = action,
@@ -367,6 +387,14 @@ static void nodes_dispatch_node_dm_event_cb(lv_event_t *event)
         event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) :
                 NULL,
         D1L_UI_NODES_ACTION_OPEN_NODE_DM);
+}
+
+static void nodes_dispatch_node_admin_event_cb(lv_event_t *event)
+{
+    nodes_dispatch_node_event(
+        event ? (d1l_ui_nodes_action_binding_t *)lv_event_get_user_data(event) :
+                NULL,
+        D1L_UI_NODES_ACTION_OPEN_NODE_ADMIN);
 }
 
 static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
@@ -465,6 +493,7 @@ static void nodes_render_contact_row(
         &controller->rendered.contact_rows[index];
     const bool can_dm = controller->rendered.contact_can_dm[index];
     const bool can_manage = d1l_contact_store_can_admin(entry);
+    const bool has_side_action = can_manage || can_dm;
     lv_obj_t *row = nodes_create_panel(
         parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT);
     if (!row) {
@@ -485,7 +514,7 @@ static void nodes_render_contact_row(
     lv_obj_t *name = nodes_create_label(
         row, display_name,
         entry->muted ? 0xA6B0B7 : (entry->favorite ? 0xFBBF24 : 0xF4F7FB));
-    nodes_set_dot_width(name, can_dm ? 246 : 320);
+    nodes_set_dot_width(name, has_side_action ? 246 : 320);
     if (name) {
         lv_obj_set_pos(name, 58, 7);
     }
@@ -496,16 +525,16 @@ static void nodes_render_contact_row(
              entry->muted ? " | Muted" :
              (entry->favorite ? " | Favorite" : ""));
     lv_obj_t *details = nodes_create_label(row, meta, 0xA6B0B7);
-    nodes_set_dot_width(details, can_dm ? 266 : 344);
+    nodes_set_dot_width(details, has_side_action ? 266 : 344);
     if (details) {
         lv_obj_set_pos(details, 58, 31);
     }
-    if (can_dm) {
+    if (can_manage) {
+        nodes_create_button(row, "Login", 340, 7, 84, 44, 0xFBBF24, true,
+                            nodes_dispatch_contact_admin_event_cb, binding);
+    } else if (can_dm) {
         nodes_create_button(row, "Chat", 340, 7, 84, 44, 0x84FF2E, true,
                             nodes_dispatch_contact_dm_event_cb, binding);
-    } else if (can_manage) {
-        nodes_create_button(row, "Manage", 340, 7, 84, 44, 0xFBBF24, true,
-                            nodes_dispatch_contact_open_event_cb, binding);
     } else {
         lv_obj_t *chevron = nodes_create_label(row, ">", 0xA6B0B7);
         if (chevron) {
@@ -527,6 +556,7 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
     const d1l_node_entry_t *entry = &view->node;
     const bool can_dm = controller->rendered.node_can_dm[index];
     const bool can_manage = view->keyed && nodes_role_is_managed_service(view->role);
+    const bool has_side_action = can_manage || can_dm;
     lv_obj_t *row = nodes_create_panel(
         parent, NODES_ROW_X, y, NODES_ROW_WIDTH, NODES_ROW_HEIGHT);
     if (!row) {
@@ -547,7 +577,7 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
     lv_obj_t *name = nodes_create_label(
         row, display_name, view->muted ? 0xA6B0B7 :
         (view->favorite ? 0xFBBF24 : 0xF4F7FB));
-    nodes_set_dot_width(name, can_dm ? 246 : 320);
+    nodes_set_dot_width(name, has_side_action ? 246 : 320);
     if (name) {
         lv_obj_set_pos(name, 58, 7);
     }
@@ -559,16 +589,16 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
              view->muted ? " | Muted" :
              (view->favorite ? " | Favorite" : ""));
     lv_obj_t *details = nodes_create_label(row, meta, 0xA6B0B7);
-    nodes_set_dot_width(details, can_dm ? 266 : 344);
+    nodes_set_dot_width(details, has_side_action ? 266 : 344);
     if (details) {
         lv_obj_set_pos(details, 58, 31);
     }
-    if (can_dm) {
+    if (can_manage) {
+        nodes_create_button(row, "Login", 340, 7, 84, 44, 0xFBBF24, true,
+                            nodes_dispatch_node_admin_event_cb, binding);
+    } else if (can_dm) {
         nodes_create_button(row, "Chat", 340, 7, 84, 44, 0x84FF2E, true,
                             nodes_dispatch_node_dm_event_cb, binding);
-    } else if (can_manage) {
-        nodes_create_button(row, "Manage", 340, 7, 84, 44, 0xFBBF24, true,
-                            nodes_dispatch_node_open_event_cb, binding);
     } else {
         lv_obj_t *chevron = nodes_create_label(row, ">", 0xA6B0B7);
         if (chevron) {

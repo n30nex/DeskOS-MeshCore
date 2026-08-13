@@ -151,7 +151,7 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     message_branch = node_row.split("if (can_dm)", 1)[1].split("else if", 1)[0]
     assert "view->keyed" not in message_branch
     assert "const bool can_manage = view->keyed" in node_row
-    assert 'nodes_create_button(row, "Manage"' in node_row
+    assert 'nodes_create_button(row, "Login"' in node_row
     assert "entry->fingerprint" not in node_row
     assert 'view->keyed ? "saved" : "missing"' in node_detail_ui
     assert "Verified MeshCore adverts populate this bounded heard-node store" in console

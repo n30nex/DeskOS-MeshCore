@@ -153,6 +153,10 @@ static const d1l_factory_reset_inventory_entry_t s_inventory[] = {
      "d1l_packets", "ring", D1L_FACTORY_RESET_DISPOSITION_CLEAR, false,
      "legacy default-NVS packet-log mirror",
      D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"admin_credentials", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
+     "d1l_admin_pw", "credentials", D1L_FACTORY_RESET_DISPOSITION_CLEAR,
+     true, "device-local repeater and room login passwords",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
 
     {"legacy_protocol_timestamp", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
      "d1l_settings", "mesh_ts",

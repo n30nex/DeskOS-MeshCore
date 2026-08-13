@@ -83,8 +83,8 @@ def test_invalid_identity_taps_explain_without_compose_or_rf_and_controls_are_to
     assert '"Why no DM?", 174, 0, 120, 44' in render_node
     assert '"DM", 208, 0, 54, 44' in render_node
     assert '"Close", 316, 0, 76, 44' in render_node
-    assert '"Admin", 8, 352, 104, 44' in render_node
-    assert '"Verified server; local authenticated login required."' in render_node
+    assert '"Login", 8, 352, 104, 44' in render_node
+    assert '"Sign in to open repeater or room controls."' in render_node
 
     render_message = ui.split("static void render_message_detail_sheet(void)", 1)[1].split(
         "static void show_message_detail_for", 1

@@ -8,7 +8,8 @@
 | **1.2 / RC2** | Corrective release: working channel selection, mobile-style Contacts, complete parity ledger, actual-device screenshots, and explicit update/fresh-install downloads | Historical (`v1.2.0`) |
 | **1.5 / RC3** | Secure BLE companion, signed local update/rollback, public-data QR sharing, diagnostics, and full-feature production activation | Historical (`v1.5.0`) |
 | **1.6** | Compact Home, five Contacts sort modes, UI ownership cleanup, truthful simulator states, and touch/copy refinement | Historical (`v1.6.0`) |
-| **1.7** | Branded animated opening, distinct DeskOS mark, and coherent product-wide palette | Current (`v1.7.0`) |
+| **1.7** | Branded animated opening, distinct DeskOS mark, and coherent product-wide palette | Historical (`v1.7.0`) |
+| **1.7.1** | Direct repeater login, optional device-local passwords, command dashboard, and visible request results | Current (`v1.7.1`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -84,3 +85,13 @@ DeskOS cyan, cobalt, lime, and charcoal palette across the complete interface.
 The repository now carries the transparent production mark, deterministic boot
 preview, and clearly labeled simulator images. The loader remains bounded and
 falls through to Home if its small object tree cannot be allocated.
+
+## 1.7.1: repeater management
+
+DeskOS 1.7.1 puts **Login** beside managed repeater and room contacts, opens a
+large masked password keyboard, and can remember a password per server on the
+device. Authenticated sessions open a compact icon dashboard with focused
+status, telemetry, neighbours, access, tools, room, and console pages. Every
+request has a visible animated pending state and a persistent result. Saved
+passwords are excluded from logs and exports and are removed when their contact
+is forgotten or the device is factory-reset.
