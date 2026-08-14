@@ -48,8 +48,8 @@ State meanings:
 | Finder/discovery | Find sends zero-hop discovery and shows key, role, and there/back SNR without treating unverified results as contacts | Complete |
 | PATH/Ping/TRACE | Verified contacts expose PATH/TRACE state; repeaters expose zero-hop Ping with pending, timeout, RTT, RSSI, and hop SNR results | Complete |
 | Path/map relationship | Node/location detail and Map expose signed position truth; no position is inferred from a display name | Complete |
-| Repeater/room login | Large masked keyboard, optional per-server device-local password, empty-password negotiation, explicit session state/permissions, logout, and target-switch authority clearing | Complete (1.7.1) |
-| Repeater status/telemetry | Authenticated icon dashboard, status, counters, telemetry, selected route, paged neighbours, visible pending animation, and persistent results | Complete (1.7.1) |
+| Repeater/room login | Large masked keyboard, optional per-server device-local password, flood-delivered sign-in, empty-password negotiation, explicit session state/permissions, logout, and target-switch authority clearing | Complete (1.7.5) |
+| Repeater status/telemetry | Authenticated icon dashboard, status, counters, telemetry, selected route, named paged neighbours, visible pending animation, persistent results, and return-to-manager navigation | Complete (1.7.5) |
 | Repeater ACL/CLI/settings | Role-gated ACL and device/radio/advert actions plus bounded redacted CLI; mutations require local confirmation | Complete |
 | Room posts | Current-session room posts and transcript; old room traffic is not replayed into a new session | Complete |
 
@@ -59,7 +59,7 @@ State meanings:
 |---|---|---|
 | Map and peer locations | Map pans/zooms/centers, plots only valid signed peer coordinates, and keeps provider attribution visible | Complete |
 | Device location | Manual configured coordinates or supported signed data replace phone GPS; the D1L has no onboard GPS | Accepted D1L adaptation |
-| Map download/cache | Connected Wi-Fi plus prepared SD and an authorized provider enable bounded background prefetch; interactive Map takes priority | Complete |
+| Map download/cache | Connected Wi-Fi plus prepared SD and an authorized provider enable bounded background prefetch; interactive Map takes priority and cached tiles skip network pacing | Complete (1.7.5) |
 | Wi-Fi profiles | Scan, save, select, delete, connect, disconnect, and reconnect from Settings | Complete |
 | Radio/device settings | Region/preset, frequency, bandwidth, SF, CR, power, RX boost, display, and time settings | Complete |
 | Storage/history | SD is primary for retained data; missing media produces visible live-only RF chat without silently moving history to default NVS | Complete |

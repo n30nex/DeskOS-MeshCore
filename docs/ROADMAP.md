@@ -9,7 +9,8 @@
 | **1.5 / RC3** | Secure BLE companion, signed local update/rollback, public-data QR sharing, diagnostics, and full-feature production activation | Historical (`v1.5.0`) |
 | **1.6** | Compact Home, five Contacts sort modes, UI ownership cleanup, truthful simulator states, and touch/copy refinement | Historical (`v1.6.0`) |
 | **1.7** | Branded animated opening, distinct DeskOS mark, and coherent product-wide palette | Historical (`v1.7.0`) |
-| **1.7.1** | Direct repeater login, optional device-local passwords, command dashboard, and visible request results | Current (`v1.7.1`) |
+| **1.7.1** | Direct repeater login, optional device-local passwords, command dashboard, and visible request results | Historical (`v1.7.1`) |
+| **1.7.5** | Flood-delivered login, human-readable neighbours, manager return navigation, ten-minute lock, top-button wake/advert, and faster cached maps | Current (`v1.7.5`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -95,3 +96,13 @@ status, telemetry, neighbours, access, tools, room, and console pages. Every
 request has a visible animated pending state and a persistent result. Saved
 passwords are excluded from logs and exports and are removed when their contact
 is forgotten or the device is factory-reset.
+
+## 1.7.5: reliable remote management
+
+DeskOS 1.7.5 sends every server login request by flood so a saved repeater can
+be reached through another repeater without trusting a stale direct path.
+Authenticated commands still use the normal learned route. Result pages return
+to the signed-in manager, and Neighbours resolves saved names with readable age
+and signal data. Cached map tiles render without network pacing. The display
+locks after ten idle minutes, the lock screen owns the entire top layer, and the
+top button wakes it or sends one normal advert on a deliberate double press.

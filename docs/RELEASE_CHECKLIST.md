@@ -85,3 +85,12 @@ the stable D1L USB identity, and physical checks of direct Login, masked entry,
 saved-password reuse, command navigation, pending animation, and result/error
 states. Qualification must not expose a password, format SD, or transmit an
 unrequested public message.
+
+## 1.7.5 release boundary
+
+The exact Actions-built `1.7.5` image must preserve every 1.7.1 safety boundary
+and prove flood login packet construction, manager return navigation, saved-name
+neighbour rendering, ten-minute display lock, top-layer lock coverage, button
+wake/double-press behavior, and cache-only map pacing. Device acceptance uses a
+non-erasing flash to the stable D1L USB identity. Automated tests do not send RF;
+the button advert is checked physically only after an explicit double press.

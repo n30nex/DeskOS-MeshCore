@@ -506,6 +506,7 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
         }
 
         size_t compressed_len = 0U;
+        bool downloaded = false;
         d1l_map_tile_download_result_t tile_result = {0};
         esp_err_t ret = d1l_map_tile_store_read(
             plan->tiles[i].zoom, plan->tiles[i].x, plan->tiles[i].y, &storage,
@@ -545,6 +546,7 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
                 &compressed_len, generation_continue, &generation, &tile_result);
             note_worker_stack();
             if (ret == ESP_OK) {
+                downloaded = true;
                 if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
                     if (s_map.status.generation == generation) {
                         ++s_map.status.downloaded_tiles;
@@ -625,7 +627,11 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
         if (!publish_tile_frame(plan, &plan->tiles[i], generation)) {
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(D1L_MAP_TILE_GAP_MS));
+        if (downloaded) {
+            vTaskDelay(pdMS_TO_TICKS(D1L_MAP_TILE_GAP_MS));
+        } else {
+            taskYIELD();
+        }
     }
 
     if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {

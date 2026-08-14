@@ -82,6 +82,7 @@ def test_display_render_is_truthful_disabled_and_fails_closed():
         "Night %s",
         "Contrast %s",
         "Timeout Off",
+        "Timeout %u min",
         "Timeout %us",
     ):
         assert f'"{label}"' in render
@@ -99,6 +100,41 @@ def test_display_render_is_truthful_disabled_and_fails_closed():
     assert "snapshot->time_available" in render
     assert "if (!complete)" in render
     assert "invalidate_sheet(controller, sheet);" in render
+
+
+def test_display_locks_after_ten_minutes_and_top_button_wakes_safely():
+    preferences_h = read("main/hal/display_preferences.h")
+    preferences = read("main/hal/display_preferences.c")
+    phase1 = read("main/ui/ui_phase1.c")
+    gesture = read("main/ui/ui_button_gesture.h")
+
+    assert "D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS 600U" in preferences_h
+    valid = body(
+        preferences,
+        "bool d1l_display_timeout_valid",
+        "static bool notification_mode_valid",
+    )
+    assert "seconds == 0U" in valid
+    assert "D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS" in valid
+    timeout_action = body(
+        phase1,
+        "case D1L_UI_DEVICE_SHEETS_ACTION_TIMEOUT:",
+        "case D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DIAGNOSTICS:",
+    )
+    assert "D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS : 0U" in timeout_action
+
+    lock = body(phase1, "static void lock_event_cb", "static uint8_t desired_backlight_percent")
+    create = body(phase1, "static void create_lock_overlay", "static void ui_task")
+    timer = body(phase1, "static void display_runtime_timer_cb", "static void map_viewport_timer_cb")
+    assert "lv_obj_move_foreground(s_lock_overlay);" in lock
+    assert "create_object(lv_layer_top(), \"lock overlay\")" in create
+    assert "LV_OPA_COVER" in create
+    assert "LV_OBJ_FLAG_CLICKABLE" in create
+    assert "d1l_board_button_pressed()" in timer
+    assert "D1L_UI_BUTTON_ACTION_WAKE" in timer
+    assert "d1l_app_model_request_advert(false)" in timer
+    assert "D1L_UI_BUTTON_DOUBLE_PRESS_MS 600U" in gesture
+    assert "gesture->was_pressed" in gesture
 
 
 def test_diagnostics_render_is_snapshot_only_and_read_only():

@@ -246,6 +246,13 @@ def test_server_admin_close_preserves_session_and_target_change_logs_out():
     assert "d1l_ui_service_sheets_render_admin_compact(" in phase1
     assert "d1l_admin_credential_store_save(" in phase1
 
+    header = sheets.split(
+        "static bool render_admin_compact_header(", 1
+    )[1].split("static bool render_admin_target(", 1)[0]
+    assert (
+        "show_back ? D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB :\n"
+        "                    D1L_UI_SERVICE_ACTION_CLOSE_ADMIN"
+    ) in header
     begin_render = sheets.split(
         "static bool begin_render(", 1
     )[1].split(
@@ -261,6 +268,43 @@ def test_server_admin_close_preserves_session_and_target_change_logs_out():
     assert "lv_obj_update_layout(sheet);" in finish_render
     assert "lv_obj_scroll_to_y(" in finish_render
     assert "finish_admin_render(controller, sheet);" in sheets
+
+
+def test_admin_login_floods_and_neighbours_resolve_saved_contact_names():
+    service = read("main/mesh/meshcore_service.c")
+    dispatch_h = read("main/mesh/meshcore_admin_dispatch.h")
+    dispatch = read("main/mesh/meshcore_admin_dispatch.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    login = service.split(
+        "static esp_err_t meshcore_service_handle_admin_login(", 1
+    )[1].split(
+        "static esp_err_t meshcore_service_handle_admin_status(", 1
+    )[0]
+    assert login.index("prepare_admin_route(") < login.index(
+        "d1l_meshcore_route_select("
+    ) < login.index("d1l_meshcore_admin_build_login_packet(")
+    assert "false, false, NULL, 0U, 0U, now_ms" in login
+    assert "d1l_meshcore_admin_route_valid(&selection)" in login
+
+    assert "d1l_meshcore_admin_neighbour_t" in dispatch_h
+    parser = dispatch.split("static bool parse_neighbours_query(", 1)[1].split(
+        "d1l_meshcore_admin_accept_query_response(", 1
+    )[0]
+    assert "result->neighbours[index]" in parser
+    assert "neighbour->seconds_ago = seconds_ago;" in parser
+    assert "neighbour->snr_quarter_db = snr_quarter_db;" in parser
+
+    friendly = phase1.split(
+        "static void build_admin_neighbour_text(", 1
+    )[1].split("static bool render_admin_service_sheet(void)", 1)[0]
+    assert "d1l_contact_store_copy_recent(" in friendly
+    assert "admin_neighbour_saved_name(prefix, contact_count)" in friendly
+    assert '"%s  |  %s  |  %s%d.%02d dB\\n"' in friendly
+    render = phase1.split("static bool render_admin_service_sheet(void)", 1)[1].split(
+        "static void refresh_admin_service_sheet_if_changed(void)", 1
+    )[0]
+    assert "build_admin_neighbour_text(&status.query_result);" in render
 
 
 def test_authenticated_server_management_is_available_on_device_and_bounded():

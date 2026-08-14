@@ -6463,6 +6463,16 @@ static esp_err_t meshcore_service_handle_admin_login(
     if (ret != ESP_OK) {
         goto admin_login_cleanup;
     }
+    /* Login is the recovery path for servers beyond direct RF range. Always
+     * flood the handshake; authenticated follow-up commands may use the
+     * learned canonical route once the session is open. */
+    if (!d1l_meshcore_route_select(
+            false, false, NULL, 0U, 0U, now_ms,
+            settings_snapshot.path_hash_bytes, &selection) ||
+        !d1l_meshcore_admin_route_valid(&selection)) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto admin_login_cleanup;
+    }
 
     uint32_t timestamp = 0U;
     ret = d1l_settings_next_mesh_timestamp(&timestamp);

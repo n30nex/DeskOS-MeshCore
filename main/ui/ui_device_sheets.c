@@ -312,6 +312,9 @@ bool d1l_ui_device_sheets_render_display(
     char timeout_text[24];
     if (snapshot->display_timeout_seconds == 0U) {
         snprintf(timeout_text, sizeof(timeout_text), "Timeout Off");
+    } else if (snapshot->display_timeout_seconds % 60U == 0U) {
+        snprintf(timeout_text, sizeof(timeout_text), "Timeout %u min",
+                 (unsigned)(snapshot->display_timeout_seconds / 60U));
     } else {
         snprintf(timeout_text, sizeof(timeout_text), "Timeout %us",
                  (unsigned)snapshot->display_timeout_seconds);
@@ -336,7 +339,7 @@ bool d1l_ui_device_sheets_render_display(
     lv_obj_t *note = create_label(
         sheet,
         "Fixed UTC offset only; daylight saving is not automatic. Touch wakes and "
-        "unlocks. Night mode dims without changing saved daytime brightness.",
+        "unlocks; the top button wakes too. Night mode keeps daytime brightness.",
         0xFBBF24);
     configure_wrapped_label(note, 8, 260);
     complete = note != NULL && complete;

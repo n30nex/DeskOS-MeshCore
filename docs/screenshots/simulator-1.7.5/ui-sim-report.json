@@ -1,0 +1,1924 @@
+{
+  "artifact_kind": "host_simulator_ui_reference_non_closure",
+  "closure_eligible": false,
+  "display": {
+    "height": 480,
+    "width": 480
+  },
+  "dock_invariant_issues": [],
+  "flow_report": {
+    "destructive_actions": [],
+    "flows": [
+      {
+        "missing_steps": [],
+        "name": "lock_overlay_unlock",
+        "ok": true,
+        "steps": [
+          {
+            "action": "unlock",
+            "box": [
+              0,
+              0,
+              480,
+              480
+            ],
+            "destination": "home",
+            "label": "Tap to unlock",
+            "present": true,
+            "view": "lock_overlay"
+          }
+        ]
+      }
+    ],
+    "format_actions": [],
+    "min_touch_target": 44,
+    "missing_steps": [],
+    "ok": true,
+    "public_rf_actions": [],
+    "release_profile": "full_feature",
+    "rf_actions": [],
+    "schema": 1,
+    "skipped_flows": [
+      "first_boot_onboarding",
+      "home_launcher_navigation",
+      "home_status_modals_return_to_active_tab",
+      "flat_settings_tools_navigation",
+      "flat_settings_connections_navigation",
+      "flat_settings_storage_maps_navigation",
+      "flat_settings_device_navigation",
+      "flat_settings_advanced_navigation",
+      "messages_hierarchy_navigation",
+      "public_compose_and_send",
+      "channel_select_private_history_compose_and_return_public",
+      "public_history_search",
+      "public_message_detail",
+      "public_message_reply",
+      "public_sender_dm_explanation",
+      "dm_thread_open_and_reply",
+      "dm_retained_search",
+      "node_detail_inspection",
+      "repeater_login_and_management",
+      "heard_only_dm_explanation",
+      "contact_detail_options_hierarchy",
+      "contact_rename_and_forget_confirmation",
+      "map_page_policy",
+      "packet_filters_search_and_details",
+      "mesh_roles_browser",
+      "settings_radio_storage_and_advert",
+      "storage_hierarchy_navigation",
+      "settings_display_and_diagnostics"
+    ],
+    "target_issues": [],
+    "target_overlaps": []
+  },
+  "formats_sd": false,
+  "hardware_required": true,
+  "incoming_event_report": {
+    "failures": [],
+    "flows": [],
+    "ok": true,
+    "skipped_flows": [
+      "incoming_public_preserves_compose",
+      "incoming_public_preserves_search",
+      "incoming_dm_preserves_home_preview_thread",
+      "incoming_dm_preserves_home_preview_thread_search"
+    ]
+  },
+  "mode": "simulation",
+  "ok": true,
+  "overflow_count": 0,
+  "physical_acceptance_claimed": false,
+  "physical_observed": false,
+  "public_rf_tx": false,
+  "release_profile": "full_feature",
+  "required_labels_missing": [],
+  "rf_acceptance_claimed": false,
+  "scenario": "map-cached-revisit",
+  "schema": 2,
+  "sibling_text_overlap_count": 0,
+  "snapshot_counts": {
+    "contacts": 2,
+    "dm_messages": 2,
+    "heard": 3,
+    "packets": 4,
+    "public_messages": 3,
+    "repeaters": 1,
+    "rooms": 1,
+    "routes": 2
+  },
+  "source": "tools/ui_simulator.py",
+  "touch_target_issue_count": 0,
+  "truncated_count": 0,
+  "views": [
+    {
+      "dock_expected": false,
+      "dock_expected_target_count": 0,
+      "dock_invariant_ok": true,
+      "dock_rendered": false,
+      "dock_target_count": 0,
+      "labels": [
+        "Repeater login",
+        "Close",
+        "Krabs Lagoon  |  60B6ABA17831F883",
+        "Enter the password used by this repeater.",
+        "Password",
+        "1 2 3 4 5 6 7 8 9 0",
+        "q w e r t y u i o p",
+        "a s d f g h j k l",
+        "space      done",
+        "Login",
+        "Save: On",
+        "Saved only on this D1L"
+      ],
+      "metrics": {
+        "admin_global_scroll_required": false,
+        "admin_keyboard_height": 112,
+        "admin_keyboard_visible": true,
+        "admin_min_touch_target": 44,
+        "admin_page": "login",
+        "admin_password_masked": true,
+        "admin_password_saved": false
+      },
+      "missing_required_labels": [],
+      "name": "repeater_login",
+      "overflow": [],
+      "release_profile": "full_feature",
+      "screenshot": "docs/screenshots/simulator-1.7.5/repeater_login.png",
+      "sibling_text_overlaps": [],
+      "text_count": 12,
+      "touch_target_count": 4,
+      "touch_target_issues": [],
+      "touch_targets": [
+        {
+          "action": "close_repeater_admin",
+          "box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "center": [
+            406,
+            116
+          ],
+          "destination": "nodes",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Close",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Close",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "width": 76
+        },
+        {
+          "action": "edit_repeater_password",
+          "box": [
+            36,
+            184,
+            444,
+            228
+          ],
+          "center": [
+            240,
+            206
+          ],
+          "destination": null,
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "password_field",
+          "label": "Repeater password",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Repeater password",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            36,
+            184,
+            444,
+            228
+          ],
+          "width": 408
+        },
+        {
+          "action": "submit_repeater_login",
+          "box": [
+            36,
+            348,
+            144,
+            392
+          ],
+          "center": [
+            90,
+            370
+          ],
+          "destination": "repeater_login_pending",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Login",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Login",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            36,
+            348,
+            144,
+            392
+          ],
+          "width": 108
+        },
+        {
+          "action": "toggle_save_password",
+          "box": [
+            152,
+            348,
+            284,
+            392
+          ],
+          "center": [
+            218,
+            370
+          ],
+          "destination": null,
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Save: On",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Save: On",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            152,
+            348,
+            284,
+            392
+          ],
+          "width": 132
+        }
+      ],
+      "truncated_labels": []
+    },
+    {
+      "dock_expected": false,
+      "dock_expected_target_count": 0,
+      "dock_invariant_ok": true,
+      "dock_rendered": false,
+      "dock_target_count": 0,
+      "labels": [
+        "Working",
+        "Close",
+        "Krabs Lagoon",
+        "Verified repeater  |  60B6ABA17831F883",
+        "Signing in",
+        "Checking the password and opening a secure session.",
+        "A slow mesh route can take up to 60 seconds.",
+        "Cancel"
+      ],
+      "metrics": {
+        "admin_operation_visible": true,
+        "admin_page": "pending",
+        "admin_progress_animated": true,
+        "admin_queued_toast_only": false,
+        "admin_timeout_explained": true
+      },
+      "missing_required_labels": [],
+      "name": "repeater_login_pending",
+      "overflow": [],
+      "release_profile": "full_feature",
+      "screenshot": "docs/screenshots/simulator-1.7.5/repeater_login_pending.png",
+      "sibling_text_overlaps": [],
+      "text_count": 8,
+      "touch_target_count": 2,
+      "touch_target_issues": [],
+      "touch_targets": [
+        {
+          "action": "close_repeater_admin",
+          "box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "center": [
+            406,
+            116
+          ],
+          "destination": "nodes",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Close",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Close",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "width": 76
+        },
+        {
+          "action": "cancel_repeater_login",
+          "box": [
+            160,
+            348,
+            320,
+            392
+          ],
+          "center": [
+            240,
+            370
+          ],
+          "destination": "repeater_login",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Cancel",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Cancel",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            160,
+            348,
+            320,
+            392
+          ],
+          "width": 160
+        }
+      ],
+      "truncated_labels": []
+    },
+    {
+      "dock_expected": false,
+      "dock_expected_target_count": 0,
+      "dock_invariant_ok": true,
+      "dock_rendered": false,
+      "dock_target_count": 0,
+      "labels": [
+        "Repeater manager",
+        "Close",
+        "Krabs Lagoon",
+        "Admin access  |  60B6ABA17831F883",
+        "S",
+        "Status",
+        "T",
+        "Telemetry",
+        "N",
+        "Neighbours",
+        "A",
+        "Access",
+        "!",
+        "Tools",
+        ">",
+        "Console",
+        "Admin access  |  firmware level 2",
+        "Logout"
+      ],
+      "metrics": {
+        "admin_command_count": 6,
+        "admin_global_scroll_required": false,
+        "admin_icon_grid": true,
+        "admin_page": "hub",
+        "admin_results_persistent": true
+      },
+      "missing_required_labels": [],
+      "name": "repeater_manager",
+      "overflow": [],
+      "release_profile": "full_feature",
+      "screenshot": "docs/screenshots/simulator-1.7.5/repeater_manager.png",
+      "sibling_text_overlaps": [],
+      "text_count": 18,
+      "touch_target_count": 8,
+      "touch_target_issues": [],
+      "touch_targets": [
+        {
+          "action": "close_repeater_admin",
+          "box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "center": [
+            406,
+            116
+          ],
+          "destination": "nodes",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Close",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Close",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "width": 76
+        },
+        {
+          "action": "open_admin_status",
+          "box": [
+            36,
+            214,
+            164,
+            276
+          ],
+          "center": [
+            100,
+            245
+          ],
+          "destination": "repeater_status",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 62,
+          "icon": null,
+          "kind": "admin_command",
+          "label": "Status",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Status",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            36,
+            214,
+            164,
+            276
+          ],
+          "width": 128
+        },
+        {
+          "action": "open_admin_telemetry",
+          "box": [
+            172,
+            214,
+            300,
+            276
+          ],
+          "center": [
+            236,
+            245
+          ],
+          "destination": "repeater_telemetry",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 62,
+          "icon": null,
+          "kind": "admin_command",
+          "label": "Telemetry",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Telemetry",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            172,
+            214,
+            300,
+            276
+          ],
+          "width": 128
+        },
+        {
+          "action": "open_admin_neighbours",
+          "box": [
+            308,
+            214,
+            436,
+            276
+          ],
+          "center": [
+            372,
+            245
+          ],
+          "destination": "repeater_neighbours",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 62,
+          "icon": null,
+          "kind": "admin_command",
+          "label": "Neighbours",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Neighbours",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            308,
+            214,
+            436,
+            276
+          ],
+          "width": 128
+        },
+        {
+          "action": "open_admin_access",
+          "box": [
+            36,
+            284,
+            164,
+            346
+          ],
+          "center": [
+            100,
+            315
+          ],
+          "destination": "repeater_access",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 62,
+          "icon": null,
+          "kind": "admin_command",
+          "label": "Access",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Access",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            36,
+            284,
+            164,
+            346
+          ],
+          "width": 128
+        },
+        {
+          "action": "open_admin_tools",
+          "box": [
+            172,
+            284,
+            300,
+            346
+          ],
+          "center": [
+            236,
+            315
+          ],
+          "destination": "repeater_tools",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 62,
+          "icon": null,
+          "kind": "admin_command",
+          "label": "Tools",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Tools",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            172,
+            284,
+            300,
+            346
+          ],
+          "width": 128
+        },
+        {
+          "action": "open_admin_console",
+          "box": [
+            308,
+            284,
+            436,
+            346
+          ],
+          "center": [
+            372,
+            315
+          ],
+          "destination": "repeater_console",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 62,
+          "icon": null,
+          "kind": "admin_command",
+          "label": "Console",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Console",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            308,
+            284,
+            436,
+            346
+          ],
+          "width": 128
+        },
+        {
+          "action": "logout_repeater",
+          "box": [
+            332,
+            348,
+            444,
+            392
+          ],
+          "center": [
+            388,
+            370
+          ],
+          "destination": "repeater_login",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Logout",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Logout",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            332,
+            348,
+            444,
+            392
+          ],
+          "width": 112
+        }
+      ],
+      "truncated_labels": []
+    },
+    {
+      "dock_expected": false,
+      "dock_expected_target_count": 0,
+      "dock_invariant_ok": true,
+      "dock_rendered": false,
+      "dock_target_count": 0,
+      "labels": [
+        "Server status",
+        "Back",
+        "Close",
+        "RSSI / SNR",
+        "-52 / 22.00",
+        "Send queue",
+        "0 queued",
+        "RX / TX",
+        "482 / 91",
+        "Uptime",
+        "19h 42m",
+        "TX / RX air",
+        "18s / 93s",
+        "Errors",
+        "None",
+        "Noise -118 dBm  |  voltage 5026 mV",
+        "Refresh status"
+      ],
+      "metrics": {
+        "admin_metric_count": 6,
+        "admin_page": "status",
+        "admin_results_persistent": true
+      },
+      "missing_required_labels": [],
+      "name": "repeater_status",
+      "overflow": [],
+      "release_profile": "full_feature",
+      "screenshot": "docs/screenshots/simulator-1.7.5/repeater_status.png",
+      "sibling_text_overlaps": [],
+      "text_count": 17,
+      "touch_target_count": 3,
+      "touch_target_issues": [],
+      "touch_targets": [
+        {
+          "action": "admin_back",
+          "box": [
+            282,
+            94,
+            358,
+            138
+          ],
+          "center": [
+            320,
+            116
+          ],
+          "destination": "repeater_manager",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Back",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Back",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            282,
+            94,
+            358,
+            138
+          ],
+          "width": 76
+        },
+        {
+          "action": "close_repeater_admin",
+          "box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "center": [
+            406,
+            116
+          ],
+          "destination": "repeater_manager",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Close",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Close",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "width": 76
+        },
+        {
+          "action": "refresh_admin_status",
+          "box": [
+            140,
+            348,
+            340,
+            392
+          ],
+          "center": [
+            240,
+            370
+          ],
+          "destination": "repeater_login_pending",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Refresh status",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Refresh status",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            140,
+            348,
+            340,
+            392
+          ],
+          "width": 200
+        }
+      ],
+      "truncated_labels": []
+    },
+    {
+      "dock_expected": false,
+      "dock_expected_target_count": 0,
+      "dock_invariant_ok": true,
+      "dock_rendered": false,
+      "dock_target_count": 0,
+      "labels": [
+        "Neighbours",
+        "Back",
+        "Close",
+        "YKF-Hilltop  |  1m 30s ago  |  10.00 dB",
+        "YKF-Hespeler  |  4s ago  |  7.00 dB",
+        "A0B0C0D0  |  12m 8s ago  |  4.00 dB",
+        "Refresh",
+        "Next page"
+      ],
+      "metrics": {
+        "admin_global_scroll_required": false,
+        "admin_page": "neighbours",
+        "admin_result_scroll_region": true,
+        "admin_results_persistent": true
+      },
+      "missing_required_labels": [],
+      "name": "repeater_neighbours",
+      "overflow": [],
+      "release_profile": "full_feature",
+      "screenshot": "docs/screenshots/simulator-1.7.5/repeater_neighbours.png",
+      "sibling_text_overlaps": [],
+      "text_count": 8,
+      "touch_target_count": 5,
+      "touch_target_issues": [],
+      "touch_targets": [
+        {
+          "action": "admin_back",
+          "box": [
+            282,
+            94,
+            358,
+            138
+          ],
+          "center": [
+            320,
+            116
+          ],
+          "destination": "repeater_manager",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Back",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Back",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            282,
+            94,
+            358,
+            138
+          ],
+          "width": 76
+        },
+        {
+          "action": "close_repeater_admin",
+          "box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "center": [
+            406,
+            116
+          ],
+          "destination": "repeater_manager",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Close",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Close",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            368,
+            94,
+            444,
+            138
+          ],
+          "width": 76
+        },
+        {
+          "action": "scroll_neighbours",
+          "box": [
+            36,
+            146,
+            444,
+            318
+          ],
+          "center": [
+            240,
+            232
+          ],
+          "destination": null,
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 172,
+          "icon": null,
+          "kind": "scroll_region",
+          "label": "Neighbours result",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Neighbours result",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            36,
+            146,
+            444,
+            318
+          ],
+          "width": 408
+        },
+        {
+          "action": "refresh_neighbours",
+          "box": [
+            174,
+            348,
+            302,
+            392
+          ],
+          "center": [
+            238,
+            370
+          ],
+          "destination": "repeater_login_pending",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Refresh",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Refresh",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            174,
+            348,
+            302,
+            392
+          ],
+          "width": 128
+        },
+        {
+          "action": "next_admin_neighbours",
+          "box": [
+            36,
+            348,
+            164,
+            392
+          ],
+          "center": [
+            100,
+            370
+          ],
+          "destination": "repeater_login_pending",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "button",
+          "label": "Next page",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Next page",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            36,
+            348,
+            164,
+            392
+          ],
+          "width": 128
+        }
+      ],
+      "truncated_labels": []
+    },
+    {
+      "dock_expected": false,
+      "dock_expected_target_count": 0,
+      "dock_invariant_ok": true,
+      "dock_rendered": false,
+      "dock_target_count": 0,
+      "labels": [
+        "MeshCore DeskOS",
+        "Tap to unlock"
+      ],
+      "metrics": {
+        "lock_is_opaque": true,
+        "lock_visible_content_count": 2
+      },
+      "missing_required_labels": [],
+      "name": "lock_overlay",
+      "overflow": [],
+      "release_profile": "full_feature",
+      "screenshot": "docs/screenshots/simulator-1.7.5/lock_overlay.png",
+      "sibling_text_overlaps": [],
+      "text_count": 2,
+      "touch_target_count": 1,
+      "touch_target_issues": [],
+      "touch_targets": [
+        {
+          "action": "unlock",
+          "box": [
+            0,
+            0,
+            480,
+            480
+          ],
+          "center": [
+            240,
+            240
+          ],
+          "destination": "home",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 480,
+          "icon": null,
+          "kind": "screen",
+          "label": "Tap to unlock",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Tap to unlock",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            0,
+            0,
+            480,
+            480
+          ],
+          "width": 480
+        }
+      ],
+      "truncated_labels": []
+    },
+    {
+      "dock_expected": true,
+      "dock_expected_target_count": 5,
+      "dock_invariant_ok": true,
+      "dock_rendered": true,
+      "dock_target_count": 5,
+      "labels": [
+        "YKF Corebot",
+        "Companion 1m",
+        "YKF Room",
+        "Room Server 2m",
+        "Krabs Lagoo...",
+        "Repeater 5m",
+        "Options",
+        "Manual source",
+        "Center",
+        "Drag to pan",
+        "+",
+        "z10",
+        "-",
+        "Location shared by node",
+        "recently verified accuracy",
+        "unknown",
+        "Location shared by node\nrecently verified\naccuracy unknown",
+        "(c) OpenStreetMap contributors",
+        "Home",
+        "Channels",
+        "Contacts",
+        "Map",
+        "Settings"
+      ],
+      "metrics": {
+        "dock_height": 48,
+        "dock_y": 432,
+        "docked_content_height": 432,
+        "docked_content_y": 0,
+        "map_actual_view": true,
+        "map_area_download": false,
+        "map_attribution": "(c) OpenStreetMap contributors",
+        "map_attribution_visible": true,
+        "map_background_download": false,
+        "map_backward_time_rechecks_future_pins": true,
+        "map_cached_tile_count": 9,
+        "map_center_lat_e7": 436532000,
+        "map_center_lon_e7": -793832000,
+        "map_center_provenance_explicit": true,
+        "map_center_source": "manual",
+        "map_center_trust_required_for_initial_acquire": true,
+        "map_center_trust_required_for_interactive_acquire": true,
+        "map_center_trust_required_for_reacquire": true,
+        "map_controls_overlay_canvas": true,
+        "map_default_zoom": 10,
+        "map_frame_ready": true,
+        "map_full_bleed_content": true,
+        "map_hierarchy_level": "actual_view",
+        "map_interactive_request_eligible": false,
+        "map_landing_action_count": 1,
+        "map_local_header_height": 0,
+        "map_location_set": true,
+        "map_marker_age_labels": [
+          "1m",
+          "2m",
+          "5m"
+        ],
+        "map_marker_age_reference_valid": true,
+        "map_marker_age_seconds": [
+          60,
+          120,
+          300
+        ],
+        "map_marker_age_verified": true,
+        "map_marker_bounds": [
+          [
+            143,
+            187,
+            255,
+            242
+          ],
+          [
+            245,
+            242,
+            357,
+            297
+          ],
+          [
+            12,
+            162,
+            124,
+            217
+          ]
+        ],
+        "map_marker_collision_policy": "newest_first_skip_if_below_label_conflicts",
+        "map_marker_colors": [
+          "#2DD4BF",
+          "#C084FC",
+          "#FACC15"
+        ],
+        "map_marker_display_limit": 8,
+        "map_marker_displayed_count": 3,
+        "map_marker_exclusion_boxes": [
+          [
+            0,
+            0,
+            112,
+            64
+          ],
+          [
+            108,
+            10,
+            412,
+            64
+          ],
+          [
+            412,
+            0,
+            478,
+            152
+          ],
+          [
+            0,
+            270,
+            112,
+            360
+          ],
+          [
+            108,
+            294,
+            232,
+            360
+          ],
+          [
+            220,
+            326,
+            478,
+            360
+          ]
+        ],
+        "map_marker_fingerprints": [
+          "0BF0A701D5AE2DB6",
+          "937D290883817CBD",
+          "60B6ABA17831F883"
+        ],
+        "map_marker_full_names": [
+          "YKF Corebot",
+          "YKF Room",
+          "Krabs Lagoon Repeater"
+        ],
+        "map_marker_hit_diameter_px": 44,
+        "map_marker_labels_below": true,
+        "map_marker_name_max_chars": 14,
+        "map_marker_names": [
+          "YKF Corebot",
+          "YKF Room",
+          "Krabs Lagoo..."
+        ],
+        "map_marker_overlay_separate": true,
+        "map_marker_precision_claim": "accuracy_unknown",
+        "map_marker_provenance_verified": true,
+        "map_marker_query_count": 3,
+        "map_marker_query_limit": 32,
+        "map_marker_reference_timestamp": 2000,
+        "map_marker_refresh_rebuilds_tiles": false,
+        "map_marker_role_labels": [
+          "Companion",
+          "Room Server",
+          "Repeater"
+        ],
+        "map_marker_roles": [
+          "companion",
+          "room",
+          "repeater"
+        ],
+        "map_marker_source": "signed_advert_location",
+        "map_marker_truncated_count": 1,
+        "map_max_zoom": 14,
+        "map_min_control_target": 48,
+        "map_min_zoom": 8,
+        "map_pan_gesture": true,
+        "map_pin_truth_legend": "Location shared by node\nrecently verified\naccuracy unknown",
+        "map_policy": "Visible current-view up to 3x3 \u00b7 touch pan/zoom \u00b7 cache/reuse",
+        "map_probe_network_allowed": false,
+        "map_progress_bar_supported": true,
+        "map_progress_bar_visible": false,
+        "map_progress_completed": 0,
+        "map_progress_total": 0,
+        "map_route_count": 2,
+        "map_same_view_frame_reuse": true,
+        "map_saved_center_pin": "omitted",
+        "map_tile_cache_ready": true,
+        "map_tile_download_supported": false,
+        "map_tile_render_supported": true,
+        "map_tile_style": "local_dark_osm_standard",
+        "map_trust_loss_invalidates_retained_view": true,
+        "map_view_control_count": 3,
+        "map_viewport": [
+          0,
+          0,
+          480,
+          432
+        ],
+        "map_visible_tile_limit": 9,
+        "map_zoom_batch_count": 1
+      },
+      "missing_required_labels": [],
+      "name": "map",
+      "overflow": [],
+      "release_profile": "full_feature",
+      "screenshot": "docs/screenshots/simulator-1.7.5/map.png",
+      "sibling_text_overlaps": [],
+      "text_count": 22,
+      "touch_target_count": 12,
+      "touch_target_issues": [],
+      "touch_targets": [
+        {
+          "action": "open_map_node_detail",
+          "box": [
+            177,
+            172,
+            221,
+            216
+          ],
+          "center": [
+            199,
+            194
+          ],
+          "destination": "map_node_detail_sheet",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "map_marker_hit",
+          "label": "Map node YKF Corebot",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Map node YKF Corebot",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            177,
+            172,
+            221,
+            216
+          ],
+          "width": 44
+        },
+        {
+          "action": "open_map_node_detail",
+          "box": [
+            279,
+            227,
+            323,
+            271
+          ],
+          "center": [
+            301,
+            249
+          ],
+          "destination": "map_node_detail_sheet",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "map_marker_hit",
+          "label": "Map node YKF Room",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Map node YKF Room",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            279,
+            227,
+            323,
+            271
+          ],
+          "width": 44
+        },
+        {
+          "action": "open_map_node_detail",
+          "box": [
+            46,
+            147,
+            90,
+            191
+          ],
+          "center": [
+            68,
+            169
+          ],
+          "destination": "map_node_detail_sheet",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": null,
+          "kind": "map_marker_hit",
+          "label": "Map node Krabs Lagoon Repeater",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Map node Krabs Lagoon Repeater",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            46,
+            147,
+            90,
+            191
+          ],
+          "width": 44
+        },
+        {
+          "action": "open_map_options",
+          "box": [
+            8,
+            8,
+            104,
+            56
+          ],
+          "center": [
+            56,
+            32
+          ],
+          "destination": "map_options",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 48,
+          "icon": null,
+          "kind": "button",
+          "label": "Options",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Options",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            8,
+            8,
+            104,
+            56
+          ],
+          "width": 96
+        },
+        {
+          "action": "map_recenter",
+          "box": [
+            8,
+            372,
+            104,
+            424
+          ],
+          "center": [
+            56,
+            398
+          ],
+          "destination": null,
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 52,
+          "icon": null,
+          "kind": "button",
+          "label": "Center",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Center",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            8,
+            372,
+            104,
+            424
+          ],
+          "width": 96
+        },
+        {
+          "action": "map_zoom_in",
+          "box": [
+            420,
+            8,
+            472,
+            60
+          ],
+          "center": [
+            446,
+            34
+          ],
+          "destination": null,
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 52,
+          "icon": null,
+          "kind": "button",
+          "label": "+",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "+",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            420,
+            8,
+            472,
+            60
+          ],
+          "width": 52
+        },
+        {
+          "action": "map_zoom_out",
+          "box": [
+            420,
+            92,
+            472,
+            144
+          ],
+          "center": [
+            446,
+            118
+          ],
+          "destination": null,
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 52,
+          "icon": null,
+          "kind": "button",
+          "label": "-",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "-",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            420,
+            92,
+            472,
+            144
+          ],
+          "width": 52
+        },
+        {
+          "action": "open_home",
+          "box": [
+            4,
+            436,
+            92,
+            480
+          ],
+          "center": [
+            48,
+            458
+          ],
+          "destination": "home",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": "LV_SYMBOL_HOME",
+          "kind": "dock_tab",
+          "label": "Home tab",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Home",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            4,
+            436,
+            92,
+            480
+          ],
+          "width": 88
+        },
+        {
+          "action": "open_messages",
+          "box": [
+            100,
+            436,
+            188,
+            480
+          ],
+          "center": [
+            144,
+            458
+          ],
+          "destination": "messages",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": "LV_SYMBOL_ENVELOPE",
+          "kind": "dock_tab",
+          "label": "Channels tab",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Channels",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            100,
+            436,
+            188,
+            480
+          ],
+          "width": 88
+        },
+        {
+          "action": "open_nodes",
+          "box": [
+            196,
+            436,
+            284,
+            480
+          ],
+          "center": [
+            240,
+            458
+          ],
+          "destination": "nodes",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": "LV_SYMBOL_LIST",
+          "kind": "dock_tab",
+          "label": "Contacts tab",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Contacts",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            196,
+            436,
+            284,
+            480
+          ],
+          "width": 88
+        },
+        {
+          "action": "open_map",
+          "box": [
+            292,
+            436,
+            380,
+            480
+          ],
+          "center": [
+            336,
+            458
+          ],
+          "destination": "map",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": "LV_SYMBOL_IMAGE",
+          "kind": "dock_tab",
+          "label": "Map tab",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": true,
+          "semantic_label": "Map",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            292,
+            436,
+            380,
+            480
+          ],
+          "width": 88
+        },
+        {
+          "action": "open_settings",
+          "box": [
+            388,
+            436,
+            476,
+            480
+          ],
+          "center": [
+            432,
+            458
+          ],
+          "destination": "settings",
+          "destructive": false,
+          "dm_tx": false,
+          "dock_overlap": false,
+          "enabled": true,
+          "formats_sd": false,
+          "height": 44,
+          "icon": "LV_SYMBOL_SETTINGS",
+          "kind": "dock_tab",
+          "label": "Settings tab",
+          "marks_read": false,
+          "offscreen": false,
+          "public_rf_tx": false,
+          "rf_tx": false,
+          "selected": false,
+          "semantic_label": "Settings",
+          "too_small": false,
+          "top_bar_overlap": false,
+          "unexpected_dock": false,
+          "visual_box": [
+            388,
+            436,
+            476,
+            480
+          ],
+          "width": 88
+        }
+      ],
+      "truncated_labels": []
+    }
+  ]
+}

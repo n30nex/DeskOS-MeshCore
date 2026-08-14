@@ -811,7 +811,8 @@ static bool render_admin_compact_header(
     complete = create_button(
         controller, sheet, "Close", 340, 0, 76, 44,
         BINDING_CLOSE_ADMIN,
-        D1L_UI_SERVICE_ACTION_CLOSE_ADMIN) != NULL && complete;
+        show_back ? D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB :
+                    D1L_UI_SERVICE_ACTION_CLOSE_ADMIN) != NULL && complete;
     return complete;
 }
 

@@ -516,6 +516,16 @@ static int test_server_queries_and_protocol_permissions(void)
     CHECK(session.query_result.offset == 0U);
     CHECK(session.query_result.total == 12U);
     CHECK(session.query_result.count == 2U);
+    CHECK(memcmp(
+              session.query_result.neighbours[0].public_key_prefix,
+              "\x01\x02\x03\x04", 4U) == 0);
+    CHECK(session.query_result.neighbours[0].seconds_ago == 90U);
+    CHECK(session.query_result.neighbours[0].snr_quarter_db == -5);
+    CHECK(memcmp(
+              session.query_result.neighbours[1].public_key_prefix,
+              "\xA0\xB0\xC0\xD0", 4U) == 0);
+    CHECK(session.query_result.neighbours[1].seconds_ago == 4U);
+    CHECK(session.query_result.neighbours[1].snr_quarter_db == 7);
     CHECK(strstr(session.query_result.text, "-1.25 dB") != NULL);
     CHECK(strstr(session.query_result.text, "1.75 dB") != NULL);
 

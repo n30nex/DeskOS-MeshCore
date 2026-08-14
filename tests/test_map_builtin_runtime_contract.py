@@ -139,6 +139,14 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
         "tile_result.status_code != 0 && tile_result.status_code != 200", 1
     )[1].split("continue;", 1)[0]
     assert "break;" in systemic_http
+    assert "bool downloaded = false;" in run
+    assert "downloaded = true;" in run
+    cache_pacing = run.split(
+        "if (!publish_tile_frame(plan, &plan->tiles[i], generation))", 1
+    )[1].split("\n    }", 1)[0]
+    assert "if (downloaded)" in cache_pacing
+    assert "vTaskDelay(pdMS_TO_TICKS(D1L_MAP_TILE_GAP_MS));" in cache_pacing
+    assert "taskYIELD();" in cache_pacing
 
     fetch = body(
         store,
