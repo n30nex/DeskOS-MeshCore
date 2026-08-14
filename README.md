@@ -6,9 +6,9 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.7.1** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.7.1` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.1).
+DeskOS **1.7.5** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.7.5` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.5).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -17,7 +17,24 @@ and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
 
-## What 1.7.1 fixes
+## What 1.7.5 improves
+
+DeskOS 1.7.5 makes remote repeater work and everyday display use more reliable:
+
+- repeater and room login always uses flood delivery, so servers beyond direct
+  range can receive the sign-in request through the mesh;
+- **Close** on Status, Telemetry, Neighbours, and other signed-in pages returns
+  to the repeater manager instead of dropping back to Contacts;
+- Neighbours shows saved repeater names, friendly elapsed time, and SNR while
+  retaining a short identity prefix for unknown entries;
+- the screen now locks and turns off after ten minutes of inactivity, with a
+  true full-screen cover that cannot leave old controls visible above it;
+- the top button wakes the display; double-pressing it while awake sends one
+  normal advert; and
+- maps already stored on the SD card render without an artificial delay between
+  tiles.
+
+## What 1.7.1 added
 
 Repeater and room management now behaves like a first-class touch workflow:
 
@@ -107,7 +124,8 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.5 / RC3** | BLE, signed update/rollback, sharing, diagnostics, and full-feature activation | Historical (`v1.5.0`) |
 | **1.6** | Compact Home, Contacts search/sorts, UI truthfulness, and diagnostics polish | Historical (`v1.6.0`) |
 | **1.7** | DeskOS identity, animated opening, and NeonPocket-inspired product theme | Historical (`v1.7.0`) |
-| **1.7.1** | Direct repeater login, saved passwords, and touch-first server management | Current (`v1.7.1`) |
+| **1.7.1** | Direct repeater login, saved passwords, and touch-first server management | Historical (`v1.7.1`) |
+| **1.7.5** | Reliable remote login, better results/navigation, display wake/lock, and faster cached maps | Current (`v1.7.5`) |
 
 ## Device UI
 
@@ -115,7 +133,7 @@ These native 480x480 captures show the production touch shell introduced in
 1.2 and refined by 1.6. Their exact 1.2 provenance is recorded in
 [`docs/screenshots/DEVICE_1_2_CAPTURE.md`](docs/screenshots/DEVICE_1_2_CAPTURE.md).
 
-### Repeater management in 1.7.1
+### Repeater management in 1.7.5
 
 Managed repeaters and rooms now open directly from their **Login** button.
 After authentication, each server gets a focused command dashboard instead of
@@ -124,14 +142,14 @@ until they succeed, fail, time out, or are cancelled.
 
 | Login | Working |
 |---|---|
-| ![DeskOS 1.7.1 repeater login preview](docs/screenshots/simulator-1.7.1/repeater_login.png) | ![DeskOS 1.7.1 repeater request progress preview](docs/screenshots/simulator-1.7.1/repeater_login_pending.png) |
+| ![DeskOS 1.7.5 repeater login preview](docs/screenshots/simulator-1.7.5/repeater_login.png) | ![DeskOS 1.7.5 repeater request progress preview](docs/screenshots/simulator-1.7.5/repeater_login_pending.png) |
 
 | Manager | Status |
 |---|---|
-| ![DeskOS 1.7.1 repeater manager preview](docs/screenshots/simulator-1.7.1/repeater_manager.png) | ![DeskOS 1.7.1 repeater status preview](docs/screenshots/simulator-1.7.1/repeater_status.png) |
+| ![DeskOS 1.7.5 repeater manager preview](docs/screenshots/simulator-1.7.5/repeater_manager.png) | ![DeskOS 1.7.5 named-neighbours preview](docs/screenshots/simulator-1.7.5/repeater_neighbours.png) |
 
 These are deterministic 480x480 simulator previews used for layout regression.
-They contain no real password or private radio material; physical 1.7.1 device
+They contain no real password or private radio material; physical 1.7.5 device
 captures are collected separately during release acceptance.
 
 The 1.7 simulator previews below show the refreshed production palette. They

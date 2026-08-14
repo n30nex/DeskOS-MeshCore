@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
 #include "esp_check.h"
@@ -29,10 +30,12 @@
 #include "hal/indicator_board.h"
 #include "map/map_view_service.h"
 #include "mesh/admin_credential_store.h"
+#include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/user_text.h"
 #include "ui_ble.h"
 #include "ui_boot_scene.h"
+#include "ui_button_gesture.h"
 #include "ui_channel_sheets.h"
 #include "ui_chrome.h"
 #include "ui_compose_eligibility.h"
@@ -208,6 +211,7 @@ static uint32_t s_admin_rendered_generation;
 static bool s_backlight_dimmed;
 static bool s_backlight_pulse_active;
 static uint32_t s_backlight_pulse_until;
+static d1l_ui_button_gesture_t s_button_gesture;
 static uint32_t s_last_notification_unread;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_packet_log_entry_t
@@ -235,6 +239,8 @@ static char s_admin_feedback[96] EXT_RAM_BSS_ATTR;
 static bool s_admin_feedback_error;
 static d1l_dm_entry_t
     s_admin_room_preview[D1L_UI_ADMIN_ROOM_PREVIEW_COUNT] EXT_RAM_BSS_ATTR;
+static d1l_contact_entry_t
+    s_admin_neighbour_contacts[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static char
     s_admin_room_transcript[D1L_UI_ADMIN_ROOM_TRANSCRIPT_BYTES]
         EXT_RAM_BSS_ATTR;
@@ -7407,11 +7413,8 @@ static void device_sheets_action_handler(
     }
     case D1L_UI_DEVICE_SHEETS_ACTION_TIMEOUT: {
         d1l_display_preferences_get(&preferences);
-        const uint16_t next =
-            preferences.timeout_seconds == 0U ? 30U :
-            preferences.timeout_seconds == 30U ? 60U :
-            preferences.timeout_seconds == 60U ? 120U :
-            preferences.timeout_seconds == 120U ? 300U : 0U;
+        const uint16_t next = preferences.timeout_seconds == 0U ?
+            D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS : 0U;
         const esp_err_t ret = d1l_display_preferences_set_timeout(next);
         show_toast("Display timeout", ret);
         d1l_app_model_snapshot(&s_snapshot);
@@ -7565,6 +7568,105 @@ static void build_admin_room_transcript(
     s_admin_room_transcript[used] = '\0';
 }
 
+static const char *admin_neighbour_saved_name(
+    const char prefix[9], size_t contact_count)
+{
+    const char *name = NULL;
+    bool matched = false;
+    for (size_t i = 0U; i < contact_count; ++i) {
+        const d1l_contact_entry_t *contact = &s_admin_neighbour_contacts[i];
+        if (strlen(contact->public_key_hex) < 8U ||
+            strncasecmp(contact->public_key_hex, prefix, 8U) != 0) {
+            continue;
+        }
+        if (matched) {
+            return NULL;
+        }
+        matched = true;
+        name = contact->alias[0] ? contact->alias :
+            (contact->heard_name[0] ? contact->heard_name : NULL);
+    }
+    return name;
+}
+
+static void build_admin_neighbour_text(
+    d1l_meshcore_admin_query_result_t *result)
+{
+    if (!result || !result->valid ||
+        result->kind != D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS ||
+        result->count > D1L_MESHCORE_ADMIN_NEIGHBOUR_PAGE_COUNT) {
+        return;
+    }
+    const size_t contact_count = d1l_contact_store_copy_recent(
+        s_admin_neighbour_contacts, D1L_CONTACT_STORE_CAPACITY);
+    size_t used = 0U;
+    int written = snprintf(
+        result->text, sizeof(result->text), "Neighbours %u-%u of %u\n",
+        (unsigned)(result->count == 0U ? result->offset : result->offset + 1U),
+        (unsigned)(result->offset + result->count), (unsigned)result->total);
+    if (written < 0) {
+        result->text[0] = '\0';
+        return;
+    }
+    used = (size_t)written < sizeof(result->text) ?
+        (size_t)written : sizeof(result->text) - 1U;
+    for (uint16_t i = 0U; i < result->count &&
+         used < sizeof(result->text) - 1U; ++i) {
+        const d1l_meshcore_admin_neighbour_t *neighbour =
+            &result->neighbours[i];
+        char prefix[9];
+        snprintf(
+            prefix, sizeof(prefix), "%02X%02X%02X%02X",
+            (unsigned)neighbour->public_key_prefix[0],
+            (unsigned)neighbour->public_key_prefix[1],
+            (unsigned)neighbour->public_key_prefix[2],
+            (unsigned)neighbour->public_key_prefix[3]);
+        char age[24];
+        if (neighbour->seconds_ago < 60U) {
+            snprintf(age, sizeof(age), "%lus ago",
+                     (unsigned long)neighbour->seconds_ago);
+        } else if (neighbour->seconds_ago < 3600U) {
+            snprintf(age, sizeof(age), "%lum %lus ago",
+                     (unsigned long)(neighbour->seconds_ago / 60U),
+                     (unsigned long)(neighbour->seconds_ago % 60U));
+        } else {
+            snprintf(age, sizeof(age), "%luh %lum ago",
+                     (unsigned long)(neighbour->seconds_ago / 3600U),
+                     (unsigned long)((neighbour->seconds_ago % 3600U) / 60U));
+        }
+        const char *name = admin_neighbour_saved_name(prefix, contact_count);
+        const int snr = neighbour->snr_quarter_db;
+        const int magnitude = snr < 0 ? -snr : snr;
+        if (name) {
+            written = snprintf(
+                &result->text[used], sizeof(result->text) - used,
+                "%s  |  %s  |  %s%d.%02d dB\n",
+                name, age, snr < 0 ? "-" : "",
+                magnitude / 4, (magnitude % 4) * 25);
+        } else {
+            written = snprintf(
+                &result->text[used], sizeof(result->text) - used,
+                "%s  |  %s  |  %s%d.%02d dB\n",
+                prefix, age, snr < 0 ? "-" : "",
+                magnitude / 4, (magnitude % 4) * 25);
+        }
+        if (written < 0) {
+            result->text[used] = '\0';
+            return;
+        }
+        if ((size_t)written >= sizeof(result->text) - used) {
+            result->truncated = true;
+            used = sizeof(result->text) - 1U;
+            break;
+        }
+        used += (size_t)written;
+    }
+    if (result->count == 0U && used < sizeof(result->text) - 1U) {
+        snprintf(&result->text[used], sizeof(result->text) - used,
+                 "No neighbours on this page.\n");
+    }
+}
+
 static bool render_admin_service_sheet(void)
 {
     d1l_meshcore_admin_snapshot_t status = {0};
@@ -7587,6 +7689,7 @@ static bool render_admin_service_sheet(void)
             s_admin_cli_armed[0] != '\0', s_admin_cli_deadline)) {
         clear_admin_cli_confirmation();
     }
+    build_admin_neighbour_text(&status.query_result);
     build_admin_room_transcript(&status);
     const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
     const bool saved_password_available =
@@ -9697,6 +9800,7 @@ static void lock_event_cb(lv_event_t *event)
         }
         d1l_ui_map_viewport_release();
         s_lock_visible = true;
+        lv_obj_move_foreground(s_lock_overlay);
         lv_obj_clear_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -9751,6 +9855,19 @@ static void display_runtime_timer_cb(lv_timer_t *timer)
     d1l_display_preferences_t preferences = {0};
     d1l_display_preferences_get(&preferences);
     const uint32_t now = lv_tick_get();
+    const d1l_ui_button_action_t button_action =
+        d1l_ui_button_gesture_update(
+            &s_button_gesture, d1l_board_button_pressed(),
+            s_lock_visible || s_backlight_dimmed, now);
+    if (button_action == D1L_UI_BUTTON_ACTION_WAKE) {
+        lv_disp_trig_activity(NULL);
+        unlock_event_cb(NULL);
+    } else if (button_action == D1L_UI_BUTTON_ACTION_ACTIVITY) {
+        lv_disp_trig_activity(NULL);
+    } else if (button_action == D1L_UI_BUTTON_ACTION_ADVERT) {
+        lv_disp_trig_activity(NULL);
+        show_toast("Advert", d1l_app_model_request_advert(false));
+    }
     const uint64_t unread_wide =
         (uint64_t)s_snapshot.public_unread_count +
         (uint64_t)s_snapshot.dm_unread_count;
@@ -10514,15 +10631,18 @@ static void create_onboarding_sheet(lv_obj_t *screen)
 
 static void create_lock_overlay(lv_obj_t *screen)
 {
-    s_lock_overlay = create_object(screen, "lock overlay");
+    (void)screen;
+    s_lock_overlay = create_object(lv_layer_top(), "lock overlay");
     if (!s_lock_overlay) {
         return;
     }
     lv_obj_set_size(s_lock_overlay, 480, 480);
     lv_obj_set_pos(s_lock_overlay, 0, 0);
     lv_obj_set_style_bg_color(s_lock_overlay, lv_color_hex(0x0E0F10), 0);
+    lv_obj_set_style_bg_opa(s_lock_overlay, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(s_lock_overlay, 0, 0);
     lv_obj_clear_flag(s_lock_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_lock_overlay, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_lock_overlay, unlock_event_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *title = create_label(s_lock_overlay, "MeshCore DeskOS", 0xF4F7FB);

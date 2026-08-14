@@ -5497,7 +5497,7 @@ def draw_admin_shell(s: Surface, title: str, *, back: bool = False) -> None:
         "Close",
         MUTED,
         action="close_repeater_admin",
-        destination="nodes",
+        destination="repeater_manager" if back else "nodes",
     )
 
 
@@ -5666,7 +5666,11 @@ def render_admin_data_page(s: Surface, title: str, body: str, page: str) -> None
     draw_admin_shell(s, title, back=True)
     panel = (36, 146, 444, 318)
     s.round_rect(panel, (23, 31, 36), (52, 86, 106), 8)
-    s.wrapped_text(body, (48, 158, 432, 306), 12, TEXT, line_height=20)
+    if "\n" in body:
+        for index, line in enumerate(body.splitlines()):
+            s.text(line, (48, 158 + index * 24, 432, 180 + index * 24), 12, TEXT)
+    else:
+        s.wrapped_text(body, (48, 158, 432, 306), 12, TEXT, line_height=20)
     s.touch_target(f"{title} result", panel, kind="scroll_region", action=f"scroll_{page}")
     draw_button(s, (174, 348, 302, 392), "Refresh", ACCENT, action=f"refresh_{page}", destination="repeater_login_pending")
     if page == "access":
@@ -5688,7 +5692,14 @@ def render_repeater_telemetry(s: Surface, snap: Snapshot) -> None:
 
 def render_repeater_neighbours(s: Surface, snap: Snapshot) -> None:
     del snap
-    render_admin_data_page(s, "Neighbours", "1. YKF Hilltop  -81 dBm  10 dB\n2. Hespeler  -88 dBm  7 dB\n3. Krab Hut  -94 dBm  4 dB", "neighbours")
+    render_admin_data_page(
+        s,
+        "Neighbours",
+        "YKF-Hilltop  |  1m 30s ago  |  10.00 dB\n"
+        "YKF-Hespeler  |  4s ago  |  7.00 dB\n"
+        "A0B0C0D0  |  12m 8s ago  |  4.00 dB",
+        "neighbours",
+    )
     draw_button(s, (36, 348, 164, 392), "Next page", MUTED, action="next_admin_neighbours", destination="repeater_login_pending")
 
 
@@ -6852,13 +6863,12 @@ def render_mesh_repeaters_page(s: Surface, snap: Snapshot):
 
 
 def render_lock_overlay(s: Surface, snap: Snapshot):
-    s.rect((0, 0, WIDTH, HEIGHT), (4, 8, 13))
+    del snap
+    s.rect((0, 0, WIDTH, HEIGHT), (14, 15, 16))
     s.touch_target("Tap to unlock", (0, 0, WIDTH, HEIGHT), kind="screen", action="unlock", destination="home")
-    s.text("MeshCore DeskOS", (40, 72, 440, 110), 28, TEXT, True, "center")
-    s.text(snap.node_name, (40, 116, 440, 140), 16, MUTED, False, "center")
-    draw_metric(s, (76, 176, 404, 252), "Mesh", snap.mesh_state, f"{snap.latest_signal} latest", GREEN)
-    draw_metric(s, (76, 268, 404, 344), "Unread", f"Public {snap.unread_public}", f"DM {snap.unread_dm}, tap to unlock", AMBER)
-    s.text("Tap to unlock", (40, 392, 440, 426), 20, ACCENT, True, "center")
+    s.text("MeshCore DeskOS", (40, 196, 440, 232), 24, TEXT, True, "center")
+    s.text("Tap to unlock", (40, 244, 440, 278), 18, ACCENT, True, "center")
+    s.metrics.update({"lock_is_opaque": True, "lock_visible_content_count": 2})
 
 
 def draw_first_start_header(s: Surface, title: str, step: str):
@@ -7817,9 +7827,36 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "repeater_status": (
         "Server status", "RSSI / SNR", "Send queue", "RX / TX", "Uptime", "Errors", "Refresh status", "Back", "Close",
     ),
-    "repeater_telemetry": ("Telemetry", "Voltage 5.03 V\nTemperature 24.8 C\nPressure 100.8 kPa\nUpdated from signed server reply", "Refresh", "Back", "Close"),
-    "repeater_neighbours": ("Neighbours", "1. YKF Hilltop  -81 dBm  10 dB\n2. Hespeler  -88 dBm  7 dB\n3. Krab Hut  -94 dBm  4 dB", "Next page", "Refresh", "Back", "Close"),
-    "repeater_access": ("Access list", "Admin  0BF0A701...7788\nWrite  88B9D10A...41C2\nRead   C7047D29...D0A1", "Edit access", "Refresh", "Back", "Close"),
+    "repeater_telemetry": (
+        "Telemetry",
+        "Voltage 5.03 V",
+        "Temperature 24.8 C",
+        "Pressure 100.8 kPa",
+        "Updated from signed server reply",
+        "Refresh",
+        "Back",
+        "Close",
+    ),
+    "repeater_neighbours": (
+        "Neighbours",
+        "YKF-Hilltop  |  1m 30s ago  |  10.00 dB",
+        "YKF-Hespeler  |  4s ago  |  7.00 dB",
+        "A0B0C0D0  |  12m 8s ago  |  4.00 dB",
+        "Next page",
+        "Refresh",
+        "Back",
+        "Close",
+    ),
+    "repeater_access": (
+        "Access list",
+        "Admin  0BF0A701...7788",
+        "Write  88B9D10A...41C2",
+        "Read   C7047D29...D0A1",
+        "Edit access",
+        "Refresh",
+        "Back",
+        "Close",
+    ),
     "repeater_tools": ("Server tools", "Clear statistics", "Zero-hop advert", "Changes require a second tap and a confirmed server reply.", "Back", "Close"),
     "repeater_console": ("Server console", "Secure input: Off", "Server command", "Send", "Back", "Close"),
     "room_console": ("Room console", "You: Morning Lagoon [delivered]", "Message the room", "Send", "Back", "Close"),
@@ -7912,7 +7949,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "mesh_roles_sheet": ("Mesh Roles", "Back", "Rooms", "Repeaters", "Large networks show recent results first"),
     "mesh_rooms_page": ("Rooms", "Back", "Room servers"),
     "mesh_repeaters_page": ("Repeaters", "Back", "Repeater candidates"),
-    "lock_overlay": ("MeshCore DeskOS", "Mesh", "Unread", "Tap to unlock"),
+    "lock_overlay": ("MeshCore DeskOS", "Tap to unlock"),
     "startup_readiness": (
         "DeskOS is getting ready",
         "STARTUP CHECK",
@@ -8393,6 +8430,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "repeater_login_pending", "action": "cancel_repeater_login", "destination": "repeater_login"},
             {"view": "repeater_manager", "action": "open_admin_status", "destination": "repeater_status"},
             {"view": "repeater_status", "action": "admin_back", "destination": "repeater_manager"},
+            {"view": "repeater_status", "action": "close_repeater_admin", "destination": "repeater_manager"},
             {"view": "repeater_manager", "action": "open_admin_telemetry", "destination": "repeater_telemetry"},
             {"view": "repeater_manager", "action": "open_admin_neighbours", "destination": "repeater_neighbours"},
             {"view": "repeater_manager", "action": "open_admin_access", "destination": "repeater_access"},

@@ -2008,6 +2008,12 @@ static bool parse_neighbours_query(
             read_le32(&entry[D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES]);
         const int8_t snr_quarter_db =
             (int8_t)entry[D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES + 4U];
+        d1l_meshcore_admin_neighbour_t *neighbour =
+            &result->neighbours[index];
+        memcpy(neighbour->public_key_prefix, entry,
+               D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES);
+        neighbour->seconds_ago = seconds_ago;
+        neighbour->snr_quarter_db = snr_quarter_db;
         const int snr_magnitude =
             snr_quarter_db < 0 ? -(int)snr_quarter_db :
                                  (int)snr_quarter_db;

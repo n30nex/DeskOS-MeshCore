@@ -155,12 +155,20 @@ typedef struct {
 } d1l_meshcore_admin_status_t;
 
 typedef struct {
+    uint8_t public_key_prefix[D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES];
+    uint32_t seconds_ago;
+    int8_t snr_quarter_db;
+} d1l_meshcore_admin_neighbour_t;
+
+typedef struct {
     d1l_meshcore_admin_query_t kind;
     bool valid;
     bool truncated;
     uint16_t offset;
     uint16_t total;
     uint16_t count;
+    d1l_meshcore_admin_neighbour_t
+        neighbours[D1L_MESHCORE_ADMIN_NEIGHBOUR_PAGE_COUNT];
     char text[D1L_MESHCORE_ADMIN_MAX_QUERY_TEXT_BYTES + 1U];
 } d1l_meshcore_admin_query_result_t;
 
