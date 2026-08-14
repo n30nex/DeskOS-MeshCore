@@ -889,6 +889,38 @@ def test_ui_capture_ready_wait_requires_fresh_non_pending_frame():
     ) is True
 
 
+def test_ui_capture_chunk_retries_only_timeouts(monkeypatch):
+    replies = iter(
+        [
+            {"ok": False, "cmd": "ui capture chunk", "code": "TIMEOUT"},
+            {"ok": True, "cmd": "ui capture chunk", "offset": 0, "len": 512},
+        ]
+    )
+    calls = []
+
+    def fake_send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return next(replies)
+
+    monkeypatch.setattr(ui_capture_d1l, "send_console_command", fake_send)
+    monkeypatch.setattr(ui_capture_d1l.time, "sleep", lambda _seconds: None)
+
+    result, attempts = ui_capture_d1l.read_capture_chunk(None, "ui capture chunk 0 512", 30)
+
+    assert result["ok"] is True
+    assert len(calls) == 2
+    assert [attempt["attempt"] for attempt in attempts] == [1, 2]
+
+    monkeypatch.setattr(
+        ui_capture_d1l,
+        "send_console_command",
+        lambda *_args: {"ok": False, "cmd": "ui capture chunk", "code": "BAD_OFFSET"},
+    )
+    result, attempts = ui_capture_d1l.read_capture_chunk(None, "ui capture chunk 0 512", 30)
+    assert result["code"] == "BAD_OFFSET"
+    assert len(attempts) == 1
+
+
 def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
     report = ui_compose_keyboard_capture_d1l.dry_run_report(
         targets=ui_compose_keyboard_capture_d1l.parse_targets("all"),

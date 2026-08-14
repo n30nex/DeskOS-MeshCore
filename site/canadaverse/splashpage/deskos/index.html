@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07100f">
+  <meta name="description" content="DeskOS MeshCore is a touch-first standalone MeshCore client for the SenseCAP Indicator D1L.">
+  <title>DeskOS MeshCore | Canadaverse</title>
+  <link rel="icon" href="assets/deskos-mark-512.png">
+  <link rel="stylesheet" href="site.css?v=175">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Canadaverse home">
+      <img src="assets/deskos-mark-512.png" alt="" width="40" height="40">
+      <span><strong>DeskOS</strong><small>by Canadaverse</small></span>
+    </a>
+    <nav aria-label="DeskOS links">
+      <a href="#features">Features</a>
+      <a href="#device">On device</a>
+      <a href="https://github.com/n30nex/DeskOS-MeshCore" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a class="nav-action" href="https://flasher.canadaverse.org/">Open flasher</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> Production release 1.7.5</p>
+        <h1 id="page-title">DeskOS<br>MeshCore</h1>
+        <p class="lede">A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="https://flasher.canadaverse.org/">Flash your D1L</a>
+          <a class="button" href="https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.5" target="_blank" rel="noopener noreferrer">Download 1.7.5</a>
+        </div>
+        <dl class="release-strip" aria-label="Release verification">
+          <div><dt>Target</dt><dd>SenseCAP D1L</dd></div>
+          <div><dt>Profile</dt><dd>Full feature</dd></div>
+          <div><dt>Verified</dt><dd>Physical hardware</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="signal-band" aria-label="DeskOS status">
+      <div><span class="status-icon cyan" aria-hidden="true"></span><strong>MeshCore client</strong><small>Non-forwarding</small></div>
+      <div><span class="status-icon lime" aria-hidden="true"></span><strong>Touch first</strong><small>480 × 480 native UI</small></div>
+      <div><span class="status-icon yellow" aria-hidden="true"></span><strong>Safe updates</strong><small>Signed SD + USB recovery</small></div>
+      <div><span class="status-icon blue" aria-hidden="true"></span><strong>Open source</strong><small>Built by GitHub Actions</small></div>
+    </section>
+
+    <section id="features" class="section feature-section">
+      <div class="section-heading">
+        <p class="eyebrow">Everyday mesh, on a real desk</p>
+        <h2>Built around the way the D1L is actually used.</h2>
+        <p>Messages, contacts, maps, repeater administration, radio settings, storage, diagnostics, and secure companion access live in one focused interface.</p>
+      </div>
+      <div class="feature-grid">
+        <article>
+          <span class="feature-number">01</span>
+          <h3>Remote repeater login</h3>
+          <p>Sign-in requests use flood delivery, while authenticated commands retain the learned route. Status, telemetry, neighbours, access, tools, and room controls stay together.</p>
+        </article>
+        <article>
+          <span class="feature-number">02</span>
+          <h3>Human-readable results</h3>
+          <p>Named neighbours, friendly ages, signal quality, visible progress, clear timeouts, and predictable Back and Close actions replace raw queued commands.</p>
+        </article>
+        <article>
+          <span class="feature-number">03</span>
+          <h3>Designed for the hardware</h3>
+          <p>Ten-minute display sleep, top-button wake, deliberate double-press advert, fast cached maps, large controls, and a native 480 × 480 layout.</p>
+        </article>
+        <article>
+          <span class="feature-number">04</span>
+          <h3>Bounded and recoverable</h3>
+          <p>DeskOS never repeats other nodes, never formats your SD card, verifies signed local updates, and keeps USB as the recovery path.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="boot-section" aria-labelledby="boot-title">
+      <div class="boot-copy">
+        <p class="eyebrow">A small computer with a clear identity</p>
+        <h2 id="boot-title">Ready before the radio wakes up.</h2>
+        <p>The opening animation is drawn from lightweight LVGL shapes on the D1L. The same electric cyan, cobalt, lime, and amber language carries through the complete interface.</p>
+        <ul class="check-list">
+          <li>Standalone MeshCore messaging and contacts</li>
+          <li>Local map tiles and conditional SD history</li>
+          <li>Secure BLE companion transport</li>
+          <li>Wi-Fi, diagnostics, packets, and radio tools</li>
+        </ul>
+      </div>
+      <figure class="boot-display">
+        <img src="assets/deskos-boot.gif" width="480" height="480" alt="DeskOS animated boot sequence">
+        <figcaption>On-device opening sequence</figcaption>
+      </figure>
+    </section>
+
+    <section id="device" class="section capture-section">
+      <div class="section-heading">
+        <p class="eyebrow">Captured from the production device</p>
+        <h2>What 1.7.5 looks like on the D1L.</h2>
+        <p>These are direct RGB565 framebuffer captures from the physically flashed release, not browser mockups. Private messages, credentials, keys, and precise location data are excluded.</p>
+      </div>
+      <div class="capture-grid">
+        <figure>
+          <img src="captures/home.png" width="480" height="480" alt="DeskOS 1.7.5 Home screen on a physical D1L">
+          <figcaption><strong>Home</strong><span>Live mesh, Wi-Fi, storage, and attention state</span></figcaption>
+        </figure>
+        <figure>
+          <img src="captures/messages.png" width="480" height="480" alt="DeskOS 1.7.5 Channels screen on a physical D1L">
+          <figcaption><strong>Channels</strong><span>Public, direct, and room conversations</span></figcaption>
+        </figure>
+        <figure>
+          <img src="captures/nodes.png" width="480" height="480" alt="DeskOS 1.7.5 Contacts screen on a physical D1L">
+          <figcaption><strong>Contacts</strong><span>Search, routes, and direct repeater login</span></figcaption>
+        </figure>
+        <figure>
+          <img src="captures/settings.png" width="480" height="480" alt="DeskOS 1.7.5 Settings screen on a physical D1L">
+          <figcaption><strong>Settings</strong><span>Packets, diagnostics, connections, and support</span></figcaption>
+        </figure>
+      </div>
+      <p class="proof-note"><span aria-hidden="true">✓</span> All four captures are 480 × 480, passed full-frame CRC verification, and report no public RF transmission or SD formatting during collection.</p>
+    </section>
+
+    <section class="section release-section" aria-labelledby="release-title">
+      <div class="release-copy">
+        <p class="eyebrow">Exact release proof</p>
+        <h2 id="release-title">Firmware and evidence stay tied together.</h2>
+        <p>The physical D1L reported version <strong>1.7.5</strong>, full-feature profile, and build commit <code>b719faaed93032211988c00b6a5c0c0ee74ef60b</code>. The release package, checksums, RP2040 bridge, and installation notes are produced by the same successful GitHub Actions run.</p>
+      </div>
+      <div class="release-card" aria-label="DeskOS 1.7.5 release details">
+        <div><span>Version</span><strong>1.7.5</strong></div>
+        <div><span>ESP-IDF</span><strong>5.5.4</strong></div>
+        <div><span>History</span><strong>Conditional SD</strong></div>
+        <div><span>Commit</span><strong>b719faae</strong></div>
+        <a class="button primary" href="https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.5" target="_blank" rel="noopener noreferrer">View release assets</a>
+      </div>
+    </section>
+
+    <section class="install-band" aria-labelledby="install-title">
+      <div>
+        <p class="eyebrow">Guided installation</p>
+        <h2 id="install-title">Choose the path that matches your D1L.</h2>
+      </div>
+      <div class="install-options">
+        <article><span>Update</span><h3>Keep your setup</h3><p>Use the app update path for an existing DeskOS install. Retained device regions stay intact.</p></article>
+        <article><span>Recovery</span><h3>Start clean</h3><p>Use the complete image only when you deliberately want a fresh install or need USB recovery.</p></article>
+        <article><span>Bridge</span><h3>Complete the pair</h3><p>The release includes the matching RP2040 SD-bridge UF2 and clear BOOTSEL instructions.</p></article>
+      </div>
+      <a class="button primary large" href="https://flasher.canadaverse.org/">Launch the Canadaverse flasher</a>
+    </section>
+  </main>
+
+  <footer>
+    <a class="footer-brand" href="/"><img src="assets/deskos-mark-512.png" alt="" width="36" height="36"><span><strong>DeskOS MeshCore</strong><small>Community-built in Canada</small></span></a>
+    <nav aria-label="Footer links">
+      <a href="https://github.com/n30nex/DeskOS-MeshCore" target="_blank" rel="noopener noreferrer">Source</a>
+      <a href="https://github.com/n30nex/DeskOS-MeshCore/blob/main/docs/USER_GUIDE_D1L.md" target="_blank" rel="noopener noreferrer">User guide</a>
+      <a href="https://ko-fi.com/canadaverse" target="_blank" rel="noopener noreferrer">Support</a>
+    </nav>
+  </footer>
+</body>
+</html>

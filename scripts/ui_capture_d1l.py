@@ -30,6 +30,7 @@ HEIGHT = 480
 BYTES_PER_PIXEL = 2
 TOTAL_BYTES = WIDTH * HEIGHT * BYTES_PER_PIXEL
 MAX_CHUNK_BYTES = 1024
+CHUNK_MAX_ATTEMPTS = 4
 CAPTURE_COMMANDS = [
     "ui capture status",
     "ui capture begin",
@@ -204,6 +205,28 @@ def wait_for_capture_ready(ser: Any, timeout: float, baseline: dict[str, Any] | 
     return False, statuses
 
 
+def read_capture_chunk(
+    ser: Any,
+    command: str,
+    timeout: float,
+    max_attempts: int = CHUNK_MAX_ATTEMPTS,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    attempts: list[dict[str, Any]] = []
+    result: dict[str, Any] = {}
+    for attempt in range(1, max(1, max_attempts) + 1):
+        result = send_console_command(ser, command, timeout)
+        attempts.append(
+            {
+                "attempt": attempt,
+                **{key: result.get(key) for key in ("ok", "cmd", "code", "offset", "len", "chunk_crc32")},
+            }
+        )
+        if result.get("ok") is True or result.get("code") != "TIMEOUT":
+            break
+        time.sleep(0.1 * attempt)
+    return result, attempts
+
+
 def capture_frame(
     port: str,
     baud: int,
@@ -291,8 +314,8 @@ def capture_frame(
         while len(raw) < total:
             requested = min(chunk_size, total - len(raw))
             command = f"ui capture chunk {len(raw)} {requested}"
-            chunk = send_console_command(ser, command, timeout)
-            events.append({key: chunk.get(key) for key in ("ok", "cmd", "offset", "len", "chunk_crc32")})
+            chunk, chunk_attempts = read_capture_chunk(ser, command, timeout)
+            events.extend(chunk_attempts)
             if chunk.get("ok") is not True:
                 send_console_command(ser, "ui capture end", timeout)
                 raise RuntimeError(f"capture chunk failed at offset {len(raw)}: {chunk}")
