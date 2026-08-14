@@ -129,9 +129,23 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 
 ## Device UI
 
-These native 480x480 captures show the production touch shell introduced in
-1.2 and refined by 1.6. Their exact 1.2 provenance is recorded in
-[`docs/screenshots/DEVICE_1_2_CAPTURE.md`](docs/screenshots/DEVICE_1_2_CAPTURE.md).
+### Physical 1.7.5 device captures
+
+These current 480x480 frames came directly from the physically flashed D1L.
+Their CRCs, firmware identity, safety receipt, and collection notes are in
+[`docs/screenshots/device-1.7.5/README.md`](docs/screenshots/device-1.7.5/README.md).
+
+| Home | Channels |
+|---|---|
+| ![DeskOS 1.7.5 Home on D1L](docs/screenshots/device-1.7.5/home.png) | ![DeskOS 1.7.5 Channels on D1L](docs/screenshots/device-1.7.5/messages.png) |
+
+| Contacts | Settings |
+|---|---|
+| ![DeskOS 1.7.5 Contacts on D1L](docs/screenshots/device-1.7.5/nodes.png) | ![DeskOS 1.7.5 Settings on D1L](docs/screenshots/device-1.7.5/settings.png) |
+
+The screenshots contain no private messages, passwords, keys, or precise
+location data. Collection transmitted no public RF traffic and never formatted
+the SD card.
 
 ### Repeater management in 1.7.5
 
@@ -149,8 +163,7 @@ until they succeed, fail, time out, or are cancelled.
 | ![DeskOS 1.7.5 repeater manager preview](docs/screenshots/simulator-1.7.5/repeater_manager.png) | ![DeskOS 1.7.5 named-neighbours preview](docs/screenshots/simulator-1.7.5/repeater_neighbours.png) |
 
 These are deterministic 480x480 simulator previews used for layout regression.
-They contain no real password or private radio material; physical 1.7.5 device
-captures are collected separately during release acceptance.
+They contain no real password or private radio material.
 
 The 1.7 simulator previews below show the refreshed production palette. They
 are visual previews, not substitutes for the physical D1L release check.

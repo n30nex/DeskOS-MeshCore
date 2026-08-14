@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en" data-astro-cid-b7bcg5p4>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#040a10" />
+  <meta name="description" content="Canadaverse is a Canadian mesh and radio lab for MeshCore, DeskOS, NeonPocketMC, Meshtastic, and Krabs Lagoon." />
+  <title>Canadaverse — Mesh, Radio & Firmware</title>
+  <script src="/scripts/cedarmesh-waves.js" defer></script>
+  <link rel="stylesheet" href="/_astro/LaunchDirectory.CqGe6ozy.css" />
+  <link rel="stylesheet" href="/assets/glass.css?v=20260620glass" />
+
+  <style>
+    .directory-layout[data-astro-cid-b7bcg5p4] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .mast-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 14px;
+    }
+    .kofi-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 15px;
+      border: 1px solid rgba(255, 126, 123, 0.82);
+      border-radius: 8px;
+      color: #ffffff;
+      background: #ff5e5b;
+      box-shadow: 0 10px 24px rgba(255, 94, 91, 0.24);
+      font-size: 0.82rem;
+      font-weight: 800;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
+    }
+    .kofi-button:hover {
+      transform: translateY(-1px);
+      background: #ff7471;
+      box-shadow: 0 13px 28px rgba(255, 94, 91, 0.32);
+    }
+    .kofi-button:focus-visible {
+      outline: 3px solid rgba(128, 216, 255, 0.86);
+      outline-offset: 3px;
+    }
+    .logo-avatar.neonpocket {
+      border-color: rgba(32, 217, 237, 0.48);
+      background: #17191a;
+    }
+    .logo-avatar.neonpocket img {
+      object-fit: contain;
+      padding: 6px;
+    }
+    .avatar.deskos {
+      border-color: rgba(32, 217, 237, 0.7);
+      color: #07100f;
+      background: #20d9ed;
+      font-size: 0.72rem;
+      font-weight: 900;
+    }
+
+    @media (max-width: 620px) {
+      .mast-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: space-between;
+      }
+      .kofi-button {
+        width: 100%;
+        min-height: 46px;
+      }
+    }
+  </style>
+  <link rel="stylesheet" href="/assets/home-v2.css?v=20260812v1" />
+</head>
+<body data-astro-cid-b7bcg5p4>
+  <main class="screen" role="main" data-astro-cid-b7bcg5p4>
+    <div class="shell" data-astro-cid-b7bcg5p4>
+      <header class="mast" aria-label="Canadaverse launch directory heading" data-astro-cid-b7bcg5p4>
+        <a class="brand" href="/" aria-label="Canadaverse home" data-astro-cid-b7bcg5p4>
+          <img src="/assets/brand/canadaverse-emblem.svg" alt="" width="44" height="44" data-astro-cid-b7bcg5p4 />
+          <span data-astro-cid-b7bcg5p4>
+            <strong data-astro-cid-b7bcg5p4>Canadaverse</strong>
+            <small data-astro-cid-b7bcg5p4>Mesh + radio lab</small>
+          </span>
+        </a>
+        <div class="mast-actions">
+          <p class="status-line" data-astro-cid-b7bcg5p4><span data-astro-cid-b7bcg5p4></span> 5 projects</p>
+          <a class="kofi-button" href="https://ko-fi.com/canadaverse" target="_blank" rel="noopener noreferrer" aria-label="Support Canadaverse on Ko-fi">Support</a>
+        </div>
+      </header>
+
+      <section class="home-hero" aria-labelledby="home-title">
+        <div class="home-hero-copy">
+          <p class="home-kicker">Canadian mesh + radio lab</p>
+          <h1 id="home-title">Build the mesh.<br><em>Explore the signal.</em></h1>
+          <p>Firmware, maps, dashboards, and live radio tools—built in Canada and open to the community.</p>
+          <div class="home-actions">
+            <a class="home-button primary" href="https://flasher.canadaverse.org/">Flash NeonPocket <span aria-hidden="true">↗</span></a>
+            <a class="home-button" href="/meshcore/">Open MeshCore <span aria-hidden="true">→</span></a>
+          </div>
+        </div>
+        <dl class="home-stats" aria-label="Canadaverse at a glance">
+          <div><dt>5</dt><dd>projects</dd></div>
+          <div><dt>4</dt><dd>radio targets</dd></div>
+        </dl>
+      </section>
+
+      <section class="directory-layout" aria-label="Canadaverse project launcher" data-astro-cid-b7bcg5p4>
+        <section class="project-directory" aria-label="Canadaverse project directory" data-astro-cid-b7bcg5p4>
+          <div class="directory-head" data-astro-cid-b7bcg5p4>
+            <div>
+              <p class="eyebrow" data-astro-cid-b7bcg5p4>Explore</p>
+              <h2>Choose a project.</h2>
+            </div>
+            <div class="signal-card" aria-label="Directory size" data-astro-cid-b7bcg5p4>
+              <span data-astro-cid-b7bcg5p4>Directory</span>
+              <strong data-astro-cid-b7bcg5p4>5 projects</strong>
+            </div>
+          </div>
+
+          <div class="project-grid" role="list" data-astro-cid-b7bcg5p4>
+            <a class="project active" href="/meshcore/" data-health-url="/meshcore/health" role="listitem" data-service="meshcore" aria-label="Open Meshcore" data-astro-cid-b7bcg5p4>
+              <span class="avatar logo-avatar meshcore" aria-hidden="true" data-astro-cid-b7bcg5p4>
+                <img src="/assets/brand/meshcore.svg" alt="MeshCore logo" data-astro-cid-b7bcg5p4 />
+              </span>
+              <span class="project-copy" data-astro-cid-b7bcg5p4>
+                <strong data-astro-cid-b7bcg5p4>Meshcore</strong>
+                <small data-astro-cid-b7bcg5p4>Maps, nodes, packets, and field tools.</small>
+              </span>
+              <span class="state" data-astro-cid-b7bcg5p4>Open</span>
+            </a>
+
+            <a class="project active featured" href="/neonpocketmc/" data-health-url="/neonpocketmc/" role="listitem" data-service="neonpocketmc" aria-label="Open NeonPocketMC" data-astro-cid-b7bcg5p4>
+              <span class="avatar logo-avatar neonpocket" aria-hidden="true" data-astro-cid-b7bcg5p4>
+                <img src="/assets/brand/neonpocketmc-mark.png" alt="" data-astro-cid-b7bcg5p4 />
+              </span>
+              <span class="project-copy" data-astro-cid-b7bcg5p4>
+                <strong data-astro-cid-b7bcg5p4>NeonPocketMC</strong>
+                <small data-astro-cid-b7bcg5p4>Firmware and guided flashing for pocket mesh radios.</small>
+              </span>
+              <span class="state" data-astro-cid-b7bcg5p4>Open</span>
+            </a>
+
+            <a class="project active" href="/deskos/" role="listitem" data-service="deskos" aria-label="Open DeskOS MeshCore" data-astro-cid-b7bcg5p4>
+              <span class="avatar deskos" aria-hidden="true" data-astro-cid-b7bcg5p4>D1L</span>
+              <span class="project-copy" data-astro-cid-b7bcg5p4>
+                <strong data-astro-cid-b7bcg5p4>DeskOS MeshCore</strong>
+                <small data-astro-cid-b7bcg5p4>Touch-first firmware for the SenseCAP Indicator D1L.</small>
+              </span>
+              <span class="state" data-astro-cid-b7bcg5p4>Open</span>
+            </a>
+
+            <a class="project active" href="/meshtastic/" data-health-url="/meshtastic/health" role="listitem" data-service="meshtastic" aria-label="Open Meshtastic" data-astro-cid-b7bcg5p4>
+              <span class="avatar logo-avatar meshtastic" aria-hidden="true" data-astro-cid-b7bcg5p4>
+                <img src="/assets/brand/meshtastic-m-pwrd.png" alt="Meshtastic Powered logo" data-astro-cid-b7bcg5p4 />
+              </span>
+              <span class="project-copy" data-astro-cid-b7bcg5p4>
+                <strong data-astro-cid-b7bcg5p4>Meshtastic</strong>
+                <small data-astro-cid-b7bcg5p4>Maps, chat, docs, and firmware.</small>
+              </span>
+              <span class="state" data-astro-cid-b7bcg5p4>Open</span>
+            </a>
+
+            <a class="project active" href="/krab/lagoon/" role="listitem" aria-label="Open Krabs Lagoon" data-service="krab" data-astro-cid-b7bcg5p4>
+              <span class="avatar krab" aria-hidden="true" data-astro-cid-b7bcg5p4>KR</span>
+              <span class="project-copy" data-astro-cid-b7bcg5p4>
+                <strong data-astro-cid-b7bcg5p4>Krab</strong>
+                <small data-astro-cid-b7bcg5p4>Animated MeshCore topology and lagoon view.</small>
+              </span>
+              <span class="state" data-astro-cid-b7bcg5p4>Open</span>
+            </a>
+
+          </div>
+        </section>
+      </section>
+
+      <footer class="home-footer">
+        <p>Community-built in Canada. Not affiliated with Heltec, MeshCore, or Meshtastic.</p>
+        <nav aria-label="Canadaverse secondary links">
+          <a href="https://canadaverse.org/meshcore-canada/">MeshCore Canada WIP</a>
+          <a href="https://ko-fi.com/canadaverse" target="_blank" rel="noopener noreferrer">Ko-fi</a>
+        </nav>
+      </footer>
+    </div>
+  </main>
+<script type="text/plain" hidden>
+(() => {
+  const DEFAULT_TIMEOUT_MS = 5000;
+  const CHECKED_SELECTOR = '.project-grid a';
+
+  const markOffline = (el) => {
+    if (!el || el.dataset.offline === '1') {
+      return;
+    }
+
+    el.dataset.offline = '1';
+    el.classList.remove('active');
+    el.classList.add('disabled', 'service-offline');
+    el.setAttribute('aria-disabled', 'true');
+
+    if (el.tagName === 'A') {
+      if (!el.dataset.originalHref) {
+        el.dataset.originalHref = el.getAttribute('href') || '';
+      }
+      el.removeAttribute('href');
+      el.setAttribute('tabindex', '-1');
+      el.addEventListener(
+        'click',
+        (event) => {
+          event.preventDefault();
+        },
+        { capture: true, once: true }
+      );
+      el.addEventListener(
+        'keydown',
+        (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+          }
+        },
+        { capture: true, once: true }
+      );
+    }
+
+    const state = el.querySelector('.state');
+    if (state) {
+      state.textContent = 'Offline';
+    }
+  };
+
+  const knownHealthForPath = {
+    '/meshcore/': '/meshcore/health',
+    '/meshtastic/': '/meshtastic/health',
+    '/launchdirectorytest/meshcore/': '/launchdirectorytest/meshcore/health',
+    '/launchdirectorytest/meshtastic/': '/launchdirectorytest/meshtastic/health',
+  };
+
+  const getHealthUrl = (anchor) => {
+    if (anchor.dataset.healthUrl) {
+      return anchor.dataset.healthUrl;
+    }
+
+    const href = anchor.getAttribute('href');
+    if (!href) {
+      return '';
+    }
+
+    let target;
+    try {
+      target = new URL(href, location.href);
+    } catch {
+      return '';
+    }
+
+    if (target.origin === location.origin) {
+      return knownHealthForPath[target.pathname] || target.pathname.replace(/\/+$/, '') + '/health';
+    }
+
+    return target.href;
+  };
+
+  const checkAlive = async (url, sameOrigin) => {
+    if (!url) {
+      return false;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, DEFAULT_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        cache: 'no-store',
+        mode: sameOrigin ? 'cors' : 'no-cors',
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!sameOrigin) {
+        return response.type === 'opaque' || response.ok;
+      }
+
+      return response.status >= 200 && response.status < 500;
+    } catch {
+      clearTimeout(timer);
+      return false;
+    }
+  };
+
+  const testAndUpdate = async (anchor) => {
+    const href = anchor.getAttribute('href');
+    if (!href) {
+      markOffline(anchor);
+      return false;
+    }
+
+    let target;
+    try {
+      target = new URL(href, location.href);
+    } catch {
+      markOffline(anchor);
+      return false;
+    }
+
+    const sameOrigin = target.origin === location.origin;
+    const healthUrl = getHealthUrl(anchor);
+
+    const primary = await checkAlive(healthUrl, sameOrigin);
+    if (primary) {
+      return true;
+    }
+
+    const fallback = await checkAlive(target.href, sameOrigin);
+    return fallback;
+  };
+
+  const refresh = async () => {
+    const links = Array.from(document.querySelectorAll(CHECKED_SELECTOR));
+    if (!links.length) {
+      return;
+    }
+
+    const results = await Promise.all(
+      links.map(async (anchor) => {
+        const ok = await testAndUpdate(anchor);
+        if (!ok) {
+          markOffline(anchor);
+        }
+
+        return ok;
+      })
+    );
+
+    const active = results.filter(Boolean).length;
+    const total = results.length;
+    const signalCard = document.querySelector('.signal-card strong');
+    const statusLine = document.querySelector('.status-line');
+
+    if (signalCard) {
+      signalCard.textContent = `${active} active`;
+    }
+
+    if (statusLine) {
+      const marker = statusLine.querySelector('span');
+      statusLine.textContent = `${active}/${total} services online`;
+      if (marker) {
+        statusLine.prepend(marker);
+      }
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', refresh, { once: true });
+  } else {
+    refresh();
+  }
+})();
+</script></body>
+</html>
