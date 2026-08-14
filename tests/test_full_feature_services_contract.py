@@ -196,6 +196,30 @@ def test_repeater_login_opens_a_compact_saved_session_manager():
     assert "d1l_admin_credential_store_save(" in phase1
     assert "d1l_admin_credential_store_forget(" in phase1
 
+    preserve_page = phase1.split(
+        "static bool admin_state_preserves_selected_page(", 1
+    )[1].split("static esp_err_t select_admin_target(", 1)[0]
+    for state in (
+        "D1L_MESHCORE_ADMIN_AUTHENTICATED",
+        "D1L_MESHCORE_ADMIN_LOGIN_PENDING",
+        "D1L_MESHCORE_ADMIN_STATUS_PENDING",
+        "D1L_MESHCORE_ADMIN_MUTATION_PENDING",
+        "D1L_MESHCORE_ADMIN_CLI_PENDING",
+        "D1L_MESHCORE_ADMIN_QUERY_PENDING",
+    ):
+        assert state in preserve_page
+
+    render = phase1.split(
+        "static bool render_admin_service_sheet(void)", 1
+    )[1].split(
+        "static void refresh_admin_service_sheet_if_changed(void)", 1
+    )[0]
+    assert "!admin_state_preserves_selected_page(status.state)" in render
+    assert (
+        "status.state != D1L_MESHCORE_ADMIN_LOGIN_PENDING"
+        not in render
+    )
+
     actions = phase1.split(
         "case D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB:", 1
     )[1].split("case D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT:", 1)[0]
