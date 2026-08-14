@@ -14,6 +14,8 @@ enum {
     BINDING_NIGHT_MODE,
     BINDING_HIGH_CONTRAST,
     BINDING_TIMEOUT,
+    BINDING_TIMEZONE_MINUS,
+    BINDING_TIMEZONE_PLUS,
     BINDING_CLOSE_DIAGNOSTICS,
     BINDING_OPEN_TERMINAL,
 };
@@ -335,13 +337,21 @@ bool d1l_ui_device_sheets_render_display(
         controller, sheet, timeout_text, 8, 196, 154, 44,
         BINDING_TIMEOUT,
         D1L_UI_DEVICE_SHEETS_ACTION_TIMEOUT) != NULL && complete;
+    complete = create_button(
+        controller, sheet, "Time -1h", 172, 196, 116, 44,
+        BINDING_TIMEZONE_MINUS,
+        D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_MINUS) != NULL && complete;
+    complete = create_button(
+        controller, sheet, "Time +1h", 298, 196, 118, 44,
+        BINDING_TIMEZONE_PLUS,
+        D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_PLUS) != NULL && complete;
 
     lv_obj_t *note = create_label(
         sheet,
-        "Fixed UTC offset only; daylight saving is not automatic. Touch wakes and "
-        "unlocks; the top button wakes too. Night mode keeps daytime brightness.",
+        "Use Time -1h/+1h to set the local clock. Daylight saving changes are "
+        "manual; radio and security timestamps stay UTC.",
         0xFBBF24);
-    configure_wrapped_label(note, 8, 260);
+    configure_wrapped_label(note, 8, 252);
     complete = note != NULL && complete;
     if (!complete) {
         invalidate_sheet(controller, sheet);

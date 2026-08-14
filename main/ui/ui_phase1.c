@@ -7421,6 +7421,27 @@ static void device_sheets_action_handler(
         (void)render_display_sheet();
         return;
     }
+    case D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_MINUS:
+    case D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_PLUS: {
+        int16_t offset = s_snapshot.timezone_offset_minutes;
+        if (!d1l_time_display_offset_valid(offset)) {
+            offset = 0;
+        }
+        const int16_t step =
+            action == D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_MINUS ? -60 : 60;
+        int16_t next = (int16_t)(offset + step);
+        if (next < D1L_TIMEZONE_OFFSET_MINUTES_MIN) {
+            next = D1L_TIMEZONE_OFFSET_MINUTES_MAX;
+        } else if (next > D1L_TIMEZONE_OFFSET_MINUTES_MAX) {
+            next = D1L_TIMEZONE_OFFSET_MINUTES_MIN;
+        }
+        const esp_err_t ret =
+            d1l_app_model_set_timezone_offset_minutes(next);
+        show_toast("Local time", ret);
+        d1l_app_model_snapshot(&s_snapshot);
+        (void)render_display_sheet();
+        return;
+    }
     case D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DIAGNOSTICS:
         hide_diagnostics_sheet();
         return;
