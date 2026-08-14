@@ -6128,19 +6128,21 @@ def render_storage_data_page(s: Surface, snap: Snapshot):
 def render_display_settings_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Display", "Screen controls")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_display_settings", destination="settings")
-    s.text("Screen controls", (44, 154, 436, 178), 15, GREEN, True)
-    s.text("Brightness, night mode, contrast, and timeout belong here.", (44, 194, 436, 236), 13, TEXT)
+    s.text("Local display time", (44, 150, 436, 174), 15, GREEN, True)
+    s.text("UTC-6  12:45", (44, 178, 436, 202), 13, TEXT)
+    draw_button(s, (44, 220, 196, 264), "Brightness 80%", BLUE, action="display_brightness")
+    draw_button(s, (208, 220, 320, 264), "Night Off", BLUE, action="display_night")
+    draw_button(s, (332, 220, 448, 264), "Contrast Off", BLUE, action="display_contrast")
+    draw_button(s, (44, 274, 196, 318), "Timeout 10 min", BLUE, action="display_timeout")
+    draw_button(s, (208, 274, 320, 318), "Time -1h", BLUE, action="display_timezone_minus")
+    draw_button(s, (332, 274, 448, 318), "Time +1h", BLUE, action="display_timezone_plus")
     s.wrapped_text(
-        "Touch the screen to wake it. Night mode keeps your daytime brightness setting.",
-        (44, 252, 436, 300),
+        "Use Time -1h/+1h to set the local clock. Daylight saving changes are manual; radio and security timestamps stay UTC.",
+        (44, 340, 436, 400),
         13,
         AMBER,
         line_height=18,
     )
-    draw_button(s, (44, 318, 160, 360), "Brightness", BLUE, action="display_brightness")
-    draw_button(s, (172, 318, 260, 360), "Night", BLUE, action="display_night")
-    draw_button(s, (272, 318, 386, 360), "Contrast", BLUE, action="display_contrast")
-    s.text("Timeout", (44, 374, 160, 402), 12, MUTED, True)
 
 
 def render_diagnostics_sheet(s: Surface, snap: Snapshot):
@@ -7715,10 +7717,13 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "display_settings_sheet": (
         "Display",
         "Screen controls",
-        "Brightness",
-        "Night",
-        "Contrast",
-        "Timeout",
+        "Local display time",
+        "Brightness 80%",
+        "Night Off",
+        "Contrast Off",
+        "Timeout 10 min",
+        "Time -1h",
+        "Time +1h",
         "Close",
     ),
     "diagnostics_sheet": (

@@ -91,11 +91,15 @@ def test_display_render_is_truthful_disabled_and_fails_closed():
         "NIGHT_MODE",
         "HIGH_CONTRAST",
         "TIMEOUT",
+        "TIMEZONE_MINUS",
+        "TIMEZONE_PLUS",
     ):
         assert f"D1L_UI_DEVICE_SHEETS_ACTION_{action}" in render
     assert "const d1l_app_snapshot_t *snapshot" in render
     assert '"Local display time"' in render
-    assert '"Fixed UTC offset only; daylight saving is not automatic.' in render
+    assert '"Use Time -1h/+1h to set the local clock.' in render
+    assert '"Time -1h"' in render
+    assert '"Time +1h"' in render
     assert "snapshot->timezone_settings_ready" in render
     assert "snapshot->time_available" in render
     assert "if (!complete)" in render
@@ -122,6 +126,15 @@ def test_display_locks_after_ten_minutes_and_top_button_wakes_safely():
         "case D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DIAGNOSTICS:",
     )
     assert "D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS : 0U" in timeout_action
+
+    timezone_action = body(
+        phase1,
+        "case D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_MINUS:",
+        "case D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DIAGNOSTICS:",
+    )
+    assert "d1l_app_model_set_timezone_offset_minutes(next)" in timezone_action
+    assert "D1L_TIMEZONE_OFFSET_MINUTES_MIN" in timezone_action
+    assert "D1L_TIMEZONE_OFFSET_MINUTES_MAX" in timezone_action
 
     lock = body(phase1, "static void lock_event_cb", "static uint8_t desired_backlight_percent")
     create = body(phase1, "static void create_lock_overlay", "static void ui_task")

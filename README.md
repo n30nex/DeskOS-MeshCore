@@ -6,9 +6,9 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.7.5** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.7.5` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.5).
+DeskOS **1.7.6** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.7.6` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.6).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -17,7 +17,24 @@ and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
 
-## What 1.7.5 improves
+## What 1.7.6 fixes
+
+DeskOS 1.7.6 completes the first-install path and makes local time practical:
+
+- the [NeonPocket flasher](https://flasher.canadaverse.org/) can identify the
+  RP2040 BOOTSEL drive, checksum the matching bridge UF2, and copy it directly;
+- the flasher can prepare an already-formatted FAT32 card by adding only
+  missing, checksum-verified DeskOS files. It never formats, deletes, or
+  replaces a different existing file;
+- both bridge and card steps include a separate device-side verification so a
+  copied file is never presented as a working installation; and
+- **Settings -> Display** now has **Time -1h** and **Time +1h** controls for the
+  displayed local clock. Mountain Time is UTC-7 in standard time and UTC-6 in
+  daylight time; daylight-saving changes are manual.
+
+Radio, security, and retained protocol timestamps remain UTC.
+
+## What 1.7.5 improved
 
 DeskOS 1.7.5 makes remote repeater work and everyday display use more reliable:
 
@@ -125,7 +142,8 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.6** | Compact Home, Contacts search/sorts, UI truthfulness, and diagnostics polish | Historical (`v1.6.0`) |
 | **1.7** | DeskOS identity, animated opening, and NeonPocket-inspired product theme | Historical (`v1.7.0`) |
 | **1.7.1** | Direct repeater login, saved passwords, and touch-first server management | Historical (`v1.7.1`) |
-| **1.7.5** | Reliable remote login, better results/navigation, display wake/lock, and faster cached maps | Current (`v1.7.5`) |
+| **1.7.5** | Reliable remote login, better results/navigation, display wake/lock, and faster cached maps | Historical (`v1.7.5`) |
+| **1.7.6** | Guided bridge/SD installation and adjustable local display time | Current (`v1.7.6`) |
 
 ## Device UI
 
@@ -193,12 +211,18 @@ private keys, and admin credentials must never be included in screenshots.
 
 ## Install
 
-Extract the complete release package and begin with `START_HERE.md`.
+Use the [browser flasher](https://flasher.canadaverse.org/) for the guided
+ESP32, RP2040 bridge, and SD-card workflow, or extract the complete release
+package and begin with `START_HERE.md`.
 
 - **Update an existing DeskOS install:** use the app update path. It preserves
   unrelated retained flash regions.
 - **Fresh clean install or recovery:** use the full 8 MB image at `0x0`.
-- **RP2040 bridge:** copy the complete production UF2 through BOOTSEL.
+- **RP2040 bridge:** hold BOOTSEL while connecting its USB side, then use the
+  browser flasher to identify the drive and copy the verified production UF2.
+- **SD card:** select an already-formatted FAT32 card in the browser flasher.
+  It adds and reads back only the missing DeskOS payload; it never formats the
+  card or replaces a different file.
 - **On-device signed update:** place the exact manifest, signature, and app BIN
   from one release under `updates/` on the prepared SD card, then use
   **Settings -> Signed Update**.

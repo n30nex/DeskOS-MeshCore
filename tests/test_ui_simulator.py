@@ -608,7 +608,18 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Pair",
         "Forget",
     } <= labels_by_view["ble_setup_sheet"]
-    assert {"Display", "Screen controls", "Brightness", "Night", "Contrast", "Timeout"} <= labels_by_view["display_settings_sheet"]
+    assert {
+        "Display",
+        "Screen controls",
+        "Local display time",
+        "UTC-6  12:45",
+        "Brightness 80%",
+        "Night Off",
+        "Contrast Off",
+        "Timeout 10 min",
+        "Time -1h",
+        "Time +1h",
+    } <= labels_by_view["display_settings_sheet"]
     assert {"Diagnostics", "Health", "Crashlog  Events  Serial", "Open Terminal"} <= labels_by_view["diagnostics_sheet"]
     assert {"Message Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
     assert {"DM YKF Corebot", "Direct message", "reply to YKF Corebot", "20 chars | 20/138 B", "Send", "Clear", "Close"} <= labels_by_view["compose_dm_sheet"]

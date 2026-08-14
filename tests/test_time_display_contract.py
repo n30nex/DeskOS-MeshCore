@@ -36,6 +36,8 @@ def test_usb_and_ui_disclose_fixed_offset_and_no_automatic_dst():
     assert '\\"model\\":\\"fixed_utc_offset\\"' in console
     assert '\\"auto_dst\\":false' in console
     assert "d1l_app_model_set_timezone_offset_minutes" in console
-    assert "Fixed UTC offset only; daylight saving is not automatic." in display_sheet
+    assert "Use Time -1h/+1h to set the local clock." in display_sheet
+    assert "Daylight saving changes are" in display_sheet
+    assert "manual; radio and security timestamps stay UTC." in display_sheet
     assert "timezone_settings_ready" in more
     assert '"Time setting unavailable"' in more

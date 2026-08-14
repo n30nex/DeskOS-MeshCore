@@ -1,10 +1,24 @@
 # DeskOS SD Card Setup
 
-DeskOS 1.0 uses a prepared SD card as its persistent history and map-cache
+DeskOS uses a prepared SD card as its persistent history and map-cache
 store. Use a 32 GB or larger card formatted as FAT32. DeskOS never formats a
 card.
 
 ## Prepare the Card
+
+### Browser flasher
+
+In Chrome or Edge, open the DeskOS onboarding step in the NeonPocket flasher
+and choose **Prepare SD card**. Select the root of an already-formatted FAT32
+card. The browser creates the required directories, checksum-verifies every
+source and read-back file, accepts identical files, and stops rather than
+replacing a different existing file.
+
+The browser cannot and does not format the card. After preparation, insert it
+in the D1L and choose **Verify in DeskOS** to confirm that the RP2040 bridge can
+mount it and open the DeskOS data root.
+
+### Release-package script
 
 The release package contains `scripts/prepare_deskos_sd.py` and the complete
 `sdcard/` payload. Run the preparer from the unpacked release:
@@ -75,9 +89,10 @@ a degraded-mode notice and does not silently redirect persistent histories to
 NVS. Correct the card or bridge and reboot; do not format the card on the
 device.
 
-The release package contains the production RP2040 SD bridge UF2. RP2040
-recovery requires its physical BOOTSEL/UF2 mode and is a service operation; it
-is not part of routine card preparation.
+The release package contains the production RP2040 SD bridge UF2. Hold BOOTSEL
+while connecting the RP2040 USB side. The browser flasher checks the selected
+drive for its RP2040 identity, checksum-verifies the exact UF2, copies it, and
+then asks you to reconnect the ESP32 side for a device-level bridge check.
 
 ## Installation boundary
 

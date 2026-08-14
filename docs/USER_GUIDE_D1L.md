@@ -1,13 +1,14 @@
-# MeshCore DeskOS D1L 1.5 User Guide
+# MeshCore DeskOS D1L 1.7.6 User Guide
 
 This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.5/RC3 includes the corrected 1.2 channel and Contacts workflows plus
-secure BLE companion access, public-data QR sharing, and signed local updates
-with rollback. The remaining intentional limits and D1L adaptations are in
+DeskOS 1.7.6 includes secure BLE companion access, public-data QR sharing,
+signed local updates with rollback, touch-first repeater management, and the
+guided bridge and SD installation path. The remaining intentional limits and
+D1L adaptations are in
 [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) and
 [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md).
 
@@ -147,6 +148,18 @@ are never printed by status, logs or exports.
 Mesh messaging does not require Wi-Fi. If Wi-Fi is unavailable, cached Map
 tiles remain usable and RF chat continues.
 
+## Local clock
+
+Open **Settings -> Display** and use **Time -1h** or **Time +1h** to adjust the
+displayed local clock in one-hour steps. The selected fixed UTC offset is saved
+across restarts. Mountain Time uses UTC-7 in standard time and UTC-6 in
+daylight time.
+
+DeskOS does not currently apply daylight-saving changes automatically. Adjust
+the offset when the clock changes. This setting changes only human-readable
+display time; radio, security, ordering, and retained protocol timestamps stay
+in UTC.
+
 ## BLE companion
 
 Open **Settings -> Connections -> BLE**, enable BLE, then choose **Pair**. The
@@ -234,8 +247,8 @@ Wi-Fi, channel definitions, Observer configuration, display/time, crash and
 reset state. Retained history is not redirected there.
 
 - The firmware never formats an SD card.
-- Prepare a 32GB-or-larger FAT32 card with the checked-in
-  `scripts/prepare_deskos_sd.py` workflow. The 1.5 first-start flow requires
+- Prepare a 32GB-or-larger FAT32 card with the browser flasher or checked-in
+  `scripts/prepare_deskos_sd.py` workflow. The first-start flow requires
   the authorized NRCan provider manifest for background/offline Map download.
 - Foreign, non-FAT32 or unmountable media is preserved and reported.
 - A missing/unusable card activates a prominent degraded notice.
@@ -307,7 +320,8 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the published DeskOS D1L 1.5 download and follow its `START_HERE.md`.
+Use the guided browser flasher or the published DeskOS D1L 1.7.6 download and
+follow its `START_HERE.md`.
 On Linux, select the D1L only through the stable by-id path:
 
 ```text

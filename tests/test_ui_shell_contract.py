@@ -1808,7 +1808,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
-    assert '"Fixed UTC offset only; daylight saving is not automatic.' in device_sheets
+    assert '"Use Time -1h/+1h to set the local clock.' in device_sheets
     assert '"Terminal shows recent events and the current log level."' in device_sheets
     assert '"reset %s  uptime %lus  mesh %s"' in device_sheets
 
