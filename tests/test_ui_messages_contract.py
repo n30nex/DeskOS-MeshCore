@@ -136,7 +136,9 @@ def test_public_conversation_bubbles_align_and_show_truthful_time_and_state():
 
     assert "messages_public_time_label(" in bubble
     assert '"time unknown"' in source
-    assert "no persisted boot epoch" in source
+    assert "d1l_message_entry_display_timestamp(entry)" in source
+    assert "d1l_time_display_format_clock(" in source
+    assert "controller->rendered.timezone_offset_minutes" in bubble
     assert 'return "Sent by radio";' in source
     assert 'return unread ? "New" : "Received";' in source
     assert "outgoing ? 76 : 8" in bubble

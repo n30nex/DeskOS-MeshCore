@@ -589,6 +589,19 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->recent_node_count =
         d1l_app_model_query_nodes(&node_query, snapshot->recent_nodes,
                                   D1L_APP_SNAPSHOT_NODE_PREVIEW);
+    for (size_t contact_index = 0U;
+         contact_index < snapshot->recent_contact_count; ++contact_index) {
+        snapshot->recent_contacts[contact_index].last_heard_ms = 0U;
+        for (size_t node_index = 0U;
+             node_index < snapshot->recent_node_count; ++node_index) {
+            if (strcmp(snapshot->recent_contacts[contact_index].fingerprint,
+                       snapshot->recent_nodes[node_index].node.fingerprint) == 0) {
+                snapshot->recent_contacts[contact_index].last_heard_ms =
+                    snapshot->recent_nodes[node_index].node.last_heard_ms;
+                break;
+            }
+        }
+    }
     snapshot->recent_message_count =
         d1l_message_store_copy_recent(snapshot->recent_messages, D1L_APP_SNAPSHOT_MESSAGE_PREVIEW);
     populate_dm_conversation_summaries(snapshot);

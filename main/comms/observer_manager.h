@@ -12,8 +12,10 @@ extern "C" {
 
 #define D1L_OBSERVER_URI_LEN 192U
 #define D1L_OBSERVER_TOPIC_LEN 96U
-#define D1L_OBSERVER_USERNAME_LEN 64U
-#define D1L_OBSERVER_PASSWORD_LEN 96U
+#define D1L_OBSERVER_USERNAME_LEN 72U
+#define D1L_OBSERVER_PASSWORD_LEN 512U
+#define D1L_OBSERVER_REGION_LEN 4U
+#define D1L_OBSERVER_BROKER_COUNT 3U
 
 typedef enum {
     D1L_OBSERVER_STATE_DISABLED = 0,
@@ -32,6 +34,13 @@ typedef struct {
     bool enabled;
     bool connected;
     bool include_location;
+    bool primary_connected;
+    bool secondary_connected;
+    bool custom_configured;
+    bool custom_connected;
+    uint8_t broker_count;
+    uint8_t connected_brokers;
+    char region[D1L_OBSERVER_REGION_LEN];
     char broker_host[D1L_OBSERVER_URI_LEN];
     char topic[D1L_OBSERVER_TOPIC_LEN];
     uint32_t queued;
@@ -53,6 +62,10 @@ esp_err_t d1l_observer_configure(const char *mqtts_uri,
                                  bool include_location);
 esp_err_t d1l_observer_clear_configuration(void);
 esp_err_t d1l_observer_set_enabled(bool enabled);
+esp_err_t d1l_observer_set_region(const char *iata);
+esp_err_t d1l_observer_enqueue_packet(const uint8_t *raw, size_t raw_len,
+                                      int16_t rssi_dbm,
+                                      int8_t snr_quarter_db);
 void d1l_observer_status(d1l_observer_status_t *out_status);
 const char *d1l_observer_state_name(d1l_observer_state_t state);
 

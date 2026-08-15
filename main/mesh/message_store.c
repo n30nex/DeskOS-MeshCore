@@ -349,9 +349,13 @@ static bool persisted_ascii_is_valid(const char *text, size_t capacity,
 static bool entry_is_valid(const d1l_message_entry_t *entry)
 {
     static const uint8_t zero_reserved[5] = {0};
+    const bool legacy_reserved = entry &&
+        memcmp(entry->reserved, zero_reserved, sizeof(entry->reserved)) == 0;
+    const bool timestamp_reserved = entry &&
+        entry->reserved[4] == D1L_MESSAGE_DISPLAY_TIME_VERSION &&
+        d1l_message_entry_display_timestamp(entry) != 0U;
     return entry && entry->seq > 0U && entry->channel_id != 0U &&
-           memcmp(entry->reserved, zero_reserved,
-                  sizeof(entry->reserved)) == 0 &&
+           (legacy_reserved || timestamp_reserved) &&
            persisted_ascii_is_valid(entry->direction,
                                     sizeof(entry->direction), true) &&
            persisted_ascii_is_valid(entry->author,
@@ -724,7 +728,34 @@ static bool entries_equal(const d1l_message_entry_t *left,
            left->snr_tenths == right->snr_tenths &&
            left->path_hash_bytes == right->path_hash_bytes &&
            left->path_hops == right->path_hops &&
-           left->delivered == right->delivered;
+           left->delivered == right->delivered &&
+           memcmp(left->reserved, right->reserved,
+                  sizeof(left->reserved)) == 0;
+}
+
+uint32_t d1l_message_entry_display_timestamp(
+    const d1l_message_entry_t *entry)
+{
+    if (!entry || entry->reserved[4] != D1L_MESSAGE_DISPLAY_TIME_VERSION) {
+        return 0U;
+    }
+    return (uint32_t)entry->reserved[0] |
+           ((uint32_t)entry->reserved[1] << 8U) |
+           ((uint32_t)entry->reserved[2] << 16U) |
+           ((uint32_t)entry->reserved[3] << 24U);
+}
+
+static void message_entry_set_display_timestamp(d1l_message_entry_t *entry,
+                                                uint32_t timestamp)
+{
+    if (!entry || timestamp == 0U) {
+        return;
+    }
+    entry->reserved[0] = (uint8_t)(timestamp & 0xffU);
+    entry->reserved[1] = (uint8_t)((timestamp >> 8U) & 0xffU);
+    entry->reserved[2] = (uint8_t)((timestamp >> 16U) & 0xffU);
+    entry->reserved[3] = (uint8_t)((timestamp >> 24U) & 0xffU);
+    entry->reserved[4] = D1L_MESSAGE_DISPLAY_TIME_VERSION;
 }
 
 static bool blobs_equivalent(const d1l_message_store_blob_t *left,
@@ -1574,8 +1605,9 @@ esp_err_t d1l_message_store_flush_if_due(void)
 static esp_err_t append_channel_internal(
     uint64_t channel_id, const char *direction, const char *author,
     const char *text, int rssi_dbm, int snr_tenths,
-    uint8_t path_hash_bytes, uint8_t path_hops, bool delivered, bool persist,
-    bool defer_flush, uint32_t *out_seq)
+    uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
+    uint32_t display_timestamp, bool persist, bool defer_flush,
+    uint32_t *out_seq)
 {
     if (out_seq) {
         *out_seq = 0U;
@@ -1616,6 +1648,7 @@ static esp_err_t append_channel_internal(
         .delivered = delivered,
         .channel_id = channel_id,
     };
+    message_entry_set_display_timestamp(&entry, display_timestamp);
     sanitize_ascii(entry.direction, sizeof(entry.direction), direction ? direction : "rx");
     sanitize_ascii(entry.author, sizeof(entry.author), author ? author : "Public");
     memcpy(entry.text, text, text_info.byte_count + 1U);
@@ -1706,7 +1739,19 @@ esp_err_t d1l_message_store_append_channel(
 {
     return append_channel_internal(
         channel_id, direction, author, text, rssi_dbm, snr_tenths,
-        path_hash_bytes, path_hops, delivered, true, false, out_seq);
+        path_hash_bytes, path_hops, delivered, 0U, true, false, out_seq);
+}
+
+esp_err_t d1l_message_store_append_channel_at(
+    uint64_t channel_id, const char *direction, const char *author,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
+    uint32_t display_timestamp, uint32_t *out_seq)
+{
+    return append_channel_internal(
+        channel_id, direction, author, text, rssi_dbm, snr_tenths,
+        path_hash_bytes, path_hops, delivered, display_timestamp, true, false,
+        out_seq);
 }
 
 esp_err_t d1l_message_store_append_channel_deferred(
@@ -1720,7 +1765,22 @@ esp_err_t d1l_message_store_append_channel_deferred(
     }
     return append_channel_internal(
         channel_id, direction, author, text, rssi_dbm, snr_tenths,
-        path_hash_bytes, path_hops, delivered, true, true, out_seq);
+        path_hash_bytes, path_hops, delivered, 0U, true, true, out_seq);
+}
+
+esp_err_t d1l_message_store_append_channel_deferred_at(
+    uint64_t channel_id, const char *direction, const char *author,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
+    uint32_t display_timestamp, uint32_t *out_seq)
+{
+    if (!out_seq) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return append_channel_internal(
+        channel_id, direction, author, text, rssi_dbm, snr_tenths,
+        path_hash_bytes, path_hops, delivered, display_timestamp, true, true,
+        out_seq);
 }
 
 #if D1L_ENABLE_QUALIFICATION_HOOKS
@@ -1731,7 +1791,7 @@ esp_err_t d1l_message_store_append_channel_volatile(
 {
     return append_channel_internal(
         channel_id, direction, author, text, rssi_dbm, snr_tenths,
-        path_hash_bytes, path_hops, delivered, false, false, NULL);
+        path_hash_bytes, path_hops, delivered, 0U, false, false, NULL);
 }
 #endif
 

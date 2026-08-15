@@ -1286,7 +1286,7 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     wifi_signal_snapshot(&out_status->wifi_rssi_dbm,
                          &out_status->wifi_channel);
 #endif
-    out_status->coexistence_policy = "offline_first_one_companion_radio";
+    out_status->coexistence_policy = "wifi_ble_shared_radio";
 }
 
 esp_err_t d1l_connectivity_prepare_reboot(void)
@@ -1343,15 +1343,6 @@ esp_err_t d1l_connectivity_init(void)
 #endif
 
     d1l_settings_t settings = {0};
-    (void)d1l_settings_public_snapshot(&settings);
-    if (settings.wifi_enabled && settings.ble_companion_enabled) {
-        settings.ble_companion_enabled = false;
-        esp_err_t ret = d1l_settings_update_fields(
-            &settings, D1L_SETTINGS_UPDATE_BLE_ENABLED);
-        if (ret != ESP_OK) {
-            return ret;
-        }
-    }
     (void)d1l_settings_public_snapshot(&settings);
 #ifdef CONFIG_ESP_WIFI_ENABLED
     if (!s_boot_guard_lock) {
@@ -1810,11 +1801,6 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
         return ESP_OK;
     }
 
-    settings.ble_companion_enabled = false;
-    ret = d1l_ble_companion_stop();
-    if (ret != ESP_OK) {
-        return ret;
-    }
 #ifdef CONFIG_ESP_WIFI_ENABLED
     ret = mark_boot_guard_active(D1L_CONNECTIVITY_SUBSYSTEM_WIFI);
     if (ret != ESP_OK) {
@@ -1829,8 +1815,7 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
 
     settings.wifi_enabled = true;
     ret = d1l_settings_update_fields(
-        &settings, D1L_SETTINGS_UPDATE_WIFI_ENABLED |
-                   D1L_SETTINGS_UPDATE_BLE_ENABLED);
+        &settings, D1L_SETTINGS_UPDATE_WIFI_ENABLED);
     if (ret != ESP_OK) {
 #ifdef CONFIG_ESP_WIFI_ENABLED
         const esp_err_t stop_ret = stop_wifi_runtime_safely();
@@ -1876,56 +1861,10 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
     }
     d1l_settings_t settings = {0};
     settings.ble_companion_enabled = enabled;
-    if (enabled) {
-        settings.wifi_enabled = false;
-    }
-#ifdef CONFIG_ESP_WIFI_ENABLED
-    bool control_taken = false;
-    if (enabled) {
-        const esp_err_t quiesce_ret =
-            wifi_shutdown_begin(&control_taken);
-        if (quiesce_ret != ESP_OK) {
-            set_wifi_last_error("network_quiesce_failed");
-            return quiesce_ret;
-        }
-    }
-#endif
-    const d1l_settings_update_mask_t update_mask =
-        D1L_SETTINGS_UPDATE_BLE_ENABLED |
-        (enabled ? D1L_SETTINGS_UPDATE_WIFI_ENABLED : 0U);
-    const esp_err_t ret = d1l_settings_update_fields(&settings, update_mask);
+    const esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_BLE_ENABLED);
     if (ret != ESP_OK) {
-#ifdef CONFIG_ESP_WIFI_ENABLED
-        if (enabled) {
-            wifi_shutdown_end(control_taken);
-        }
-#endif
         return ret;
-    }
-    if (enabled) {
-        portENTER_CRITICAL(&s_wifi_policy_lock);
-        d1l_wifi_retry_policy_disable(&s_wifi_policy);
-        portEXIT_CRITICAL(&s_wifi_policy_lock);
-#ifdef CONFIG_ESP_WIFI_ENABLED
-        notify_wifi_retry_worker();
-        stop_wifi_runtime();
-        wifi_shutdown_end(control_taken);
-#endif
-    }
-#ifdef CONFIG_ESP_WIFI_ENABLED
-    /* This guard currently records Wi-Fi crash recovery only. Clear that
-     * Wi-Fi-specific marker before starting the independently fail-closed BLE
-     * foundation. */
-    esp_err_t boot_guard_ret = ESP_OK;
-    if (enabled) {
-        boot_guard_ret = clear_boot_guard();
-    }
-#else
-    const esp_err_t boot_guard_ret = ESP_OK;
-#endif
-    if (boot_guard_ret != ESP_OK) {
-        set_wifi_last_error("boot_guard_unavailable");
-        return boot_guard_ret;
     }
     if (!enabled) {
         return d1l_ble_companion_stop();

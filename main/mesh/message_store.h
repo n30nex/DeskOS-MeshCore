@@ -16,6 +16,7 @@
 #define D1L_MESSAGE_MAX_CHARS D1L_MESSAGE_MAX_BYTES
 #define D1L_MESSAGE_TEXT_LEN (D1L_MESSAGE_MAX_BYTES + 1U)
 #define D1L_MESSAGE_STORE_PERSIST_RETRY_MS 5000U
+#define D1L_MESSAGE_DISPLAY_TIME_VERSION 1U
 
 typedef struct {
     uint32_t seq;
@@ -99,6 +100,11 @@ esp_err_t d1l_message_store_append_channel(
     const char *text, int rssi_dbm, int snr_tenths,
     uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
     uint32_t *out_seq);
+esp_err_t d1l_message_store_append_channel_at(
+    uint64_t channel_id, const char *direction, const char *author,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
+    uint32_t display_timestamp, uint32_t *out_seq);
 /* Zero-wait retained-ring admission for radio terminal paths. out_seq is
  * required; ESP_OK plus a nonzero value means this invocation inserted one
  * visible row. Backend persistence remains owned by the retained-store worker. */
@@ -107,6 +113,13 @@ esp_err_t d1l_message_store_append_channel_deferred(
     const char *text, int rssi_dbm, int snr_tenths,
     uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
     uint32_t *out_seq);
+esp_err_t d1l_message_store_append_channel_deferred_at(
+    uint64_t channel_id, const char *direction, const char *author,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, bool delivered,
+    uint32_t display_timestamp, uint32_t *out_seq);
+uint32_t d1l_message_entry_display_timestamp(
+    const d1l_message_entry_t *entry);
 #if D1L_ENABLE_QUALIFICATION_HOOKS
 esp_err_t d1l_message_store_append_channel_volatile(
     uint64_t channel_id, const char *direction, const char *author,

@@ -82,10 +82,11 @@ CONFIG_ESP_WIFI_RX_BA_WIN=6
 # CONFIG_ESP_WIFI_IRAM_OPT is not set
 # CONFIG_ESP_WIFI_RX_IRAM_OPT is not set
 
-# Compile the low-memory BLE-only NimBLE peripheral foundation. Runtime intent
-# remains off by default in settings, and Wi-Fi/BLE mode switching remains
-# explicit until exact-device coexistence and memory evidence exists.
+# Compile the low-memory NimBLE peripheral foundation alongside Wi-Fi. ESP32-S3
+# software coexistence arbitrates the shared 2.4 GHz radio while both services
+# remain independently user-controlled.
 CONFIG_BT_ENABLED=y
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
 CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y

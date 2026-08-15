@@ -521,22 +521,26 @@ bool d1l_ui_service_sheets_render_observer(
         controller, sheet, "Observer / MQTT", BINDING_CLOSE_OBSERVER,
         D1L_UI_SERVICE_ACTION_CLOSE_OBSERVER);
     char line[160];
-    snprintf(line, sizeof(line), "State %s  queued %lu/%lu  PUBACK %lu",
+    snprintf(line, sizeof(line), "State %s  links %u/%u  queued %lu/%lu",
              d1l_observer_state_name(status->state),
+             (unsigned)status->connected_brokers,
+             (unsigned)status->broker_count,
              (unsigned long)status->queued,
-             (unsigned long)status->queue_capacity,
-             (unsigned long)status->acknowledged_total);
+             (unsigned long)status->queue_capacity);
     lv_obj_t *state = create_label(sheet, line,
                                    status->connected ? 0x20D9ED : 0xFBBF24);
     position_dot(state, 8, 54, 408);
     complete = state && complete;
-    snprintf(line, sizeof(line), "Broker %.152s",
-             status->broker_host[0] ? status->broker_host :
-                                      "not configured");
+    snprintf(line, sizeof(line), "Canada 1 %s  Canada 2 %s  Custom %s",
+             status->primary_connected ? "up" : "down",
+             status->secondary_connected ? "up" : "down",
+             status->custom_configured ?
+                 (status->custom_connected ? "up" : "down") : "off");
     lv_obj_t *broker = create_label(sheet, line, 0xF4F7FB);
     position_dot(broker, 8, 84, 408);
     complete = broker && complete;
-    snprintf(line, sizeof(line), "Topic %s%s",
+    snprintf(line, sizeof(line), "Region %s  Topic %s%s",
+             status->region[0] ? status->region : "---",
              status->topic[0] ? status->topic : "-",
              status->include_location ? "  + location" : "");
     lv_obj_t *topic = create_label(sheet, line, 0xA6B0B7);
@@ -544,7 +548,7 @@ bool d1l_ui_service_sheets_render_observer(
     complete = topic && complete;
     lv_obj_t *privacy = create_label(
         sheet,
-        "Opt-in TLS only. Publishes device health counters and optional manual/companion location; never message text, keys, contacts, or RF forwarding.",
+        "Secure opt-in uplink. Sends received packet payloads and health to both MeshCore Canada brokers; it never forwards RF or exposes private keys.",
         0x4D7FFF);
     position_wrap(privacy, 8, 146, 408);
     complete = privacy && complete;
@@ -557,7 +561,7 @@ bool d1l_ui_service_sheets_render_observer(
     } else {
         lv_obj_t *setup = create_label(
             sheet,
-            "Configure once over local USB with `observer configure`; credentials stay off screen and out of logs.",
+            "Device identity is not ready. Complete setup before enabling the secure Observer uplink.",
             0xFBBF24);
         position_wrap(setup, 8, 238, 408);
         complete = setup && complete;

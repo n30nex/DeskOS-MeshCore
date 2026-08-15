@@ -5382,6 +5382,8 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     }
     memset(view_model, 0, sizeof(*view_model));
     view_model->mode = s_messages_mode;
+    view_model->timezone_offset_minutes =
+        snapshot->timezone_offset_minutes;
     view_model->dm_total = snapshot->dm_conversation_count;
     view_model->dm_unread = snapshot->dm_unread_count;
     view_model->muted_dm_unread = snapshot->muted_dm_unread_count;

@@ -6,9 +6,9 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.7.7** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.7.7` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.7).
+DeskOS **1.7.8** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.7.8` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.8).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -16,6 +16,23 @@ DeskOS is a standalone, dark, touch-first MeshCore client. Firmware is built
 and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
+
+## What 1.7.8 fixes
+
+DeskOS 1.7.8 is a connectivity and screen-response release:
+
+- Observer now sends received packet data to both secure MeshCore Canada
+  brokers using the standard signed identity format and `YKF` topic region;
+- one optional secure custom broker remains available, while MQTT work runs
+  away from the radio and screen paths in bounded queues;
+- Wi-Fi and Bluetooth companion mode can remain on together, with the familiar
+  `123456` pairing PIN;
+- Recent Contacts uses only adverts heard during the current boot and updates
+  from the live radio state;
+- message rows save and show their real local time when a trusted clock is
+  available; older rows without a saved time remain honestly unknown; and
+- Map keeps showing saved tiles while missing tiles retry instead of replacing
+  the whole view with a premature error.
 
 ## What 1.7.7 improves
 
@@ -157,7 +174,8 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.7.1** | Direct repeater login, saved passwords, and touch-first server management | Historical (`v1.7.1`) |
 | **1.7.5** | Reliable remote login, better results/navigation, display wake/lock, and faster cached maps | Historical (`v1.7.5`) |
 | **1.7.6** | Guided bridge/SD installation and adjustable local display time | Historical (`v1.7.6`) |
-| **1.7.7** | Faster verified-advert admission and Contacts rendering | Current (`v1.7.7`) |
+| **1.7.7** | Faster verified-advert admission and Contacts rendering | Historical (`v1.7.7`) |
+| **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Current (`v1.7.8`) |
 
 ## Device UI
 

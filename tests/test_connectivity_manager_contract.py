@@ -38,7 +38,7 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "wifi_consecutive_crash_boots" in header
     assert "wifi_crash_loop_detected" in header
     assert "wifi_last_active_subsystem" in header
-    assert '"offline_first_one_companion_radio"' in source
+    assert '"wifi_ble_shared_radio"' in source
     assert "settings.wifi_enabled = true" in source
     assert "settings.ble_companion_enabled = enabled" in source
     assert "if (enabled && !build_wifi_enabled())" in source
@@ -66,6 +66,18 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "d1l_ble_companion_start()" in source
     assert "d1l_ble_companion_stop()" in source
     assert "d1l_ble_companion_status(&ble_status)" in source
+    wifi_toggle = source[
+        source.index("esp_err_t d1l_connectivity_set_wifi_enabled"):
+        source.index("esp_err_t d1l_connectivity_set_ble_enabled")
+    ]
+    ble_toggle = source[
+        source.index("esp_err_t d1l_connectivity_set_ble_enabled"):
+        source.index("esp_err_t d1l_connectivity_ble_begin_pairing")
+    ]
+    assert "ble_companion_enabled = false" not in wifi_toggle
+    assert "wifi_enabled = false" not in ble_toggle
+    assert "d1l_ble_companion_stop" not in wifi_toggle
+    assert "stop_wifi_runtime" not in ble_toggle
     assert "d1l_settings_save_wifi_profile(ssid, password)" in source
     assert "d1l_settings_clear_wifi_profile()" in source
     assert "ESP_NETIF_DEFAULT_WIFI_STA()" in source
@@ -242,7 +254,7 @@ def test_wifi_driver_teardown_is_bounded_by_network_quiesce():
     ]
     disable_path = disable[
         disable.index("if (!enabled)"):
-        disable.index("settings.ble_companion_enabled = false")
+        disable.index("ret = mark_boot_guard_active")
     ]
     ble = source[
         source.index("esp_err_t d1l_connectivity_set_ble_enabled"):
@@ -275,10 +287,9 @@ def test_wifi_driver_teardown_is_bounded_by_network_quiesce():
     assert save_failure.index("wifi_shutdown_end(") < save_failure.index(
         "return ret;"
     )
-    ble_stop_index = ble.index("stop_wifi_runtime()")
-    assert ble.index("wifi_shutdown_begin(") < ble.index(
-        "d1l_settings_update_fields("
-    ) < ble_stop_index < ble.index("wifi_shutdown_end(", ble_stop_index)
+    assert "stop_wifi_runtime()" not in ble
+    assert "wifi_shutdown_begin(" not in ble
+    assert "wifi_shutdown_end(" not in ble
     assert prepare_reboot.index("wifi_shutdown_begin(") < prepare_reboot.index(
         "esp_wifi_stop()"
     ) < prepare_reboot.index("wifi_shutdown_end(")
@@ -454,7 +465,7 @@ def test_connectivity_boot_guard_is_scoped_checksummed_and_not_written_from_even
     ]
     assert "clear_boot_guard()" in disable
     disable_path = disable[disable.index("if (!enabled)"):disable.index(
-        "settings.ble_companion_enabled = false"
+        "ret = mark_boot_guard_active"
     )]
     assert disable_path.index("d1l_settings_update_fields(") < disable_path.index(
         "stop_wifi_runtime()"
@@ -463,9 +474,8 @@ def test_connectivity_boot_guard_is_scoped_checksummed_and_not_written_from_even
         source.index("esp_err_t d1l_connectivity_set_ble_enabled"):
         source.index("esp_err_t d1l_connectivity_save_wifi_profile")
     ]
-    assert ble_toggle.index("stop_wifi_runtime()") < ble_toggle.index(
-        "clear_boot_guard()"
-    )
+    assert "stop_wifi_runtime()" not in ble_toggle
+    assert "clear_boot_guard()" not in ble_toggle
     assert "mark_boot_guard_active" not in ble_toggle
     clear_profile = source[source.index("esp_err_t d1l_connectivity_clear_wifi_profile"):]
     assert "d1l_connectivity_wifi_disconnect()" in clear_profile

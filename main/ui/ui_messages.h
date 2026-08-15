@@ -34,6 +34,7 @@ typedef struct {
     uint32_t dm_unread;
     uint32_t muted_dm_unread;
     uint32_t last_channel_read_seq;
+    int16_t timezone_offset_minutes;
     d1l_message_entry_t public_rows[D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS];
     size_t public_row_count;
     uint64_t active_channel_id;

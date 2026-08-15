@@ -12,7 +12,8 @@
 | **1.7.1** | Direct repeater login, optional device-local passwords, command dashboard, and visible request results | Historical (`v1.7.1`) |
 | **1.7.5** | Flood-delivered login, human-readable neighbours, manager return navigation, ten-minute lock, top-button wake/advert, and faster cached maps | Historical (`v1.7.5`) |
 | **1.7.6** | Guided bridge/SD installation and adjustable local display time | Historical (`v1.7.6`) |
-| **1.7.7** | Faster verified-advert admission and Contacts rendering | Current (`v1.7.7`) |
+| **1.7.7** | Faster verified-advert admission and Contacts rendering | Historical (`v1.7.7`) |
+| **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Current (`v1.7.8`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -115,3 +116,11 @@ DeskOS 1.7.7 publishes verified contact updates to the UI before ambient SD
 persistence, then coalesces those writes through the existing retained-store
 worker. User-initiated contact edits remain synchronous. Heard-node queries
 also use an efficient library sort while retaining the same filters and order.
+
+## 1.7.8: connectivity and screen-response repair
+
+DeskOS 1.7.8 replaces the single status-only MQTT placeholder with the standard
+two-broker MeshCore Canada packet uplink, using signed identity tokens and a
+bounded handoff away from the radio/UI task. Wi-Fi and Bluetooth can coexist,
+Recent Contacts reflects the current boot, map retries remain progressive, and
+new channel messages retain a truthful local display time.

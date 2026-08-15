@@ -1,11 +1,11 @@
-# MeshCore DeskOS D1L 1.7.7 User Guide
+# MeshCore DeskOS D1L 1.7.8 User Guide
 
 This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.7.7 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.7.8 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -266,9 +266,12 @@ filters, search, detail and raw preview. The event terminal provides a bounded
 structured log without credentials or remote command secrets. Basic board,
 radio, storage, Wi-Fi, Map and crash state is available under Diagnostics.
 
-Observer is optional and uses `mqtts://`, TLS, QoS 1 and a bounded queue. It
-may publish device health and explicitly enabled location state. It never
-publishes message text, keys, contacts or forwarded RF traffic.
+Observer is optional and uses secure WSS/MQTT TLS, QoS 1, and bounded queues.
+When enabled, it publishes received packet payloads and health to the redundant
+`mqtt1.meshcore.ca` and `mqtt2.meshcore.ca` endpoints under the selected
+three-letter region (`YKF` by default). **Observer status** shows each link.
+An optional secure custom broker can be added over USB. The D1L does not repeat
+traffic on RF, and private keys and saved contacts are never published.
 
 ## Useful USB diagnostics
 
@@ -320,7 +323,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.7.7 download and
+Use the guided browser flasher or the published DeskOS D1L 1.7.8 download and
 follow its `START_HERE.md`.
 On Linux, select the D1L only through the stable by-id path:
 

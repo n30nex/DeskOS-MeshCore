@@ -36,13 +36,23 @@ def test_observer_is_tls_qos1_bounded_and_privacy_scoped():
     observer = read("main/comms/observer_manager.c")
     ui = read("main/ui/ui_service_sheets.c")
     assert 'strncmp(uri, "mqtts://"' in observer
+    assert 'strncmp(uri, "wss://"' in observer
+    assert 'D1L_OBSERVER_PRIMARY_URI "wss://mqtt1.meshcore.ca:443/mqtt"' in observer
+    assert 'D1L_OBSERVER_SECONDARY_URI "wss://mqtt2.meshcore.ca:443/mqtt"' in observer
+    assert '"v1_%s"' in observer
+    assert '"{\\"alg\\":\\"Ed25519\\",\\"typ\\":\\"JWT\\"}"' in observer
+    assert '"meshcore/%s/%s/%s"' in observer
     assert ".verification.crt_bundle_attach = esp_crt_bundle_attach" in observer
     assert "esp_mqtt_client_enqueue(" in observer
-    assert "s_client, topic, payload, 0, 1, 0, true" in observer
+    assert "endpoint->client, topic, payload, 0, 1," in observer
     assert "MQTT_EVENT_PUBLISHED" in observer
+    assert "inflight_sequence" in observer
+    assert "mark_payload_acknowledged" in observer
     assert "D1L_OBSERVER_QUEUE_CAPACITY" in observer
+    assert "D1L_OBSERVER_PACKET_QUEUE_CAPACITY" in observer
+    assert "d1l_observer_enqueue_packet" in observer
     assert "dropped_oldest" in observer
-    assert "never message text, keys, contacts, or RF forwarding" in ui
+    assert "never forwards RF or exposes private keys" in ui
 
 
 def test_signed_update_is_dual_slot_verified_and_anti_rollback():

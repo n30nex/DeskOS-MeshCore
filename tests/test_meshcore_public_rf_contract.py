@@ -155,7 +155,7 @@ def test_public_tx_history_retries_nonblocking_exact_terminal_stages_before_rele
     assert "s_pending_channel_route_history_admitted =" in history
     assert "D1L_MESHCORE_PUBLIC_HISTORY_RETRY_INTERVAL_MS" in history
     assert "D1L_MESHCORE_PUBLIC_HISTORY_RETRY_TIMEOUT_MS" in source
-    assert "d1l_message_store_append_channel_deferred(" in message
+    assert "d1l_message_store_append_channel_deferred_at(" in message
     assert "d1l_message_store_append_channel(" not in message
     assert "reconcile_channel_messages(" not in message
     assert "public_tx_history_failures" in degraded_handler

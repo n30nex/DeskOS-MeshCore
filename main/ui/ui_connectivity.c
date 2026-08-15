@@ -107,7 +107,7 @@ void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
                  "Disable" : "Enable");
     snprintf(out_view->production_note, sizeof(out_view->production_note), "%s",
              runtime_available && input->protocol_running ?
-                 "Using the MeshCore connection. Wi-Fi turns off while Bluetooth is active." :
+                 "Using the MeshCore connection alongside Wi-Fi." :
                  "USB stays available for recovery and diagnostics.");
     out_view->pairing_available =
         runtime_available && input->companion_enabled;

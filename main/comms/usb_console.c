@@ -8270,14 +8270,26 @@ static void print_observer_status(const char *command)
            bool_json(status.enabled), bool_json(status.connected),
            bool_json(status.include_location));
     print_json_string(status.broker_host);
+    printf(",\"region\":");
+    print_json_string(status.region);
     printf(",\"topic\":");
     print_json_string(status.topic);
+    printf(",\"brokers\":{\"expected\":%u,\"connected\":%u,"
+           "\"meshcore_ca_1\":%s,\"meshcore_ca_2\":%s,"
+           "\"custom_configured\":%s,\"custom_connected\":%s}",
+           (unsigned)status.broker_count,
+           (unsigned)status.connected_brokers,
+           bool_json(status.primary_connected),
+           bool_json(status.secondary_connected),
+           bool_json(status.custom_configured),
+           bool_json(status.custom_connected));
     printf(",\"queue\":{\"count\":%lu,\"capacity\":%lu,"
            "\"queued_total\":%lu,\"published_total\":%lu,"
            "\"acknowledged_total\":%lu,\"dropped_oldest\":%lu},"
            "\"reconnects\":%lu,\"last_message_id\":%lu,"
            "\"last_error\":\"%s\",\"tls_required\":true,"
            "\"broker_identity_verified\":true,\"credentials_redacted\":true,"
+           "\"packet_payloads_uploaded\":true,"
            "\"message_text_uploaded\":false,\"rf_forwarding\":false}\n",
            (unsigned long)status.queued,
            (unsigned long)status.queue_capacity,
@@ -8299,7 +8311,7 @@ static void cmd_observer_configure(const char *line, bool authenticated,
     char password[D1L_OBSERVER_PASSWORD_LEN] = {0};
     int consumed = -1;
     const int parsed = authenticated ?
-        sscanf(line, "observer configure-auth %191s %95s %63s %95s %n",
+        sscanf(line, "observer configure-auth %191s %95s %71s %511s %n",
                uri, topic, username, password, &consumed) :
         sscanf(line, include_location ?
                "observer configure-location %191s %95s %n" :
@@ -8311,8 +8323,8 @@ static void cmd_observer_configure(const char *line, bool authenticated,
         wipe_console_bytes(password, sizeof(password));
         err_result("observer configure", "INVALID_ARGUMENT",
                    authenticated ?
-                   "usage: observer configure-auth <mqtts-uri> <topic> <username> <password>" :
-                   "usage: observer configure[-location] <mqtts-uri> <topic>");
+                   "usage: observer configure-auth <secure-uri> <topic> <username> <password>" :
+                   "usage: observer configure[-location] <secure-uri> <topic>");
         return;
     }
     const esp_err_t ret = d1l_observer_configure(
@@ -8322,7 +8334,7 @@ static void cmd_observer_configure(const char *line, bool authenticated,
     wipe_console_bytes(password, sizeof(password));
     if (ret != ESP_OK) {
         err_result("observer configure", esp_err_to_name(ret),
-                   "require mqtts:// URI, bounded topic, and printable credentials");
+                   "require wss:// or mqtts:// URI, bounded topic, and printable credentials");
         return;
     }
     print_observer_status("observer configure");
@@ -8334,9 +8346,8 @@ static void cmd_observer_set_enabled(bool enabled)
     if (ret != ESP_OK) {
         err_result(enabled ? "observer on" : "observer off",
                    esp_err_to_name(ret),
-                   enabled ?
-                   "save a TLS broker configuration before enabling uploads" :
-                   "could not persist observer disabled state");
+                   enabled ? "device identity is not ready" :
+                             "could not persist observer disabled state");
         return;
     }
     print_observer_status(enabled ? "observer on" : "observer off");
@@ -8351,6 +8362,25 @@ static void cmd_observer_clear(void)
         return;
     }
     print_observer_status("observer clear");
+}
+
+static void cmd_observer_region(const char *line)
+{
+    char region[D1L_OBSERVER_REGION_LEN] = {0};
+    int consumed = -1;
+    if (sscanf(line, "observer region %3s %n", region, &consumed) != 1 ||
+        consumed < 0 || line[consumed] != '\0') {
+        err_result("observer region", "INVALID_ARGUMENT",
+                   "usage: observer region <three uppercase letters>");
+        return;
+    }
+    const esp_err_t ret = d1l_observer_set_region(region);
+    if (ret != ESP_OK) {
+        err_result("observer region", esp_err_to_name(ret),
+                   "region must be a three-letter uppercase IATA code");
+        return;
+    }
+    print_observer_status("observer region");
 }
 
 static void cmd_update_status(void)
@@ -9044,10 +9074,11 @@ static void cmd_help(void)
            "\"wifi delete <1-based-index>\",\"wifi connect\",\"wifi clear\","
            "\"wifi on\",\"wifi off\",\"ble status\","
            "\"ble on\",\"ble off\",\"observer status\",\"observer configure "
-           "<mqtts-uri> <topic>\",\"observer configure-location "
-           "<mqtts-uri> <topic>\",\"observer configure-auth "
-           "<mqtts-uri> <topic> <username> <password>\","
-           "\"observer on\",\"observer off\",\"observer clear\","
+           "<secure-uri> <topic>\",\"observer configure-location "
+           "<secure-uri> <topic>\",\"observer configure-auth "
+           "<secure-uri> <topic> <username> <password>\","
+           "\"observer region <IATA>\",\"observer on\",\"observer off\","
+           "\"observer clear\","
            "\"logs\",\"logs clear CONFIRM-CLEAR-LOGS\","
            "\"terminal status\",\"terminal level <error|warn|info|debug>\","
            "\"update status\",\"update install CONFIRM-SIGNED-UPDATE\","
@@ -9656,6 +9687,9 @@ static void handle_line(const d1l_usb_command_view_t *command)
     } else if (strncmp(line, "observer configure ",
                        strlen("observer configure ")) == 0) {
         cmd_observer_configure(line, false, false);
+    } else if (strncmp(line, "observer region ",
+                       strlen("observer region ")) == 0) {
+        cmd_observer_region(line);
     } else if (strcmp(line, "observer on") == 0) {
         cmd_observer_set_enabled(true);
     } else if (strcmp(line, "observer off") == 0) {
