@@ -136,7 +136,7 @@
     "main/mesh/advert_data.c": "b046f34629d8f04fbf680cc8b517958162c5401acb991d5bb3231c75f3ac6818",
     "main/mesh/meshcore_lifetime.h": "b480f554ac3979e3caefdd1d815a334e0de47bddc8f21c7ac8305d4643fba535",
     "main/mesh/meshcore_service.c": "60cd9a884a0f897bcdd8f5321354d32fc7c317f3cbbd13476e10372c20af409d",
-    "main/mesh/node_store.c": "78a787f3a085937c6a0fa9c327d5260927ad3c9892cd219a63955e2314680292",
+    "main/mesh/node_store.c": "e4ca37a8f0969f4a4a80d1b9748e6849de94326ae172557b1d0b1bb7292a5b2c",
     "main/mesh/node_store.h": "4182df086de1b0b925a3f84f6d41dd4bf582ea5ecbaa23e46183d119461d70a1",
     "main/platform/time_service.c": "ef1602a22a9cc97580877bd42867ba04524e5a5697c8e14f7e955c268badc7b9",
     "main/platform/time_service.h": "07d19b51dda5c0c18bd61b87b577fa402ce5c8befc5b6f421a15019d5e01b0b0",

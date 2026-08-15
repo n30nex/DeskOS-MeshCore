@@ -1,11 +1,11 @@
-# MeshCore DeskOS D1L 1.7.6 User Guide
+# MeshCore DeskOS D1L 1.7.7 User Guide
 
 This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.7.6 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.7.7 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -320,7 +320,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.7.6 download and
+Use the guided browser flasher or the published DeskOS D1L 1.7.7 download and
 follow its `START_HERE.md`.
 On Linux, select the D1L only through the stable by-id path:
 

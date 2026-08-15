@@ -1553,17 +1553,8 @@ static void test_d1l_equal_exact_key_contact_retry(void)
     assert(!stale);
     assert(!d1l_contact_store_find_by_public_key(key, NULL));
 
-    mock_nvs_fail_next_set(ESP_FAIL);
     d1l_meshcore_advert_admission_receipt_t receipt =
         admit_verified_advert(fingerprint, key, "Retry Peer", 300U, false, 0, 0);
-    assert(receipt.outcome ==
-           D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED);
-    assert(receipt.contact_store_error == ESP_FAIL);
-    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
-    assert(!d1l_contact_store_find_by_public_key(key, NULL));
-
-    receipt = admit_verified_advert(fingerprint, key, "Retry Peer", 300U,
-                                    false, 0, 0);
     assert(receipt.outcome ==
            D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED);
     assert(receipt.contact_store_error == ESP_OK);
@@ -1571,6 +1562,12 @@ static void test_d1l_equal_exact_key_contact_retry(void)
     d1l_contact_entry_t contact = {0};
     assert(d1l_contact_store_find_by_public_key(key, &contact));
     assert(contact.signed_advert_timestamp == 300U);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    mock_nvs_fail_next_set(ESP_FAIL);
+    assert(d1l_contact_store_flush() == ESP_FAIL);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    assert(d1l_contact_store_find_by_public_key(key, &contact));
+    assert(d1l_contact_store_flush() == ESP_OK);
 
     receipt = admit_verified_advert(fingerprint, key, "Retry Peer", 300U,
                                     false, 0, 0);
@@ -1740,8 +1737,8 @@ static void test_d1l_distinct_equal_timestamp_hash_miss_reaches_replay(void)
     assert(d1l_meshcore_packet_hash_cache_remember(&cache, distinct_hash));
 }
 
-/* d1l_contact_retry_failure_hash_not_remembered */
-static void test_d1l_contact_retry_failure_hash_not_remembered(void)
+/* d1l_deferred_contact_persistence_keeps_admission_cacheable */
+static void test_d1l_deferred_contact_persistence_keeps_admission_cacheable(void)
 {
     initialize_admission_stores();
     char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
@@ -1754,16 +1751,21 @@ static void test_d1l_contact_retry_failure_hash_not_remembered(void)
                false, 0, 0, &stale) == ESP_OK);
     assert(!stale);
 
-    mock_nvs_fail_next_set(ESP_FAIL);
-    const d1l_meshcore_advert_admission_receipt_t failed =
+    const d1l_meshcore_advert_admission_receipt_t accepted =
         admit_verified_advert(fingerprint, key, "Retry", 700U, false, 0, 0);
-    assert(failed.outcome ==
-           D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED);
-    assert(!d1l_meshcore_advert_admission_receipt_cacheable(&failed));
+    assert(accepted.outcome ==
+           D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED);
+    assert(d1l_meshcore_advert_admission_receipt_cacheable(&accepted));
+    assert(d1l_contact_store_stats().persistence_dirty);
     d1l_meshcore_packet_hash_cache_t cache = {0};
     uint8_t hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
     calculate_advert_hash(4U, hash);
-    assert(!d1l_meshcore_packet_hash_cache_contains(&cache, hash));
+    assert(d1l_meshcore_packet_hash_cache_remember(&cache, hash));
+    assert(d1l_meshcore_packet_hash_cache_contains(&cache, hash));
+    mock_nvs_fail_next_set(ESP_FAIL);
+    assert(d1l_contact_store_flush() == ESP_FAIL);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    assert(d1l_contact_store_flush() == ESP_OK);
 }
 
 /* d1l_accepted_contact_failure_hash_not_remembered */
@@ -1916,7 +1918,7 @@ static void test_verified_contact_promotes_placeholder_without_losing_preference
     assert(d1l_contact_store_stats().count == 1U);
 }
 
-static void test_verified_contact_refuses_collision_and_rolls_back_nvs_failure(void)
+static void test_verified_contact_refuses_collision_and_retries_deferred_persistence(void)
 {
     mock_nvs_reset();
     assert(d1l_contact_store_init() == ESP_OK);
@@ -1929,23 +1931,35 @@ static void test_verified_contact_refuses_collision_and_rolls_back_nvs_failure(v
         D1L_CONTACT_VERIFIED_ADVERT_NONE;
     assert(d1l_contact_store_upsert_verified_advert(
                fingerprint, &node, &result, NULL) == ESP_OK);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    assert(d1l_contact_store_flush() == ESP_OK);
 
     d1l_contact_entry_t baseline = {0};
     assert(d1l_contact_store_find_by_fingerprint(fingerprint, &baseline));
-    const d1l_contact_store_stats_t baseline_stats = d1l_contact_store_stats();
     node = make_verified_node(key, "Failed Update", "repeater");
-    mock_nvs_fail_next_set(ESP_FAIL);
     result = D1L_CONTACT_VERIFIED_ADVERT_CREATED;
     assert(d1l_contact_store_upsert_verified_advert(
-               fingerprint, &node, &result, NULL) == ESP_FAIL);
-    assert(result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
+               fingerprint, &node, &result, NULL) == ESP_OK);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_UPDATED);
     d1l_contact_entry_t after = {0};
     assert(d1l_contact_store_find_by_fingerprint(fingerprint, &after));
-    assert(memcmp(&after, &baseline, sizeof(after)) == 0);
-    assert_contact_stats_equal(d1l_contact_store_stats(), baseline_stats);
+    assert(strcmp(after.heard_name, "Failed Update") == 0);
+    assert(strcmp(after.type, "repeater") == 0);
+    assert(memcmp(&after, &baseline, sizeof(after)) != 0);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    mock_nvs_fail_next_set(ESP_FAIL);
+    assert(d1l_contact_store_flush() == ESP_FAIL);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    d1l_contact_entry_t retained_after_failure = {0};
+    assert(d1l_contact_store_find_by_fingerprint(
+        fingerprint, &retained_after_failure));
+    assert(memcmp(&retained_after_failure, &after, sizeof(after)) == 0);
+    assert(d1l_contact_store_flush() == ESP_OK);
     assert(d1l_contact_store_init() == ESP_OK);
     assert(d1l_contact_store_find_by_fingerprint(fingerprint, &after));
-    assert(memcmp(&after, &baseline, sizeof(after)) == 0);
+    assert(memcmp(&after, &retained_after_failure, sizeof(after)) == 0);
+    baseline = after;
+    const d1l_contact_store_stats_t baseline_stats = d1l_contact_store_stats();
 
     char colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
     copy_field(colliding_key, sizeof(colliding_key), key);
@@ -1969,18 +1983,19 @@ static void test_verified_contact_refuses_collision_and_rolls_back_nvs_failure(v
     make_public_key(retry_key, 4U);
     fingerprint_from_key(retry_fingerprint, retry_key);
     node = make_verified_node(retry_key, "Retry", "sensor");
-    mock_nvs_fail_next_set(ESP_FAIL);
     result = D1L_CONTACT_VERIFIED_ADVERT_UPDATED;
-    assert(d1l_contact_store_upsert_verified_advert(
-               retry_fingerprint, &node, &result, NULL) == ESP_FAIL);
-    assert(result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
-    assert(!d1l_contact_store_find_by_public_key(retry_key, NULL));
-    assert_contact_stats_equal(d1l_contact_store_stats(), baseline_stats);
-    assert(d1l_contact_store_init() == ESP_OK);
-    result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
     assert(d1l_contact_store_upsert_verified_advert(
                retry_fingerprint, &node, &result, NULL) == ESP_OK);
     assert(result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
+    assert(d1l_contact_store_find_by_public_key(retry_key, NULL));
+    assert(d1l_contact_store_stats().persistence_dirty);
+    mock_nvs_fail_next_set(ESP_FAIL);
+    assert(d1l_contact_store_flush() == ESP_FAIL);
+    assert(d1l_contact_store_stats().persistence_dirty);
+    assert(d1l_contact_store_find_by_public_key(retry_key, NULL));
+    assert(d1l_contact_store_flush() == ESP_OK);
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_find_by_public_key(retry_key, NULL));
 }
 
 static void test_verified_contact_full_store_never_evicts(void)
@@ -2674,14 +2689,14 @@ int main(void)
     test_d1l_full_key_prefix_collision_precedes_replay();
     test_d1l_advert_accepted_terminal_hash_remembered();
     test_d1l_distinct_equal_timestamp_hash_miss_reaches_replay();
-    test_d1l_contact_retry_failure_hash_not_remembered();
+    test_d1l_deferred_contact_persistence_keeps_admission_cacheable();
     test_d1l_accepted_contact_failure_hash_not_remembered();
     test_d1l_contact_retry_success_hash_remembered();
     test_contact_nvs_failure_rolls_back_and_retry_succeeds();
     test_prepare_after_concurrent_delete_fails_closed();
     test_verified_contact_create_reload_update_preserves_preferences();
     test_verified_contact_promotes_placeholder_without_losing_preferences();
-    test_verified_contact_refuses_collision_and_rolls_back_nvs_failure();
+    test_verified_contact_refuses_collision_and_retries_deferred_persistence();
     test_verified_contact_full_store_never_evicts();
     test_favorite_placeholders_are_never_evicted();
     test_uri_import_promotes_placeholder_and_preserves_preferences();

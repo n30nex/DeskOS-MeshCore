@@ -10,6 +10,16 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+def test_node_query_uses_bounded_library_sort_instead_of_quadratic_selection():
+    source = read("main/mesh/node_store.c")
+    body = source.split("size_t d1l_node_store_query", 1)[1].split(
+        "uint32_t d1l_node_store_marker_generation", 1
+    )[0]
+
+    assert "qsort(s_query_scratch" in body
+    assert "bool used[D1L_NODE_STORE_CAPACITY]" not in body
+
+
 def test_heard_node_store_is_bounded_sd_primary_and_degrades_without_nvs_history():
     header = read("main/mesh/node_store.h")
     source = read("main/mesh/node_store.c")

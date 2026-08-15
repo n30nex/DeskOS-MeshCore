@@ -1853,7 +1853,6 @@ esp_err_t d1l_contact_store_upsert_verified_advert(
         result = D1L_CONTACT_VERIFIED_ADVERT_CREATED;
     }
 
-    capture_rollback_state();
     const esp_err_t revision_ret = reserve_sequenced_mutation_locked();
     if (revision_ret != ESP_OK) {
         d1l_store_lock_give(&s_store_lock);
@@ -1909,15 +1908,16 @@ esp_err_t d1l_contact_store_upsert_verified_advert(
         sanitize_ascii(entry->type, sizeof(entry->type), "unknown");
     }
 
-    const esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
-    if (ret == ESP_OK) {
-        *out_result = result;
-        if (out_entry) {
-            *out_entry = s_entries[index];
-        }
+    /* Signed adverts are ambient traffic, so publish the verified identity to
+     * readers immediately and let the retained-store worker coalesce the SD
+     * write. Explicit user edits still use synchronous persistence. */
+    mark_deferred_persistence_locked(now_ms);
+    *out_result = result;
+    if (out_entry) {
+        *out_entry = s_entries[index];
     }
     d1l_store_lock_give(&s_store_lock);
-    return ret;
+    return ESP_OK;
 }
 
 esp_err_t d1l_contact_store_import_uri(
