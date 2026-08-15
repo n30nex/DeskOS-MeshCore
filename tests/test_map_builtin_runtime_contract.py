@@ -518,8 +518,8 @@ def test_https_download_waits_for_valid_sntp_time_and_remains_cancelable():
     )
     clock = body(
         time_service,
+        "static esp_err_t wait_for_time",
         "esp_err_t d1l_time_service_wait_for_certificate_time",
-        "esp_err_t d1l_time_service_set_companion_time",
     )
     run = body(
         service,

@@ -52,6 +52,10 @@ def test_observer_is_tls_qos1_bounded_and_privacy_scoped():
     assert "D1L_OBSERVER_PACKET_QUEUE_CAPACITY" in observer
     assert "d1l_observer_enqueue_packet" in observer
     assert "dropped_oldest" in observer
+    assert "xTaskCreateWithCaps(observer_task" in observer
+    assert "MALLOC_CAP_SPIRAM" in observer
+    assert "d1l_time_service_wait_for_network_time(" in observer
+    assert "observer_network_continue" in observer
     assert "never forwards RF or exposes private keys" in ui
 
 

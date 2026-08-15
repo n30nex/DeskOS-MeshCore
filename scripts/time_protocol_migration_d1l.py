@@ -100,11 +100,11 @@ PROTOCOL_POLICY_SOURCE_BLOBS = (
     ),
     (
         "main/platform/time_service.h",
-        "e754598c2d9d05a41f70433a3d97200b58e538ea",
+        "bfaae401cde345a5da00386f1d1456aa2d34c57d",
     ),
     (
         "main/platform/time_service.c",
-        "3d8ece05655fb769309310e0ed69c6ea41c71fb0",
+        "060aa73c08192726245ac52dea65bee14a8ba257",
     ),
     (
         "main/app/settings_protocol_migration.h",

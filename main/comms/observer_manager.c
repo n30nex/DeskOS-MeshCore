@@ -12,9 +12,11 @@
 #include "ed_25519.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mesh/meshcore_service.h"
@@ -830,6 +832,26 @@ static bool observer_enabled(void)
         d1l_release_feature_available(D1L_RELEASE_FEATURE_OBSERVER_MQTT);
 }
 
+static bool observer_network_continue(void *context)
+{
+    (void)context;
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_connectivity_status(&connectivity);
+    return observer_enabled() && connectivity.wifi_connected;
+}
+
+static void note_endpoint_error(esp_err_t error, uint32_t retry_at_ms)
+{
+    portENTER_CRITICAL(&s_lock);
+    const uint8_t active_mask = active_endpoint_mask_locked();
+    for (uint8_t i = 0U; i < D1L_OBSERVER_BROKER_COUNT; ++i) {
+        if ((active_mask & (1U << i)) == 0U) continue;
+        s_endpoints[i].last_error = error;
+        s_endpoints[i].backoff_until_ms = retry_at_ms;
+    }
+    portEXIT_CRITICAL(&s_lock);
+}
+
 static void enqueue_status_payload(void)
 {
     char timestamp[32] = {0};
@@ -1057,6 +1079,17 @@ static void observer_task(void *argument)
             vTaskDelay(pdMS_TO_TICKS(D1L_OBSERVER_LOOP_MS));
             continue;
         }
+        const esp_err_t time_ret = d1l_time_service_wait_for_network_time(
+            D1L_TIME_TLS_WAIT_TIMEOUT_MS, D1L_TIME_TLS_WAIT_SLICE_MS,
+            observer_network_continue, NULL);
+        if (time_ret != ESP_OK) {
+            stop_all_clients();
+            note_endpoint_error(time_ret,
+                                now_ms + D1L_OBSERVER_BACKOFF_MS);
+            refresh_aggregate_state(enabled, connectivity.wifi_connected);
+            vTaskDelay(pdMS_TO_TICKS(D1L_OBSERVER_LOOP_MS));
+            continue;
+        }
         (void)build_next_packet_payload();
         portENTER_CRITICAL(&s_lock);
         const uint8_t active_mask = active_endpoint_mask_locked();
@@ -1146,8 +1179,9 @@ esp_err_t d1l_observer_manager_init(void)
     if (load_ret != ESP_OK || identity_ret != ESP_OK) {
         return load_ret != ESP_OK ? load_ret : identity_ret;
     }
-    if (xTaskCreate(observer_task, "d1l_observer",
-                    D1L_OBSERVER_TASK_STACK_BYTES, NULL, 3, &s_task) !=
+    if (xTaskCreateWithCaps(observer_task, "d1l_observer",
+                            D1L_OBSERVER_TASK_STACK_BYTES, NULL, 3, &s_task,
+                            MALLOC_CAP_SPIRAM) !=
         pdPASS) {
         return ESP_ERR_NO_MEM;
     }

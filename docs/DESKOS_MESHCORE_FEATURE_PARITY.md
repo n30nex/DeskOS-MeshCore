@@ -64,7 +64,7 @@ State meanings:
 | Radio/device settings | Region/preset, frequency, bandwidth, SF, CR, power, RX boost, display, and time settings | Complete |
 | Storage/history | SD is primary for retained data; missing media produces visible live-only RF chat without silently moving history to default NVS | Complete |
 | Packet/event diagnostics | Bounded packet detail/raw preview, event log, storage/Map/Wi-Fi/radio/crash state, and secret redaction | Complete |
-| Observer integration | Opt-in dual secure MeshCore Canada packet/health uplink plus one custom broker; bounded off-radio queue, no RF forwarding or private-key export | Complete (1.7.8) |
+| Observer integration | Opt-in dual secure MeshCore Canada packet/health uplink plus one custom broker; bounded off-radio queue, no RF forwarding or private-key export | Complete (1.7.9) |
 | Production screenshot/support export | Read-only 480x480 RGB565 framebuffer capture over the USB console; no RF transmit, storage format, test hook, or qualification mode | Complete (#323) |
 | Accessibility/language | 480x480 touch layout, dark contrast, plain labels, and on-device keyboard; the current firmware is English-only | Accepted D1L adaptation; language expansion is RC3 |
 
