@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
     from scripts.verify_checksums import is_link_or_reparse, sha256_file
 
 
-REPOSITORY = "n30nex/SIGUI"
+REPOSITORY = "n30nex/DeskOS-MeshCore"
 WORKFLOW_NAME = "d1l-ci"
 WORKFLOW_PATH = ".github/workflows/d1l-ci.yml"
 RELEASE_BRANCH = "main"

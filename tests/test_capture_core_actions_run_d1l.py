@@ -29,7 +29,7 @@ def api_fixture(*, unsafe: bool = False):
         "source_commit": COMMIT,
         "workflow_run_id": RUN_ID,
         "workflow_run_attempt": RUN_ATTEMPT,
-        "repository": "n30nex/SIGUI",
+        "repository": "n30nex/DeskOS-MeshCore",
         "workflow": "d1l-ci",
         "event": "push",
         "include_sd_bridge": True,
@@ -79,7 +79,7 @@ def api_fixture(*, unsafe: bool = False):
         "path": ".github/workflows/d1l-ci.yml",
         "name": "d1l-ci",
         "run_attempt": int(RUN_ATTEMPT),
-        "repository": {"full_name": "n30nex/SIGUI"},
+        "repository": {"full_name": "n30nex/DeskOS-MeshCore"},
     }
     artifacts = {"total_count": len(rows), "artifacts": rows}
     return run, artifacts, archives

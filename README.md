@@ -32,7 +32,9 @@ DeskOS 1.7.8 is a connectivity and screen-response release:
 - message rows save and show their real local time when a trusted clock is
   available; older rows without a saved time remain honestly unknown; and
 - Map keeps showing saved tiles while missing tiles retry instead of replacing
-  the whole view with a premature error.
+  the whole view with a premature error; and
+- a deliberate top-button double press sends one flood advert, with a one-minute
+  cooldown to prevent accidental repeats.
 
 ## What 1.7.7 improves
 

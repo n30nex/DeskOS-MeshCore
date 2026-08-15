@@ -19,6 +19,8 @@ D1L.
 - **Message time:** newly received and sent channel messages show a real local
   clock time when trusted time is available.
 - **Progressive Map:** saved tiles remain visible while missing tiles retry.
+- **Button flood advert:** a deliberate top-button double press sends one
+  wide-area advert, with a one-minute cooldown against accidental repeats.
 
 ## Safety
 
