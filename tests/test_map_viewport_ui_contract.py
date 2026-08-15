@@ -491,6 +491,15 @@ def test_map_ui_releases_before_covers_and_automation_is_fail_closed():
         "d1l_ui_modal_show(obj);"
     )
 
+    show_map_modal = function_body(
+        source, "static void show_map_modal", "static void layout_content_for_active_tab"
+    )
+    assert "d1l_ui_map_viewport_prepare_cover();" in show_map_modal
+    assert "d1l_ui_map_viewport_release();" not in show_map_modal
+    assert "d1l_ui_modal_show(obj);" in show_map_modal
+    assert "show_map_modal(d1l_ui_map_options_sheet" in source
+    assert "show_map_modal(d1l_ui_map_location_sheet" in source
+
     render_active = function_body(source, "static void render_active_tab", "esp_err_t d1l_ui_phase1_request_tab")
     assert render_active.index("d1l_ui_map_viewport_release();") < render_active.index(
         "d1l_ui_screen_render("
@@ -549,9 +558,9 @@ def test_map_ui_releases_before_covers_and_automation_is_fail_closed():
         "static void close_map_options_sheet_event_cb(lv_event_t *event)\n{",
         "static void open_map_cache_status_event_cb(lv_event_t *event)\n{",
     )
-    assert close_options.index("set_map_interactive_touch_authorized(true);") < close_options.index(
-        "request_tab_switch(D1L_UI_TAB_MAP);"
-    )
+    assert "set_map_interactive_touch_authorized(true);" in close_options
+    assert "(void)d1l_ui_map_viewport_refresh();" in close_options
+    assert "request_tab_switch(D1L_UI_TAB_MAP);" not in close_options
     save_location = function_body(
         source,
         "static void map_location_save_event_cb(lv_event_t *event)\n{",

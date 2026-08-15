@@ -214,6 +214,8 @@ static uint32_t s_backlight_pulse_until;
 static d1l_ui_button_gesture_t s_button_gesture;
 static bool s_button_flood_cooldown_active;
 static uint32_t s_button_flood_cooldown_until;
+static bool s_button_flood_result_pending;
+static uint32_t s_button_flood_request_id;
 static uint32_t s_last_notification_unread;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_packet_log_entry_t
@@ -1627,6 +1629,16 @@ static void show_modal(lv_obj_t *obj)
         d1l_ui_map_viewport_prepare_cover();
     }
     d1l_ui_map_viewport_release();
+    set_dock_hidden(true);
+    d1l_ui_modal_show(obj);
+}
+
+static void show_map_modal(lv_obj_t *obj)
+{
+    if (!obj) {
+        return;
+    }
+    d1l_ui_map_viewport_prepare_cover();
     set_dock_hidden(true);
     d1l_ui_modal_show(obj);
 }
@@ -5662,20 +5674,22 @@ static void channel_management_action_handler(
     case D1L_UI_CHANNEL_ACTION_CANCEL_IMPORT:
         return_to_channel_selector();
         return;
-    case D1L_UI_CHANNEL_ACTION_SUBMIT_CREATE:
+    case D1L_UI_CHANNEL_ACTION_SUBMIT_CREATE: {
+        const bool hashtag = event->text && event->text[0] == '#';
         ret = d1l_app_model_create_channel(
             event->text, false, &result, &updated);
         show_channel_mutation_result("Channel created", ret, result);
         if (ret == ESP_OK && set_managed_channel(&updated)) {
             d1l_ui_channel_sheets_hide_create(
                 &s_channel_sheets_controller);
-            if (!d1l_release_feature_available(
+            if (hashtag || !d1l_release_feature_available(
                     D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI) ||
                 !show_channel_export_sheet()) {
                 show_channel_options_sheet();
             }
         }
         return;
+    }
     case D1L_UI_CHANNEL_ACTION_SUBMIT_IMPORT: {
         const size_t uri_len = bounded_channel_uri_length(event->text);
         ret = uri_len > 0U ? d1l_app_model_import_channel_uri(
@@ -5960,16 +5974,16 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
         .reachable_only = false,
     };
     view_model->node_row_count = d1l_app_model_query_nodes(
-        &node_query, view_model->node_rows, D1L_NODE_STORE_CAPACITY);
-    if (view_model->node_row_count > D1L_NODE_STORE_CAPACITY) {
-        view_model->node_row_count = D1L_NODE_STORE_CAPACITY;
+        &node_query, view_model->node_rows, D1L_UI_NODES_ROW_CAPACITY);
+    if (view_model->node_row_count > D1L_UI_NODES_ROW_CAPACITY) {
+        view_model->node_row_count = D1L_UI_NODES_ROW_CAPACITY;
     }
-    const char *node_roles[D1L_NODE_STORE_CAPACITY] = {0};
+    const char *node_roles[D1L_UI_NODES_ROW_CAPACITY] = {0};
     for (size_t i = 0; i < view_model->node_row_count; ++i) {
         node_roles[i] = view_model->node_rows[i].role;
     }
     d1l_ui_nodes_summarize_roles(
-        node_roles, view_model->node_row_count, D1L_NODE_STORE_CAPACITY,
+        node_roles, view_model->node_row_count, D1L_UI_NODES_ROW_CAPACITY,
         &view_model->role_counts);
     for (size_t i = 0; i < view_model->node_row_count; ++i) {
         view_model->node_can_dm[i] = node_view_can_dm(&view_model->node_rows[i]);
@@ -6353,10 +6367,11 @@ static void close_map_location_sheet_event_cb(lv_event_t *event)
         s_map_location_returns_to_options = false;
         d1l_app_model_snapshot(&s_snapshot);
         if (render_map_options_sheet(D1L_UI_MAP_OPTIONS_ROOT)) {
-            show_modal(d1l_ui_map_options_sheet(&s_map_sheets_controller));
+            show_map_modal(d1l_ui_map_options_sheet(&s_map_sheets_controller));
         }
     } else {
-        request_content_refresh();
+        set_map_interactive_touch_authorized(true);
+        (void)d1l_ui_map_viewport_refresh();
     }
 }
 
@@ -6480,7 +6495,7 @@ static void open_map_location_sheet_event_cb(lv_event_t *event)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     if (render_map_location_sheet()) {
-        show_modal(d1l_ui_map_location_sheet(&s_map_sheets_controller));
+        show_map_modal(d1l_ui_map_location_sheet(&s_map_sheets_controller));
     } else {
         show_toast_text("Map location unavailable", false);
     }
@@ -6509,7 +6524,7 @@ static void close_map_options_sheet_event_cb(lv_event_t *event)
     }
     hide_map_options_sheet();
     set_map_interactive_touch_authorized(true);
-    request_tab_switch(D1L_UI_TAB_MAP);
+    (void)d1l_ui_map_viewport_refresh();
 }
 
 static void open_map_cache_status_event_cb(lv_event_t *event)
@@ -6564,7 +6579,7 @@ static void open_map_options_sheet_event_cb(lv_event_t *event)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     if (render_map_options_sheet(D1L_UI_MAP_OPTIONS_ROOT)) {
-        show_modal(d1l_ui_map_options_sheet(&s_map_sheets_controller));
+        show_map_modal(d1l_ui_map_options_sheet(&s_map_sheets_controller));
     } else {
         show_toast_text("Map options unavailable", false);
     }
@@ -7827,6 +7842,28 @@ static void service_sheets_action_handler(
                    d1l_observer_set_enabled(!status.enabled));
         (void)render_observer_service_sheet();
         request_content_refresh();
+        return;
+    }
+    case D1L_UI_SERVICE_ACTION_OBSERVER_REGION_SAVE: {
+        char region[D1L_OBSERVER_REGION_LEN] = {0};
+        if (!d1l_ui_service_sheets_copy_observer_region(
+                &s_service_sheets_controller, region)) {
+            show_toast_text("Use a three-letter region", false);
+            return;
+        }
+        for (size_t i = 0U; i < 3U; ++i) {
+            if (region[i] >= 'a' && region[i] <= 'z') {
+                region[i] = (char)(region[i] - 'a' + 'A');
+            }
+        }
+        const esp_err_t ret = d1l_observer_set_region(region);
+        show_toast(ret == ESP_OK ? "Observer region saved" :
+                                    "Observer region",
+                   ret);
+        if (ret == ESP_OK) {
+            (void)render_observer_service_sheet();
+            request_content_refresh();
+        }
         return;
     }
     case D1L_UI_SERVICE_ACTION_UPDATE_INSTALL:
@@ -9896,15 +9933,32 @@ static void display_runtime_timer_cb(lv_timer_t *timer)
             show_toast_text("Wide-area advert cooling down", false);
         } else {
             s_button_flood_cooldown_active = false;
-            const esp_err_t ret = d1l_app_model_request_advert(true);
+            uint32_t request_id = 0U;
+            const esp_err_t ret =
+                d1l_app_model_queue_advert(true, &request_id);
             if (ret == ESP_OK) {
                 s_button_flood_cooldown_active = true;
                 s_button_flood_cooldown_until =
                     now + D1L_UI_BUTTON_FLOOD_COOLDOWN_MS;
+                s_button_flood_result_pending = true;
+                s_button_flood_request_id = request_id;
                 show_toast_text("Flood advert queued", true);
             } else {
                 show_toast("Flood advert", ret);
             }
+        }
+    }
+    if (s_button_flood_result_pending) {
+        const d1l_meshcore_service_status_t status =
+            d1l_meshcore_service_status();
+        if (status.advert_request_done_id ==
+            s_button_flood_request_id) {
+            s_button_flood_result_pending = false;
+            show_toast_text("Flood advert sent", true);
+        } else if (status.advert_request_failed_id ==
+                   s_button_flood_request_id) {
+            s_button_flood_result_pending = false;
+            show_toast_text("Flood advert failed", false);
         }
     }
     const uint64_t unread_wide =
@@ -9980,7 +10034,9 @@ static void refresh_timer_cb(lv_timer_t *timer)
             &s_service_sheets_controller))) {
         (void)render_update_service_sheet();
     } else if (d1l_ui_modal_visible(d1l_ui_service_sheets_observer(
-                   &s_service_sheets_controller))) {
+                   &s_service_sheets_controller)) &&
+               !d1l_ui_service_sheets_observer_edit_active(
+                   &s_service_sheets_controller)) {
         (void)render_observer_service_sheet();
     } else if (d1l_ui_modal_visible(d1l_ui_service_sheets_admin(
                    &s_service_sheets_controller))) {

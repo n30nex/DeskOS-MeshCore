@@ -1,11 +1,11 @@
-# MeshCore DeskOS D1L 1.7.9 User Guide
+# MeshCore DeskOS D1L 1.7.10 User Guide
 
 This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.7.9 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.7.10 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -62,6 +62,11 @@ Use the channel controls to create or import, select, enable, rename, make
 default, and remove with local confirmation. A selected channel can display a
 one-time QR containing only its supported public import URI.
 
+To join an interoperable hashtag channel, choose **Add** and enter its exact
+name beginning with `#`, such as `#chat`, `#yyc`, or `#yyc-weather`. DeskOS
+derives the standard MeshCore channel secret from that exact hashtag. Names
+without `#` create a new private channel with a random secret instead.
+
 Public and channel views support send, receive, retained history, search and
 unread state. Public display names have the `sender_name_unverified` boundary.
 A displayed name never alias-matches into a direct-message destination.
@@ -114,6 +119,9 @@ data replaces an advert.
 Interactive Map supports one-finger pan, **-**, **+**, and **Center** from zoom
 8 through 18, limited by the selected provider.
 Completed tiles are reused from SD.
+Opening and closing Map Options keeps the current frame in memory. Returning
+to the same view resumes an interrupted healthy tile pass from the SD cache
+instead of restarting all nine tiles.
 
 The built-in OpenStreetMap Standard source displays
 `(c) OpenStreetMap contributors` and fetches only the visible current-view 3×3
@@ -174,6 +182,8 @@ three-byte companion protocol to the single-owner MeshCore runtime. BLE and
 Wi-Fi can remain enabled together. Leave Wi-Fi on while pairing if you also use
 online maps or Observer/MQTT; heavy network traffic may briefly reduce Bluetooth
 responsiveness, but neither connection should need to be disabled.
+If the same phone presents an expired bond, DeskOS replaces that phone's bond
+and retries pairing instead of restarting the device or clearing other peers.
 
 The BLE client can use normal supported messaging, contact, channel, time,
 radio, advert, and status operations. Private-key import/export, remote reboot,
@@ -270,7 +280,9 @@ radio, storage, Wi-Fi, Map and crash state is available under Diagnostics.
 Observer is optional and uses secure WSS/MQTT TLS, QoS 1, and bounded queues.
 When enabled, it publishes received packet payloads and health to the redundant
 `mqtt1.meshcore.ca` and `mqtt2.meshcore.ca` endpoints under the selected
-three-letter region (`YKF` by default). **Observer status** shows each link.
+three-letter region (`YKF` by default). Edit the **Observer region** field to
+the local IATA code, such as `YYC`, and choose **Save** before enabling uploads.
+**Observer status** shows each link.
 An optional secure custom broker can be added over USB. The D1L does not repeat
 traffic on RF, and private keys and saved contacts are never published.
 
@@ -324,7 +336,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.7.9 download and
+Use the guided browser flasher or the published DeskOS D1L 1.7.10 download and
 follow its `START_HERE.md`.
 On Linux, select the D1L only through the stable by-id path:
 

@@ -14,7 +14,8 @@
 | **1.7.6** | Guided bridge/SD installation and adjustable local display time | Historical (`v1.7.6`) |
 | **1.7.7** | Faster verified-advert admission and Contacts rendering | Historical (`v1.7.7`) |
 | **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Historical (`v1.7.8`) |
-| **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Current (`v1.7.9`) |
+| **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Historical (`v1.7.9`) |
+| **1.7.10** | Faster Contacts, retained maps, stable BLE pairing, editable Observer region, hashtag channels, and reliable flood adverts | Current (`v1.7.10`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -134,3 +135,13 @@ not require internal RAM into PSRAM. Wi-Fi, BLE companion advertising, MQTT,
 the radio, and the touch interface can therefore remain active together
 without exhausting the ESP32-S3 internal heap. Observer also waits for a fresh
 SNTP or authenticated companion clock before signing broker credentials.
+
+## 1.7.10: radio-to-screen reliability
+
+DeskOS 1.7.10 removes the synchronous top-button advert timeout, makes repeat
+BLE pairing recover the exact stale bond, and reserves more internal memory for
+encrypted companion traffic. Contacts uses a bounded presentation query and
+lightweight sorting, while Map retains and resumes the current frame across
+ordinary UI navigation. Observer gains an editable IATA region, Channels can
+join standard hashtag-derived channels directly, and received messages fall
+back to trusted local arrival time when the packet timestamp is unusable.

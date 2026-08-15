@@ -12,6 +12,9 @@
 #define NODES_MIN_TOUCH_HEIGHT 44
 #define NODES_MAX_RENDERED_ROWS 12U
 
+_Static_assert(D1L_UI_NODES_ROW_CAPACITY >= NODES_MAX_RENDERED_ROWS,
+               "Contacts row query must cover the visible list");
+
 static lv_obj_t *nodes_create_label(lv_obj_t *parent,
                                     const char *text,
                                     uint32_t color)
@@ -691,8 +694,8 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
         controller->rendered.contact_row_count =
             D1L_CONTACT_STORE_CAPACITY;
     }
-    if (controller->rendered.node_row_count > D1L_NODE_STORE_CAPACITY) {
-        controller->rendered.node_row_count = D1L_NODE_STORE_CAPACITY;
+    if (controller->rendered.node_row_count > D1L_UI_NODES_ROW_CAPACITY) {
+        controller->rendered.node_row_count = D1L_UI_NODES_ROW_CAPACITY;
     }
     memset(controller->contact_rows, 0, sizeof(controller->contact_rows));
     memset(controller->node_rows, 0, sizeof(controller->node_rows));

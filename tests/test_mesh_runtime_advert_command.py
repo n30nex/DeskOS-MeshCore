@@ -80,6 +80,28 @@ def test_advert_is_a_bounded_mesh_runtime_command():
     ):
         assert forbidden not in adapter
 
+    queued = body(
+        source,
+        "esp_err_t d1l_meshcore_service_queue_advert",
+        "esp_err_t d1l_meshcore_service_request_advert",
+    )
+    assert ".type = D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT" in queued
+    assert ".requested_tx_kind = D1L_MESH_TX_OPERATION_ADVERT" in queued
+    assert "uint32_t *out_request_id" in queued
+    assert ".advert_request_id = request_id" in queued
+    assert "*out_request_id = request_id" in queued
+    assert "xQueueSend(s_service_queue, &cmd, 0)" in queued
+    assert "meshcore_service_wake()" in queued
+    assert "meshcore_service_send_command" not in queued
+    assert "meshcore_request_wait" not in queued
+
+    for tracked in (
+        "advert_request_done_id",
+        "advert_request_failed_id",
+        "s_active_advert_request_id",
+    ):
+        assert tracked in source
+
 
 def test_boot_announces_only_retained_onboarded_identity_after_rx_is_queued():
     source = read("main/app_main.c")

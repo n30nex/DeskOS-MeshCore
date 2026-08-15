@@ -607,9 +607,9 @@ bool d1l_ui_channel_sheets_render_create(
         return false;
     }
     return render_input_sheet(
-        controller, controller->create_sheet, "New Channel",
-        "A fresh channel secret is generated on this device.",
-        "Channel name", "", D1L_CHANNEL_NAME_LEN - 1U, false,
+        controller, controller->create_sheet, "Add Channel",
+        "Start with # to join a shared hashtag; other names stay private.",
+        "#yyc or private name", "", D1L_CHANNEL_NAME_LEN - 1U, false,
         BINDING_CREATE_BACK, D1L_UI_CHANNEL_ACTION_CANCEL_CREATE,
         BINDING_CREATE_SUBMIT, D1L_UI_CHANNEL_ACTION_SUBMIT_CREATE,
         BINDING_CREATE_KEYBOARD, &controller->create_textarea,

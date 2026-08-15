@@ -554,9 +554,22 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         }
         return 0;
     case BLE_GAP_EVENT_REPEAT_PAIRING:
-        /* Bond replacement requires an explicit future management action.
-         * Never delete a trusted peer merely because a remote asks to pair. */
-        return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        {
+            struct ble_gap_conn_desc desc = {0};
+            const int rc = ble_gap_conn_find(
+                event->repeat_pairing.conn_handle, &desc);
+            if (rc != 0) {
+                note_nimble_error(rc);
+                return BLE_GAP_REPEAT_PAIRING_IGNORE;
+            }
+            const int delete_rc = ble_store_util_delete_peer(
+                &desc.peer_id_addr);
+            if (delete_rc != 0) {
+                note_nimble_error(delete_rc);
+                return BLE_GAP_REPEAT_PAIRING_IGNORE;
+            }
+            return BLE_GAP_REPEAT_PAIRING_RETRY;
+        }
     case BLE_GAP_EVENT_ADV_COMPLETE:
         portENTER_CRITICAL(&s_lock);
         s_advertising = false;

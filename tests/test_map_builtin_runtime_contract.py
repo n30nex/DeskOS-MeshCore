@@ -719,13 +719,16 @@ def test_same_visible_or_complete_hidden_plan_reuses_frame_without_worker_replay
         "esp_err_t d1l_map_view_service_init",
     )
 
-    assert "s_map.status.visible || completed_frame_locked()" in identical
+    assert "s_map.status.generation != 0U" in acquire
     assert "s_map.status.visible = true" in identical
     assert "if (completed_frame_locked())" in identical
     assert 'set_message_locked("ready", "Map ready")' in identical
     assert "const uint32_t generation = s_map.status.generation" in identical
     assert "*out_generation = generation" in identical
     assert "d1l_map_prefetch_service_wake()" in identical
+    assert "s_map.status.failed_tiles > 0U" in identical
+    assert "D1L_MAP_VIEW_MAX_GENERATION_PASSES" in identical
+    assert "s_map.status.pass_attempts = 0U;" in identical
     assert identical.index("xSemaphoreGive(s_map.lock)") < identical.index(
         "d1l_map_prefetch_service_wake()"
     )

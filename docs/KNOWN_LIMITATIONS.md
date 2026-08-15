@@ -1,4 +1,4 @@
-# DeskOS D1L 1.7.9 limitations
+# DeskOS D1L 1.7.10 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -25,10 +25,10 @@ SD-primary storage.
   RF-triggered update. USB app/full-clean flashing remains the recovery path.
 - The current UI is English-only. Additional localization remains future work.
 - Observer/MQTT is opt-in and is never enabled silently.
-- New messages save a display timestamp once the device has trusted time.
-  Older retained rows without one remain labelled `time unknown`.
+- New messages use a plausible sender timestamp or the trusted local arrival
+  time. Older retained rows without either remain labelled `time unknown`.
 - Optional Indicator temperature, humidity, and CO2 sensor integration remains
-  future work and is not represented as live data in 1.7.9.
+  future work and is not represented as live data in 1.7.10.
 
 See [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md)
 for the complete mobile-to-D1L outcome matrix.

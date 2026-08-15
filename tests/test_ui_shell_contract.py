@@ -1182,7 +1182,7 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "nodes_render_node_row" in nodes_source
     assert "nodes_render_contact_row" in nodes_source
     assert "d1l_ui_nodes_controller_t s_nodes_controller" in source
-    assert "d1l_node_view_t node_rows[D1L_NODE_STORE_CAPACITY]" in nodes_header
+    assert "d1l_node_view_t node_rows[D1L_UI_NODES_ROW_CAPACITY]" in nodes_header
     assert "recent_node_count" in header
     assert "recent_nodes" in header
     assert "d1l_node_view_t recent_nodes" in header

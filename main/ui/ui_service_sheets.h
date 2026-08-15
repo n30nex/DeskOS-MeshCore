@@ -23,6 +23,7 @@ typedef enum {
     D1L_UI_SERVICE_ACTION_TERMINAL_CLEAR,
     D1L_UI_SERVICE_ACTION_CLOSE_OBSERVER,
     D1L_UI_SERVICE_ACTION_OBSERVER_TOGGLE,
+    D1L_UI_SERVICE_ACTION_OBSERVER_REGION_SAVE,
     D1L_UI_SERVICE_ACTION_CLOSE_UPDATE,
     D1L_UI_SERVICE_ACTION_UPDATE_INSTALL,
     D1L_UI_SERVICE_ACTION_UPDATE_CANCEL,
@@ -101,6 +102,8 @@ typedef struct {
 typedef struct d1l_ui_service_sheets_controller {
     lv_obj_t *terminal_sheet;
     lv_obj_t *observer_sheet;
+    lv_obj_t *observer_region_textarea;
+    lv_obj_t *observer_keyboard;
     lv_obj_t *update_sheet;
     lv_obj_t *notifications_sheet;
     lv_obj_t *admin_sheet;
@@ -131,6 +134,11 @@ bool d1l_ui_service_sheets_render_observer(
     const d1l_observer_status_t *status,
     d1l_ui_service_action_handler_t action_handler,
     void *action_context);
+bool d1l_ui_service_sheets_copy_observer_region(
+    const d1l_ui_service_sheets_controller_t *controller,
+    char out_region[D1L_OBSERVER_REGION_LEN]);
+bool d1l_ui_service_sheets_observer_edit_active(
+    const d1l_ui_service_sheets_controller_t *controller);
 bool d1l_ui_service_sheets_render_update(
     d1l_ui_service_sheets_controller_t *controller,
     const d1l_update_status_t *status,

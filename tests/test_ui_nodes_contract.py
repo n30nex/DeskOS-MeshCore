@@ -23,16 +23,17 @@ def test_nodes_root_has_owned_bounded_view_model_and_action_lifetime():
     assert "d1l_ui_nodes_render" in header
     assert "d1l_ui_nodes_deactivate" in header
     assert "d1l_contact_entry_t contact_rows[D1L_CONTACT_STORE_CAPACITY]" in header
-    assert "d1l_node_view_t node_rows[D1L_NODE_STORE_CAPACITY]" in header
+    assert "#define D1L_UI_NODES_ROW_CAPACITY 32U" in header
+    assert "d1l_node_view_t node_rows[D1L_UI_NODES_ROW_CAPACITY]" in header
     assert "bool contact_can_dm[D1L_CONTACT_STORE_CAPACITY]" in header
-    assert "bool node_can_dm[D1L_NODE_STORE_CAPACITY]" in header
+    assert "bool node_can_dm[D1L_UI_NODES_ROW_CAPACITY]" in header
     assert "d1l_ui_node_role_counts_t role_counts" in header
 
     assert "view_model != &controller->rendered" in source
     assert "controller->rendered = *view_model;" in source
     assert "controller->rendered.contact_row_count >" in source
     assert "D1L_CONTACT_STORE_CAPACITY" in source
-    assert "node_row_count > D1L_NODE_STORE_CAPACITY" in source
+    assert "node_row_count > D1L_UI_NODES_ROW_CAPACITY" in source
     assert "binding->row_index >= controller->rendered.contact_row_count" in source
     assert "binding->row_index >= controller->rendered.node_row_count" in source
     assert "!controller->rendered.contact_can_dm[binding->row_index]" in source
