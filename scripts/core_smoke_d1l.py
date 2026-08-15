@@ -191,12 +191,13 @@ def exact_identity(
     result: object,
     expected_commit: str,
     expected_sd_history_mode: str,
+    expected_release_profile: str = CORE_RELEASE_PROFILE,
 ) -> bool:
     return (
         isinstance(result, dict)
         and result.get("ok") is True
         and exact_commit(result.get("build_commit")) == expected_commit
-        and result.get("release_profile") == CORE_RELEASE_PROFILE
+        and result.get("release_profile") == expected_release_profile
         and result.get("sd_history_mode") == expected_sd_history_mode
     )
 
@@ -237,9 +238,15 @@ def exact_version_identity(
     result: object,
     expected_commit: str,
     expected_sd_history_mode: str,
+    expected_release_profile: str = CORE_RELEASE_PROFILE,
 ) -> bool:
     return (
-        exact_identity(result, expected_commit, expected_sd_history_mode)
+        exact_identity(
+            result,
+            expected_commit,
+            expected_sd_history_mode,
+            expected_release_profile,
+        )
         and isinstance(result, dict)
         and result.get("cmd") == "version"
         and result.get("idf") == EXPECTED_IDF_VERSION

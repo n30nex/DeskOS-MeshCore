@@ -30,16 +30,9 @@ try:
     from artifact_metadata import git_metadata
     from capture_core_actions_run_d1l import validate_capture_receipt
     from core_install_recovery_review_d1l import (
-        CORE_INSTALL_CONTRACT_KEYS,
-        CORE_INSTALL_CONTRACT_SCHEMA,
         CORE_PACKAGE_SCHEMA,
-        GENERATED_INSTALL_FILES,
-        expected_normal_install_targets,
-        expected_target_policy,
     )
     from core_smoke_d1l import (
-        CORE_RELEASE_PROFILE,
-        D1L_CORE_POSIX_TARGET,
         D1L_CORE_PORT,
         enforce_core_port,
         exact_identity,
@@ -69,16 +62,9 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         validate_capture_receipt,
     )
     from scripts.core_install_recovery_review_d1l import (
-        CORE_INSTALL_CONTRACT_KEYS,
-        CORE_INSTALL_CONTRACT_SCHEMA,
         CORE_PACKAGE_SCHEMA,
-        GENERATED_INSTALL_FILES,
-        expected_normal_install_targets,
-        expected_target_policy,
     )
     from scripts.core_smoke_d1l import (
-        CORE_RELEASE_PROFILE,
-        D1L_CORE_POSIX_TARGET,
         D1L_CORE_PORT,
         enforce_core_port,
         exact_identity,
@@ -100,8 +86,15 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 EXPECTED_SD_HISTORY_MODE = "conditional"
-EXPECTED_SD_HISTORY_STATE = "runtime_conditional_sd_primary"
-EXPECTED_STORAGE_AUTHORITY = "sd_primary_live_only_without_sd"
+EXPECTED_SD_HISTORY_STATE = "runtime_conditional_on_verified_bridge"
+EXPECTED_STORAGE_AUTHORITY = "nvs_with_runtime_verified_sd_history"
+EXPECTED_RELEASE_PROFILE = "full_feature"
+EXPECTED_UPDATE_PATH = "update/d1l-update.bin"
+EXPECTED_PACKAGE_SCRIPTS = {
+    "windows_project_flash": "flash_project.ps1",
+    "windows_full_flash": "flash_full_8mb.ps1",
+    "posix_project_flash": "flash_project.sh",
+}
 EXPECTED_RP2040_ARTIFACT_NAMES = (
     "rp2040-sd-bridge-firmware",
 )
@@ -311,17 +304,9 @@ def verify_core_package(
     manifest = _load_json(manifest_path, "Core release manifest")
     workflow = manifest.get("workflow")
     git_info = manifest.get("git")
-    install = manifest.get("install_recovery_guide")
     scripts = manifest.get("scripts")
-    generated_files: dict[str, dict[str, Any]] = {}
-    for relative in GENERATED_INSTALL_FILES:
-        generated = _inside(package / relative, package, "generated install file")
-        if not generated.is_file() or generated.stat().st_size <= 0:
-            raise ValueError(f"Core generated install file is invalid: {relative}")
-        generated_files[relative] = {
-            "size": generated.stat().st_size,
-            "sha256": sha256_file(generated),
-        }
+    update_image = manifest.get("update_image")
+    signed_update = manifest.get("signed_update")
     rp2040_artifacts = manifest.get("rp2040_artifacts")
     rp2040_artifacts_ok = (
         isinstance(rp2040_artifacts, list)
@@ -347,7 +332,7 @@ def verify_core_package(
     required_truth = (
         type(manifest.get("schema")) is int
         and manifest.get("schema") == CORE_PACKAGE_SCHEMA
-        and manifest.get("release_profile") == CORE_RELEASE_PROFILE
+        and manifest.get("release_profile") == EXPECTED_RELEASE_PROFILE
         and exact_commit(manifest.get("firmware_commit")) == commit
         and str(manifest.get("actions_run")) == run_id
         and str(manifest.get("actions_run_attempt")) == run_attempt
@@ -356,7 +341,14 @@ def verify_core_package(
         and manifest.get("storage_authority") == EXPECTED_STORAGE_AUTHORITY
         and manifest.get("full_feature_release_ready") is False
         and rp2040_artifacts_ok
-        and manifest.get("update_image") is None
+        and isinstance(update_image, dict)
+        and isinstance(signed_update, dict)
+        and manifest.get("signed_update_required") is True
+        and signed_update.get("signed") is True
+        and exact_commit(signed_update.get("source_commit")) == commit
+        and signed_update.get("rf_trigger_allowed") is False
+        and signed_update.get("partition_table_replacement_in_firmware") is False
+        and signed_update.get("rollback_required") is True
         and isinstance(workflow, dict)
         and exact_commit(workflow.get("sha")) == commit
         and str(workflow.get("run_id")) == run_id
@@ -366,45 +358,8 @@ def verify_core_package(
         and exact_commit(git_info.get("commit")) == commit
         and git_info.get("dirty") is False
         and git_info.get("dirty_entries") == []
-        and scripts
-        == {
-            "shared_project_flash": "flash_project.py",
-            "serial_target_resolver": "d1l_serial_target.py",
-            "windows_project_flash": "flash_project.ps1",
-            "posix_project_flash": "flash_project.sh",
-            "windows_update_flash": "flash_update_bin.ps1",
-            "posix_update_flash": "flash_update_bin.sh",
-            "windows_full_flash": "flash_full_8mb.ps1",
-            "posix_full_flash": "flash_full_8mb.sh",
-        }
-        and isinstance(install, dict)
-        and set(install) == CORE_INSTALL_CONTRACT_KEYS
-        and type(install.get("schema")) is int
-        and install.get("schema") == CORE_INSTALL_CONTRACT_SCHEMA
-        and install.get("usb_only") is True
-        and install.get("normal_install_script") == "flash_project.py"
-        and install.get("normal_install_scripts")
-        == {
-            "windows": "flash_update_bin.ps1",
-            "posix": "flash_update_bin.sh",
-        }
-        and install.get("normal_install_port") == D1L_CORE_POSIX_TARGET
-        and install.get("normal_install_targets")
-        == expected_normal_install_targets()
-        and install.get("target_policy") == expected_target_policy()
-        and install.get("normal_install_preserves_unrelated_nvs") is True
-        and install.get("normal_install_package_root_only") is True
-        and install.get("normal_install_checksum_verified") is True
-        and install.get("recovery_script") == "flash_full_8mb.ps1"
-        and install.get("recovery_platform") == "windows_and_posix"
-        and install.get("posix_recovery_script") == "flash_full_8mb.sh"
-        and install.get("recovery_requires_typed_confirmation") is True
-        and install.get("recovery_checksum_verified") is True
-        and install.get("recovery_target_identity_verified") is True
-        and install.get("install_guide") == "docs/CORE_INSTALL_RECOVERY.md"
-        and install.get("recovery_guide") == "docs/CORE_INSTALL_RECOVERY.md"
-        and install.get("no_on_device_sd_format") is True
-        and install.get("generated_files") == generated_files
+        and scripts == EXPECTED_PACKAGE_SCRIPTS
+        and manifest.get("install_recovery_guide") is None
     )
     if not required_truth:
         raise ValueError(
@@ -415,10 +370,9 @@ def verify_core_package(
             "Core package must have the complete valid root and RP2040 "
             "SHA256SUMS.txt manifests"
         )
-    if not (package / "rp2040").is_dir() or (package / "update").exists():
+    if not (package / "rp2040").is_dir() or not (package / "update").is_dir():
         raise ValueError(
-            "Conditional-SD Core package is missing RP2040 payloads or "
-            "contains an excluded update payload"
+            "Full Feature package is missing its RP2040 or update payload"
         )
 
     action_rows = actions_verification.get("flash_files")
@@ -477,6 +431,44 @@ def verify_core_package(
         )
     if seen_offsets != set(EXPECTED_FLASH_ROLES):
         raise ValueError("Core package project image roles are incomplete")
+    app_row = next(row for row in checked_rows if row["role"] == "app")
+    update_path = _inside(
+        package / str(update_image.get("path") or ""),
+        package,
+        "Core package update image",
+    )
+    update_digest = sha256_file(update_path)
+    signed_image = signed_update.get("image")
+    if not (
+        update_image.get("path") == EXPECTED_UPDATE_PATH
+        and update_path.is_file()
+        and update_image.get("size") == update_path.stat().st_size
+        and update_image.get("sha256") == update_digest
+        and update_image.get("size") == app_row["size"]
+        and update_digest == app_row["sha256"]
+        and isinstance(signed_image, dict)
+        and signed_image.get("path") == EXPECTED_UPDATE_PATH
+        and signed_image.get("size") == update_path.stat().st_size
+        and signed_image.get("sha256") == update_digest
+    ):
+        raise ValueError(
+            "Full Feature update image does not match the exact Actions app image"
+        )
+    for label in ("manifest", "signature"):
+        signed_file = signed_update.get(label)
+        if not isinstance(signed_file, dict):
+            raise ValueError(f"Full Feature signed update {label} is missing")
+        target = _inside(
+            package / str(signed_file.get("path") or ""),
+            package,
+            f"Full Feature signed update {label}",
+        )
+        if not (
+            target.is_file()
+            and signed_file.get("size") == target.stat().st_size
+            and signed_file.get("sha256") == sha256_file(target)
+        ):
+            raise ValueError(f"Full Feature signed update {label} is invalid")
     return {
         "ok": True,
         "package": str(package),
@@ -489,12 +481,17 @@ def verify_core_package(
         "firmware_commit": commit,
         "github_actions_run": run_id,
         "workflow_run_attempt": run_attempt,
-        "release_profile": CORE_RELEASE_PROFILE,
+        "release_profile": EXPECTED_RELEASE_PROFILE,
         "sd_history_mode": EXPECTED_SD_HISTORY_MODE,
         "storage_authority": EXPECTED_STORAGE_AUTHORITY,
         "repository": EXPECTED_REPOSITORY,
         "flash_files_match_actions": True,
         "flash_files": checked_rows,
+        "update_image": {
+            "path": update_path.relative_to(package).as_posix(),
+            "size": update_path.stat().st_size,
+            "sha256": update_digest,
+        },
     }
 
 
@@ -1124,6 +1121,18 @@ def command_uses_only_target(command: object, target: str) -> bool:
         elif token.startswith("--port="):
             selected.append(token.split("=", 1)[1])
     return selected == [target]
+
+
+def command_flash_offsets(command: object) -> set[int]:
+    if not isinstance(command, list) or "write-flash" not in command:
+        return set()
+    start = command.index("write-flash") + 1
+    return {
+        int(token, 0)
+        for token in command[start:]
+        if isinstance(token, str)
+        and re.fullmatch(r"0[xX][0-9a-fA-F]+", token)
+    }
 
 
 def read_device_identity(
@@ -2551,10 +2560,25 @@ def run_core_flash_only(
         actions_verification=actions_verification,
     )
     build_dir = github_run_dir / "d1l-firmware-artifacts" / "build"
-    command = esptool_flash_command(build_dir, port, flash_baud)
+    selected_flash_offsets = (
+        {0x20000}
+        if flash_phase == FLASH_PHASE_RETAINED_REFLASH
+        else set(EXPECTED_FLASH_ROLES)
+    )
+    command = esptool_flash_command(
+        build_dir,
+        port,
+        flash_baud,
+        flash_offsets=(
+            selected_flash_offsets
+            if flash_phase == FLASH_PHASE_RETAINED_REFLASH
+            else None
+        ),
+    )
     if (
         "write-flash" not in command
         or not command_uses_only_target(command, port)
+        or command_flash_offsets(command) != selected_flash_offsets
         or any("erase" in token.lower() for token in command)
         or any(
             blocked in token.upper()
@@ -2709,11 +2733,13 @@ def run_core_flash_only(
                     before_version,
                     before_build_commit,
                     EXPECTED_SD_HISTORY_MODE,
+                    EXPECTED_RELEASE_PROFILE,
                 )
                 and exact_identity(
                     before_health,
                     before_build_commit,
                     EXPECTED_SD_HISTORY_MODE,
+                    EXPECTED_RELEASE_PROFILE,
                 )
                 and before_health.get("board_ready") is True
                 and before_health.get("ui_ready") is True
@@ -3016,10 +3042,16 @@ def run_core_flash_only(
     identity_ok = (
         target_continuity_ok
         and exact_version_identity(
-            version, normalized_commit, EXPECTED_SD_HISTORY_MODE
+            version,
+            normalized_commit,
+            EXPECTED_SD_HISTORY_MODE,
+            EXPECTED_RELEASE_PROFILE,
         )
         and exact_identity(
-            health, normalized_commit, EXPECTED_SD_HISTORY_MODE
+            health,
+            normalized_commit,
+            EXPECTED_SD_HISTORY_MODE,
+            EXPECTED_RELEASE_PROFILE,
         )
         and health.get("board_ready") is True
         and health.get("ui_ready") is True
@@ -3109,7 +3141,7 @@ def run_core_flash_only(
         "commit": normalized_commit,
         "github_actions_run": str(run_id),
         "workflow_run_attempt": str(run_attempt),
-        "release_profile": CORE_RELEASE_PROFILE,
+        "release_profile": EXPECTED_RELEASE_PROFILE,
         "sd_history_mode": EXPECTED_SD_HISTORY_MODE,
         "expected_firmware_commit": normalized_commit,
         "pre_flash_build_commit": before_build_commit,
@@ -3130,6 +3162,7 @@ def run_core_flash_only(
         "actions_capture_verification": actions_capture_verification,
         "package_verification": package_verification,
         "command": command,
+        "flash_offsets": [hex(offset) for offset in sorted(selected_flash_offsets)],
         "result": result,
         "raw_flash_log": raw_log_row,
         "post_flash_version": version,

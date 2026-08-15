@@ -22,7 +22,7 @@ def zip_bytes(files: dict[str, bytes]) -> bytes:
     return output.getvalue()
 
 
-def api_fixture(*, unsafe: bool = False):
+def api_fixture(*, unsafe: bool = False, release_profile: str = "full_feature"):
     scope = {
         "schema": 1,
         "kind": "d1l_candidate_scope",
@@ -34,7 +34,7 @@ def api_fixture(*, unsafe: bool = False):
         "event": "push",
         "include_sd_bridge": True,
         "scope_reason": "rc1_sd_paths",
-        "release_profile": "core_1_0",
+        "release_profile": release_profile,
         "sd_history_mode": "conditional",
     }
     archives = {}
@@ -85,8 +85,16 @@ def api_fixture(*, unsafe: bool = False):
     return run, artifacts, archives
 
 
-def install_fake_api(monkeypatch, *, unsafe: bool = False):
-    run, artifacts, archives = api_fixture(unsafe=unsafe)
+def install_fake_api(
+    monkeypatch,
+    *,
+    unsafe: bool = False,
+    release_profile: str = "full_feature",
+):
+    run, artifacts, archives = api_fixture(
+        unsafe=unsafe,
+        release_profile=release_profile,
+    )
 
     def fake_api(_root: Path, endpoint: str) -> bytes:
         if endpoint.endswith(f"/actions/runs/{RUN_ID}"):
@@ -110,10 +118,11 @@ def install_fake_api(monkeypatch, *, unsafe: bool = False):
     )
 
 
+@pytest.mark.parametrize("release_profile", ("core_1_0", "full_feature"))
 def test_capture_downloads_api_bound_archives_and_revalidates(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, release_profile
 ):
-    install_fake_api(monkeypatch)
+    install_fake_api(monkeypatch, release_profile=release_profile)
     run_dir = tmp_path / "artifacts" / "github" / RUN_ID
     receipt = capture.capture(
         root=tmp_path,
