@@ -218,6 +218,19 @@ static int rx_access(uint16_t connection_handle, uint16_t attribute_handle,
         BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
+static int tx_access(uint16_t connection_handle, uint16_t attribute_handle,
+                     struct ble_gatt_access_ctxt *context, void *arg)
+{
+    (void)connection_handle;
+    (void)attribute_handle;
+    (void)context;
+    (void)arg;
+
+    /* NimBLE requires every registered characteristic to have an access
+     * callback, even when its value is delivered only with notify_custom. */
+    return BLE_ATT_ERR_READ_NOT_PERMITTED;
+}
+
 static const struct ble_gatt_svc_def s_gatt_services[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -234,6 +247,7 @@ static const struct ble_gatt_svc_def s_gatt_services[] = {
             },
             {
                 .uuid = &s_tx_uuid.u,
+                .access_cb = tx_access,
                 .flags = BLE_GATT_CHR_F_NOTIFY |
                          BLE_GATT_CHR_F_NOTIFY_INDICATE_ENC |
                          BLE_GATT_CHR_F_NOTIFY_INDICATE_AUTHEN,
@@ -596,6 +610,10 @@ esp_err_t d1l_ble_companion_start(void)
         BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_hs_cfg.sm_their_key_dist =
         BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+#if defined(CONFIG_BT_NIMBLE_STATIC_PASSKEY)
+    ble_sm_configure_static_passkey(
+        D1L_BLE_COMPANION_STATIC_PASSKEY, true);
+#endif
 
     int rc = 0;
     ble_svc_gap_init();
