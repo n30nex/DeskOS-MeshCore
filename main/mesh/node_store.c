@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_attr.h"
@@ -130,6 +131,9 @@ static d1l_node_store_blob_v4_t s_legacy_blob_scratch EXT_RAM_BSS_ATTR;
 static d1l_node_store_sd_blob_t s_sd_blob_scratch EXT_RAM_BSS_ATTR;
 static d1l_node_store_sd_blob_t s_persist_snapshot EXT_RAM_BSS_ATTR;
 static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+/* Queries are serialized by s_store_lock, so qsort's comparator context is
+ * safe without allocating another 512-entry buffer. */
+static d1l_node_sort_t s_query_sort;
 static bool s_persistence_dirty;
 static bool s_sd_reconcile_pending;
 static bool s_dirty_timing_started;
@@ -913,6 +917,19 @@ static bool node_view_better(const d1l_node_view_t *candidate, const d1l_node_vi
     return candidate->node.seq > best->node.seq;
 }
 
+static int node_view_compare(const void *left, const void *right)
+{
+    const d1l_node_view_t *left_view = left;
+    const d1l_node_view_t *right_view = right;
+    if (node_view_better(left_view, right_view, s_query_sort)) {
+        return -1;
+    }
+    if (node_view_better(right_view, left_view, s_query_sort)) {
+        return 1;
+    }
+    return 0;
+}
+
 esp_err_t d1l_node_store_init(void)
 {
     d1l_store_lock_take(&s_persist_io_lock);
@@ -1520,30 +1537,26 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
     }
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     d1l_store_lock_take(&s_store_lock);
+    size_t matched = 0U;
     for (size_t i = 0; i < s_count; ++i) {
         build_node_view(i, &s_entries[i], &s_query_scratch[i], now_ms);
+        if (!node_view_matches_query(&s_query_scratch[i], query)) {
+            continue;
+        }
+        if (matched != i) {
+            s_query_scratch[matched] = s_query_scratch[i];
+        }
+        matched++;
     }
 
     const d1l_node_sort_t sort = query ? query->sort : D1L_NODE_SORT_LAST_HEARD;
-    bool used[D1L_NODE_STORE_CAPACITY] = {0};
-    size_t copied = 0;
-    while (copied < max_entries) {
-        size_t best = 0;
-        bool best_set = false;
-        for (size_t i = 0; i < s_count; ++i) {
-            if (used[i] || !node_view_matches_query(&s_query_scratch[i], query)) {
-                continue;
-            }
-            if (!best_set || node_view_better(&s_query_scratch[i], &s_query_scratch[best], sort)) {
-                best = i;
-                best_set = true;
-            }
-        }
-        if (!best_set) {
-            break;
-        }
-        used[best] = true;
-        out_entries[copied++] = s_query_scratch[best];
+    s_query_sort = sort;
+    qsort(s_query_scratch, matched, sizeof(s_query_scratch[0]),
+          node_view_compare);
+    const size_t copied = matched < max_entries ? matched : max_entries;
+    if (copied > 0U) {
+        memcpy(out_entries, s_query_scratch,
+               copied * sizeof(out_entries[0]));
     }
     d1l_store_lock_give(&s_store_lock);
     return copied;

@@ -6,9 +6,9 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.7.6** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.7.6` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.6).
+DeskOS **1.7.7** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.7.7` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.7).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -16,6 +16,19 @@ DeskOS is a standalone, dark, touch-first MeshCore client. Firmware is built
 and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
+
+## What 1.7.7 improves
+
+DeskOS 1.7.7 shortens the path from radio receipt to the Contacts screen:
+
+- verified adverts become readable immediately instead of waiting behind an
+  SD-card write;
+- the existing retained-store worker coalesces ambient contact updates once
+  per second while preserving forced flushes before a controlled reboot;
+- explicit contact edits such as rename, favorite, and mute remain
+  synchronously durable; and
+- heard-node sorting now uses an efficient library sort instead of repeatedly
+  scanning all 512 slots for every row.
 
 ## What 1.7.6 fixes
 
@@ -143,7 +156,8 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.7** | DeskOS identity, animated opening, and NeonPocket-inspired product theme | Historical (`v1.7.0`) |
 | **1.7.1** | Direct repeater login, saved passwords, and touch-first server management | Historical (`v1.7.1`) |
 | **1.7.5** | Reliable remote login, better results/navigation, display wake/lock, and faster cached maps | Historical (`v1.7.5`) |
-| **1.7.6** | Guided bridge/SD installation and adjustable local display time | Current (`v1.7.6`) |
+| **1.7.6** | Guided bridge/SD installation and adjustable local display time | Historical (`v1.7.6`) |
+| **1.7.7** | Faster verified-advert admission and Contacts rendering | Current (`v1.7.7`) |
 
 ## Device UI
 

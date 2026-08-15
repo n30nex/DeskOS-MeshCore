@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def _verified_upsert_body() -> str:
     source = (ROOT / "main/mesh/contact_store.c").read_text(encoding="utf-8")
     start = source.index("esp_err_t d1l_contact_store_upsert_verified_advert")
-    end = source.index("esp_err_t d1l_contact_store_update_path", start)
+    end = source.index("esp_err_t d1l_contact_store_import_uri", start)
     return source[start:end]
 
 
@@ -33,6 +33,17 @@ def test_verified_advert_upsert_preserves_user_preferences():
         "entry->out_path_updated_ms =",
     ):
         assert user_preference not in body
+
+
+def test_verified_advert_upsert_publishes_before_coalesced_persistence():
+    body = _verified_upsert_body()
+
+    assert "mark_deferred_persistence_locked(now_ms);" in body
+    assert "persist_store_or_rollback" not in body
+    publish = body.index("mark_deferred_persistence_locked(now_ms);")
+    assert body.index("*out_result = result;", publish) < body.index(
+        "d1l_store_lock_give(&s_store_lock);", publish
+    )
 
 
 def test_signed_advert_rx_binds_exact_full_key_to_truthful_retained_contact_result():

@@ -10,7 +10,9 @@
 | **1.6** | Compact Home, five Contacts sort modes, UI ownership cleanup, truthful simulator states, and touch/copy refinement | Historical (`v1.6.0`) |
 | **1.7** | Branded animated opening, distinct DeskOS mark, and coherent product-wide palette | Historical (`v1.7.0`) |
 | **1.7.1** | Direct repeater login, optional device-local passwords, command dashboard, and visible request results | Historical (`v1.7.1`) |
-| **1.7.5** | Flood-delivered login, human-readable neighbours, manager return navigation, ten-minute lock, top-button wake/advert, and faster cached maps | Current (`v1.7.5`) |
+| **1.7.5** | Flood-delivered login, human-readable neighbours, manager return navigation, ten-minute lock, top-button wake/advert, and faster cached maps | Historical (`v1.7.5`) |
+| **1.7.6** | Guided bridge/SD installation and adjustable local display time | Historical (`v1.7.6`) |
+| **1.7.7** | Faster verified-advert admission and Contacts rendering | Current (`v1.7.7`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -106,3 +108,10 @@ to the signed-in manager, and Neighbours resolves saved names with readable age
 and signal data. Cached map tiles render without network pacing. The display
 locks after ten idle minutes, the lock screen owns the entire top layer, and the
 top button wakes it or sends one normal advert on a deliberate double press.
+
+## 1.7.7: faster radio-to-screen updates
+
+DeskOS 1.7.7 publishes verified contact updates to the UI before ambient SD
+persistence, then coalesces those writes through the existing retained-store
+worker. User-initiated contact edits remain synchronous. Heard-node queries
+also use an efficient library sort while retaining the same filters and order.

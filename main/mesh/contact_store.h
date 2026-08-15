@@ -97,7 +97,9 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
 /*
  * Stores identity metadata only after the caller has verified the signed
  * advert. Exact full public keys are authoritative; the short fingerprint is
- * only an index hint and can never authorize replacement or eviction.
+ * only an index hint and can never authorize replacement or eviction. Ambient
+ * advert refreshes become readable immediately and are durably coalesced by
+ * the retained-store worker; explicit user edits remain synchronous.
  */
 esp_err_t d1l_contact_store_upsert_verified_advert(
     const char *fingerprint, const d1l_node_entry_t *verified_node,
