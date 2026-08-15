@@ -428,7 +428,7 @@ static void messages_public_time_label(const d1l_message_entry_t *entry,
     const uint32_t timestamp =
         d1l_message_entry_display_timestamp(entry);
     if (timestamp != 0U && d1l_time_display_format_clock(
-            timestamp, timezone_offset_minutes, out, out_size)) {
+            timestamp, timezone_offset_minutes, false, out, out_size)) {
         return;
     }
     snprintf(out, out_size, "time unknown");
