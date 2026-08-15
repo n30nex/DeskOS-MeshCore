@@ -791,6 +791,11 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
         if (completed_frame_locked()) {
             s_map.status.worker_running = false;
             set_message_locked("ready", "Map ready");
+        } else if (s_map.status.failed_tiles > 0U &&
+                   s_map.status.pass_attempts >=
+                       D1L_MAP_VIEW_MAX_GENERATION_PASSES) {
+            /* Reopening is the explicit retry after a failed pass budget. */
+            s_map.status.pass_attempts = 0U;
         } else if (s_map.status.attempted_tiles < s_map.status.planned_tiles &&
                    s_map.status.failed_tiles == 0U) {
             /* A tab change cancelled a healthy partial pass. Reopening Map

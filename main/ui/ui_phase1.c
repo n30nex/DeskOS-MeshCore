@@ -215,8 +215,7 @@ static d1l_ui_button_gesture_t s_button_gesture;
 static bool s_button_flood_cooldown_active;
 static uint32_t s_button_flood_cooldown_until;
 static bool s_button_flood_result_pending;
-static uint32_t s_button_flood_done_baseline;
-static uint32_t s_button_flood_failed_baseline;
+static uint32_t s_button_flood_request_id;
 static uint32_t s_last_notification_unread;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_packet_log_entry_t
@@ -9934,16 +9933,15 @@ static void display_runtime_timer_cb(lv_timer_t *timer)
             show_toast_text("Wide-area advert cooling down", false);
         } else {
             s_button_flood_cooldown_active = false;
-            const d1l_meshcore_service_status_t before =
-                d1l_meshcore_service_status();
-            const esp_err_t ret = d1l_app_model_queue_advert(true);
+            uint32_t request_id = 0U;
+            const esp_err_t ret =
+                d1l_app_model_queue_advert(true, &request_id);
             if (ret == ESP_OK) {
                 s_button_flood_cooldown_active = true;
                 s_button_flood_cooldown_until =
                     now + D1L_UI_BUTTON_FLOOD_COOLDOWN_MS;
                 s_button_flood_result_pending = true;
-                s_button_flood_done_baseline = before.advert_tx_done;
-                s_button_flood_failed_baseline = before.advert_tx_failed;
+                s_button_flood_request_id = request_id;
                 show_toast_text("Flood advert queued", true);
             } else {
                 show_toast("Flood advert", ret);
@@ -9953,11 +9951,12 @@ static void display_runtime_timer_cb(lv_timer_t *timer)
     if (s_button_flood_result_pending) {
         const d1l_meshcore_service_status_t status =
             d1l_meshcore_service_status();
-        if (status.advert_tx_done != s_button_flood_done_baseline) {
+        if (status.advert_request_done_id ==
+            s_button_flood_request_id) {
             s_button_flood_result_pending = false;
             show_toast_text("Flood advert sent", true);
-        } else if (status.advert_tx_failed !=
-                   s_button_flood_failed_baseline) {
+        } else if (status.advert_request_failed_id ==
+                   s_button_flood_request_id) {
             s_button_flood_result_pending = false;
             show_toast_text("Flood advert failed", false);
         }

@@ -25,6 +25,8 @@ typedef struct {
     uint32_t advert_tx_queued;
     uint32_t advert_tx_done;
     uint32_t advert_tx_failed;
+    uint32_t advert_request_done_id;
+    uint32_t advert_request_failed_id;
     uint32_t boot_advert_tx_queued;
     uint32_t boot_advert_tx_done;
     uint32_t boot_advert_tx_failed;
@@ -221,9 +223,10 @@ esp_err_t d1l_meshcore_service_admin_request_cli(
 esp_err_t d1l_meshcore_service_admin_send_room_post(const char *text);
 esp_err_t d1l_meshcore_service_admin_logout(void);
 /* Enqueues a user-requested advert without blocking the caller while the
- * single radio owner finishes earlier traffic. Completion is observable
- * through advert_tx_done/advert_tx_failed in the service status. */
-esp_err_t d1l_meshcore_service_queue_advert(bool flood);
+ * single radio owner finishes earlier traffic. The returned nonzero request
+ * ID is completed only by the matching advert_request_*_id status field. */
+esp_err_t d1l_meshcore_service_queue_advert(bool flood,
+                                            uint32_t *out_request_id);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_request_boot_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,

@@ -1128,9 +1128,9 @@ esp_err_t d1l_app_model_request_advert(bool flood)
     return d1l_meshcore_service_request_advert(flood);
 }
 
-esp_err_t d1l_app_model_queue_advert(bool flood)
+esp_err_t d1l_app_model_queue_advert(bool flood, uint32_t *out_request_id)
 {
-    return d1l_meshcore_service_queue_advert(flood);
+    return d1l_meshcore_service_queue_advert(flood, out_request_id);
 }
 
 static esp_err_t validate_map_location(int32_t lat_e7, int32_t lon_e7)

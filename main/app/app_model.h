@@ -387,7 +387,7 @@ esp_err_t d1l_app_model_mark_public_read(void);
 esp_err_t d1l_app_model_mark_channel_read(uint64_t channel_id);
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
-esp_err_t d1l_app_model_queue_advert(bool flood);
+esp_err_t d1l_app_model_queue_advert(bool flood, uint32_t *out_request_id);
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);
 esp_err_t d1l_app_model_set_companion_map_location(
     int32_t lat_e7, int32_t lon_e7);
