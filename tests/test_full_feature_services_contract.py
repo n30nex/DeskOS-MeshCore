@@ -56,6 +56,11 @@ def test_observer_is_tls_qos1_bounded_and_privacy_scoped():
     assert "MALLOC_CAP_SPIRAM" in observer
     assert "d1l_time_service_wait_for_network_time(" in observer
     assert "observer_network_continue" in observer
+    assert "D1L_OBSERVER_ENDPOINT_START_GAP_MS" in observer
+    assert "started_endpoint" in observer
+    assert "event->error_handle->connect_return_code" in observer
+    assert "event->error_handle->esp_tls_last_esp_err" in observer
+    assert "event->error_handle->esp_transport_sock_errno" in observer
     assert "never forwards RF or exposes private keys" in ui
 
 

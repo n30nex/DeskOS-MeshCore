@@ -90,11 +90,35 @@ def test_ble_build_configuration_is_nimble_only_and_memory_bounded():
         "CONFIG_BT_NIMBLE_MAX_BONDS=2",
         "CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1",
         "CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=517",
+        "CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=4",
+        "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=1",
+        "CONFIG_BT_NIMBLE_MAX_CCCDS=2",
+        "CONFIG_BT_NIMBLE_WHITELIST_SIZE=2",
         "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096",
         "CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12",
         "CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12",
+        "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=8",
+        "CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=12",
+        "CONFIG_BT_NIMBLE_LOW_SPEED_MODE=y",
+        "CONFIG_BT_CTRL_BLE_MAX_ACT=2",
+        "# CONFIG_BT_CTRL_BLE_SCAN is not set",
     ):
         assert setting in defaults
+    for service in (
+        "PROX",
+        "ANS",
+        "CTS",
+        "HTP",
+        "IPSS",
+        "TPS",
+        "IAS",
+        "LLS",
+        "SPS",
+        "HR",
+        "BAS",
+        "DIS",
+    ):
+        assert f"# CONFIG_BT_NIMBLE_{service}_SERVICE is not set" in defaults
     assert '"comms/ble_companion.c"' in cmake
     assert '"comms/ble_companion_protocol.c"' in cmake
     assert '"comms/ble_companion_queue.c"' in cmake

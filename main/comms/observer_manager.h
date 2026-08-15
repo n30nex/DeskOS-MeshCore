@@ -28,6 +28,15 @@ typedef enum {
 } d1l_observer_state_t;
 
 typedef struct {
+    esp_err_t last_error;
+    int error_type;
+    int connect_return_code;
+    esp_err_t tls_esp_error;
+    int tls_stack_error;
+    int socket_errno;
+} d1l_observer_endpoint_diagnostic_t;
+
+typedef struct {
     d1l_observer_state_t state;
     bool initialized;
     bool configured;
@@ -52,6 +61,9 @@ typedef struct {
     uint32_t reconnects;
     uint32_t last_message_id;
     esp_err_t last_error;
+    d1l_observer_endpoint_diagnostic_t primary_diagnostic;
+    d1l_observer_endpoint_diagnostic_t secondary_diagnostic;
+    d1l_observer_endpoint_diagnostic_t custom_diagnostic;
 } d1l_observer_status_t;
 
 esp_err_t d1l_observer_manager_init(void);

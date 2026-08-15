@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "nvs.h"
 
@@ -62,7 +63,8 @@ typedef enum {
     D1L_ROUTE_SOURCE_NVS_LEGACY,
 } d1l_route_source_t;
 
-static d1l_route_entry_t s_entries[D1L_ROUTE_STORE_CAPACITY];
+static d1l_route_entry_t
+    s_entries[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_route_entry_t s_volatile_entry;
 static size_t s_count;
 static uint32_t s_next_seq = 1;
@@ -71,12 +73,16 @@ static uint32_t s_dropped_oldest;
 static uint32_t s_epoch = 1U;
 static bool s_loaded;
 static bool s_volatile_valid;
-static d1l_route_store_blob_t s_blob_scratch;
-static d1l_route_store_fallback_blob_t s_fallback_blob_scratch;
-static d1l_route_store_legacy_blob_t s_legacy_sd_blob_scratch;
-static d1l_route_store_legacy_blob_t s_legacy_nvs_blob_scratch;
-static d1l_route_persist_snapshot_t s_persist_snapshot;
-static d1l_route_entry_t s_reconcile_overlay[D1L_ROUTE_STORE_CAPACITY];
+static d1l_route_store_blob_t s_blob_scratch EXT_RAM_BSS_ATTR;
+static d1l_route_store_fallback_blob_t
+    s_fallback_blob_scratch EXT_RAM_BSS_ATTR;
+static d1l_route_store_legacy_blob_t
+    s_legacy_sd_blob_scratch EXT_RAM_BSS_ATTR;
+static d1l_route_store_legacy_blob_t
+    s_legacy_nvs_blob_scratch EXT_RAM_BSS_ATTR;
+static d1l_route_persist_snapshot_t s_persist_snapshot EXT_RAM_BSS_ATTR;
+static d1l_route_entry_t
+    s_reconcile_overlay[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static bool s_persistence_dirty;
 static bool s_persistence_material_dirty;
 static bool s_sd_primary_dirty;

@@ -10,6 +10,7 @@
 #include "d1l_config.h"
 #include "diagnostics/event_log.h"
 #include "ed_25519.h"
+#include "esp_attr.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
@@ -39,6 +40,7 @@
 #define D1L_OBSERVER_PUBLISH_INTERVAL_MS 300000U
 #define D1L_OBSERVER_BACKOFF_MS 5000U
 #define D1L_OBSERVER_LOOP_MS 200U
+#define D1L_OBSERVER_ENDPOINT_START_GAP_MS 12000U
 #define D1L_OBSERVER_TOKEN_LIFETIME_SEC 3600U
 #define D1L_OBSERVER_TOKEN_RENEW_SEC 2700U
 #define D1L_OBSERVER_PRIMARY_INDEX 0U
@@ -81,6 +83,7 @@ typedef struct {
     uint32_t inflight_sequence;
     int inflight_message_id;
     esp_err_t last_error;
+    d1l_observer_endpoint_diagnostic_t diagnostic;
     char username[D1L_OBSERVER_USERNAME_LEN];
     char password[D1L_OBSERVER_PASSWORD_LEN];
 } d1l_observer_endpoint_t;
@@ -88,12 +91,13 @@ typedef struct {
 static const char *TAG = "d1l_observer";
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_observer_config_t s_config;
-static d1l_observer_queue_entry_t s_queue[D1L_OBSERVER_QUEUE_CAPACITY];
+static d1l_observer_queue_entry_t
+    s_queue[D1L_OBSERVER_QUEUE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_queue_head;
 static size_t s_queue_count;
 static uint32_t s_queue_sequence = 1U;
 static d1l_observer_packet_entry_t
-    s_packet_queue[D1L_OBSERVER_PACKET_QUEUE_CAPACITY];
+    s_packet_queue[D1L_OBSERVER_PACKET_QUEUE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_packet_queue_head;
 static size_t s_packet_queue_count;
 static d1l_observer_status_t s_status = {
@@ -105,6 +109,7 @@ static d1l_observer_endpoint_t s_endpoints[D1L_OBSERVER_BROKER_COUNT];
 static SemaphoreHandle_t s_client_lock;
 static TaskHandle_t s_task;
 static uint32_t s_last_periodic_ms;
+static uint32_t s_last_endpoint_start_ms;
 static char s_public_key_hex[65];
 
 static bool take_client_lock(void)
@@ -642,6 +647,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         portENTER_CRITICAL(&s_lock);
         endpoint->connected = true;
         endpoint->last_error = ESP_OK;
+        memset(&endpoint->diagnostic, 0, sizeof(endpoint->diagnostic));
         endpoint->backoff_until_ms = 0U;
         s_status.reconnects++;
         portEXIT_CRITICAL(&s_lock);
@@ -651,7 +657,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     case MQTT_EVENT_DISCONNECTED:
         portENTER_CRITICAL(&s_lock);
         endpoint->connected = false;
-        endpoint->last_error = ESP_ERR_INVALID_STATE;
+        if (endpoint->last_error == ESP_OK) {
+            endpoint->last_error = ESP_ERR_INVALID_STATE;
+        }
         portEXIT_CRITICAL(&s_lock);
         break;
     case MQTT_EVENT_PUBLISHED: {
@@ -677,6 +685,19 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     case MQTT_EVENT_ERROR:
         portENTER_CRITICAL(&s_lock);
         endpoint->last_error = ESP_FAIL;
+        if (event && event->error_handle) {
+            endpoint->diagnostic = (d1l_observer_endpoint_diagnostic_t) {
+                .error_type = event->error_handle->error_type,
+                .connect_return_code =
+                    event->error_handle->connect_return_code,
+                .tls_esp_error =
+                    event->error_handle->esp_tls_last_esp_err,
+                .tls_stack_error =
+                    event->error_handle->esp_tls_stack_err,
+                .socket_errno =
+                    event->error_handle->esp_transport_sock_errno,
+            };
+        }
         portEXIT_CRITICAL(&s_lock);
         d1l_event_log_append(D1L_EVENT_LOG_LEVEL_ERROR, "observer",
                              "error", "secure MQTT transport error");
@@ -738,6 +759,10 @@ static esp_err_t start_endpoint(uint8_t index, uint32_t now_ms)
     }
     const char *uri = endpoint->uri;
     esp_err_t ret = ESP_OK;
+    portENTER_CRITICAL(&s_lock);
+    endpoint->last_error = ESP_OK;
+    memset(&endpoint->diagnostic, 0, sizeof(endpoint->diagnostic));
+    portEXIT_CRITICAL(&s_lock);
     if (index == D1L_OBSERVER_CUSTOM_INDEX) {
         char audience[D1L_OBSERVER_URI_LEN] = {0};
         portENTER_CRITICAL(&s_lock);
@@ -1096,6 +1121,7 @@ static void observer_task(void *argument)
         portEXIT_CRITICAL(&s_lock);
         uint32_t now_epoch = 0U;
         (void)current_utc(&now_epoch, NULL, 0U, NULL, 0U, NULL, 0U);
+        bool started_endpoint = false;
         for (uint8_t i = 0U; i < D1L_OBSERVER_BROKER_COUNT; ++i) {
             if ((active_mask & (1U << i)) == 0U) {
                 stop_endpoint(i);
@@ -1116,7 +1142,26 @@ static void observer_task(void *argument)
             }
             if (!endpoint_client_exists(i) &&
                 (retry_at == 0U || (int32_t)(now_ms - retry_at) >= 0)) {
-                (void)start_endpoint(i, now_ms);
+                bool another_connected = false;
+                uint32_t last_start_ms = 0U;
+                portENTER_CRITICAL(&s_lock);
+                for (uint8_t j = 0U; j < D1L_OBSERVER_BROKER_COUNT; ++j) {
+                    another_connected = another_connected ||
+                                        s_endpoints[j].connected;
+                }
+                last_start_ms = s_last_endpoint_start_ms;
+                portEXIT_CRITICAL(&s_lock);
+                const bool start_window_open =
+                    last_start_ms == 0U || another_connected ||
+                    now_ms - last_start_ms >=
+                        D1L_OBSERVER_ENDPOINT_START_GAP_MS;
+                if (!started_endpoint && start_window_open) {
+                    (void)start_endpoint(i, now_ms);
+                    portENTER_CRITICAL(&s_lock);
+                    s_last_endpoint_start_ms = now_ms;
+                    portEXIT_CRITICAL(&s_lock);
+                    started_endpoint = true;
+                }
             }
             portENTER_CRITICAL(&s_lock);
             connected = s_endpoints[i].connected;
@@ -1327,6 +1372,12 @@ void d1l_observer_status(d1l_observer_status_t *out_status)
     if (!out_status) return;
     portENTER_CRITICAL(&s_lock);
     *out_status = s_status;
+    out_status->primary_diagnostic = s_endpoints[0].diagnostic;
+    out_status->secondary_diagnostic = s_endpoints[1].diagnostic;
+    out_status->custom_diagnostic = s_endpoints[2].diagnostic;
+    out_status->primary_diagnostic.last_error = s_endpoints[0].last_error;
+    out_status->secondary_diagnostic.last_error = s_endpoints[1].last_error;
+    out_status->custom_diagnostic.last_error = s_endpoints[2].last_error;
     out_status->queued =
         (uint32_t)(s_queue_count + s_packet_queue_count);
     portEXIT_CRITICAL(&s_lock);

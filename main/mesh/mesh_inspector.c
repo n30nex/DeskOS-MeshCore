@@ -9,8 +9,8 @@
 #include "mesh/packet_log.h"
 #include "mesh/store_lock.h"
 
-static d1l_packet_log_entry_t s_packet_scratch[8];
-static d1l_route_entry_t s_route_scratch[D1L_ROUTE_STORE_CAPACITY];
+static d1l_packet_log_entry_t s_packet_scratch[8] EXT_RAM_BSS_ATTR;
+static d1l_route_entry_t s_route_scratch[D1L_ROUTE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_node_entry_t s_node_scratch[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_store_lock_t s_inspector_lock = D1L_STORE_LOCK_INITIALIZER;
 

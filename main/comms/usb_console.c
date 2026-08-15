@@ -8283,6 +8283,27 @@ static void print_observer_status(const char *command)
            bool_json(status.secondary_connected),
            bool_json(status.custom_configured),
            bool_json(status.custom_connected));
+    printf(",\"diagnostics\":{\"meshcore_ca_1\":{"
+           "\"last_error\":\"%s\",\"error_type\":%d,"
+           "\"connect_return_code\":%d,"
+           "\"tls_error\":\"%s\",\"tls_stack_error\":%d,"
+           "\"socket_errno\":%d},\"meshcore_ca_2\":{"
+           "\"last_error\":\"%s\",\"error_type\":%d,"
+           "\"connect_return_code\":%d,"
+           "\"tls_error\":\"%s\",\"tls_stack_error\":%d,"
+           "\"socket_errno\":%d}}",
+           esp_err_to_name(status.primary_diagnostic.last_error),
+           status.primary_diagnostic.error_type,
+           status.primary_diagnostic.connect_return_code,
+           esp_err_to_name(status.primary_diagnostic.tls_esp_error),
+           status.primary_diagnostic.tls_stack_error,
+           status.primary_diagnostic.socket_errno,
+           esp_err_to_name(status.secondary_diagnostic.last_error),
+           status.secondary_diagnostic.error_type,
+           status.secondary_diagnostic.connect_return_code,
+           esp_err_to_name(status.secondary_diagnostic.tls_esp_error),
+           status.secondary_diagnostic.tls_stack_error,
+           status.secondary_diagnostic.socket_errno);
     printf(",\"queue\":{\"count\":%lu,\"capacity\":%lu,"
            "\"queued_total\":%lu,\"published_total\":%lu,"
            "\"acknowledged_total\":%lu,\"dropped_oldest\":%lu},"
