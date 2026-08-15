@@ -477,7 +477,7 @@ static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
     };
     messages_make_clickable(bubble, binding);
 
-    char time_label[D1L_TIME_DISPLAY_CLOCK_LEN] = {0};
+    char time_label[16] = {0};
     messages_public_time_label(
         entry, controller->rendered.timezone_offset_minutes,
         time_label, sizeof(time_label));
