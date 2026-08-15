@@ -6,6 +6,7 @@
 #include "app/release_profile.h"
 #include "app/settings_model.h"
 #include "bsp_sx126x.h"
+#include "comms/observer_manager.h"
 #include "diagnostics/event_log.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -164,6 +165,7 @@ static bool s_pending_channel_packet_hash_ready;
 static uint8_t s_pending_channel_raw[D1L_MESHCORE_MAX_RAW_PACKET];
 static uint8_t s_pending_channel_raw_len;
 static uint8_t s_pending_channel_path_hash_bytes;
+static uint32_t s_pending_channel_display_timestamp;
 static char s_pending_channel_name[D1L_CHANNEL_NAME_LEN];
 static char s_pending_channel_author[D1L_NODE_NAME_LEN];
 static bool s_pending_channel_tx_completed;
@@ -1376,7 +1378,8 @@ typedef struct {
 
 static d1l_channel_rx_store_result_t append_channel_message_store_rx(
     uint64_t channel_id, const char *channel_name, const char *message,
-    int rssi, int snr_quarters, uint8_t path_hash_bytes, uint8_t path_hops)
+    int rssi, int snr_quarters, uint8_t path_hash_bytes, uint8_t path_hops,
+    uint32_t display_timestamp)
 {
     char author[D1L_MESSAGE_AUTHOR_LEN] = {0};
     char body[D1L_MESSAGE_TEXT_LEN] = {0};
@@ -1404,9 +1407,9 @@ static d1l_channel_rx_store_result_t append_channel_message_store_rx(
         };
     }
     uint32_t message_seq = 0U;
-    esp_err_t ret = d1l_message_store_append_channel(
+    esp_err_t ret = d1l_message_store_append_channel_at(
         channel_id, "rx", author, body, rssi, (snr_quarters * 10) / 4,
-        path_hash_bytes, path_hops, true, &message_seq);
+        path_hash_bytes, path_hops, true, display_timestamp, &message_seq);
     reconcile_channel_messages(message_seq);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "channel message append rx failed: %s",
@@ -1426,9 +1429,10 @@ static bool append_channel_message_store_tx(uint64_t channel_id,
                                             const char *message)
 {
     uint32_t message_seq = 0U;
-    const esp_err_t ret = d1l_message_store_append_channel_deferred(
+    const esp_err_t ret = d1l_message_store_append_channel_deferred_at(
         channel_id, "tx", author, message, 0, 0,
-        s_pending_channel_path_hash_bytes, 0, false, &message_seq);
+        s_pending_channel_path_hash_bytes, 0, false,
+        s_pending_channel_display_timestamp, &message_seq);
     return ret == ESP_OK && message_seq != 0U;
 }
 
@@ -1886,6 +1890,7 @@ static void reset_pending_channel_tx_state(void)
                       sizeof(s_pending_channel_raw));
     s_pending_channel_raw_len = 0U;
     s_pending_channel_path_hash_bytes = 0U;
+    s_pending_channel_display_timestamp = 0U;
     secure_zero_bytes(s_pending_channel_name,
                       sizeof(s_pending_channel_name));
     secure_zero_bytes(s_pending_channel_author,
@@ -1913,6 +1918,7 @@ static esp_err_t remember_pending_channel_tx(uint64_t channel_id,
                                              const uint8_t *raw,
                                              uint8_t raw_len,
                                              uint8_t path_hash_bytes,
+                                             uint32_t display_timestamp,
                                              const char *channel_name,
                                              const char *author)
 {
@@ -1933,6 +1939,7 @@ static esp_err_t remember_pending_channel_tx(uint64_t channel_id,
     memcpy(s_pending_channel_raw, raw, raw_len);
     s_pending_channel_raw_len = raw_len;
     s_pending_channel_path_hash_bytes = path_hash_bytes;
+    s_pending_channel_display_timestamp = display_timestamp;
     sanitize_note(s_pending_channel_name, sizeof(s_pending_channel_name),
                   channel_name);
     sanitize_note(s_pending_channel_author, sizeof(s_pending_channel_author),
@@ -3442,7 +3449,7 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     const d1l_channel_rx_store_result_t message_result =
         append_channel_message_store_rx(
             channel_id, channel.name, message, rssi, snr,
-            packet.path_hash_bytes, packet.path_hops);
+            packet.path_hash_bytes, packet.path_hops, read_le32(plain));
     if (!message_result.admitted) {
         secure_zero_bytes(plain, sizeof(plain));
         return;
@@ -5236,6 +5243,7 @@ static void meshcore_service_handle_radio_rx_done(
 {
     d1l_meshcore_packet_semantic_view_t packet = {0};
     bool ack_queued = false;
+    (void)d1l_observer_enqueue_packet(payload, size, rssi, snr);
     if (d1l_meshcore_packet_semantic_parse(payload, size, &packet)) {
         switch (packet.kind) {
         case D1L_MESHCORE_PACKET_SEMANTIC_ADMIN_RESPONSE:
@@ -8384,6 +8392,14 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         s_status.rejected_commands++;
         return ret;
     }
+    uint32_t display_timestamp = 0U;
+    d1l_time_service_status_t time_status = {0};
+    d1l_time_service_status(&time_status);
+    if (time_status.display_time_valid &&
+        time_status.clock.wall_epoch_sec > 0 &&
+        (uint64_t)time_status.clock.wall_epoch_sec <= UINT32_MAX) {
+        display_timestamp = (uint32_t)time_status.clock.wall_epoch_sec;
+    }
     ret = build_channel_text_packet(
         &channel_key, settings->node_name, text,
         settings->path_hash_bytes, tx_timestamp, raw, sizeof(raw),
@@ -8404,7 +8420,8 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
     }
     ret = remember_pending_channel_tx(
         channel_id, text, packet_hash, raw, raw_len,
-        settings->path_hash_bytes, channel.name, settings->node_name);
+        settings->path_hash_bytes, display_timestamp, channel.name,
+        settings->node_name);
     secure_zero_bytes(packet_hash, sizeof(packet_hash));
     if (ret != ESP_OK) {
         secure_zero_bytes(raw, sizeof(raw));

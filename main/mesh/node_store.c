@@ -797,6 +797,8 @@ static void build_node_view(size_t index, const d1l_node_entry_t *node,
     }
     memset(view, 0, sizeof(*view));
     view->node = *node;
+    view->node.last_heard_ms = s_live_heard_valid[index] ?
+        s_live_last_heard_ms[index] : 0U;
 
     d1l_contact_entry_t contact = {0};
     const bool has_contact =

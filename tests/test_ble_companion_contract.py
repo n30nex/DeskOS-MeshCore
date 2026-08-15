@@ -55,12 +55,12 @@ def test_ble_transport_fails_closed_on_security_and_preserves_wire_contract():
     assert "mesh/" not in source
 
 
-def test_ble_pin_is_generated_never_logged_and_touch_capability_is_truthful():
+def test_ble_pin_matches_meshcore_companion_and_is_never_logged():
     source = read("main/comms/ble_companion.c")
     app_header = read("main/app/app_model.h")
     settings = read("main/app/settings_model.c")
 
-    assert "100000U + (esp_random() % 900000U)" in source
+    assert "D1L_BLE_COMPANION_STATIC_PASSKEY 123456U" in source
     assert "ble_sm_inject_io" in source
     for line in source.splitlines():
         if "LOG" in line or "printf" in line:

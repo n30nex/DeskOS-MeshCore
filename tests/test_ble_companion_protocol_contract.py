@@ -75,12 +75,12 @@ def test_protocol_fails_closed_for_privileged_and_malformed_commands():
     assert "frame_len != D1L_COMPANION3_HEADER_SIZE + payload_len" in protocol
 
 
-def test_pairing_is_dynamic_bonded_and_locally_manageable():
+def test_pairing_is_interoperable_bonded_and_locally_manageable():
     transport = read("main/comms/ble_companion.c")
     ui = read("main/ui/ui_connectivity.c")
     phase1 = read("main/ui/ui_phase1.c")
 
-    assert "100000U + (esp_random() % 900000U)" in transport
+    assert "D1L_BLE_COMPANION_STATIC_PASSKEY 123456U" in transport
     assert "desc.sec_state.encrypted" in transport
     assert "desc.sec_state.authenticated" in transport
     assert "desc.sec_state.bonded" in transport

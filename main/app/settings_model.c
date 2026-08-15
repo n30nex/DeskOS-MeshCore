@@ -635,9 +635,6 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
     settings->onboarding_complete = settings->onboarding_complete ? true : false;
     settings->wifi_enabled = settings->wifi_enabled ? true : false;
     settings->ble_companion_enabled = settings->ble_companion_enabled ? true : false;
-    if (settings->wifi_enabled && settings->ble_companion_enabled) {
-        settings->ble_companion_enabled = false;
-    }
     settings->observer_enabled = settings->observer_enabled ? true : false;
     if (settings->path_hash_bytes < 1 || settings->path_hash_bytes > 3) {
         settings->path_hash_bytes = 1;
@@ -1913,7 +1910,7 @@ esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enab
     snprintf(settings.node_name, sizeof(settings.node_name), "%s", node_name);
     settings.role = D1L_ROLE_DESK_COMPANION;
     settings.wifi_enabled = wifi_enabled;
-    settings.ble_companion_enabled = wifi_enabled ? false : ble_companion_enabled;
+    settings.ble_companion_enabled = ble_companion_enabled;
     settings.observer_enabled = observer_enabled;
     settings.onboarding_complete = true;
     const esp_err_t ret = settings_save_locked(&settings);

@@ -62,6 +62,7 @@ static uint16_t s_att_mtu = D1L_BLE_COMPANION_DEFAULT_ATT_MTU;
 static uint16_t s_rx_value_handle;
 static uint16_t s_tx_value_handle;
 static uint32_t s_pairing_passkey;
+#define D1L_BLE_COMPANION_STATIC_PASSKEY 123456U
 static uint32_t s_connect_count;
 static uint32_t s_disconnect_count;
 static uint32_t s_rx_frame_count;
@@ -518,14 +519,12 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         return 0;
     case BLE_GAP_EVENT_PASSKEY_ACTION:
         if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
-            const uint32_t pairing_passkey =
-                100000U + (esp_random() % 900000U);
             struct ble_sm_io passkey = {
                 .action = BLE_SM_IOACT_DISP,
-                .passkey = pairing_passkey,
+                .passkey = D1L_BLE_COMPANION_STATIC_PASSKEY,
             };
             portENTER_CRITICAL(&s_lock);
-            s_pairing_passkey = pairing_passkey;
+            s_pairing_passkey = D1L_BLE_COMPANION_STATIC_PASSKEY;
             portEXIT_CRITICAL(&s_lock);
             const int rc = ble_sm_inject_io(event->passkey.conn_handle,
                                             &passkey);

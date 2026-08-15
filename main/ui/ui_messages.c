@@ -5,6 +5,7 @@
 
 #include "app/release_profile.h"
 #include "lvgl.h"
+#include "platform/time_display.h"
 #include "ui_font_symbols_14.h"
 #include "ui_modal.h"
 
@@ -417,12 +418,20 @@ static void messages_make_clickable(
                         binding);
 }
 
-static const char *messages_public_time_label(const d1l_message_entry_t *entry)
+static void messages_public_time_label(const d1l_message_entry_t *entry,
+                                       int16_t timezone_offset_minutes,
+                                       char *out, size_t out_size)
 {
-    /* Retained rows have uptime but no persisted boot epoch.  Never present
-     * that value as wall-clock or relative time across reboot. */
-    (void)entry;
-    return "time unknown";
+    if (!out || out_size == 0U) {
+        return;
+    }
+    const uint32_t timestamp =
+        d1l_message_entry_display_timestamp(entry);
+    if (timestamp != 0U && d1l_time_display_format_clock(
+            timestamp, timezone_offset_minutes, false, out, out_size)) {
+        return;
+    }
+    snprintf(out, out_size, "time unknown");
 }
 
 static const char *messages_public_state(const d1l_message_entry_t *entry,
@@ -468,10 +477,14 @@ static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
     };
     messages_make_clickable(bubble, binding);
 
+    char time_label[16] = {0};
+    messages_public_time_label(
+        entry, controller->rendered.timezone_offset_minutes,
+        time_label, sizeof(time_label));
     char state_and_time[64];
     snprintf(state_and_time, sizeof(state_and_time), "%s | %s",
              messages_public_state(entry, unread),
-             messages_public_time_label(entry));
+             time_label);
 
     lv_obj_t *author = messages_create_label(
         bubble, outgoing ? "You" :

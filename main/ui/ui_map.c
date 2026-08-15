@@ -979,11 +979,17 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
         detail = "Add this area to the SD card or configure an authorized download source.";
         color = MAP_COLOR_WARN;
         show_overlay = true;
-    } else if (status->failed_tiles > 0U && !status->frame_ready) {
+    } else if (status->failed_tiles > 0U && !status->frame_ready &&
+               !status->worker_running) {
         title = "Map unavailable";
         detail = "Tiles could not be loaded. Check Wi-Fi and the SD card.";
         color = MAP_COLOR_WARN;
         show_overlay = true;
+    } else if (status->failed_tiles > 0U && status->worker_running) {
+        title = "Loading map";
+        detail = "Retrying missing tiles while saved tiles appear.";
+        color = MAP_COLOR_INFO;
+        show_overlay = !status->frame_ready;
     } else if (!status->frame_ready &&
                strcmp(status->phase, "loading_cache") == 0) {
         title = "Loading saved map";
