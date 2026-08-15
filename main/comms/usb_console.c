@@ -23,6 +23,7 @@
 #include "app/qualification_hooks.h"
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
+#include "comms/ble_companion.h"
 #include "comms/companion_3byte.h"
 #include "comms/observer_manager.h"
 #include "comms/usb_command_parser.h"
@@ -8872,7 +8873,9 @@ static void cmd_wifi_connect(void)
 static void cmd_ble_status(void)
 {
     d1l_connectivity_status_t status = {0};
+    d1l_ble_companion_status_t ble = {0};
     d1l_connectivity_status(&status);
+    d1l_ble_companion_status(&ble);
     const bool available =
         d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
     ok_begin("ble status");
@@ -8882,6 +8885,7 @@ static void cmd_ble_status(void)
            "\"setting_enabled\":%s,\"configured_setting_enabled\":%s,"
            "\"build_enabled\":%s,\"stack_active\":%s,"
            "\"runtime_policy_violation\":%s,\"state\":\"%s\","
+           "\"last_error\":\"%s\",\"last_nimble_error\":%d,"
            "\"policy\":\"%s\"}\n",
            bool_json(available),
            bool_json(
@@ -8890,7 +8894,8 @@ static void cmd_ble_status(void)
            bool_json(status.ble_build_enabled),
            bool_json(status.ble_stack_active),
            bool_json(!available && status.ble_stack_active),
-           status.ble_state, status.coexistence_policy);
+           status.ble_state, esp_err_to_name(ble.last_error),
+           ble.last_nimble_error, status.coexistence_policy);
 }
 
 static void cmd_ble_off(void)

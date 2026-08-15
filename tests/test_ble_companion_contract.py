@@ -23,6 +23,8 @@ def test_ble_gatt_contract_matches_pinned_meshcore_and_stays_bounded():
     assert "D1L_COMPANION3_MAX_FRAME_SIZE" in queue
     assert "BLE_GATT_CHR_F_WRITE_NO_RSP" in source
     assert "BLE_GATT_CHR_F_NOTIFY" in source
+    assert ".access_cb = tx_access" in source
+    assert "BLE_ATT_ERR_READ_NOT_PERMITTED" in source
     assert "BLE_GAP_EVENT_SUBSCRIBE" in source
     assert "BLE_GAP_EVENT_MTU" in source
     assert "ble_gatts_notify_custom" in source
@@ -61,6 +63,7 @@ def test_ble_pin_matches_meshcore_companion_and_is_never_logged():
     settings = read("main/app/settings_model.c")
 
     assert "D1L_BLE_COMPANION_STATIC_PASSKEY 123456U" in source
+    assert "ble_sm_configure_static_passkey" in source
     assert "ble_sm_inject_io" in source
     for line in source.splitlines():
         if "LOG" in line or "printf" in line:
@@ -91,19 +94,22 @@ def test_ble_build_configuration_is_nimble_only_and_memory_bounded():
         "CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1",
         "CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=517",
         "CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=4",
-        "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=1",
+        "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2",
         "CONFIG_BT_NIMBLE_MAX_CCCDS=2",
         "CONFIG_BT_NIMBLE_WHITELIST_SIZE=2",
         "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096",
         "CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12",
         "CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12",
         "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=8",
-        "CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=12",
+        "CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=15",
         "CONFIG_BT_NIMBLE_LOW_SPEED_MODE=y",
         "CONFIG_BT_CTRL_BLE_MAX_ACT=2",
         "# CONFIG_BT_CTRL_BLE_SCAN is not set",
     ):
         assert setting in defaults
+    assert "# CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC is not set" in defaults
+    assert "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y" in defaults
+    assert "# CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC is not set" in defaults
     for service in (
         "PROX",
         "ANS",
