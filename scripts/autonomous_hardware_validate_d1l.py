@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -686,12 +687,25 @@ def terminate_process_tree(proc: subprocess.Popen) -> None:
         pass
 
 
-def esptool_flash_command(build_dir: Path, port: str, baud: int) -> list[str]:
+def esptool_flash_command(
+    build_dir: Path,
+    port: str,
+    baud: int,
+    flash_offsets: Iterable[int] | None = None,
+) -> list[str]:
     flasher = json.loads(require_path(build_dir / "flasher_args.json", "flasher_args.json").read_text())
     extra = flasher.get("extra_esptool_args", {})
     write_args = [str(item).replace("_", "-") if str(item).startswith("--") else str(item) for item in flasher.get("write_flash_args", [])]
     flash_files = flasher.get("flash_files", {})
     ordered_files = sorted(flash_files.items(), key=lambda item: int(str(item[0]), 0))
+    if flash_offsets is not None:
+        selected = {int(offset) for offset in flash_offsets}
+        available = {int(str(offset), 0) for offset, _ in ordered_files}
+        if not selected or not selected <= available:
+            raise FlashGuardError("requested flash offsets are empty or unavailable")
+        ordered_files = [
+            item for item in ordered_files if int(str(item[0]), 0) in selected
+        ]
     file_args: list[str] = []
     for offset, rel_path in ordered_files:
         file_args.extend([str(offset), str((build_dir / str(rel_path)).resolve())])

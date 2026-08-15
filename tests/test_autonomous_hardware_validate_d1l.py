@@ -462,6 +462,19 @@ def test_esptool_command_uses_actions_build_files(tmp_path):
     assert str((build / "meshcore_deskos_d1l.bin").resolve()) in command
 
 
+def test_esptool_command_can_select_app_only_for_retained_update(tmp_path):
+    build = tmp_path / "build"
+    write_flasher_args(build)
+
+    command = runner.esptool_flash_command(
+        build, "COM12", 460800, flash_offsets={0x20000}
+    )
+
+    assert "0x20000" in command
+    assert str((build / "meshcore_deskos_d1l.bin").resolve()) in command
+    assert all(offset not in command for offset in ("0x0", "0x8000", "0xf000"))
+
+
 def test_flash_esp32_waits_after_successful_hard_reset(tmp_path, monkeypatch):
     run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
     write_flasher_args(run_dir / "d1l-firmware-artifacts" / "build")

@@ -470,7 +470,7 @@ def validate_capture_receipt(
         / "build-inputs"
         / "d1l-candidate-scope.json"
     )
-    scope = _read_json_file(scope_path, "RC1 candidate scope")
+    scope = _read_json_file(scope_path, "release candidate scope")
     expected_scope = {
         "schema": 1,
         "kind": "d1l_candidate_scope",
@@ -481,18 +481,19 @@ def validate_capture_receipt(
         "workflow": WORKFLOW_NAME,
         "event": "push",
         "include_sd_bridge": True,
-        "release_profile": "core_1_0",
         "sd_history_mode": "conditional",
     }
     scope_reason = scope.get("scope_reason")
     scope_without_reason = {
         key: value for key, value in scope.items() if key != "scope_reason"
     }
+    release_profile = scope_without_reason.pop("release_profile", None)
     if (
         scope_without_reason != expected_scope
+        or release_profile not in {"core_1_0", "full_feature"}
         or scope_reason not in {"rc1_candidate", "rc1_sd_paths"}
     ):
-        raise ValueError("Checksummed merged-main RC1 candidate scope is not exact")
+        raise ValueError("Checksummed merged-main release candidate scope is not exact")
     return {
         "ok": True,
         "receipt": file_row(receipt_path, root),

@@ -322,7 +322,7 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
             "ok": True,
             "build_commit": commit,
             "idf": "v5.5.4",
-            "release_profile": "core_1_0",
+            "release_profile": "full_feature",
             "sd_history_mode": "conditional",
         },
         {
@@ -330,7 +330,7 @@ def retained_state(commit: str = COMMIT, *, name: str = "DeskOS") -> list[dict]:
             "cmd": "health",
             "ok": True,
             "build_commit": commit,
-            "release_profile": "core_1_0",
+            "release_profile": "full_feature",
             "sd_history_mode": "conditional",
             "board_ready": True,
             "ui_ready": True,
@@ -1396,6 +1396,17 @@ def fixture_paths(tmp_path: Path):
 
 
 def install_preflight_mocks(monkeypatch):
+    def fake_esptool_command(_build, port, _baud, flash_offsets=None):
+        offsets = (
+            (0x20000,)
+            if flash_offsets == {0x20000}
+            else tuple(sorted(flash.EXPECTED_FLASH_ROLES))
+        )
+        command = ["python", "-m", "esptool", "-p", port, "write-flash"]
+        for offset in offsets:
+            command.extend([hex(offset), f"{offset:x}.bin"])
+        return command
+
     monkeypatch.setattr(
         flash,
         "git_metadata",
@@ -1433,16 +1444,7 @@ def install_preflight_mocks(monkeypatch):
     monkeypatch.setattr(
         flash,
         "esptool_flash_command",
-        lambda _build, port, _baud: [
-            "python",
-            "-m",
-            "esptool",
-            "-p",
-            port,
-            "write-flash",
-            "0x0",
-            "bootloader.bin",
-        ],
+        fake_esptool_command,
     )
 
 
@@ -2026,6 +2028,12 @@ def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
     assert bootstrap["scope"] == "core-bootstrap-flash-only"
     assert bootstrap["retained_state_before"] is None
     assert bootstrap["retained_state_preserved"] is None
+    assert bootstrap["flash_offsets"] == [
+        "0x0",
+        "0x8000",
+        "0xf000",
+        "0x20000",
+    ]
 
     closing_log = raw_log.with_name("esp32_flash_closing.log")
     closing = flash.run_core_flash_only(
@@ -2060,6 +2068,8 @@ def test_bootstrap_is_nonclosing_then_retained_reflash_closes(
     assert closing["erase_flash"] is False
     assert closing["workflow_run_attempt"] == RUN_ATTEMPT
     assert closing["actions_capture_verification"]["ok"] is True
+    assert closing["flash_offsets"] == ["0x20000"]
+    assert flash.command_flash_offsets(closing["command"]) == {0x20000}
 
 
 def test_retained_reflash_refuses_empty_before_and_after_retry_baseline(
