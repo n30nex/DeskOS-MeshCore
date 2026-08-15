@@ -220,6 +220,10 @@ esp_err_t d1l_meshcore_service_admin_request_cli(
     const char *command, bool local_confirmed);
 esp_err_t d1l_meshcore_service_admin_send_room_post(const char *text);
 esp_err_t d1l_meshcore_service_admin_logout(void);
+/* Enqueues a user-requested advert without blocking the caller while the
+ * single radio owner finishes earlier traffic. Completion is observable
+ * through advert_tx_done/advert_tx_failed in the service status. */
+esp_err_t d1l_meshcore_service_queue_advert(bool flood);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_request_boot_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,

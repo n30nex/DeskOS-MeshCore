@@ -10,6 +10,7 @@
 #include "diagnostics/health_monitor.h"
 #include "esp_attr.h"
 #include "hal/display_preferences.h"
+#include "mbedtls/md.h"
 #include "mesh/admin_credential_store.h"
 #include "mesh/channel_message_coordinator.h"
 #include "mesh/meshcore_service.h"
@@ -762,12 +763,28 @@ esp_err_t d1l_app_model_create_channel(
     if (prepared != ESP_OK) {
         return prepared;
     }
-    uint8_t secret[D1L_CHANNEL_SECRET_128_LEN];
-    const esp_err_t random_ret =
-        d1l_secure_random_fill(secret, sizeof(secret));
-    if (random_ret != ESP_OK) {
+    uint8_t secret[D1L_CHANNEL_SECRET_128_LEN] = {0};
+    esp_err_t secret_ret = ESP_OK;
+    if (name && name[0] == '#') {
+        const char *end = memchr(name, '\0', D1L_CHANNEL_NAME_LEN);
+        const size_t name_len = end ? (size_t)(end - name) : 0U;
+        uint8_t digest[32] = {0};
+        const mbedtls_md_info_t *sha256 =
+            mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+        if (!end || name_len < 2U || !sha256 ||
+            mbedtls_md(sha256, (const unsigned char *)name, name_len,
+                       digest) != 0) {
+            secret_ret = ESP_ERR_INVALID_ARG;
+        } else {
+            memcpy(secret, digest, sizeof(secret));
+        }
+        clear_sensitive_bytes(digest, sizeof(digest));
+    } else {
+        secret_ret = d1l_secure_random_fill(secret, sizeof(secret));
+    }
+    if (secret_ret != ESP_OK) {
         clear_sensitive_bytes(secret, sizeof(secret));
-        return random_ret;
+        return secret_ret;
     }
     const esp_err_t ret = d1l_channel_store_add(
         name, secret, (uint8_t)sizeof(secret), true, make_default,
@@ -1109,6 +1126,11 @@ esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint)
 esp_err_t d1l_app_model_request_advert(bool flood)
 {
     return d1l_meshcore_service_request_advert(flood);
+}
+
+esp_err_t d1l_app_model_queue_advert(bool flood)
+{
+    return d1l_meshcore_service_queue_advert(flood);
 }
 
 static esp_err_t validate_map_location(int32_t lat_e7, int32_t lon_e7)

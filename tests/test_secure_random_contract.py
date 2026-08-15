@@ -83,7 +83,8 @@ def test_identity_and_channel_secrets_use_only_the_secure_service():
     for body in (create, identity):
         assert "d1l_secure_random_fill(" in body
         assert "esp_fill_random" not in body
-        assert "return random_ret" in body
+    assert "return secret_ret" in create
+    assert "return random_ret" in identity
     assert create.index("d1l_secure_random_fill(") < create.index(
         "d1l_channel_store_add("
     )

@@ -16,7 +16,8 @@ def test_node_query_uses_bounded_library_sort_instead_of_quadratic_selection():
         "uint32_t d1l_node_store_marker_generation", 1
     )[0]
 
-    assert "qsort(s_query_scratch" in body
+    assert "qsort(s_query_order" in body
+    assert "sizeof(s_query_order[0])" in body
     assert "bool used[D1L_NODE_STORE_CAPACITY]" not in body
 
 
@@ -102,12 +103,15 @@ def test_heard_node_query_supports_production_sort_filter_rows():
     assert "d1l_node_store_query" in header
     assert '#include "mesh/contact_store.h"' in source
     assert "static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY]" in source
+    assert "static uint16_t s_query_order[D1L_NODE_STORE_CAPACITY]" in source
+    assert "d1l_contact_store_copy_recent(" in source
+    assert "qsort(s_query_order" in source
     assert "node_role_name" in source
     assert 'return "sensor";' in source
     assert "node_view_matches_filter" in source
     assert "node_view_better" in source
     assert "contains_casefold" in source
-    assert "d1l_contact_store_find_by_fingerprint" in source
+    assert "query_contact_for_node" in source
 
 
 def test_verified_adverts_upsert_heard_nodes():

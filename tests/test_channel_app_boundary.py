@@ -91,8 +91,12 @@ def test_app_channel_management_boundary_is_redacted_confirmed_and_persistent():
 
     assert "d1l_channel_store_add(" in add_channel
     assert "d1l_secure_random_fill(secret, sizeof(secret))" in create_channel
+    assert "name[0] == '#'" in create_channel
+    assert "MBEDTLS_MD_SHA256" in create_channel
+    assert "mbedtls_md(sha256" in create_channel
+    assert "memcpy(secret, digest, sizeof(secret))" in create_channel
     assert "esp_fill_random" not in create_channel
-    assert "return random_ret" in create_channel
+    assert "return secret_ret" in create_channel
     assert "D1L_CHANNEL_SECRET_128_LEN" in create_channel
     assert "d1l_channel_store_add(" in create_channel
     assert create_channel.index("d1l_secure_random_fill(") < create_channel.index(

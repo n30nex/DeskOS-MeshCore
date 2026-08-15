@@ -131,8 +131,11 @@ static d1l_node_store_blob_v4_t s_legacy_blob_scratch EXT_RAM_BSS_ATTR;
 static d1l_node_store_sd_blob_t s_sd_blob_scratch EXT_RAM_BSS_ATTR;
 static d1l_node_store_sd_blob_t s_persist_snapshot EXT_RAM_BSS_ATTR;
 static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
-/* Queries are serialized by s_store_lock, so qsort's comparator context is
- * safe without allocating another 512-entry buffer. */
+static uint16_t s_query_order[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_contact_entry_t
+    s_query_contacts[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+/* Queries are serialized by s_store_lock. Sort compact indexes instead of
+ * repeatedly moving the much larger node views. */
 static d1l_node_sort_t s_query_sort;
 static bool s_persistence_dirty;
 static bool s_sd_reconcile_pending;
@@ -789,8 +792,23 @@ static uint8_t node_role_order(const char *role)
     return 4U;
 }
 
+static const d1l_contact_entry_t *query_contact_for_node(
+    const d1l_node_entry_t *node, size_t contact_count)
+{
+    if (!node) {
+        return NULL;
+    }
+    for (size_t i = 0U; i < contact_count; ++i) {
+        if (strcmp(s_query_contacts[i].fingerprint, node->fingerprint) == 0) {
+            return &s_query_contacts[i];
+        }
+    }
+    return NULL;
+}
+
 static void build_node_view(size_t index, const d1l_node_entry_t *node,
-                            d1l_node_view_t *view, uint32_t now_ms)
+                            d1l_node_view_t *view, uint32_t now_ms,
+                            size_t contact_count)
 {
     if (index >= s_count || !node || !view) {
         return;
@@ -800,19 +818,18 @@ static void build_node_view(size_t index, const d1l_node_entry_t *node,
     view->node.last_heard_ms = s_live_heard_valid[index] ?
         s_live_last_heard_ms[index] : 0U;
 
-    d1l_contact_entry_t contact = {0};
-    const bool has_contact =
-        d1l_contact_store_find_by_fingerprint(node->fingerprint, &contact);
-    view->favorite = has_contact && contact.favorite;
-    view->muted = has_contact && contact.muted;
-    view->keyed = node_has_key(node, has_contact ? &contact : NULL);
+    const d1l_contact_entry_t *contact =
+        query_contact_for_node(node, contact_count);
+    view->favorite = contact && contact->favorite;
+    view->muted = contact && contact->muted;
+    view->keyed = node_has_key(node, contact);
     view->reachable = s_live_heard_valid[index] &&
         d1l_meshcore_lifetime_age_current_u32(
             s_live_last_heard_ms[index], now_ms,
             D1L_MESHCORE_CONTACT_REACHABLE_MAX_AGE_MS);
     sanitize_ascii(view->role, sizeof(view->role), node_role_name(node));
-    if (has_contact && contact.alias[0] != '\0') {
-        sanitize_ascii(view->display_name, sizeof(view->display_name), contact.alias);
+    if (contact && contact->alias[0] != '\0') {
+        sanitize_ascii(view->display_name, sizeof(view->display_name), contact->alias);
     } else if (node->name[0] != '\0') {
         sanitize_ascii(view->display_name, sizeof(view->display_name), node->name);
     } else {
@@ -919,10 +936,12 @@ static bool node_view_better(const d1l_node_view_t *candidate, const d1l_node_vi
     return candidate->node.seq > best->node.seq;
 }
 
-static int node_view_compare(const void *left, const void *right)
+static int node_view_index_compare(const void *left, const void *right)
 {
-    const d1l_node_view_t *left_view = left;
-    const d1l_node_view_t *right_view = right;
+    const uint16_t left_index = *(const uint16_t *)left;
+    const uint16_t right_index = *(const uint16_t *)right;
+    const d1l_node_view_t *left_view = &s_query_scratch[left_index];
+    const d1l_node_view_t *right_view = &s_query_scratch[right_index];
     if (node_view_better(left_view, right_view, s_query_sort)) {
         return -1;
     }
@@ -1539,26 +1558,26 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
     }
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     d1l_store_lock_take(&s_store_lock);
+    const size_t contact_count = d1l_contact_store_copy_recent(
+        s_query_contacts, D1L_CONTACT_STORE_CAPACITY);
     size_t matched = 0U;
     for (size_t i = 0; i < s_count; ++i) {
-        build_node_view(i, &s_entries[i], &s_query_scratch[i], now_ms);
-        if (!node_view_matches_query(&s_query_scratch[i], query)) {
+        build_node_view(i, &s_entries[i], &s_query_scratch[matched], now_ms,
+                        contact_count);
+        if (!node_view_matches_query(&s_query_scratch[matched], query)) {
             continue;
         }
-        if (matched != i) {
-            s_query_scratch[matched] = s_query_scratch[i];
-        }
+        s_query_order[matched] = (uint16_t)matched;
         matched++;
     }
 
     const d1l_node_sort_t sort = query ? query->sort : D1L_NODE_SORT_LAST_HEARD;
     s_query_sort = sort;
-    qsort(s_query_scratch, matched, sizeof(s_query_scratch[0]),
-          node_view_compare);
+    qsort(s_query_order, matched, sizeof(s_query_order[0]),
+          node_view_index_compare);
     const size_t copied = matched < max_entries ? matched : max_entries;
-    if (copied > 0U) {
-        memcpy(out_entries, s_query_scratch,
-               copied * sizeof(out_entries[0]));
+    for (size_t i = 0U; i < copied; ++i) {
+        out_entries[i] = s_query_scratch[s_query_order[i]];
     }
     d1l_store_lock_give(&s_store_lock);
     return copied;

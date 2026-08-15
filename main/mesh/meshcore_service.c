@@ -1376,6 +1376,28 @@ typedef struct {
     bool admitted;
 } d1l_channel_rx_store_result_t;
 
+static uint32_t channel_message_display_timestamp(uint32_t wire_timestamp)
+{
+    static const uint32_t plausible_epoch_floor = 1577836800U;
+    static const uint32_t allowed_past_seconds = 7U * 24U * 60U * 60U;
+    static const uint32_t allowed_future_seconds = 24U * 60U * 60U;
+    d1l_time_service_status_t time_status = {0};
+    d1l_time_service_status(&time_status);
+    const bool local_valid = time_status.display_time_valid &&
+        time_status.clock.wall_epoch_sec > 0 &&
+        (uint64_t)time_status.clock.wall_epoch_sec <= UINT32_MAX;
+    const uint32_t local_timestamp = local_valid ?
+        (uint32_t)time_status.clock.wall_epoch_sec : 0U;
+    if (wire_timestamp >= plausible_epoch_floor &&
+        (!local_valid ||
+         ((uint64_t)wire_timestamp + allowed_past_seconds >= local_timestamp &&
+          (uint64_t)wire_timestamp <=
+              (uint64_t)local_timestamp + allowed_future_seconds))) {
+        return wire_timestamp;
+    }
+    return local_timestamp;
+}
+
 static d1l_channel_rx_store_result_t append_channel_message_store_rx(
     uint64_t channel_id, const char *channel_name, const char *message,
     int rssi, int snr_quarters, uint8_t path_hash_bytes, uint8_t path_hops,
@@ -3449,7 +3471,8 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     const d1l_channel_rx_store_result_t message_result =
         append_channel_message_store_rx(
             channel_id, channel.name, message, rssi, snr,
-            packet.path_hash_bytes, packet.path_hops, read_le32(plain));
+            packet.path_hash_bytes, packet.path_hops,
+            channel_message_display_timestamp(read_le32(plain)));
     if (!message_result.admitted) {
         secure_zero_bytes(plain, sizeof(plain));
         return;
@@ -7313,6 +7336,7 @@ static void meshcore_service_task(void *arg)
             ret = meshcore_service_handle_send_advert(&cmd);
             if (ret != ESP_OK) {
                 s_status.rejected_commands++;
+                s_status.advert_tx_failed++;
             }
             break;
         case D1L_MESHCORE_SERVICE_CMD_SEND_DM:
@@ -8324,6 +8348,30 @@ static esp_err_t meshcore_service_request_advert(bool flood, bool boot_advert)
     };
     return meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+}
+
+esp_err_t d1l_meshcore_service_queue_advert(bool flood)
+{
+    esp_err_t ret = meshcore_service_start_task();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
+        .requested_tx_kind = D1L_MESH_TX_OPERATION_ADVERT,
+        .flood = flood,
+        .boot_advert = false,
+    };
+    if (xQueueSend(s_service_queue, &cmd, 0) != pdTRUE) {
+        runtime_note_command_saturation(false);
+        meshcore_service_command_wipe(&cmd);
+        return ESP_ERR_TIMEOUT;
+    }
+    runtime_note_queue_depth(s_service_queue,
+                             &s_runtime_command_queue_high_water);
+    meshcore_service_wake();
+    meshcore_service_command_wipe(&cmd);
+    return ESP_OK;
 }
 
 esp_err_t d1l_meshcore_service_request_advert(bool flood)

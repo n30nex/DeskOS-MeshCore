@@ -719,7 +719,7 @@ def test_same_visible_or_complete_hidden_plan_reuses_frame_without_worker_replay
         "esp_err_t d1l_map_view_service_init",
     )
 
-    assert "s_map.status.visible || completed_frame_locked()" in identical
+    assert "s_map.status.generation != 0U" in acquire
     assert "s_map.status.visible = true" in identical
     assert "if (completed_frame_locked())" in identical
     assert 'set_message_locked("ready", "Map ready")' in identical

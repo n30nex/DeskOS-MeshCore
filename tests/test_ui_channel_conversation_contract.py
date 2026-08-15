@@ -116,7 +116,7 @@ def test_selector_exposes_bounded_management_entry_points_without_secrets() -> N
         "bool d1l_ui_messages_render_channel_selector",
         "bool d1l_ui_messages_channel_selector_active",
     )
-    assert 'sheet, "New"' in selector
+    assert 'sheet, "Add"' in selector
     assert 'sheet, "Import"' in selector
     assert 'row, "Manage"' in selector
     assert 'row, "Manage", 310, 0, 96, 44' in selector

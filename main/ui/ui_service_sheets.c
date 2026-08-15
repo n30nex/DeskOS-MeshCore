@@ -15,6 +15,9 @@ enum {
     BINDING_TERMINAL_CLEAR,
     BINDING_CLOSE_OBSERVER,
     BINDING_OBSERVER_TOGGLE,
+    BINDING_OBSERVER_REGION_FOCUS,
+    BINDING_OBSERVER_REGION_SAVE,
+    BINDING_OBSERVER_KEYBOARD,
     BINDING_CLOSE_UPDATE,
     BINDING_UPDATE_INSTALL,
     BINDING_UPDATE_CANCEL,
@@ -144,6 +147,43 @@ static void admin_password_focus_event_cb(lv_event_t *event)
     (void)d1l_ui_keyboard_focus_textarea_from_event(
         controller->admin_keyboard, event,
         controller->admin_password_textarea, NULL);
+}
+
+static void observer_region_focus_event_cb(lv_event_t *event)
+{
+    d1l_ui_service_binding_t *binding = event ?
+        (d1l_ui_service_binding_t *)lv_event_get_user_data(event) : NULL;
+    if (!binding_current(binding)) {
+        return;
+    }
+    d1l_ui_service_sheets_controller_t *controller = binding->controller;
+    if (d1l_ui_keyboard_focus_textarea_from_event(
+            controller->observer_keyboard, event,
+            controller->observer_region_textarea, NULL)) {
+        lv_obj_clear_flag(controller->observer_keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(controller->observer_keyboard);
+    }
+}
+
+static void observer_keyboard_event_cb(lv_event_t *event)
+{
+    d1l_ui_service_binding_t *binding = event ?
+        (d1l_ui_service_binding_t *)lv_event_get_user_data(event) : NULL;
+    if (!binding_current(binding) ||
+        !binding->controller->action_handler) {
+        return;
+    }
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_CANCEL) {
+        d1l_ui_keyboard_clear_textarea(
+            binding->controller->observer_keyboard);
+        lv_obj_add_flag(binding->controller->observer_keyboard,
+                        LV_OBJ_FLAG_HIDDEN);
+    } else if (code == LV_EVENT_READY) {
+        binding->controller->action_handler(
+            D1L_UI_SERVICE_ACTION_OBSERVER_REGION_SAVE,
+            binding->controller->action_context);
+    }
 }
 
 static void admin_cli_focus_event_cb(lv_event_t *event)
@@ -351,6 +391,7 @@ static void destroy_sheets(
         return;
     }
     clear_admin_sensitive_input(controller);
+    d1l_ui_keyboard_clear_textarea(controller->observer_keyboard);
     delete_sheet(&controller->terminal_sheet);
     delete_sheet(&controller->observer_sheet);
     delete_sheet(&controller->update_sheet);
@@ -403,6 +444,10 @@ static bool begin_render(
     controller->action_handler = handler;
     controller->action_context = context;
     lv_obj_clean(sheet);
+    if (sheet == controller->observer_sheet) {
+        controller->observer_region_textarea = NULL;
+        controller->observer_keyboard = NULL;
+    }
     if (sheet == controller->admin_sheet) {
         controller->admin_password_textarea = NULL;
         controller->admin_room_textarea = NULL;
@@ -548,25 +593,113 @@ bool d1l_ui_service_sheets_render_observer(
     complete = topic && complete;
     lv_obj_t *privacy = create_label(
         sheet,
-        "Secure opt-in uplink. Sends received packet payloads and health to both MeshCore Canada brokers; it never forwards RF or exposes private keys.",
+        "Secure opt-in upload to both brokers; never forwards RF or exposes private keys.",
         0x4D7FFF);
-    position_wrap(privacy, 8, 146, 408);
+    position_wrap(privacy, 8, 140, 408);
     complete = privacy && complete;
+
+    lv_obj_t *region_label = create_label(sheet, "Observer region", 0xA6B0B7);
+    position_dot(region_label, 8, 166, 132);
+    complete = region_label && complete;
+    controller->observer_region_textarea = lv_textarea_create(sheet);
+    if (!controller->observer_region_textarea) {
+        complete = false;
+    } else {
+        lv_obj_set_size(controller->observer_region_textarea, 96, 44);
+        lv_obj_set_pos(controller->observer_region_textarea, 8, 188);
+        lv_textarea_set_one_line(controller->observer_region_textarea, true);
+        lv_textarea_set_max_length(controller->observer_region_textarea, 3U);
+        lv_textarea_set_accepted_chars(controller->observer_region_textarea,
+                                       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+        lv_textarea_set_text(controller->observer_region_textarea,
+                             status->region);
+        d1l_ui_service_binding_t *focus = set_binding(
+            controller, BINDING_OBSERVER_REGION_FOCUS,
+            D1L_UI_SERVICE_ACTION_OBSERVER_REGION_SAVE);
+        if (!focus) {
+            complete = false;
+        } else {
+            lv_obj_add_event_cb(controller->observer_region_textarea,
+                                observer_region_focus_event_cb,
+                                LV_EVENT_FOCUSED, focus);
+            lv_obj_add_event_cb(controller->observer_region_textarea,
+                                observer_region_focus_event_cb,
+                                LV_EVENT_CLICKED, focus);
+        }
+    }
+    complete = create_button(
+        controller, sheet, "Save", 112, 188, 82, 44,
+        BINDING_OBSERVER_REGION_SAVE,
+        D1L_UI_SERVICE_ACTION_OBSERVER_REGION_SAVE) != NULL && complete;
     if (status->configured) {
         complete = create_button(
             controller, sheet, status->enabled ? "Disable Uploads" :
                                                  "Enable Uploads",
-            8, 238, 170, 44, BINDING_OBSERVER_TOGGLE,
+            204, 188, 204, 44, BINDING_OBSERVER_TOGGLE,
             D1L_UI_SERVICE_ACTION_OBSERVER_TOGGLE) != NULL && complete;
     } else {
         lv_obj_t *setup = create_label(
             sheet,
             "Device identity is not ready. Complete setup before enabling the secure Observer uplink.",
             0xFBBF24);
-        position_wrap(setup, 8, 238, 408);
+        position_wrap(setup, 204, 188, 204);
         complete = setup && complete;
     }
+
+    controller->observer_keyboard = lv_keyboard_create(sheet);
+    if (!controller->observer_keyboard ||
+        !controller->observer_region_textarea) {
+        complete = false;
+    } else {
+        d1l_ui_keyboard_configure_compose(controller->observer_keyboard);
+        d1l_ui_keyboard_configure_input(
+            controller->observer_keyboard,
+            controller->observer_region_textarea, 8, 76, 408, 220);
+        lv_keyboard_set_mode(controller->observer_keyboard,
+                             LV_KEYBOARD_MODE_TEXT_UPPER);
+        d1l_ui_service_binding_t *keyboard = set_binding(
+            controller, BINDING_OBSERVER_KEYBOARD,
+            D1L_UI_SERVICE_ACTION_OBSERVER_REGION_SAVE);
+        if (!keyboard) {
+            complete = false;
+        } else {
+            lv_obj_add_event_cb(controller->observer_keyboard,
+                                observer_keyboard_event_cb,
+                                LV_EVENT_READY, keyboard);
+            lv_obj_add_event_cb(controller->observer_keyboard,
+                                observer_keyboard_event_cb,
+                                LV_EVENT_CANCEL, keyboard);
+        }
+        lv_obj_add_flag(controller->observer_keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
     return complete;
+}
+
+bool d1l_ui_service_sheets_copy_observer_region(
+    const d1l_ui_service_sheets_controller_t *controller,
+    char out_region[D1L_OBSERVER_REGION_LEN])
+{
+    if (!controller || !out_region ||
+        !controller->observer_region_textarea ||
+        !lv_obj_is_valid(controller->observer_region_textarea)) {
+        return false;
+    }
+    const char *text = lv_textarea_get_text(
+        controller->observer_region_textarea);
+    if (!text || strlen(text) != 3U) {
+        return false;
+    }
+    memcpy(out_region, text, 3U);
+    out_region[3] = '\0';
+    return true;
+}
+
+bool d1l_ui_service_sheets_observer_edit_active(
+    const d1l_ui_service_sheets_controller_t *controller)
+{
+    return controller && controller->observer_keyboard &&
+        lv_obj_is_valid(controller->observer_keyboard) &&
+        !lv_obj_has_flag(controller->observer_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 bool d1l_ui_service_sheets_render_update(
@@ -2495,6 +2628,7 @@ void d1l_ui_service_sheets_hide_all(
         return;
     }
     clear_admin_sensitive_input(controller);
+    d1l_ui_keyboard_clear_textarea(controller->observer_keyboard);
     deactivate_actions(controller);
     lv_obj_t *sheets[] = {
         controller->terminal_sheet,

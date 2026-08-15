@@ -43,10 +43,11 @@ def test_ble_transport_fails_closed_on_security_and_preserves_wire_contract():
         "ble_hs_cfg.sm_mitm = 1",
         "ble_hs_cfg.sm_sc = 1",
         "BLE_ATT_ERR_INSUFFICIENT_AUTHEN",
-        "BLE_GAP_REPEAT_PAIRING_IGNORE",
+        "BLE_GAP_REPEAT_PAIRING_RETRY",
     ):
         assert security in source
     assert "ble_gap_security_initiate" in source
+    assert "ble_store_util_delete_peer" in source
     assert "secure_connections_mitm_bonded" in source
     assert "D1L_COMPANION3_APP_TO_RADIO" in source
     assert "D1L_COMPANION3_RADIO_TO_APP" in source

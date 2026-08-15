@@ -1024,7 +1024,7 @@ bool d1l_ui_messages_render_channel_selector(
             controller, 0U,
             D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR)) != NULL;
     complete = messages_create_button(
-        sheet, "New", 304, 6, 72, 44,
+        sheet, "Add", 304, 6, 72, 44,
         messages_bind_channel_control(
             controller, 1U,
             D1L_UI_MESSAGES_ACTION_CREATE_CHANNEL)) != NULL && complete;

@@ -107,7 +107,7 @@ def test_phase1_routes_sheet_visibility_through_modal_boundary():
     show_calls = re.findall(r"show_modal\(s_[a-z0-9_]+_sheet\)", ui_source)
     assert len(hide_calls) >= 20
     assert len(show_calls) >= 20
-    assert ui_source.count("d1l_ui_modal_show(") == 1
+    assert ui_source.count("d1l_ui_modal_show(") == 2
 
     show_wrapper = ui_source.split("static void show_modal", 1)[1].split(
         "static void layout_content_for_active_tab", 1
@@ -117,6 +117,8 @@ def test_phase1_routes_sheet_visibility_through_modal_boundary():
     assert show_wrapper.index("set_dock_hidden(true);") < show_wrapper.index(
         "d1l_ui_modal_show(obj);"
     )
+    assert "static void show_map_modal" in show_wrapper
+    assert "d1l_ui_map_viewport_prepare_cover();" in show_wrapper
 
     restore = ui_source.split("static void restore_dock_for_active_tab", 1)[1].split(
         "static void show_modal", 1

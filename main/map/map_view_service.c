@@ -785,13 +785,17 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
                            s_map.plan.height == plan.height;
     const bool force_reload = s_map.force_reload_next_acquire;
     s_map.force_reload_next_acquire = false;
-    if (!force_reload && same_plan &&
-        (s_map.status.visible || completed_frame_locked())) {
+    if (!force_reload && same_plan && s_map.status.generation != 0U) {
         s_map.status.visible = true;
         const uint32_t generation = s_map.status.generation;
         if (completed_frame_locked()) {
             s_map.status.worker_running = false;
             set_message_locked("ready", "Map ready");
+        } else if (s_map.status.attempted_tiles < s_map.status.planned_tiles &&
+                   s_map.status.failed_tiles == 0U) {
+            /* A tab change cancelled a healthy partial pass. Reopening Map
+             * resumes the same generation from its SD-backed tile cache. */
+            s_map.status.pass_attempts = 0U;
         }
         xSemaphoreGive(s_map.lock);
         ret = d1l_map_prefetch_service_wake();
