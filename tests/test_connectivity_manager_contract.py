@@ -633,6 +633,8 @@ def test_console_reports_wifi_ble_status_scan_and_connect_without_password_echo(
     assert "cmd_wifi_save" in console
     assert "cmd_wifi_clear" in console
     assert "cmd_ble_status" in console
+    assert 'print_ble_status_result("ble status")' in console
+    assert 'print_ble_status_result("ble on")' in console
     assert '\\"last_nimble_error\\":%d' in console
     assert "WIFI_BUILD_DISABLED" in console
     assert "BLE_BUILD_DISABLED" in console

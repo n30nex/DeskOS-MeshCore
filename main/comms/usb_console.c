@@ -8870,7 +8870,7 @@ static void cmd_wifi_connect(void)
     printf(",\"password_printed\":false,\"public_rf_tx\":false}\n");
 }
 
-static void cmd_ble_status(void)
+static void print_ble_status_result(const char *command)
 {
     d1l_connectivity_status_t status = {0};
     d1l_ble_companion_status_t ble = {0};
@@ -8878,7 +8878,7 @@ static void cmd_ble_status(void)
     d1l_ble_companion_status(&ble);
     const bool available =
         d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
-    ok_begin("ble status");
+    ok_begin(command);
     printf(",\"available\":%s", bool_json(available));
     print_release_profile_fields();
     printf(",\"feature\":\"ble\",\"mutation_allowed\":%s,"
@@ -8896,6 +8896,11 @@ static void cmd_ble_status(void)
            bool_json(!available && status.ble_stack_active),
            status.ble_state, esp_err_to_name(ble.last_error),
            ble.last_nimble_error, status.coexistence_policy);
+}
+
+static void cmd_ble_status(void)
+{
+    print_ble_status_result("ble status");
 }
 
 static void cmd_ble_off(void)
@@ -8927,7 +8932,7 @@ static void cmd_ble_on(void)
                    "BLE enable/start is pending a later measured connectivity build");
         return;
     }
-    cmd_ble_status();
+    print_ble_status_result("ble on");
 }
 
 static void cmd_help(void)
