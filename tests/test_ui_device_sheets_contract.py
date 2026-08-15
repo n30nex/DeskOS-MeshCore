@@ -145,8 +145,11 @@ def test_display_locks_after_ten_minutes_and_top_button_wakes_safely():
     assert "LV_OBJ_FLAG_CLICKABLE" in create
     assert "d1l_board_button_pressed()" in timer
     assert "D1L_UI_BUTTON_ACTION_WAKE" in timer
-    assert "d1l_app_model_request_advert(false)" in timer
+    assert "d1l_app_model_request_advert(true)" in timer
     assert "D1L_UI_BUTTON_DOUBLE_PRESS_MS 600U" in gesture
+    assert "D1L_UI_BUTTON_FLOOD_COOLDOWN_MS 60000U" in gesture
+    assert "Flood advert queued" in timer
+    assert "Wide-area advert cooling down" in timer
     assert "gesture->was_pressed" in gesture
 
 

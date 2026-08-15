@@ -123,4 +123,5 @@ DeskOS 1.7.8 replaces the single status-only MQTT placeholder with the standard
 two-broker MeshCore Canada packet uplink, using signed identity tokens and a
 bounded handoff away from the radio/UI task. Wi-Fi and Bluetooth can coexist,
 Recent Contacts reflects the current boot, map retries remain progressive, and
-new channel messages retain a truthful local display time.
+new channel messages retain a truthful local display time. A deliberate
+top-button double press now sends one cooldown-protected flood advert.

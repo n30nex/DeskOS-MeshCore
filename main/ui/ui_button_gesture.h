@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define D1L_UI_BUTTON_DOUBLE_PRESS_MS 600U
+#define D1L_UI_BUTTON_FLOOD_COOLDOWN_MS 60000U
 
 typedef enum {
     D1L_UI_BUTTON_ACTION_NONE = 0,

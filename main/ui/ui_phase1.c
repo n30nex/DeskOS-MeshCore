@@ -212,6 +212,8 @@ static bool s_backlight_dimmed;
 static bool s_backlight_pulse_active;
 static uint32_t s_backlight_pulse_until;
 static d1l_ui_button_gesture_t s_button_gesture;
+static bool s_button_flood_cooldown_active;
+static uint32_t s_button_flood_cooldown_until;
 static uint32_t s_last_notification_unread;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_packet_log_entry_t
@@ -9889,7 +9891,21 @@ static void display_runtime_timer_cb(lv_timer_t *timer)
         lv_disp_trig_activity(NULL);
     } else if (button_action == D1L_UI_BUTTON_ACTION_ADVERT) {
         lv_disp_trig_activity(NULL);
-        show_toast("Advert", d1l_app_model_request_advert(false));
+        if (s_button_flood_cooldown_active &&
+            (int32_t)(now - s_button_flood_cooldown_until) < 0) {
+            show_toast_text("Wide-area advert cooling down", false);
+        } else {
+            s_button_flood_cooldown_active = false;
+            const esp_err_t ret = d1l_app_model_request_advert(true);
+            if (ret == ESP_OK) {
+                s_button_flood_cooldown_active = true;
+                s_button_flood_cooldown_until =
+                    now + D1L_UI_BUTTON_FLOOD_COOLDOWN_MS;
+                show_toast_text("Flood advert queued", true);
+            } else {
+                show_toast("Flood advert", ret);
+            }
+        }
     }
     const uint64_t unread_wide =
         (uint64_t)s_snapshot.public_unread_count +
