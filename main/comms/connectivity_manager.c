@@ -1024,6 +1024,12 @@ static esp_err_t ensure_wifi_started(void)
         set_wifi_last_error("build_disabled");
         return ESP_ERR_NOT_SUPPORTED;
     }
+    d1l_ble_companion_status_t ble_status = {0};
+    d1l_ble_companion_status(&ble_status);
+    if (ble_status.stack_initialized) {
+        set_wifi_last_error("ble_mode_active");
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_err_t ret = ensure_wifi_retry_worker();
     if (ret != ESP_OK) {
         return fail_closed_wifi_runtime(ret, "retry_task_failed");
@@ -1286,7 +1292,7 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     wifi_signal_snapshot(&out_status->wifi_rssi_dbm,
                          &out_status->wifi_channel);
 #endif
-    out_status->coexistence_policy = "wifi_ble_shared_radio";
+    out_status->coexistence_policy = "exclusive_wifi_or_ble";
 }
 
 esp_err_t d1l_connectivity_prepare_reboot(void)
@@ -1344,6 +1350,18 @@ esp_err_t d1l_connectivity_init(void)
 
     d1l_settings_t settings = {0};
     (void)d1l_settings_public_snapshot(&settings);
+    if (settings.wifi_enabled && settings.ble_companion_enabled) {
+        /* Legacy coexistence settings cannot safely satisfy phone pairing on
+         * this board. Prefer the explicitly enabled companion mode once, then
+         * all future mode changes persist the same mutual exclusion. */
+        settings.wifi_enabled = false;
+        const esp_err_t normalize_ret = d1l_settings_update_fields(
+            &settings, D1L_SETTINGS_UPDATE_WIFI_ENABLED);
+        if (normalize_ret != ESP_OK) {
+            set_wifi_last_error("mode_normalize_failed");
+            return normalize_ret;
+        }
+    }
 #ifdef CONFIG_ESP_WIFI_ENABLED
     if (!s_boot_guard_lock) {
         s_boot_guard_lock = xSemaphoreCreateMutex();
@@ -1764,6 +1782,18 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
     }
     d1l_settings_t settings = {0};
     esp_err_t ret;
+    if (enabled) {
+        d1l_ble_companion_status_t ble_status = {0};
+        (void)d1l_settings_public_snapshot(&settings);
+        d1l_ble_companion_status(&ble_status);
+        if (settings.ble_companion_enabled || ble_status.stack_initialized) {
+            ret = d1l_connectivity_set_ble_enabled(false);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+        }
+        memset(&settings, 0, sizeof(settings));
+    }
     if (!enabled) {
 #ifdef CONFIG_ESP_WIFI_ENABLED
         bool control_taken = false;
@@ -1860,6 +1890,22 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
         return ESP_ERR_NOT_SUPPORTED;
     }
     d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    if (enabled) {
+#ifdef CONFIG_ESP_WIFI_ENABLED
+        const bool wifi_runtime_active = s_wifi_initialized;
+#else
+        const bool wifi_runtime_active = false;
+#endif
+        if (settings.wifi_enabled || wifi_runtime_active) {
+            const esp_err_t wifi_ret =
+                d1l_connectivity_set_wifi_enabled(false);
+            if (wifi_ret != ESP_OK) {
+                return wifi_ret;
+            }
+        }
+    }
+    memset(&settings, 0, sizeof(settings));
     settings.ble_companion_enabled = enabled;
     const esp_err_t ret = d1l_settings_update_fields(
         &settings, D1L_SETTINGS_UPDATE_BLE_ENABLED);
@@ -1887,7 +1933,7 @@ esp_err_t d1l_connectivity_ble_begin_pairing(void)
     }
     d1l_settings_t settings = {0};
     (void)d1l_settings_public_snapshot(&settings);
-    if (!settings.ble_companion_enabled) {
+    if (!settings.ble_companion_enabled || settings.wifi_enabled) {
         return ESP_ERR_INVALID_STATE;
     }
     return d1l_ble_companion_begin_pairing();

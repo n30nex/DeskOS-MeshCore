@@ -102,6 +102,9 @@ def test_ble_renderer_preserves_unavailable_truth_and_enables_real_actions():
     assert '"Forget unavailable"' in source
     assert '"Pair"' in source
     assert '"Forget"' in source
+    assert 'lv_font_montserrat_32' in source
+    assert 'controller->rendered.pairing_passkey' in source
+    assert 'controller->rendered.pairing_active' in source
     assert source.count("lv_obj_add_state(") >= 2
     assert "LV_STATE_DISABLED" in source
     assert "D1L_UI_BLE_ACTION_PAIR" in source
@@ -111,3 +114,28 @@ def test_ble_renderer_preserves_unavailable_truth_and_enables_real_actions():
     assert '"Bluetooth companion connections are unavailable."' in connectivity
     assert '"Bluetooth pairing is unavailable."' in connectivity
     assert '"USB stays available for recovery and diagnostics."' in connectivity
+
+
+def test_phone_pairing_wakes_a_large_pin_prompt_and_home_switches_radio_mode():
+    source = read("main/ui/ui_ble.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    refresh = body(
+        phase1, "static void refresh_timer_cb", "static void create_top_bar"
+    )
+    home = body(
+        phase1, "static void handle_home_action", "static void render_home_screen"
+    )
+    assert "ble_pairing_active" in refresh
+    assert "s_ble_pairing_announced" in refresh
+    assert "lv_disp_trig_activity(NULL)" in refresh
+    assert "open_ble_sheet_event_cb(NULL)" in refresh
+    assert "!s_snapshot.ble_protocol_ready" in refresh
+    assert "lv_font_montserrat_32" in source
+    assert 'snprintf(pin, sizeof(pin), "%06lu"' in source
+    assert home.index("d1l_app_model_set_wifi_enabled(true)") < home.index(
+        "open_wifi_sheet_event_cb(NULL)"
+    )
+    assert home.index("d1l_app_model_set_ble_enabled(true)") < home.index(
+        "open_ble_sheet_event_cb(NULL)"
+    )

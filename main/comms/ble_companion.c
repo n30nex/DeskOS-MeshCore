@@ -156,6 +156,7 @@ static void reset_connection_locked(void)
     s_notification_enabled = false;
     s_connection_handle = BLE_HS_CONN_HANDLE_NONE;
     s_att_mtu = D1L_BLE_COMPANION_DEFAULT_ATT_MTU;
+    s_pairing_passkey = 0U;
     clear_session_queues_locked();
 }
 
@@ -457,6 +458,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         reset_connection_locked();
         s_connected = true;
         s_connection_handle = event->connect.conn_handle;
+        s_pairing_passkey = D1L_BLE_COMPANION_STATIC_PASSKEY;
         s_connect_count++;
         s_state = D1L_BLE_STATE_PAIRING;
         portEXIT_CRITICAL(&s_lock);

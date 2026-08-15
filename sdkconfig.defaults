@@ -28,6 +28,7 @@ CONFIG_LCD_TASK_REFRESH_TIME=10
 CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_32=y
 CONFIG_LV_USE_QRCODE=y
 # The production shell creates enough labels/sheets that LVGL's fixed 32 KB
 # object heap can panic before the app console starts. Use the ESP-IDF heap

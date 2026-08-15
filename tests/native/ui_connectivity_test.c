@@ -91,6 +91,18 @@ static void test_ble_never_implies_unmeasured_transport(void)
     assert(view.controls_available);
     assert(strcmp(view.toggle_label, "Disable") == 0);
     assert(strstr(view.purpose, "available") != NULL);
+
+    input.state = "pairing";
+    input.pairing_passkey = 123456U;
+    d1l_ui_connectivity_ble_view(&input, &view);
+    assert(view.pairing_active);
+    assert(view.pairing_passkey == 123456U);
+    assert(!view.pairing_available);
+    assert(strstr(view.purpose, "Pairing request detected") != NULL);
+    assert(strcmp(view.runtime_note,
+                  "Enter this PIN in the MeshCore app.") == 0);
+    assert(strcmp(view.production_note,
+                  "Bluetooth mode is active; Wi-Fi is off.") == 0);
 }
 
 int main(void)

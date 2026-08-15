@@ -170,6 +170,7 @@ static d1l_ui_storage_view_model_t s_storage_view EXT_RAM_BSS_ATTR;
 static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_map_sheets_controller_t s_map_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR;
+static bool s_ble_pairing_announced;
 static d1l_ui_device_sheets_controller_t s_device_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_service_sheets_controller_t s_service_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_radio_settings_controller_t s_radio_settings_controller EXT_RAM_BSS_ATTR;
@@ -2473,12 +2474,30 @@ static void handle_home_action(d1l_ui_home_action_t action, void *context)
     case D1L_UI_HOME_ACTION_RADIO:
         open_radio_settings_event_cb(NULL);
         break;
-    case D1L_UI_HOME_ACTION_WIFI:
-        open_wifi_sheet_event_cb(NULL);
+    case D1L_UI_HOME_ACTION_WIFI: {
+        d1l_app_model_snapshot(&s_snapshot);
+        esp_err_t ret = ESP_OK;
+        if (!s_snapshot.wifi_enabled || s_snapshot.ble_companion_enabled) {
+            ret = d1l_app_model_set_wifi_enabled(true);
+            show_toast("Wi-Fi mode", ret);
+        }
+        if (ret == ESP_OK) {
+            open_wifi_sheet_event_cb(NULL);
+        }
         break;
-    case D1L_UI_HOME_ACTION_BLE:
-        open_ble_sheet_event_cb(NULL);
+    }
+    case D1L_UI_HOME_ACTION_BLE: {
+        d1l_app_model_snapshot(&s_snapshot);
+        esp_err_t ret = ESP_OK;
+        if (!s_snapshot.ble_companion_enabled || s_snapshot.wifi_enabled) {
+            ret = d1l_app_model_set_ble_enabled(true);
+            show_toast("Bluetooth mode", ret);
+        }
+        if (ret == ESP_OK) {
+            open_ble_sheet_event_cb(NULL);
+        }
         break;
+    }
     case D1L_UI_HOME_ACTION_STORAGE:
         open_storage_sheet_event_cb(NULL);
         break;
@@ -10023,12 +10042,35 @@ static void refresh_timer_cb(lv_timer_t *timer)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     update_startup_overlay(&s_snapshot);
+    const bool ble_pairing_active =
+        s_snapshot.ble_companion_enabled &&
+        s_snapshot.ble_pairing_passkey >= 100000U &&
+        s_snapshot.ble_pairing_passkey <= 999999U &&
+        strcmp(s_snapshot.ble_state ? s_snapshot.ble_state : "", "pairing") == 0;
 #if !D1L_ENABLE_QUALIFICATION_HOOKS
     lv_timer_set_period(
-        timer, s_onboarding_visible ? 250U : 2000U);
+        timer,
+        (s_onboarding_visible ||
+         (s_snapshot.ble_companion_enabled &&
+          !s_snapshot.ble_protocol_ready)) ? 250U : 2000U);
 #endif
+    if (ble_pairing_active && !s_ble_pairing_announced &&
+        !s_onboarding_visible) {
+        s_ble_pairing_announced = true;
+        lv_disp_trig_activity(NULL);
+        if (s_backlight_dimmed) {
+            (void)d1l_backlight_set_percent(desired_backlight_percent());
+            s_backlight_dimmed = false;
+        }
+        open_ble_sheet_event_cb(NULL);
+    } else if (!ble_pairing_active) {
+        s_ble_pairing_announced = false;
+    }
     if (d1l_ui_modal_visible(s_compose_sheet)) {
         update_compose_counter();
+    } else if (d1l_ui_modal_visible(
+                   d1l_ui_ble_sheet(&s_ble_controller))) {
+        (void)render_ble_sheet();
     }
     if (d1l_ui_modal_visible(d1l_ui_service_sheets_update(
             &s_service_sheets_controller))) {

@@ -86,7 +86,8 @@ def test_pairing_is_interoperable_bonded_and_locally_manageable():
     assert "desc.sec_state.bonded" in transport
     assert "ble_store_util_delete_peer" in transport
     assert "d1l_ble_companion_begin_pairing" in transport
-    assert "Enter PIN %06lu" in ui
+    assert "Enter this PIN in the MeshCore app." in ui
+    assert "s_pairing_passkey = D1L_BLE_COMPANION_STATIC_PASSKEY" in transport
     assert "d1l_app_model_ble_begin_pairing" in phase1
     assert "d1l_app_model_ble_forget_peer" in phase1
     for line in transport.splitlines():

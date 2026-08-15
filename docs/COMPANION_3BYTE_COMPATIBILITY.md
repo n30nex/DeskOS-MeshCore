@@ -39,16 +39,14 @@ DeskOS 1.5 status:
   passkey, encryption, authentication, and bonding.
 - A connection is not protocol-ready until the client subscribes to TX
   notifications.
-- Repeated pairing is rejected until the owner deliberately forgets the old
-  peer on-device.
+- Repeated pairing replaces that connecting peer's stale bond and retries.
 - Private-key import/export, factory reset, and remote reboot are disabled over
   BLE even though those command numbers exist in the wider companion protocol.
 - Frames are bounded by the negotiated ATT MTU and fixed queues. Oversize,
   malformed, unauthenticated, or unsubscribed traffic fails closed and is
   counted without logging payloads or secrets.
-- Wi-Fi and BLE can remain active together. Their enable, disable, and restart
-  transitions are serialized by the connectivity manager so stack ownership
-  changes cannot race.
+- Wi-Fi and BLE are exclusive modes. Their transitions are serialized by the
+  connectivity manager, which fully stops one stack before starting the other.
 
 ## 2. 3-Byte Path Hash Support
 

@@ -1,6 +1,7 @@
 #include "ui_ble.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "lvgl.h"
@@ -256,22 +257,39 @@ bool d1l_ui_ble_render(d1l_ui_ble_controller_t *controller,
                                      controller->rendered.purpose, 0xF4F7FB);
     configure_wrapped_label(purpose, 8, 88);
     complete = purpose != NULL && complete;
+
+    if (controller->rendered.pairing_active) {
+        char pin[7];
+        snprintf(pin, sizeof(pin), "%06lu",
+                 (unsigned long)controller->rendered.pairing_passkey);
+        lv_obj_t *pin_label = create_label(controller->sheet, pin, 0x84FF2E);
+        if (pin_label) {
+            lv_obj_set_style_text_font(pin_label, &lv_font_montserrat_32, 0);
+            lv_obj_set_style_text_align(pin_label, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_width(pin_label, 408);
+            lv_obj_set_pos(pin_label, 8, 126);
+        } else {
+            complete = false;
+        }
+    }
     lv_obj_t *runtime = create_label(controller->sheet,
                                      controller->rendered.runtime_note,
                                      0xFBBF24);
-    configure_wrapped_label(runtime, 8, 144);
+    configure_wrapped_label(
+        runtime, 8, controller->rendered.pairing_active ? 174 : 144);
     complete = runtime != NULL && complete;
 
     if (controller->rendered.controls_available) {
+        const int action_y = controller->rendered.pairing_active ? 216 : 206;
         lv_obj_t *toggle = create_button(
-            controller, controller->rendered.toggle_label, 8, 206, 98, 40,
+            controller, controller->rendered.toggle_label, 8, action_y, 98, 40,
             BINDING_TOGGLE, D1L_UI_BLE_ACTION_TOGGLE);
-        lv_obj_t *pair = create_button(controller, "Pair", 116, 206, 98, 40,
+        lv_obj_t *pair = create_button(controller, "Pair", 116, action_y, 98, 40,
                                        BINDING_PAIR,
                                        controller->rendered.pairing_available ?
                                            D1L_UI_BLE_ACTION_PAIR :
                                            D1L_UI_BLE_ACTION_NONE);
-        lv_obj_t *forget = create_button(controller, "Forget", 224, 206, 98,
+        lv_obj_t *forget = create_button(controller, "Forget", 224, action_y, 98,
                                          40, BINDING_FORGET,
                                          controller->rendered.forget_available ?
                                              D1L_UI_BLE_ACTION_FORGET :

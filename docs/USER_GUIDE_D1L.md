@@ -1,11 +1,11 @@
-# MeshCore DeskOS D1L 1.7.10 User Guide
+# MeshCore DeskOS D1L 1.7.11 User Guide
 
 This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.7.10 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.7.11 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -170,18 +170,19 @@ in UTC.
 
 ## BLE companion
 
-Open **Settings -> Connections -> BLE**, enable BLE, then choose **Pair**. The
-screen shows the current advertising, pairing, security, protocol, and failure
-state. Confirm the displayed six-digit passkey in the companion client. Use
-**Forget** to remove the retained bond before changing owners or clients.
+Tap the **BLE** status icon on Home, or open **Settings -> Connections -> BLE**.
+DeskOS switches to Bluetooth mode and safely turns Wi-Fi off. When a phone
+connects, the display wakes and opens a large six-digit pairing prompt
+automatically. Enter that PIN in the MeshCore app. Use **Forget** to remove the
+retained bond before changing owners or clients.
 
 Transport does not become ready until the connection is encrypted,
 authenticated, bonded, and subscribed to notifications. The implementation
 uses the official MeshCore service/RX/TX UUIDs and presents the existing
-three-byte companion protocol to the single-owner MeshCore runtime. BLE and
-Wi-Fi can remain enabled together. Leave Wi-Fi on while pairing if you also use
-online maps or Observer/MQTT; heavy network traffic may briefly reduce Bluetooth
-responsiveness, but neither connection should need to be disabled.
+three-byte companion protocol to the single-owner MeshCore runtime. Wi-Fi and
+BLE do not run together. Tap the **Wi-Fi** status icon to leave Bluetooth mode
+and restore online maps and Observer/MQTT; RF messaging and cached maps continue
+to work in either mode.
 If the same phone presents an expired bond, DeskOS replaces that phone's bond
 and retries pairing instead of restarting the device or clearing other peers.
 
@@ -336,7 +337,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.7.10 download and
+Use the guided browser flasher or the published DeskOS D1L 1.7.11 download and
 follow its `START_HERE.md`.
 On Linux, select the D1L only through the stable by-id path:
 
