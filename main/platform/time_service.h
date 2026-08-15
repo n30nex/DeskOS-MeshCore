@@ -61,6 +61,11 @@ esp_err_t d1l_time_service_wait_for_certificate_time(
     uint32_t slice_ms,
     d1l_time_continue_cb_t should_continue,
     void *continue_context);
+esp_err_t d1l_time_service_wait_for_network_time(
+    uint32_t timeout_ms,
+    uint32_t slice_ms,
+    d1l_time_continue_cb_t should_continue,
+    void *continue_context);
 /* `authenticated` is a capability boundary, not user input.  Only a verified
  * companion session owner may pass true; USB/CLI parsers must not expose it. */
 esp_err_t d1l_time_service_set_companion_time(int64_t epoch_sec,

@@ -6,9 +6,9 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.7.8** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.7.8` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.8).
+DeskOS **1.7.9** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.7.9` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.9).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -17,7 +17,19 @@ and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
 
-## What 1.7.8 fixes
+## What 1.7.9 fixes
+
+DeskOS 1.7.9 is a focused connectivity-stability patch:
+
+- Bluetooth companion mode keeps its dynamic host state in PSRAM, leaving
+  enough internal memory for Wi-Fi, the radio, and the touch interface;
+- the Observer control task also uses PSRAM while its broker clients retain
+  their required internal stacks; and
+- Observer waits for freshly validated network or companion time before
+  signing either MeshCore Canada broker login, instead of using an older
+  retained display clock.
+
+## What 1.7.8 added
 
 DeskOS 1.7.8 is a connectivity and screen-response release:
 
@@ -177,7 +189,8 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.7.5** | Reliable remote login, better results/navigation, display wake/lock, and faster cached maps | Historical (`v1.7.5`) |
 | **1.7.6** | Guided bridge/SD installation and adjustable local display time | Historical (`v1.7.6`) |
 | **1.7.7** | Faster verified-advert admission and Contacts rendering | Historical (`v1.7.7`) |
-| **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Current (`v1.7.8`) |
+| **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Historical (`v1.7.8`) |
+| **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Current (`v1.7.9`) |
 
 ## Device UI
 

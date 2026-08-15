@@ -324,15 +324,19 @@ static bool continue_allowed(d1l_time_continue_cb_t should_continue,
     return !should_continue || should_continue(context);
 }
 
-static bool snapshot_certificate_valid_locked(void)
+static bool snapshot_time_ready_locked(bool require_validated_source)
 {
     d1l_time_core_snapshot_t snapshot;
     d1l_time_core_snapshot(&s_time_core, monotonic_now_us(), &snapshot);
-    return snapshot.certificate_time_valid &&
-           snapshot.wall_epoch_sec >= D1L_TIME_WALL_MIN_EPOCH;
+    const bool ready = snapshot.certificate_time_valid &&
+                       snapshot.wall_epoch_sec >= D1L_TIME_WALL_MIN_EPOCH;
+    return ready && (!require_validated_source ||
+                     snapshot.wall_validity >=
+                         D1L_TIME_VALIDITY_NETWORK_VALIDATED);
 }
 
-static esp_err_t accept_sntp_system_time(uint32_t expected_generation)
+static esp_err_t accept_sntp_system_time(uint32_t expected_generation,
+                                         bool require_validated_source)
 {
     if (!time_lock()) {
         return ESP_ERR_INVALID_STATE;
@@ -342,7 +346,8 @@ static esp_err_t accept_sntp_system_time(uint32_t expected_generation)
      * system clock and committing the source under this same lock gives the
      * transition one explicit linearization point. */
     if (s_time_core.wall_generation != expected_generation) {
-        const bool ready = snapshot_certificate_valid_locked();
+        const bool ready =
+            snapshot_time_ready_locked(require_validated_source);
         time_unlock();
         /* A validated companion source wins immediately.  A weaker
          * generation change only invalidates this admission token; let the
@@ -359,7 +364,8 @@ static esp_err_t accept_sntp_system_time(uint32_t expected_generation)
         &s_time_core, expected_generation, (int64_t)now,
         monotonic_now_us(), D1L_TIME_VALIDITY_NETWORK_VALIDATED,
         D1L_TIME_SOURCE_SNTP);
-    const bool ready = ret == ESP_OK && snapshot_certificate_valid_locked();
+    const bool ready =
+        ret == ESP_OK && snapshot_time_ready_locked(require_validated_source);
     const bool checkpoint_admitted =
         ready && d1l_time_core_wall_checkpoint_eligible(&s_time_core);
     if (checkpoint_admitted) {
@@ -370,7 +376,8 @@ static esp_err_t accept_sntp_system_time(uint32_t expected_generation)
     return ready ? ESP_OK : (ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret);
 }
 
-static esp_err_t certificate_state(uint32_t *generation, bool *ready)
+static esp_err_t time_state(uint32_t *generation, bool *ready,
+                            bool require_validated_source)
 {
     if (!generation || !ready) {
         return ESP_ERR_INVALID_ARG;
@@ -385,7 +392,9 @@ static esp_err_t certificate_state(uint32_t *generation, bool *ready)
     d1l_time_core_snapshot(&s_time_core, monotonic_now_us(), &snapshot);
     *generation = snapshot.wall_generation;
     *ready = snapshot.certificate_time_valid &&
-             snapshot.wall_epoch_sec >= D1L_TIME_WALL_MIN_EPOCH;
+             snapshot.wall_epoch_sec >= D1L_TIME_WALL_MIN_EPOCH &&
+             (!require_validated_source ||
+              snapshot.wall_validity >= D1L_TIME_VALIDITY_NETWORK_VALIDATED);
     time_unlock();
     return ESP_OK;
 }
@@ -685,14 +694,15 @@ bool d1l_time_service_certificate_time_valid(void)
 {
     uint32_t generation = 0U;
     bool ready = false;
-    return certificate_state(&generation, &ready) == ESP_OK && ready;
+    return time_state(&generation, &ready, false) == ESP_OK && ready;
 }
 
-esp_err_t d1l_time_service_wait_for_certificate_time(
+static esp_err_t wait_for_time(
     uint32_t timeout_ms,
     uint32_t slice_ms,
     d1l_time_continue_cb_t should_continue,
-    void *continue_context)
+    void *continue_context,
+    bool require_validated_source)
 {
     if (slice_ms == 0U) {
         return ESP_ERR_INVALID_ARG;
@@ -702,8 +712,8 @@ esp_err_t d1l_time_service_wait_for_certificate_time(
     }
     uint32_t expected_generation = 0U;
     bool certificate_ready = false;
-    esp_err_t ret = certificate_state(&expected_generation,
-                                      &certificate_ready);
+    esp_err_t ret = time_state(&expected_generation, &certificate_ready,
+                               require_validated_source);
     if (ret != ESP_OK) {
         return ret;
     }
@@ -717,7 +727,8 @@ esp_err_t d1l_time_service_wait_for_certificate_time(
     if (ret != ESP_OK) {
         return ret;
     }
-    ret = certificate_state(&expected_generation, &certificate_ready);
+    ret = time_state(&expected_generation, &certificate_ready,
+                     require_validated_source);
     if (ret != ESP_OK) {
         return ret;
     }
@@ -744,13 +755,15 @@ esp_err_t d1l_time_service_wait_for_certificate_time(
         }
         if (ret == ESP_OK) {
             const esp_err_t accept_ret =
-                accept_sntp_system_time(expected_generation);
+                accept_sntp_system_time(expected_generation,
+                                        require_validated_source);
             if (accept_ret == ESP_OK) {
                 return ESP_OK;
             }
             if (accept_ret == ESP_ERR_NOT_FINISHED) {
-                const esp_err_t state_ret = certificate_state(
-                    &expected_generation, &certificate_ready);
+                const esp_err_t state_ret = time_state(
+                    &expected_generation, &certificate_ready,
+                    require_validated_source);
                 if (state_ret != ESP_OK) {
                     return state_ret;
                 }
@@ -764,7 +777,8 @@ esp_err_t d1l_time_service_wait_for_certificate_time(
             uint32_t observed_generation = 0U;
             bool observed_ready = false;
             const esp_err_t state_ret =
-                certificate_state(&observed_generation, &observed_ready);
+                time_state(&observed_generation, &observed_ready,
+                           require_validated_source);
             if (state_ret != ESP_OK) {
                 return state_ret;
             }
@@ -779,6 +793,26 @@ esp_err_t d1l_time_service_wait_for_certificate_time(
         elapsed_ms += wait_ms;
     }
     return ESP_ERR_TIMEOUT;
+}
+
+esp_err_t d1l_time_service_wait_for_certificate_time(
+    uint32_t timeout_ms,
+    uint32_t slice_ms,
+    d1l_time_continue_cb_t should_continue,
+    void *continue_context)
+{
+    return wait_for_time(timeout_ms, slice_ms, should_continue,
+                         continue_context, false);
+}
+
+esp_err_t d1l_time_service_wait_for_network_time(
+    uint32_t timeout_ms,
+    uint32_t slice_ms,
+    d1l_time_continue_cb_t should_continue,
+    void *continue_context)
+{
+    return wait_for_time(timeout_ms, slice_ms, should_continue,
+                         continue_context, true);
 }
 
 esp_err_t d1l_time_service_set_companion_time(int64_t epoch_sec,

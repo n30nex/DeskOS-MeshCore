@@ -13,7 +13,8 @@
 | **1.7.5** | Flood-delivered login, human-readable neighbours, manager return navigation, ten-minute lock, top-button wake/advert, and faster cached maps | Historical (`v1.7.5`) |
 | **1.7.6** | Guided bridge/SD installation and adjustable local display time | Historical (`v1.7.6`) |
 | **1.7.7** | Faster verified-advert admission and Contacts rendering | Historical (`v1.7.7`) |
-| **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Current (`v1.7.8`) |
+| **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Historical (`v1.7.8`) |
+| **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Current (`v1.7.9`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -125,3 +126,11 @@ bounded handoff away from the radio/UI task. Wi-Fi and Bluetooth can coexist,
 Recent Contacts reflects the current boot, map retries remain progressive, and
 new channel messages retain a truthful local display time. A deliberate
 top-button double press now sends one cooldown-protected flood advert.
+
+## 1.7.9: connectivity stability
+
+DeskOS 1.7.9 moves the Bluetooth host and Observer control allocations that do
+not require internal RAM into PSRAM. Wi-Fi, BLE companion advertising, MQTT,
+the radio, and the touch interface can therefore remain active together
+without exhausting the ESP32-S3 internal heap. Observer also waits for a fresh
+SNTP or authenticated companion clock before signing broker credentials.

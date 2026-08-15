@@ -182,6 +182,11 @@ def test_sntp_owner_uses_a_wait_semaphore_and_bounded_cancellation():
     service = read("main/platform/time_service.c")
     wait = body(
         service,
+        "static esp_err_t wait_for_time",
+        "esp_err_t d1l_time_service_wait_for_certificate_time",
+    )
+    wrappers = body(
+        service,
         "esp_err_t d1l_time_service_wait_for_certificate_time",
         "esp_err_t d1l_time_service_set_companion_time",
     )
@@ -189,11 +194,32 @@ def test_sntp_owner_uses_a_wait_semaphore_and_bounded_cancellation():
     assert "config.wait_for_sync = true" in service
     assert "esp_netif_sntp_init(&config)" in service
     assert "esp_netif_sntp_sync_wait(wait_ticks)" in wait
-    assert "accept_sntp_system_time(expected_generation)" in wait
+    assert "accept_sntp_system_time(expected_generation," in wait
     assert wait.count("continue_allowed(should_continue, continue_context)") >= 3
     assert "wait_ms > slice_ms" in wait
     assert "elapsed_ms += wait_ms" in wait
     assert "ESP_ERR_NOT_FINISHED" in wait
+    assert "d1l_time_service_wait_for_network_time" in wrappers
+    assert "continue_context, true" in wrappers
+
+
+def test_network_time_rejects_approximate_retained_time_before_mqtt_auth():
+    service = read("main/platform/time_service.c")
+    state = body(
+        service,
+        "static esp_err_t time_state",
+        "static esp_err_t ensure_sntp_initialized",
+    )
+    assert "require_validated_source" in state
+    assert "D1L_TIME_VALIDITY_NETWORK_VALIDATED" in state
+    observer = read("main/comms/observer_manager.c")
+    task = body(observer, "static void observer_task", "esp_err_t d1l_observer_manager_init")
+    assert task.index("d1l_time_service_wait_for_network_time(") < task.index(
+        "build_next_packet_payload()"
+    )
+    assert task.index("d1l_time_service_wait_for_network_time(") < task.index(
+        "start_endpoint(i, now_ms)"
+    )
 
 
 def test_sntp_sample_and_commit_are_generation_ordered_under_the_time_lock():
@@ -201,7 +227,7 @@ def test_sntp_sample_and_commit_are_generation_ordered_under_the_time_lock():
     accept = body(
         service,
         "static esp_err_t accept_sntp_system_time",
-        "static esp_err_t certificate_state",
+        "static esp_err_t time_state",
     )
     lock_at = accept.index("time_lock()")
     generation_at = accept.index("s_time_core.wall_generation != expected_generation")
@@ -211,11 +237,11 @@ def test_sntp_sample_and_commit_are_generation_ordered_under_the_time_lock():
     assert "return ready ? ESP_OK : ESP_ERR_NOT_FINISHED" in accept
     wait = body(
         service,
+        "static esp_err_t wait_for_time",
         "esp_err_t d1l_time_service_wait_for_certificate_time",
-        "esp_err_t d1l_time_service_set_companion_time",
     )
     refresh = wait.split("if (accept_ret == ESP_ERR_NOT_FINISHED)", 1)[1]
-    assert "certificate_state(" in refresh
+    assert "time_state(" in refresh
     assert "&expected_generation" in refresh
 
 
