@@ -14,6 +14,11 @@ coexistence on the SenseCAP Indicator D1L.
   before creating signed broker credentials or opening TLS connections.
 - **Bounded retries:** Observer startup and reconnect work yield between
   attempts instead of repeatedly consuming the UI and networking loop.
+- **Lower connection pressure:** unused Bluetooth services and oversized
+  controller pools are removed, retained route/Observer buffers live in
+  PSRAM, and the two secure broker handshakes start sequentially.
+- **Useful broker diagnostics:** Observer status now distinguishes broker
+  rejection, TLS failure, and socket failure without exposing credentials.
 - **Two default brokers:** Observer continues to publish to both
   `mqtt1.meshcore.ca` and `mqtt2.meshcore.ca`, with the custom broker option
   unchanged.
