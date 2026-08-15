@@ -170,9 +170,10 @@ state. Confirm the displayed six-digit passkey in the companion client. Use
 Transport does not become ready until the connection is encrypted,
 authenticated, bonded, and subscribed to notifications. The implementation
 uses the official MeshCore service/RX/TX UUIDs and presents the existing
-three-byte companion protocol to the single-owner MeshCore runtime. Enabling
-BLE and Wi-Fi is mutually exclusive so both network stacks cannot silently
-compete for ownership and memory.
+three-byte companion protocol to the single-owner MeshCore runtime. BLE and
+Wi-Fi can remain enabled together. Leave Wi-Fi on while pairing if you also use
+online maps or Observer/MQTT; heavy network traffic may briefly reduce Bluetooth
+responsiveness, but neither connection should need to be disabled.
 
 The BLE client can use normal supported messaging, contact, channel, time,
 radio, advert, and status operations. Private-key import/export, remote reboot,

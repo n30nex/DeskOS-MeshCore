@@ -46,8 +46,9 @@ DeskOS 1.5 status:
 - Frames are bounded by the negotiated ATT MTU and fixed queues. Oversize,
   malformed, unauthenticated, or unsubscribed traffic fails closed and is
   counted without logging payloads or secrets.
-- Wi-Fi and BLE transitions are mutually exclusive and drain their existing
-  owner before starting the other stack.
+- Wi-Fi and BLE can remain active together. Their enable, disable, and restart
+  transitions are serialized by the connectivity manager so stack ownership
+  changes cannot race.
 
 ## 2. 3-Byte Path Hash Support
 
