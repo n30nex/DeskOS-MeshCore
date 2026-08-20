@@ -1018,8 +1018,11 @@ static bool build_admin_cli_message(void)
     s_pending_payload[offset++] = 1U;
     write_u32_le(&s_pending_payload[offset], s_admin_cli_timestamp);
     offset += 4U;
-    const size_t text_len = strnlen(
-        s_admin_cli_reply, sizeof(s_pending_payload) - offset);
+    size_t text_len = strnlen(s_admin_cli_reply, sizeof(s_admin_cli_reply));
+    const size_t available = sizeof(s_pending_payload) - offset;
+    if (text_len > available) {
+        text_len = available;
+    }
     memcpy(&s_pending_payload[offset], s_admin_cli_reply, text_len);
     offset += text_len;
     s_pending_len = offset;
