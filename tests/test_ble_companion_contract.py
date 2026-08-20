@@ -22,13 +22,20 @@ def test_ble_gatt_contract_matches_pinned_meshcore_and_stays_bounded():
     assert "D1L_BLE_COMPANION_QUEUE_DEPTH 4U" in queue
     assert "D1L_COMPANION3_MAX_FRAME_SIZE" in queue
     assert "BLE_GATT_CHR_F_WRITE_NO_RSP" in source
+    assert "BLE_GATT_CHR_F_READ" in source
     assert "BLE_GATT_CHR_F_NOTIFY" in source
     assert ".access_cb = tx_access" in source
-    assert "BLE_ATT_ERR_READ_NOT_PERMITTED" in source
+    assert "empty secure" in source
     assert "BLE_GAP_EVENT_SUBSCRIBE" in source
     assert "BLE_GAP_EVENT_MTU" in source
     assert "ble_gatts_notify_custom" in source
     assert "payload_len > notification_capacity" in source
+    assert "ble_att_set_preferred_mtu" in source
+    assert "D1L_BLE_COMPANION_PREFERRED_ATT_MTU 517U" in header
+    assert "D1L_BLE_COMPANION_TX_MIN_INTERVAL_US 60000LL" in source
+    assert "d1l_ble_companion_poll();" in read(
+        "main/comms/ble_companion_protocol.c"
+    )
 
 
 def test_ble_transport_fails_closed_on_security_and_preserves_wire_contract():

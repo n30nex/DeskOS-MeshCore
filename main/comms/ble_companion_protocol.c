@@ -1114,6 +1114,7 @@ static void protocol_task(void *context)
     portEXIT_CRITICAL(&s_status_lock);
 
     while (s_start_requested) {
+        d1l_ble_companion_poll();
         d1l_ble_companion_status_t transport = {0};
         d1l_ble_companion_status(&transport);
         portENTER_CRITICAL(&s_status_lock);

@@ -8886,7 +8886,19 @@ static void print_ble_status_result(const char *command)
            "\"build_enabled\":%s,\"stack_active\":%s,"
            "\"runtime_policy_violation\":%s,\"state\":\"%s\","
            "\"last_error\":\"%s\",\"last_nimble_error\":%d,"
-           "\"policy\":\"%s\"}\n",
+           "\"policy\":\"%s\",\"connected\":%s,\"encrypted\":%s,"
+           "\"authenticated\":%s,\"bonded\":%s,"
+           "\"notification_requested\":%s,\"notification_enabled\":%s,"
+           "\"att_mtu\":%u,\"preferred_att_mtu\":%u,"
+           "\"connect_count\":%lu,\"disconnect_count\":%lu,"
+           "\"rx_frames\":%lu,\"tx_frames\":%lu,"
+           "\"rx_drops\":%lu,\"tx_drops\":%lu,"
+           "\"malformed_frames\":%lu,\"security_rejects\":%lu,"
+           "\"rx_queue_depth\":%u,\"tx_queue_depth\":%u,"
+           "\"protocol_running\":%s,\"protocol_ready\":%s,"
+           "\"protocol_commands\":%lu,\"protocol_responses\":%lu,"
+           "\"protocol_unsupported\":%lu,"
+           "\"protocol_malformed\":%lu}\n",
            bool_json(available),
            bool_json(
                available && status.ble_companion_enabled_setting),
@@ -8895,7 +8907,26 @@ static void print_ble_status_result(const char *command)
            bool_json(status.ble_stack_active),
            bool_json(!available && status.ble_stack_active),
            status.ble_state, esp_err_to_name(ble.last_error),
-           ble.last_nimble_error, status.coexistence_policy);
+           ble.last_nimble_error, status.coexistence_policy,
+           bool_json(ble.connected), bool_json(ble.encrypted),
+           bool_json(ble.authenticated), bool_json(ble.bonded),
+           bool_json(ble.notification_requested),
+           bool_json(ble.notification_enabled), ble.att_mtu,
+           D1L_BLE_COMPANION_PREFERRED_ATT_MTU,
+           (unsigned long)ble.connect_count,
+           (unsigned long)ble.disconnect_count,
+           (unsigned long)ble.rx_frame_count,
+           (unsigned long)ble.tx_frame_count,
+           (unsigned long)ble.rx_drop_count,
+           (unsigned long)ble.tx_drop_count,
+           (unsigned long)ble.malformed_frame_count,
+           (unsigned long)ble.security_reject_count,
+           ble.rx_queue_depth, ble.tx_queue_depth,
+           bool_json(ble.protocol_running), bool_json(ble.protocol_ready),
+           (unsigned long)ble.protocol_command_count,
+           (unsigned long)ble.protocol_response_count,
+           (unsigned long)ble.protocol_unsupported_count,
+           (unsigned long)ble.protocol_malformed_count);
 }
 
 static void cmd_ble_status(void)

@@ -14,6 +14,7 @@
     "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 #define D1L_BLE_COMPANION_DEVICE_NAME "MeshCore DeskOS"
 #define D1L_BLE_COMPANION_DEFAULT_ATT_MTU 23U
+#define D1L_BLE_COMPANION_PREFERRED_ATT_MTU 517U
 
 typedef struct {
     bool build_enabled;
@@ -61,6 +62,7 @@ esp_err_t d1l_ble_companion_prepare_reboot(void);
 esp_err_t d1l_ble_companion_begin_pairing(void);
 esp_err_t d1l_ble_companion_forget_peer(void);
 void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status);
+void d1l_ble_companion_poll(void);
 
 /*
  * RX frames are returned in the existing MeshCore three-byte transport form:

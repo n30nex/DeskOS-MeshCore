@@ -9,6 +9,11 @@ D1L.
 - BLE receive and transmit frame scratch space is allocated in PSRAM instead
   of on the 4 KB NimBLE host-task stack. Initial phone synchronization can pull
   the complete saved channel list without exhausting that callback stack.
+- The BLE TX characteristic now matches the official MeshCore readable and
+  notify shape, negotiates a 517-byte ATT MTU explicitly, and spaces companion
+  replies by 60 ms so phone synchronization is not starved or flooded.
+- `ble status` now reports the secure-link, MTU, queue, frame, and protocol
+  counters needed to diagnose a phone session without enabling verbose logs.
 - Channels always shows **Add** beside **Direct**. The existing create and
   import screen is reachable even when Public is already configured.
 - Connections now names **MQTT / Observer** directly. Its panel labels the
