@@ -675,6 +675,7 @@ static bool nodes_content_generation_changed_from_rendered(
     const d1l_ui_content_generation_t current =
         content_generation_from_snapshot(snapshot);
     return !s_rendered_content_generation_valid ||
+        current.rx_adverts != s_rendered_content_generation.rx_adverts ||
         current.node_total_written !=
             s_rendered_content_generation.node_total_written ||
         current.contact_total_written !=
@@ -7876,8 +7877,8 @@ static void service_sheets_action_handler(
             }
         }
         const esp_err_t ret = d1l_observer_set_region(region);
-        show_toast(ret == ESP_OK ? "Observer region saved" :
-                                    "Observer region",
+        show_toast(ret == ESP_OK ? "MQTT IATA saved" :
+                                    "MQTT IATA",
                    ret);
         if (ret == ESP_OK) {
             (void)render_observer_service_sheet();

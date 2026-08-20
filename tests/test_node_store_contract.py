@@ -114,6 +114,18 @@ def test_heard_node_query_supports_production_sort_filter_rows():
     assert "query_contact_for_node" in source
 
 
+def test_replayed_advert_refreshes_only_boot_local_recency():
+    source = read("main/mesh/node_store.c")
+    stale = source.split(
+        "!d1l_meshcore_lifetime_advert_is_strictly_newer", 1
+    )[1].split("size_t index;", 1)[0]
+
+    assert "s_live_last_heard_ms[existing] = now_ms;" in stale
+    assert "s_live_heard_valid[existing] = true;" in stale
+    assert "s_entries[existing].last_heard_ms" not in stale
+    assert "note_persistence_dirty_locked" not in stale
+
+
 def test_verified_adverts_upsert_heard_nodes():
     source = read("main/mesh/meshcore_service.c")
     admission = read("main/mesh/meshcore_advert_admission.c")

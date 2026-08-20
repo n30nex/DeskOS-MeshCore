@@ -136,7 +136,7 @@
     "main/mesh/advert_data.c": "b046f34629d8f04fbf680cc8b517958162c5401acb991d5bb3231c75f3ac6818",
     "main/mesh/meshcore_lifetime.h": "b480f554ac3979e3caefdd1d815a334e0de47bddc8f21c7ac8305d4643fba535",
     "main/mesh/meshcore_service.c": "16357ccac5cda1b03162a4c9d8a68d09dbaf2b552c1d5e9ab3f50f7b2b000ea0",
-    "main/mesh/node_store.c": "e65ec2ac5ada3f31d4af84f49b483f70023338688c63f5471382b28edeb7bca5",
+    "main/mesh/node_store.c": "782beac7827609175532837c6e1305487e9e39cdf94c77a6346f9116d0c00a62",
     "main/mesh/node_store.h": "4182df086de1b0b925a3f84f6d41dd4bf582ea5ecbaa23e46183d119461d70a1",
     "main/platform/time_service.c": "54ed3f4a6441bfb9dea2c71b55538a381f8f246f3ef557a20af865dbd564297b",
     "main/platform/time_service.h": "aceb879ef808f9b5df7d97da0ee04c52aeb3204a7612266bf26b85d365c3a679",
@@ -148,7 +148,7 @@
     "main/ui/ui_map.h": "1e18d81b50dd1c4a22e73afb8d295b96c57171fbb601adebf931f1c8e75e7949",
     "main/ui/ui_node_detail.c": "0f0fcc740e647f2667ec8bf0d1321626287ee64eed7391f388f76a3e7d101b69",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "5c16cd6e5e2f9f9cf0d05de17470eec53ba6534c3cfd7e9495940054b8720b98",
-    "tools/ui_simulator.py": "f66aa15f8c41e39271bea67b2f869258960b773a81320c435024f5099ffa304f"
+    "main/ui/ui_phase1.c": "a16e16a88afc84cb9e5e2fd69bd1099cb7202110176dded93d6331d16189958b",
+    "tools/ui_simulator.py": "997002e4fcbe1f0c04ea4134867ebfef2ac1b850d9f7fdde2322c454b9e72727"
   }
 }

@@ -1217,6 +1217,14 @@ static void test_stale_advert_and_location_preservation(void)
     assert(memcmp(&after, &original, sizeof(after)) == 0);
     assert_node_stats_equal(d1l_node_store_stats(), original_stats);
     assert(d1l_node_store_marker_generation() == original_generation);
+    d1l_node_query_t query = {
+        .filter = D1L_NODE_FILTER_ALL,
+        .sort = D1L_NODE_SORT_LAST_HEARD,
+    };
+    d1l_node_view_t replay_view = {0};
+    assert(d1l_node_store_query(&query, &replay_view, 1U) == 1U);
+    assert(replay_view.reachable);
+    assert(replay_view.node.last_heard_ms == 2000U);
 
     stale = false;
     assert(upsert_node(99U, "Older", false, 0, 0, &stale) == ESP_OK);

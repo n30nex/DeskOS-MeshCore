@@ -133,3 +133,20 @@ def test_ble_build_configuration_is_nimble_only_and_memory_bounded():
     assert "d1l_ble_companion_start()" in manager
     assert "d1l_ble_companion_stop()" in manager
     assert "d1l_ble_companion_prepare_reboot()" in manager
+
+
+def test_ble_callbacks_keep_frame_scratch_off_the_host_task_stack():
+    source = read("main/comms/ble_companion.c")
+    rx_access = source.split("static int rx_access", 1)[1].split(
+        "static int tx_access", 1
+    )[0]
+    pump_tx = source.split("static void pump_tx(void)\n{", 1)[1].split(
+        "static void update_security", 1
+    )[0]
+
+    for buffer in ("s_rx_payload", "s_rx_frame", "s_tx_frame"):
+        declaration = source.split(f"{buffer}[", 1)[1].split(";", 1)[0]
+        assert "EXT_RAM_BSS_ATTR" in declaration
+    assert "uint8_t payload[" not in rx_access
+    assert "uint8_t frame[" not in rx_access
+    assert "uint8_t frame[" not in pump_tx

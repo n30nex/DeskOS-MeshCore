@@ -1394,6 +1394,9 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
     if (existing >= 0 &&
         !d1l_meshcore_lifetime_advert_is_strictly_newer(
             true, s_entries[existing].advert_timestamp, advert_timestamp)) {
+        const uint32_t now_ms = monotonic_ms();
+        s_live_last_heard_ms[existing] = now_ms;
+        s_live_heard_valid[existing] = true;
         d1l_store_lock_give(&s_store_lock);
         *out_stale = true;
         return ESP_OK;

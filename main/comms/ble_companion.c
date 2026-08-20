@@ -5,6 +5,7 @@
 #include "comms/ble_companion_protocol.h"
 #include "comms/ble_companion_queue.h"
 #include "comms/companion_3byte.h"
+#include "esp_attr.h"
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "sdkconfig.h"
@@ -73,6 +74,9 @@ static uint32_t s_malformed_frame_count;
 static uint32_t s_security_reject_count;
 static esp_err_t s_last_error = ESP_OK;
 static int s_last_nimble_error;
+static uint8_t s_rx_payload[D1L_COMPANION3_MAX_FRAME_SIZE] EXT_RAM_BSS_ATTR;
+static uint8_t s_rx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX] EXT_RAM_BSS_ATTR;
+static uint8_t s_tx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX] EXT_RAM_BSS_ATTR;
 
 /* NimBLE UUID byte order follows the official ESP-IDF bleprph example. */
 static const ble_uuid128_t s_service_uuid =
@@ -184,9 +188,8 @@ static int rx_access(uint16_t connection_handle, uint16_t attribute_handle,
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
 
-    uint8_t payload[D1L_COMPANION3_MAX_FRAME_SIZE];
     uint16_t flattened_len = 0U;
-    if (ble_hs_mbuf_to_flat(context->om, payload, sizeof(payload),
+    if (ble_hs_mbuf_to_flat(context->om, s_rx_payload, sizeof(s_rx_payload),
                             &flattened_len) != 0 ||
         flattened_len != payload_len) {
         portENTER_CRITICAL(&s_lock);
@@ -195,10 +198,9 @@ static int rx_access(uint16_t connection_handle, uint16_t attribute_handle,
         return BLE_ATT_ERR_UNLIKELY;
     }
 
-    uint8_t frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX];
     size_t frame_len = 0U;
-    if (d1l_companion3_encode(D1L_COMPANION3_APP_TO_RADIO, payload,
-                              payload_len, frame, sizeof(frame),
+    if (d1l_companion3_encode(D1L_COMPANION3_APP_TO_RADIO, s_rx_payload,
+                              payload_len, s_rx_frame, sizeof(s_rx_frame),
                               &frame_len) != ESP_OK) {
         portENTER_CRITICAL(&s_lock);
         s_malformed_frame_count++;
@@ -208,7 +210,7 @@ static int rx_access(uint16_t connection_handle, uint16_t attribute_handle,
 
     portENTER_CRITICAL(&s_lock);
     const d1l_ble_companion_queue_result_t result =
-        d1l_ble_companion_queue_push(&s_rx_queue, frame, frame_len);
+        d1l_ble_companion_queue_push(&s_rx_queue, s_rx_frame, frame_len);
     if (result == D1L_BLE_QUEUE_OK) {
         s_rx_frame_count++;
     } else {
@@ -365,7 +367,6 @@ static void finish_tx(bool delivered, int nimble_error)
 
 static void pump_tx(void)
 {
-    uint8_t frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX];
     size_t frame_len = 0U;
     uint16_t connection_handle = BLE_HS_CONN_HANDLE_NONE;
     bool ready = false;
@@ -376,8 +377,8 @@ static void pump_tx(void)
             s_tx_queue.count > 0U;
     if (ready) {
         const d1l_ble_companion_queue_result_t peek =
-            d1l_ble_companion_queue_peek(&s_tx_queue, frame,
-                                         sizeof(frame), &frame_len);
+            d1l_ble_companion_queue_peek(&s_tx_queue, s_tx_frame,
+                                         sizeof(s_tx_frame), &frame_len);
         if (peek == D1L_BLE_QUEUE_OK) {
             s_tx_busy = true;
             connection_handle = s_connection_handle;
@@ -395,7 +396,7 @@ static void pump_tx(void)
     const uint16_t payload_len =
         (uint16_t)(frame_len - D1L_COMPANION3_HEADER_SIZE);
     struct os_mbuf *buffer = ble_hs_mbuf_from_flat(
-        &frame[D1L_COMPANION3_HEADER_SIZE], payload_len);
+        &s_tx_frame[D1L_COMPANION3_HEADER_SIZE], payload_len);
     if (!buffer) {
         finish_tx(false, BLE_HS_ENOMEM);
         return;

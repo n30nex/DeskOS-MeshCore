@@ -706,6 +706,14 @@ static void messages_render_root(d1l_ui_messages_controller_t *controller,
         parent, "Direct", 342, 6, 100, 44,
         messages_bind_control(controller, 1U,
                               D1L_UI_MESSAGES_ACTION_SHOW_DIRECT));
+    if (d1l_ui_messages_action_available(
+            D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR)) {
+        messages_create_button(
+            parent, "Add", 262, 6, 72, 44,
+            messages_bind_control(
+                controller, 4U,
+                D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR));
+    }
     lv_obj_t *subtitle = messages_create_label(
         parent, "Group conversations", 0xA6B0B7);
     if (subtitle) {
@@ -726,14 +734,6 @@ static void messages_render_root(d1l_ui_messages_controller_t *controller,
         (void)messages_render_notice(
             body, row_y, "No channels yet. Add or import a channel.",
             0xA6B0B7);
-        if (d1l_ui_messages_action_available(
-                D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR)) {
-            messages_create_button(
-                body, "Add a channel", 8, row_y + 60, 408, 48,
-                messages_bind_control(
-                    controller, 4U,
-                    D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR));
-        }
         return;
     }
     for (size_t i = 0U; i < controller->rendered.channel_count; ++i) {

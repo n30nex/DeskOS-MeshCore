@@ -584,7 +584,7 @@ bool d1l_ui_service_sheets_render_observer(
     lv_obj_t *broker = create_label(sheet, line, 0xF4F7FB);
     position_dot(broker, 8, 84, 408);
     complete = broker && complete;
-    snprintf(line, sizeof(line), "Region %s  Topic %s%s",
+    snprintf(line, sizeof(line), "IATA %s  Topic %s%s",
              status->region[0] ? status->region : "---",
              status->topic[0] ? status->topic : "-",
              status->include_location ? "  + location" : "");
@@ -598,7 +598,8 @@ bool d1l_ui_service_sheets_render_observer(
     position_wrap(privacy, 8, 140, 408);
     complete = privacy && complete;
 
-    lv_obj_t *region_label = create_label(sheet, "Observer region", 0xA6B0B7);
+    lv_obj_t *region_label = create_label(
+        sheet, "IATA region (3 letters)", 0xA6B0B7);
     position_dot(region_label, 8, 166, 132);
     complete = region_label && complete;
     controller->observer_region_textarea = lv_textarea_create(sheet);
