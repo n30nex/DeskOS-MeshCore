@@ -8896,9 +8896,11 @@ static void print_ble_status_result(const char *command)
            "\"malformed_frames\":%lu,\"security_rejects\":%lu,"
            "\"rx_queue_depth\":%u,\"tx_queue_depth\":%u,"
            "\"protocol_running\":%s,\"protocol_ready\":%s,"
-           "\"protocol_commands\":%lu,\"protocol_responses\":%lu,"
-           "\"protocol_unsupported\":%lu,"
-           "\"protocol_malformed\":%lu}\n",
+            "\"protocol_commands\":%lu,\"protocol_responses\":%lu,"
+            "\"protocol_unsupported\":%lu,"
+            "\"protocol_malformed\":%lu,"
+            "\"protocol_last_command\":%u,"
+            "\"protocol_last_unsupported_command\":%u}\n",
            bool_json(available),
            bool_json(
                available && status.ble_companion_enabled_setting),
@@ -8924,9 +8926,11 @@ static void print_ble_status_result(const char *command)
            ble.rx_queue_depth, ble.tx_queue_depth,
            bool_json(ble.protocol_running), bool_json(ble.protocol_ready),
            (unsigned long)ble.protocol_command_count,
-           (unsigned long)ble.protocol_response_count,
-           (unsigned long)ble.protocol_unsupported_count,
-           (unsigned long)ble.protocol_malformed_count);
+            (unsigned long)ble.protocol_response_count,
+            (unsigned long)ble.protocol_unsupported_count,
+            (unsigned long)ble.protocol_malformed_count,
+            ble.protocol_last_command,
+            ble.protocol_last_unsupported_command);
 }
 
 static void cmd_ble_status(void)

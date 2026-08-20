@@ -19,6 +19,8 @@
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
+#include "mesh/meshcore_service.h"
+#include "mesh/meshcore_wire.h"
 #include "mesh/node_store.h"
 #include "platform/time_service.h"
 #include "storage/storage_status.h"
@@ -54,6 +56,7 @@ enum {
     CMD_GET_CHANNEL = 31,
     CMD_SET_CHANNEL = 32,
     CMD_FACTORY_RESET = 51,
+    CMD_GET_STATS = 56,
     CMD_SET_PATH_HASH_MODE = 61,
 };
 
@@ -75,7 +78,14 @@ enum {
     RESP_CODE_CONTACT_MSG_RECV_V3 = 16,
     RESP_CODE_CHANNEL_MSG_RECV_V3 = 17,
     RESP_CODE_CHANNEL_INFO = 18,
+    RESP_CODE_STATS = 24,
     PUSH_CODE_MSG_WAITING = 0x83,
+};
+
+enum {
+    STATS_TYPE_CORE = 0,
+    STATS_TYPE_RADIO = 1,
+    STATS_TYPE_PACKETS = 2,
 };
 
 enum {
@@ -255,6 +265,7 @@ static void note_unsupported(void)
 {
     portENTER_CRITICAL(&s_status_lock);
     s_status.unsupported_count++;
+    s_status.last_unsupported_command = s_status.last_command;
     s_status.last_error = ESP_ERR_NOT_SUPPORTED;
     portEXIT_CRITICAL(&s_status_lock);
 }
@@ -417,12 +428,15 @@ static size_t build_contact_response(const d1l_contact_entry_t *contact,
     dest[offset++] = contact->favorite ? 1U : 0U;
     const uint8_t path_len =
         contact->out_path_valid &&
-        contact->out_path_len <= D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES ?
+        d1l_meshcore_wire_path_len_valid(contact->out_path_len) ?
             contact->out_path_len : 0U;
+    const uint8_t path_bytes =
+        path_len > 0U ? d1l_meshcore_wire_path_byte_len(path_len) : 0U;
     dest[offset++] = path_len;
     memset(&dest[offset], 0, D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES);
-    if (path_len > 0U) {
-        memcpy(&dest[offset], contact->out_path, path_len);
+    if (path_bytes > 0U &&
+        path_bytes <= D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES) {
+        memcpy(&dest[offset], contact->out_path, path_bytes);
     }
     offset += D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES;
     const char *name = contact->alias[0] ? contact->alias :
@@ -610,6 +624,48 @@ static void build_battery_storage(void)
     write_u32_le(&response[3], used);
     write_u32_le(&response[7], total);
     (void)set_pending(response, sizeof(response));
+}
+
+static uint8_t clamp_u8(uint32_t value)
+{
+    return value > UINT8_MAX ? UINT8_MAX : (uint8_t)value;
+}
+
+static void build_stats(uint8_t type)
+{
+    const d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
+    memset(s_pending_payload, 0, 30U);
+    s_pending_payload[0] = RESP_CODE_STATS;
+    s_pending_payload[1] = type;
+
+    switch (type) {
+    case STATS_TYPE_CORE: {
+        const uint32_t queue_depth = mesh.runtime_command_queue_depth +
+            mesh.runtime_priority_queue_depth + mesh.runtime_event_queue_depth;
+        write_u16_le(&s_pending_payload[2], 0U);
+        write_u32_le(&s_pending_payload[4],
+                     (uint32_t)(esp_timer_get_time() / 1000000ULL));
+        write_u16_le(&s_pending_payload[8],
+                     mesh.radio_ready && mesh.radio_applied ? 0U : 1U);
+        s_pending_payload[10] = clamp_u8(queue_depth);
+        s_pending_len = 11U;
+        return;
+    }
+    case STATS_TYPE_RADIO:
+        /* DeskOS does not retain airtime or noise-floor counters yet. */
+        s_pending_len = 14U;
+        return;
+    case STATS_TYPE_PACKETS:
+        write_u32_le(&s_pending_payload[2], mesh.rx_packets);
+        write_u32_le(&s_pending_payload[6], mesh.tx_packets);
+        write_u32_le(&s_pending_payload[10], mesh.tx_packets);
+        write_u32_le(&s_pending_payload[18], mesh.rx_packets);
+        s_pending_len = 30U;
+        return;
+    default:
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
 }
 
 static uint32_t message_epoch(uint32_t row_uptime_ms)
@@ -960,12 +1016,12 @@ static void set_tx_power_command(const uint8_t *payload, size_t length)
 
 static void set_path_hash_command(const uint8_t *payload, size_t length)
 {
-    if (length < 2U || payload[1] > 1U) {
+    if (length < 3U || payload[1] != 0U || payload[2] > 2U) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
     }
     d1l_settings_t settings = {0};
-    settings.path_hash_bytes = payload[1] + 1U;
+    settings.path_hash_bytes = payload[2] + 1U;
     set_result_response(d1l_settings_update_fields(
         &settings, D1L_SETTINGS_UPDATE_PATH_HASH));
 }
@@ -1052,6 +1108,14 @@ static void dispatch_command(const uint8_t *payload, size_t length)
         return;
     case CMD_GET_BATT_AND_STORAGE:
         build_battery_storage();
+        return;
+    case CMD_GET_STATS:
+        if (length < 2U) {
+            set_error_response(ERR_CODE_ILLEGAL_ARG);
+            note_malformed();
+        } else {
+            build_stats(payload[1]);
+        }
         return;
     case CMD_REBOOT:
     case CMD_FACTORY_RESET:

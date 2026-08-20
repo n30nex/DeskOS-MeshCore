@@ -48,6 +48,8 @@ typedef struct {
     uint32_t protocol_response_count;
     uint32_t protocol_unsupported_count;
     uint32_t protocol_malformed_count;
+    uint8_t protocol_last_command;
+    uint8_t protocol_last_unsupported_command;
     esp_err_t last_error;
     int last_nimble_error;
     const char *state;

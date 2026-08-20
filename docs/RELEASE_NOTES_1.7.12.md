@@ -14,6 +14,10 @@ D1L.
   companion protocol.
 - The advertised device name is now `MeshCore-DeskOS`, matching the naming
   pattern used by MeshCore clients when discovering companion radios.
+- Current MeshCore phone clients can read core, radio, and packet statistics
+  without connection-time protocol errors.
+- One-, two-, and three-byte contact routes now retain their official encoded
+  path shape, and changing path mode from the phone uses the official command.
 - BLE receive and transmit frame scratch space is allocated in PSRAM instead
   of on the 4 KB NimBLE host-task stack. Initial phone synchronization can pull
   the complete saved channel list without exhausting that callback stack.

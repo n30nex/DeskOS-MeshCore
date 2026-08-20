@@ -37,6 +37,7 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "CMD_SEND_TXT_MSG",
         "CMD_SEND_CHANNEL_TXT_MSG",
         "CMD_SET_CHANNEL",
+        "CMD_GET_STATS",
     ):
         assert f"case {command}:" in protocol
     for response in (
@@ -48,6 +49,7 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "RESP_CODE_CHANNEL_INFO",
         "RESP_CODE_CONTACT_MSG_RECV_V3",
         "RESP_CODE_CHANNEL_MSG_RECV_V3",
+        "RESP_CODE_STATS",
         "PUSH_CODE_MSG_WAITING",
     ):
         assert response in protocol
@@ -59,6 +61,34 @@ def test_official_initial_sync_and_messaging_commands_are_real():
     assert "d1l_app_model_remove_channel(" in protocol
     assert "static d1l_channel_store_stats_t s_channel_stats" in protocol
     assert protocol.count("&s_channel_stats") == 3
+
+
+def test_current_phone_stats_and_multibyte_paths_follow_official_wire_shape():
+    protocol = read("main/comms/ble_companion_protocol.c")
+
+    assert "case CMD_GET_STATS:" in protocol
+    assert "case STATS_TYPE_CORE:" in protocol
+    assert "case STATS_TYPE_RADIO:" in protocol
+    assert "case STATS_TYPE_PACKETS:" in protocol
+    assert "s_pending_len = 11U" in protocol
+    assert "s_pending_len = 14U" in protocol
+    assert "s_pending_len = 30U" in protocol
+    assert "d1l_meshcore_wire_path_byte_len(path_len)" in protocol
+    assert "dest[offset++] = path_len" in protocol
+
+    path_mode = protocol.split(
+        "static void set_path_hash_command", 1
+    )[1].split("static void dispatch_command", 1)[0]
+    assert "length < 3U" in path_mode
+    assert "payload[1] != 0U" in path_mode
+    assert "payload[2] > 2U" in path_mode
+    assert "payload[2] + 1U" in path_mode
+    assert "last_unsupported_command = s_status.last_command" in protocol
+
+    transport = read("main/comms/ble_companion.c")
+    console = read("main/comms/usb_console.c")
+    assert "protocol.last_unsupported_command" in transport
+    assert "protocol_last_unsupported_command" in console
 
 
 def test_phone_startup_uses_protocol_owned_storage_and_official_contact_count():
