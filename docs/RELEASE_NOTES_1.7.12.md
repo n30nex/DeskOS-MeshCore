@@ -12,6 +12,9 @@ D1L.
 - The BLE TX characteristic now matches the official MeshCore readable and
   notify shape, negotiates a 517-byte ATT MTU explicitly, and spaces companion
   replies by 60 ms so phone synchronization is not starved or flooded.
+- The NimBLE host task has a measured 6 KB stack reserve for Android's initial
+  secure pairing, MTU, service discovery, channel, and contact synchronization
+  burst.
 - `ble status` now reports the secure-link, MTU, queue, frame, and protocol
   counters needed to diagnose a phone session without enabling verbose logs.
 - Channels always shows **Add** beside **Direct**. The existing create and
