@@ -1210,6 +1210,7 @@ void d1l_meshcore_admin_runtime_snapshot(
     snapshot.firmware_level = s_session.firmware_level;
     snapshot.server_timestamp = s_session.server_timestamp;
     snapshot.pending_tag = s_session.pending_tag;
+    snapshot.last_completed_tag = s_session.last_completed_tag;
     snapshot.pending_mutation = s_session.pending_mutation;
     snapshot.last_mutation = s_session.last_mutation;
     snapshot.pending_query = s_session.pending_query;
@@ -1223,6 +1224,9 @@ void d1l_meshcore_admin_runtime_snapshot(
     snapshot.status_valid = s_session.status_valid;
     snapshot.status = s_session.status;
     snapshot.query_result = s_session.query_result;
+    snapshot.query_wire_len = s_session.query_wire_len;
+    memcpy(snapshot.query_wire, s_session.query_wire,
+           sizeof(snapshot.query_wire));
     snapshot.login_tx_queued = s_metrics.login_tx_queued;
     snapshot.status_tx_queued = s_metrics.status_tx_queued;
     snapshot.query_tx_queued = s_metrics.query_tx_queued;

@@ -36,6 +36,12 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "CMD_SYNC_NEXT_MESSAGE",
         "CMD_SEND_TXT_MSG",
         "CMD_SEND_CHANNEL_TXT_MSG",
+        "CMD_SEND_LOGIN",
+        "CMD_SEND_STATUS_REQ",
+        "CMD_HAS_CONNECTION",
+        "CMD_LOGOUT",
+        "CMD_SEND_TELEMETRY_REQ",
+        "CMD_SEND_BINARY_REQ",
         "CMD_SET_CHANNEL",
         "CMD_GET_STATS",
         "CMD_SET_FLOOD_SCOPE_KEY",
@@ -52,6 +58,11 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "RESP_CODE_CHANNEL_MSG_RECV_V3",
         "RESP_CODE_STATS",
         "PUSH_CODE_MSG_WAITING",
+        "PUSH_CODE_LOGIN_SUCCESS",
+        "PUSH_CODE_LOGIN_FAIL",
+        "PUSH_CODE_STATUS_RESPONSE",
+        "PUSH_CODE_TELEMETRY_RESPONSE",
+        "PUSH_CODE_BINARY_RESPONSE",
     ):
         assert response in protocol
     assert "d1l_app_model_send_dm_text" in protocol
@@ -62,6 +73,39 @@ def test_official_initial_sync_and_messaging_commands_are_real():
     assert "d1l_app_model_remove_channel(" in protocol
     assert "static d1l_channel_store_stats_t s_channel_stats" in protocol
     assert protocol.count("&s_channel_stats") == 3
+
+
+def test_repeater_login_and_management_use_the_existing_admin_runtime():
+    protocol = read("main/comms/ble_companion_protocol.c")
+    dispatch_h = read("main/mesh/meshcore_admin_dispatch.h")
+    runtime_h = read("main/mesh/meshcore_admin_runtime.h")
+    runtime = read("main/mesh/meshcore_admin_runtime.c")
+
+    login = protocol.split("static void send_login_command", 1)[1].split(
+        "static void begin_admin_status_command", 1
+    )[0]
+    assert "d1l_meshcore_service_admin_logout()" in login
+    assert "d1l_meshcore_service_admin_login(" in login
+    assert "D1L_BLE_ADMIN_REQUEST_LOGIN" in login
+    assert "set_admin_sent_response(true" in login
+
+    for call in (
+        "d1l_meshcore_service_admin_request_status()",
+        "d1l_meshcore_service_admin_request_query(query, offset)",
+        "d1l_meshcore_service_admin_request_cli(command, true)",
+    ):
+        assert call in protocol
+    assert "payload[1] != 0U && payload[1] != 1U" in protocol
+    assert "s_pending_payload[offset++] = 1U" in protocol
+    assert "maybe_queue_admin_response();" in protocol
+    assert "s_admin_snapshot.last_completed_tag == s_admin_request_tag" in protocol
+
+    assert "D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES 251U" in dispatch_h
+    assert "uint16_t query_wire_len;" in dispatch_h
+    assert "uint8_t query_wire[D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES];" in dispatch_h
+    assert "uint32_t last_completed_tag;" in runtime_h
+    assert "snapshot.last_completed_tag = s_session.last_completed_tag;" in runtime
+    assert "memcpy(snapshot.query_wire, s_session.query_wire" in runtime
 
 
 def test_current_phone_stats_and_multibyte_paths_follow_official_wire_shape():

@@ -609,6 +609,9 @@ bool d1l_meshcore_admin_begin_query_request(
     session->pending_tag = tag;
     session->pending_query = query;
     session->pending_query_offset = offset;
+    session->query_wire_len = 0U;
+    d1l_meshcore_admin_secure_zero(
+        session->query_wire, sizeof(session->query_wire));
     session->request_deadline_us = request_deadline_us;
     session->state = D1L_MESHCORE_ADMIN_QUERY_PENDING;
     session->generation = next_generation(session->generation);
@@ -2085,7 +2088,15 @@ d1l_meshcore_admin_accept_query_response(
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
 
+    const size_t wire_len = plaintext_len - 4U;
+    if (wire_len > sizeof(session->query_wire)) {
+        d1l_meshcore_admin_secure_zero(&parsed, sizeof(parsed));
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+    }
+
     session->query_result = parsed;
+    memcpy(session->query_wire, &plaintext[4], wire_len);
+    session->query_wire_len = (uint16_t)wire_len;
     session->last_completed_tag = tag;
     session->pending_tag = 0U;
     session->pending_query = D1L_MESHCORE_ADMIN_QUERY_NONE;
