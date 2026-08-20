@@ -56,6 +56,7 @@ enum {
     CMD_GET_CHANNEL = 31,
     CMD_SET_CHANNEL = 32,
     CMD_FACTORY_RESET = 51,
+    CMD_SET_FLOOD_SCOPE_KEY = 54,
     CMD_GET_STATS = 56,
     CMD_SET_PATH_HASH_MODE = 61,
 };
@@ -1026,6 +1027,17 @@ static void set_path_hash_command(const uint8_t *payload, size_t length)
         &settings, D1L_SETTINGS_UPDATE_PATH_HASH));
 }
 
+static void set_flood_scope_command(const uint8_t *payload, size_t length)
+{
+    if (length != 2U || payload[1] > 1U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+
+    /* DeskOS already sends unscoped floods, so clearing an override is true. */
+    set_result_response(ESP_OK);
+}
+
 static void dispatch_command(const uint8_t *payload, size_t length)
 {
     if (!payload || length == 0U) {
@@ -1116,6 +1128,9 @@ static void dispatch_command(const uint8_t *payload, size_t length)
         } else {
             build_stats(payload[1]);
         }
+        return;
+    case CMD_SET_FLOOD_SCOPE_KEY:
+        set_flood_scope_command(payload, length);
         return;
     case CMD_REBOOT:
     case CMD_FACTORY_RESET:

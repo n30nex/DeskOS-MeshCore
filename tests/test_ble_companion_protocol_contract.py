@@ -38,6 +38,7 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "CMD_SEND_CHANNEL_TXT_MSG",
         "CMD_SET_CHANNEL",
         "CMD_GET_STATS",
+        "CMD_SET_FLOOD_SCOPE_KEY",
     ):
         assert f"case {command}:" in protocol
     for response in (
@@ -84,6 +85,14 @@ def test_current_phone_stats_and_multibyte_paths_follow_official_wire_shape():
     assert "payload[2] > 2U" in path_mode
     assert "payload[2] + 1U" in path_mode
     assert "last_unsupported_command = s_status.last_command" in protocol
+
+    flood_scope = protocol.split(
+        "static void set_flood_scope_command", 1
+    )[1].split("static void dispatch_command", 1)[0]
+    assert "length != 2U" in flood_scope
+    assert "payload[1] > 1U" in flood_scope
+    assert "set_result_response(ESP_OK)" in flood_scope
+    assert "case CMD_SET_FLOOD_SCOPE_KEY:" in protocol
 
     transport = read("main/comms/ble_companion.c")
     console = read("main/comms/usb_console.c")
