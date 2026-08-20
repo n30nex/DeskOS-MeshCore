@@ -6,6 +6,14 @@ D1L.
 
 ## Fixed
 
+- Android startup synchronization no longer requests a full UI snapshot from
+  the Bluetooth worker. Battery and storage now use the storage service's own
+  bounded status copy, preventing the reconnect crash seen after pairing.
+- Saved channels are returned to the phone correctly when it requests each
+  slot, and the contact-list header now matches the official MeshCore
+  companion protocol.
+- The advertised device name is now `MeshCore-DeskOS`, matching the naming
+  pattern used by MeshCore clients when discovering companion radios.
 - BLE receive and transmit frame scratch space is allocated in PSRAM instead
   of on the 4 KB NimBLE host-task stack. Initial phone synchronization can pull
   the complete saved channel list without exhausting that callback stack.

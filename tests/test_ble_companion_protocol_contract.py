@@ -57,6 +57,24 @@ def test_official_initial_sync_and_messaging_commands_are_real():
     assert "d1l_app_model_set_companion_map_location" in protocol
     assert "bytes_all_zero(&payload[2], D1L_CHANNEL_NAME_LEN - 1U)" in protocol
     assert "d1l_app_model_remove_channel(" in protocol
+    assert "static d1l_channel_store_stats_t s_channel_stats" in protocol
+    assert protocol.count("&s_channel_stats") == 3
+
+
+def test_phone_startup_uses_protocol_owned_storage_and_official_contact_count():
+    protocol = read("main/comms/ble_companion_protocol.c")
+
+    battery = protocol.split("static void build_battery_storage(void)", 1)[1].split(
+        "static uint32_t message_epoch", 1
+    )[0]
+    assert "d1l_storage_status(&s_storage_status);" in battery
+    assert "d1l_app_model_snapshot" not in battery
+
+    contacts = protocol.split("static void begin_contact_iteration", 1)[1].split(
+        "static void prepare_next_contact_response", 1
+    )[0]
+    assert "write_u32_le(&response[1], s_contact_count);" in contacts
+    assert "filtered_count" not in contacts
 
 
 def test_protocol_fails_closed_for_privileged_and_malformed_commands():

@@ -21,6 +21,7 @@
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "platform/time_service.h"
+#include "storage/storage_status.h"
 
 #define D1L_BLE_PROTOCOL_TASK_STACK_BYTES 6144U
 #define D1L_BLE_PROTOCOL_TASK_PRIORITY 5U
@@ -110,9 +111,11 @@ static uint32_t s_contact_most_recent;
 static bool s_contact_iterator_active;
 static d1l_channel_info_t
     s_channels[D1L_CHANNEL_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_channel_store_stats_t s_channel_stats EXT_RAM_BSS_ATTR;
 static d1l_dm_entry_t s_dms[D1L_DM_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_message_entry_t
     s_messages[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_storage_status_t s_storage_status EXT_RAM_BSS_ATTR;
 static uint32_t s_last_synced_dm_seq;
 static uint32_t s_last_synced_message_seq;
 static uint32_t s_seen_dm_revision;
@@ -339,7 +342,7 @@ static bool channel_at_index(uint8_t index, d1l_channel_info_t *out_channel)
     uint64_t active_id = 0U;
     if (d1l_app_model_copy_channels(
             s_channels, D1L_CHANNEL_STORE_CAPACITY, &count, &active_id,
-            NULL) != ESP_OK ||
+            &s_channel_stats) != ESP_OK ||
         index >= count) {
         return false;
     }
@@ -356,7 +359,7 @@ static bool channel_index_for_id(uint64_t channel_id, uint8_t *out_index)
     if (!out_index ||
         d1l_app_model_copy_channels(
             s_channels, D1L_CHANNEL_STORE_CAPACITY, &count, &active_id,
-            NULL) != ESP_OK) {
+            &s_channel_stats) != ESP_OK) {
         return false;
     }
     for (size_t i = 0; i < count && i < D1L_BLE_PROTOCOL_MAX_CHANNELS; ++i) {
@@ -450,15 +453,8 @@ static void begin_contact_iteration(const uint8_t *payload, size_t length)
     s_contact_index = 0U;
     s_contact_most_recent = 0U;
     s_contact_iterator_active = true;
-    uint32_t filtered_count = 0U;
-    for (size_t i = 0; i < s_contact_count; ++i) {
-        if (s_contacts[i].signed_advert_timestamp > s_contact_since &&
-            s_contacts[i].public_key_hex[0] != '\0') {
-            filtered_count++;
-        }
-    }
     uint8_t response[5] = {RESP_CODE_CONTACTS_START};
-    write_u32_le(&response[1], filtered_count);
+    write_u32_le(&response[1], s_contact_count);
     (void)set_pending(response, sizeof(response));
 }
 
@@ -605,11 +601,10 @@ static void build_channel_info(uint8_t index)
 
 static void build_battery_storage(void)
 {
-    static d1l_app_snapshot_t snapshot;
-    d1l_app_model_snapshot(&snapshot);
-    const uint32_t total = snapshot.storage_capacity_kb;
-    const uint32_t used = total >= snapshot.storage_free_kb ?
-        total - snapshot.storage_free_kb : 0U;
+    d1l_storage_status(&s_storage_status);
+    const uint32_t total = s_storage_status.capacity_kb;
+    const uint32_t used = total >= s_storage_status.free_kb ?
+        total - s_storage_status.free_kb : 0U;
     uint8_t response[11] = {RESP_CODE_BATT_AND_STORAGE};
     write_u16_le(&response[1], 0U);
     write_u32_le(&response[3], used);
@@ -839,7 +834,7 @@ static void set_channel_command(const uint8_t *payload, size_t length)
         uint64_t active_id = 0U;
         result = d1l_app_model_copy_channels(
             s_channels, D1L_CHANNEL_STORE_CAPACITY, &count, &active_id,
-            NULL);
+            &s_channel_stats);
         if (result != ESP_OK || payload[1] != count) {
             set_error_response(ERR_CODE_NOT_FOUND);
             return;

@@ -19,6 +19,7 @@ def test_ble_gatt_contract_matches_pinned_meshcore_and_stays_bounded():
         "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
     ):
         assert uuid in header
+    assert 'D1L_BLE_COMPANION_DEVICE_NAME "MeshCore-DeskOS"' in header
     assert "D1L_BLE_COMPANION_QUEUE_DEPTH 4U" in queue
     assert "D1L_COMPANION3_MAX_FRAME_SIZE" in queue
     assert "BLE_GATT_CHR_F_WRITE_NO_RSP" in source
