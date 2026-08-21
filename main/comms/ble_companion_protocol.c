@@ -46,6 +46,7 @@ enum {
     CMD_SYNC_NEXT_MESSAGE = 10,
     CMD_SET_RADIO_PARAMS = 11,
     CMD_SET_RADIO_TX_POWER = 12,
+    CMD_RESET_PATH = 13,
     CMD_SET_ADVERT_LATLON = 14,
     CMD_REMOVE_CONTACT = 15,
     CMD_REBOOT = 19,
@@ -1534,6 +1535,21 @@ static void remove_contact_command(const uint8_t *payload, size_t length)
         contact.fingerprint, &removed));
 }
 
+static void reset_contact_path_command(const uint8_t *payload, size_t length)
+{
+    if (length != 33U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    d1l_contact_entry_t contact = {0};
+    if (!contact_for_public_key(&payload[1], &contact)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    set_result_response(
+        d1l_meshcore_service_reset_contact_route(contact.fingerprint));
+}
+
 static void get_contact_command(const uint8_t *payload, size_t length)
 {
     if (length != 33U) {
@@ -1733,6 +1749,9 @@ static void dispatch_command(const uint8_t *payload, size_t length)
     case CMD_REMOVE_CONTACT:
         remove_contact_command(payload, length);
         return;
+    case CMD_RESET_PATH:
+        reset_contact_path_command(payload, length);
+        return;
     case CMD_GET_CONTACT_BY_KEY:
         get_contact_command(payload, length);
         return;
@@ -1781,14 +1800,25 @@ static void reset_session_state(void)
     s_contact_iterator_active = false;
     clear_admin_request();
     clear_admin_cli_reply();
-    s_last_synced_dm_seq = 0U;
-    s_last_synced_message_seq = 0U;
-    s_seen_dm_revision = d1l_dm_store_stats().content_revision;
-    s_seen_message_revision = d1l_message_store_stats().content_revision;
     portENTER_CRITICAL(&s_status_lock);
     s_status.client_protocol_version = 3U;
     s_status.session_count++;
     portEXIT_CRITICAL(&s_status_lock);
+}
+
+static uint32_t last_existing_seq(uint32_t next_seq)
+{
+    return next_seq > 0U ? next_seq - 1U : 0U;
+}
+
+static void initialize_message_sync_watermarks(void)
+{
+    const d1l_dm_store_stats_t dm = d1l_dm_store_stats();
+    const d1l_message_store_stats_t messages = d1l_message_store_stats();
+    s_last_synced_dm_seq = last_existing_seq(dm.next_seq);
+    s_last_synced_message_seq = last_existing_seq(messages.next_seq);
+    s_seen_dm_revision = dm.content_revision;
+    s_seen_message_revision = messages.content_revision;
 }
 
 static void maybe_queue_message_waiting(void)
@@ -1810,6 +1840,7 @@ static void maybe_queue_message_waiting(void)
 static void protocol_task(void *context)
 {
     (void)context;
+    initialize_message_sync_watermarks();
     reset_session_state();
     portENTER_CRITICAL(&s_status_lock);
     s_status.running = true;
@@ -1845,10 +1876,6 @@ static void protocol_task(void *context)
             }
             s_pending_len = 0U;
         }
-        prepare_next_contact_response();
-        if (s_pending_len != 0U) {
-            continue;
-        }
         maybe_queue_admin_response();
         if (s_pending_len != 0U) {
             continue;
@@ -1880,6 +1907,10 @@ static void protocol_task(void *context)
         }
         if (receive != ESP_ERR_NOT_FOUND) {
             note_error(receive, true);
+        }
+        prepare_next_contact_response();
+        if (s_pending_len != 0U) {
+            continue;
         }
         maybe_queue_message_waiting();
         vTaskDelay(pdMS_TO_TICKS(D1L_BLE_PROTOCOL_POLL_MS));

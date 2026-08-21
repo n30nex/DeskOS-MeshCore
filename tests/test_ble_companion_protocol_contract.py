@@ -34,6 +34,7 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "CMD_GET_DEVICE_TIME",
         "CMD_SET_DEVICE_TIME",
         "CMD_SYNC_NEXT_MESSAGE",
+        "CMD_RESET_PATH",
         "CMD_SEND_TXT_MSG",
         "CMD_SEND_CHANNEL_TXT_MSG",
         "CMD_SEND_LOGIN",
@@ -106,6 +107,53 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
     assert "uint32_t last_completed_tag;" in runtime_h
     assert "snapshot.last_completed_tag = s_session.last_completed_tag;" in runtime
     assert "memcpy(snapshot.query_wire, s_session.query_wire" in runtime
+
+
+def test_repeater_path_reset_uses_the_full_contact_key_and_safe_route_reset():
+    protocol = read("main/comms/ble_companion_protocol.c")
+
+    reset = protocol.split(
+        "static void reset_contact_path_command", 1
+    )[1].split("static void get_contact_command", 1)[0]
+    assert "length != 33U" in reset
+    assert "contact_for_public_key(&payload[1], &contact)" in reset
+    assert "d1l_meshcore_service_reset_contact_route(contact.fingerprint)" in reset
+    assert "case CMD_RESET_PATH:" in protocol
+
+
+def test_admin_and_phone_commands_preempt_bulk_contact_sync():
+    protocol = read("main/comms/ble_companion_protocol.c")
+    worker = protocol.split("static void protocol_task", 1)[1].split(
+        "esp_err_t d1l_ble_companion_protocol_start", 1
+    )[0]
+
+    admin = worker.index("maybe_queue_admin_response();")
+    receive = worker.index("d1l_ble_companion_take_rx_frame(")
+    contacts = worker.index("prepare_next_contact_response();")
+    assert admin < receive < contacts
+
+
+def test_reconnect_preserves_message_watermarks_without_replaying_history():
+    protocol = read("main/comms/ble_companion_protocol.c")
+    reset = protocol.split("static void reset_session_state", 1)[1].split(
+        "static uint32_t last_existing_seq", 1
+    )[0]
+    initialize = protocol.split(
+        "static void initialize_message_sync_watermarks", 1
+    )[1].split("static void maybe_queue_message_waiting", 1)[0]
+    worker = protocol.split("static void protocol_task", 1)[1].split(
+        "esp_err_t d1l_ble_companion_protocol_start", 1
+    )[0]
+
+    assert "s_last_synced_dm_seq" not in reset
+    assert "s_last_synced_message_seq" not in reset
+    assert "s_seen_dm_revision" not in reset
+    assert "s_seen_message_revision" not in reset
+    assert "last_existing_seq(dm.next_seq)" in initialize
+    assert "last_existing_seq(messages.next_seq)" in initialize
+    assert worker.index("initialize_message_sync_watermarks();") < worker.index(
+        "reset_session_state();"
+    )
 
 
 def test_current_phone_stats_and_multibyte_paths_follow_official_wire_shape():
