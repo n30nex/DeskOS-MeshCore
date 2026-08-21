@@ -1062,7 +1062,12 @@ esp_err_t d1l_app_model_delete_contact(const char *fingerprint, d1l_contact_entr
     if (forget_ret != ESP_OK && forget_ret != ESP_ERR_NOT_FOUND) {
         return forget_ret;
     }
-    return d1l_contact_store_delete(fingerprint, out_contact);
+    esp_err_t delete_ret = d1l_contact_store_delete(fingerprint, out_contact);
+    if (delete_ret == ESP_ERR_INVALID_STATE || delete_ret == ESP_ERR_TIMEOUT ||
+        delete_ret == ESP_FAIL) {
+        delete_ret = d1l_contact_store_delete(fingerprint, out_contact);
+    }
+    return delete_ret;
 }
 
 esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, size_t dest_size)

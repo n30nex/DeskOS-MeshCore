@@ -276,6 +276,15 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "d1l_contact_store_rename(fingerprint, alias, out_contact)" in app_source
     assert "d1l_contact_store_delete(fingerprint, out_contact)" in app_source
     assert "d1l_admin_credential_store_forget(fingerprint)" in app_source
+    delete_contact = app_source.split(
+        "esp_err_t d1l_app_model_delete_contact", 1
+    )[1].split("esp_err_t d1l_app_model_export_contact_uri", 1)[0]
+    assert delete_contact.count(
+        "d1l_contact_store_delete(fingerprint, out_contact)"
+    ) == 2
+    assert "delete_ret == ESP_ERR_INVALID_STATE" in delete_contact
+    assert "delete_ret == ESP_ERR_TIMEOUT" in delete_contact
+    assert "delete_ret == ESP_FAIL" in delete_contact
     assert "nodes_render_contact_row" in nodes_ui
     contact_row = nodes_ui.split(
         "static void nodes_render_contact_row", 1

@@ -120,6 +120,15 @@ def test_repeater_path_reset_uses_the_full_contact_key_and_safe_route_reset():
     assert "d1l_meshcore_service_reset_contact_route(contact.fingerprint)" in reset
     assert "case CMD_RESET_PATH:" in protocol
 
+    response = protocol.split(
+        "static size_t build_contact_response", 1
+    )[1].split("static void begin_contact_iteration", 1)[0]
+    assert "D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN 0xFFU" in protocol
+    assert "const bool path_known" in response
+    assert "path_known ? contact->out_path_len" in response
+    assert "D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN" in response
+    assert "path_known && path_len > 0U" in response
+
 
 def test_admin_and_phone_commands_preempt_bulk_contact_sync():
     protocol = read("main/comms/ble_companion_protocol.c")

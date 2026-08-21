@@ -32,6 +32,7 @@
 #define D1L_BLE_PROTOCOL_VERSION 10U
 #define D1L_BLE_PROTOCOL_MAX_CHANNELS 8U
 #define D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES 64U
+#define D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN 0xFFU
 #define D1L_BLE_PROTOCOL_ADMIN_TIMEOUT_MS 60000U
 
 enum {
@@ -545,12 +546,14 @@ static size_t build_contact_response(const d1l_contact_entry_t *contact,
     offset += sizeof(public_key);
     dest[offset++] = contact_type_code(contact->type);
     dest[offset++] = contact->favorite ? 1U : 0U;
-    const uint8_t path_len =
+    const bool path_known =
         contact->out_path_valid &&
-        d1l_meshcore_wire_path_len_valid(contact->out_path_len) ?
-            contact->out_path_len : 0U;
+        d1l_meshcore_wire_path_len_valid(contact->out_path_len);
+    const uint8_t path_len = path_known ? contact->out_path_len :
+        D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN;
     const uint8_t path_bytes =
-        path_len > 0U ? d1l_meshcore_wire_path_byte_len(path_len) : 0U;
+        path_known && path_len > 0U ?
+            d1l_meshcore_wire_path_byte_len(path_len) : 0U;
     dest[offset++] = path_len;
     memset(&dest[offset], 0, D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES);
     if (path_bytes > 0U &&
