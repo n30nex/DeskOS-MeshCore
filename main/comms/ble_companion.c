@@ -5,7 +5,9 @@
 #include "comms/ble_companion_protocol.h"
 #include "comms/ble_companion_queue.h"
 #include "comms/companion_3byte.h"
+#include "esp_attr.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "sdkconfig.h"
 
@@ -71,8 +73,14 @@ static uint32_t s_rx_drop_count;
 static uint32_t s_tx_drop_count;
 static uint32_t s_malformed_frame_count;
 static uint32_t s_security_reject_count;
+static int64_t s_last_tx_started_us;
 static esp_err_t s_last_error = ESP_OK;
 static int s_last_nimble_error;
+static uint8_t s_rx_payload[D1L_COMPANION3_MAX_FRAME_SIZE] EXT_RAM_BSS_ATTR;
+static uint8_t s_rx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX] EXT_RAM_BSS_ATTR;
+static uint8_t s_tx_frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX] EXT_RAM_BSS_ATTR;
+
+#define D1L_BLE_COMPANION_TX_MIN_INTERVAL_US 60000LL
 
 /* NimBLE UUID byte order follows the official ESP-IDF bleprph example. */
 static const ble_uuid128_t s_service_uuid =
@@ -156,6 +164,8 @@ static void reset_connection_locked(void)
     s_notification_enabled = false;
     s_connection_handle = BLE_HS_CONN_HANDLE_NONE;
     s_att_mtu = D1L_BLE_COMPANION_DEFAULT_ATT_MTU;
+    s_pairing_passkey = 0U;
+    s_last_tx_started_us = 0;
     clear_session_queues_locked();
 }
 
@@ -183,9 +193,8 @@ static int rx_access(uint16_t connection_handle, uint16_t attribute_handle,
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
 
-    uint8_t payload[D1L_COMPANION3_MAX_FRAME_SIZE];
     uint16_t flattened_len = 0U;
-    if (ble_hs_mbuf_to_flat(context->om, payload, sizeof(payload),
+    if (ble_hs_mbuf_to_flat(context->om, s_rx_payload, sizeof(s_rx_payload),
                             &flattened_len) != 0 ||
         flattened_len != payload_len) {
         portENTER_CRITICAL(&s_lock);
@@ -194,10 +203,9 @@ static int rx_access(uint16_t connection_handle, uint16_t attribute_handle,
         return BLE_ATT_ERR_UNLIKELY;
     }
 
-    uint8_t frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX];
     size_t frame_len = 0U;
-    if (d1l_companion3_encode(D1L_COMPANION3_APP_TO_RADIO, payload,
-                              payload_len, frame, sizeof(frame),
+    if (d1l_companion3_encode(D1L_COMPANION3_APP_TO_RADIO, s_rx_payload,
+                              payload_len, s_rx_frame, sizeof(s_rx_frame),
                               &frame_len) != ESP_OK) {
         portENTER_CRITICAL(&s_lock);
         s_malformed_frame_count++;
@@ -207,7 +215,7 @@ static int rx_access(uint16_t connection_handle, uint16_t attribute_handle,
 
     portENTER_CRITICAL(&s_lock);
     const d1l_ble_companion_queue_result_t result =
-        d1l_ble_companion_queue_push(&s_rx_queue, frame, frame_len);
+        d1l_ble_companion_queue_push(&s_rx_queue, s_rx_frame, frame_len);
     if (result == D1L_BLE_QUEUE_OK) {
         s_rx_frame_count++;
     } else {
@@ -221,14 +229,19 @@ static int rx_access(uint16_t connection_handle, uint16_t attribute_handle,
 static int tx_access(uint16_t connection_handle, uint16_t attribute_handle,
                      struct ble_gatt_access_ctxt *context, void *arg)
 {
-    (void)connection_handle;
-    (void)attribute_handle;
-    (void)context;
     (void)arg;
+    if (!context || attribute_handle != s_tx_value_handle ||
+        context->op != BLE_GATT_ACCESS_OP_READ_CHR) {
+        return BLE_ATT_ERR_UNLIKELY;
+    }
+    if (!connection_authorized(connection_handle, NULL)) {
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+    }
 
-    /* NimBLE requires every registered characteristic to have an access
-     * callback, even when its value is delivered only with notify_custom. */
-    return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    /* Official MeshCore ESP32 companions expose TX as readable + notify.
+     * Protocol frames still arrive only as notifications; an empty secure
+     * read preserves that GATT shape without replaying stale private data. */
+    return 0;
 }
 
 static const struct ble_gatt_svc_def s_gatt_services[] = {
@@ -248,7 +261,10 @@ static const struct ble_gatt_svc_def s_gatt_services[] = {
             {
                 .uuid = &s_tx_uuid.u,
                 .access_cb = tx_access,
-                .flags = BLE_GATT_CHR_F_NOTIFY |
+                .flags = BLE_GATT_CHR_F_READ |
+                         BLE_GATT_CHR_F_NOTIFY |
+                         BLE_GATT_CHR_F_READ_ENC |
+                         BLE_GATT_CHR_F_READ_AUTHEN |
                          BLE_GATT_CHR_F_NOTIFY_INDICATE_ENC |
                          BLE_GATT_CHR_F_NOTIFY_INDICATE_AUTHEN,
                 .val_handle = &s_tx_value_handle,
@@ -364,19 +380,22 @@ static void finish_tx(bool delivered, int nimble_error)
 
 static void pump_tx(void)
 {
-    uint8_t frame[D1L_BLE_COMPANION_WIRE_FRAME_MAX];
     size_t frame_len = 0U;
     uint16_t connection_handle = BLE_HS_CONN_HANDLE_NONE;
     bool ready = false;
+    const int64_t now_us = esp_timer_get_time();
 
     portENTER_CRITICAL(&s_lock);
     ready = s_connected && s_encrypted && s_authenticated && s_bonded &&
             s_notification_enabled && !s_tx_busy &&
-            s_tx_queue.count > 0U;
+            s_tx_queue.count > 0U &&
+            (s_last_tx_started_us == 0 ||
+             now_us - s_last_tx_started_us >=
+                 D1L_BLE_COMPANION_TX_MIN_INTERVAL_US);
     if (ready) {
         const d1l_ble_companion_queue_result_t peek =
-            d1l_ble_companion_queue_peek(&s_tx_queue, frame,
-                                         sizeof(frame), &frame_len);
+            d1l_ble_companion_queue_peek(&s_tx_queue, s_tx_frame,
+                                         sizeof(s_tx_frame), &frame_len);
         if (peek == D1L_BLE_QUEUE_OK) {
             s_tx_busy = true;
             connection_handle = s_connection_handle;
@@ -394,7 +413,7 @@ static void pump_tx(void)
     const uint16_t payload_len =
         (uint16_t)(frame_len - D1L_COMPANION3_HEADER_SIZE);
     struct os_mbuf *buffer = ble_hs_mbuf_from_flat(
-        &frame[D1L_COMPANION3_HEADER_SIZE], payload_len);
+        &s_tx_frame[D1L_COMPANION3_HEADER_SIZE], payload_len);
     if (!buffer) {
         finish_tx(false, BLE_HS_ENOMEM);
         return;
@@ -403,7 +422,16 @@ static void pump_tx(void)
                                             s_tx_value_handle, buffer);
     if (rc != 0) {
         finish_tx(false, rc);
+    } else {
+        portENTER_CRITICAL(&s_lock);
+        s_last_tx_started_us = now_us;
+        portEXIT_CRITICAL(&s_lock);
     }
+}
+
+void d1l_ble_companion_poll(void)
+{
+    pump_tx();
 }
 
 static void update_security(uint16_t connection_handle)
@@ -457,6 +485,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         reset_connection_locked();
         s_connected = true;
         s_connection_handle = event->connect.conn_handle;
+        s_pairing_passkey = D1L_BLE_COMPANION_STATIC_PASSKEY;
         s_connect_count++;
         s_state = D1L_BLE_STATE_PAIRING;
         portEXIT_CRITICAL(&s_lock);
@@ -528,7 +557,6 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         if (event->notify_tx.attr_handle == s_tx_value_handle) {
             finish_tx(event->notify_tx.status == 0,
                       event->notify_tx.status);
-            pump_tx();
         }
         return 0;
     case BLE_GAP_EVENT_PASSKEY_ACTION:
@@ -610,6 +638,19 @@ esp_err_t d1l_ble_companion_start(void)
         s_last_nimble_error = (int)init_result;
         portEXIT_CRITICAL(&s_lock);
         return init_result;
+    }
+
+    const int mtu_result = ble_att_set_preferred_mtu(
+        D1L_BLE_COMPANION_PREFERRED_ATT_MTU);
+    if (mtu_result != 0) {
+        (void)nimble_port_deinit();
+        portENTER_CRITICAL(&s_lock);
+        s_start_requested = false;
+        s_state = D1L_BLE_STATE_ERROR;
+        s_last_error = ESP_FAIL;
+        s_last_nimble_error = mtu_result;
+        portEXIT_CRITICAL(&s_lock);
+        return ESP_FAIL;
     }
 
     ble_hs_cfg.reset_cb = on_reset;
@@ -821,6 +862,20 @@ void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status)
     out_status->protocol_response_count = protocol.response_count;
     out_status->protocol_unsupported_count = protocol.unsupported_count;
     out_status->protocol_malformed_count = protocol.malformed_count;
+    out_status->protocol_last_command = protocol.last_command;
+    out_status->protocol_last_unsupported_command =
+        protocol.last_unsupported_command;
+    out_status->protocol_last_response_error_code =
+        protocol.last_response_error_code;
+    out_status->protocol_last_failed_command = protocol.last_failed_command;
+    out_status->protocol_last_failed_response_error_code =
+        protocol.last_failed_response_error_code;
+    out_status->protocol_last_text_type = protocol.last_text_type;
+    out_status->protocol_last_admin_cli_stage =
+        protocol.last_admin_cli_stage;
+    out_status->protocol_last_text_length = protocol.last_text_length;
+    out_status->protocol_response_error_count =
+        protocol.response_error_count;
     out_status->security_policy = "secure_connections_mitm_bonded";
     out_status->wire_policy = "raw_gatt_internal_meshcore_3byte";
 }
@@ -932,6 +987,10 @@ void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status)
     out_status->state = "build_disabled";
     out_status->security_policy = "not_built";
     out_status->wire_policy = "raw_gatt_internal_meshcore_3byte";
+}
+
+void d1l_ble_companion_poll(void)
+{
 }
 
 esp_err_t d1l_ble_companion_take_rx_frame(uint8_t *dest, size_t dest_cap,

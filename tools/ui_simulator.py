@@ -2581,6 +2581,14 @@ def render_messages(s: Surface, snap: Snapshot):
     s.text("Group conversations", (18, 40, 300, 60), 12, MUTED)
     draw_button(
         s,
+        (262, 6, 334, 50),
+        "Add",
+        ACCENT,
+        action="open_channel_selector",
+        destination="channel_selector_sheet",
+    )
+    draw_button(
+        s,
         (342, 6, 442, 50),
         "Direct",
         GREEN,
@@ -2597,14 +2605,6 @@ def render_messages(s: Surface, snap: Snapshot):
             (34, 88, 426, 118),
             13,
             MUTED,
-        )
-        draw_button(
-            s,
-            (26, 134, 434, 182),
-            "Add a channel",
-            ACCENT,
-            action="open_channel_selector",
-            destination="channel_selector_sheet",
         )
     for channel in channels:
         box = (26, y, 434, y + 60)
@@ -4193,7 +4193,7 @@ def more_category_specs(
             False,
         ),
         (
-            "Observer",
+            "MQTT / Observer",
             "Not configured",
             TEXT,
             "open_observer",
@@ -4311,7 +4311,7 @@ def more_category_specs(
         {
             "key": "connections",
             "title": "Connections",
-            "summary": "Wi-Fi, Bluetooth, and observer",
+            "summary": "Wi-Fi, Bluetooth, and MQTT",
             "color": GREEN,
             "warning": False,
             "action": None,
@@ -7510,6 +7510,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "messages": (
         "Channels",
         "Group conversations",
+        "Add",
         "Direct",
         "#Public",
     ),
@@ -7521,6 +7522,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "messages_loading": (
         "Channels",
         "Group conversations",
+        "Add",
         "Direct",
         "#Public",
     ),
@@ -7613,7 +7615,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Connections",
         "Wi-Fi",
         "Bluetooth",
-        "Observer",
+        "MQTT / Observer",
     ),
     "settings_storage_maps_expanded": (
         "Settings",
@@ -8039,6 +8041,7 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "messages": (
         "Channels",
         "Group conversations",
+        "Add",
         "Direct",
         "#Public",
     ),

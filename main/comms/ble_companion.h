@@ -12,8 +12,9 @@
     "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 #define D1L_BLE_COMPANION_TX_UUID \
     "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-#define D1L_BLE_COMPANION_DEVICE_NAME "MeshCore DeskOS"
+#define D1L_BLE_COMPANION_DEVICE_NAME "MeshCore-DeskOS"
 #define D1L_BLE_COMPANION_DEFAULT_ATT_MTU 23U
+#define D1L_BLE_COMPANION_PREFERRED_ATT_MTU 517U
 
 typedef struct {
     bool build_enabled;
@@ -47,6 +48,15 @@ typedef struct {
     uint32_t protocol_response_count;
     uint32_t protocol_unsupported_count;
     uint32_t protocol_malformed_count;
+    uint8_t protocol_last_command;
+    uint8_t protocol_last_unsupported_command;
+    uint8_t protocol_last_response_error_code;
+    uint8_t protocol_last_failed_command;
+    uint8_t protocol_last_failed_response_error_code;
+    uint8_t protocol_last_text_type;
+    uint8_t protocol_last_admin_cli_stage;
+    uint16_t protocol_last_text_length;
+    uint32_t protocol_response_error_count;
     esp_err_t last_error;
     int last_nimble_error;
     const char *state;
@@ -61,6 +71,7 @@ esp_err_t d1l_ble_companion_prepare_reboot(void);
 esp_err_t d1l_ble_companion_begin_pairing(void);
 esp_err_t d1l_ble_companion_forget_peer(void);
 void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status);
+void d1l_ble_companion_poll(void);
 
 /*
  * RX frames are returned in the existing MeshCore three-byte transport form:

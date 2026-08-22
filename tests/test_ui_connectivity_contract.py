@@ -23,8 +23,10 @@ def test_connectivity_truth_is_owned_outside_the_ui_task_monolith():
     assert '"Scan to list nearby 2.4 GHz networks"' in source
     assert '"Bluetooth companion connections are unavailable."' in source
     assert '"USB stays available for recovery and diagnostics."' in source
-    assert '"Using the MeshCore connection alongside Wi-Fi."' in source
-    assert '"Enter PIN %06lu on the companion device."' in source
+    assert '"Bluetooth mode is active; Wi-Fi is off."' in source
+    assert '"Enter this PIN in the MeshCore app."' in source
+    assert "out_view->pairing_passkey" in source
+    assert "out_view->pairing_active" in source
 
     assert "lv_" not in source
     assert "d1l_app_model_" not in source

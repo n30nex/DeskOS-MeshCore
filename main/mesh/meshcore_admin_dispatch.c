@@ -500,20 +500,30 @@ d1l_meshcore_admin_accept_login_response(
         d1l_meshcore_admin_timeout(session);
         return D1L_MESHCORE_ADMIN_RESPONSE_EXPIRED;
     }
-    if (!d1l_meshcore_admin_canonical_span(
+    const bool legacy_response = d1l_meshcore_admin_canonical_span(
+        plaintext, plaintext_len,
+        D1L_MESHCORE_ADMIN_LEGACY_LOGIN_RESPONSE_BYTES) &&
+        plaintext[4] == 'O' && plaintext[5] == 'K';
+    const bool current_response = !legacy_response &&
+        d1l_meshcore_admin_canonical_span(
             plaintext, plaintext_len,
-            D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES)) {
+            D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES);
+    if (!legacy_response && !current_response) {
         (void)d1l_meshcore_admin_fail(
             session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
 
-    if (plaintext[4] != 0U) {
+    if (current_response && plaintext[4] != 0U) {
         (void)d1l_meshcore_admin_fail(
             session, D1L_MESHCORE_ADMIN_REJECTED_CREDENTIALS);
         return D1L_MESHCORE_ADMIN_RESPONSE_REJECTED;
     }
-    const uint8_t permissions = plaintext[7];
+    const uint8_t permissions = legacy_response ?
+        (session->role == D1L_MESHCORE_ADMIN_ROLE_REPEATER ?
+             D1L_MESHCORE_ADMIN_PERMISSION_ADMIN :
+             D1L_MESHCORE_ADMIN_PERMISSION_GUEST) :
+        plaintext[7];
     const uint8_t permission_role =
         permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
     const uint8_t expected_firmware =
@@ -522,8 +532,9 @@ d1l_meshcore_admin_accept_login_response(
         permission_role == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ? 1U :
         (session->role == D1L_MESHCORE_ADMIN_ROLE_ROOM &&
          permission_role == D1L_MESHCORE_ADMIN_PERMISSION_GUEST ? 2U : 0U);
-    if (plaintext[5] != 0U || plaintext[6] != expected_legacy_role ||
-        plaintext[12] != expected_firmware) {
+    if (current_response &&
+        (plaintext[6] != expected_legacy_role ||
+         plaintext[12] != expected_firmware)) {
         (void)d1l_meshcore_admin_fail(
             session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
@@ -534,18 +545,24 @@ d1l_meshcore_admin_accept_login_response(
             session, D1L_MESHCORE_ADMIN_UNSUPPORTED_PROTOCOL);
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
+    uint8_t replay_response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES] = {0};
+    memcpy(replay_response, plaintext,
+           legacy_response ? D1L_MESHCORE_ADMIN_LEGACY_LOGIN_RESPONSE_BYTES :
+                             D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES);
     if (replay_cache_contains(
-            replay_cache, peer_public_key, plaintext, server_timestamp)) {
+            replay_cache, peer_public_key, replay_response,
+            server_timestamp)) {
         (void)d1l_meshcore_admin_fail(
             session, D1L_MESHCORE_ADMIN_VOLATILE_REPLAY_REJECTED);
         return D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED;
     }
 
     replay_cache_remember(
-        replay_cache, peer_public_key, plaintext, server_timestamp);
+        replay_cache, peer_public_key, replay_response, server_timestamp);
     session->server_timestamp = server_timestamp;
     session->permissions = permissions;
-    session->firmware_level = plaintext[12];
+    session->firmware_level = legacy_response ? expected_firmware :
+                                                plaintext[12];
     session->request_deadline_us = 0U;
     session->absolute_deadline_us =
         deadline_after(now_us, session->absolute_timeout_us);
@@ -609,6 +626,9 @@ bool d1l_meshcore_admin_begin_query_request(
     session->pending_tag = tag;
     session->pending_query = query;
     session->pending_query_offset = offset;
+    session->query_wire_len = 0U;
+    d1l_meshcore_admin_secure_zero(
+        session->query_wire, sizeof(session->query_wire));
     session->request_deadline_us = request_deadline_us;
     session->state = D1L_MESHCORE_ADMIN_QUERY_PENDING;
     session->generation = next_generation(session->generation);
@@ -2085,7 +2105,15 @@ d1l_meshcore_admin_accept_query_response(
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
 
+    const size_t wire_len = plaintext_len - 4U;
+    if (wire_len > sizeof(session->query_wire)) {
+        d1l_meshcore_admin_secure_zero(&parsed, sizeof(parsed));
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
+    }
+
     session->query_result = parsed;
+    memcpy(session->query_wire, &plaintext[4], wire_len);
+    session->query_wire_len = (uint16_t)wire_len;
     session->last_completed_tag = tag;
     session->pending_tag = 0U;
     session->pending_query = D1L_MESHCORE_ADMIN_QUERY_NONE;

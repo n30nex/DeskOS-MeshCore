@@ -58,7 +58,9 @@ typedef struct {
     char toggle_label[D1L_UI_CONNECTIVITY_LABEL_LEN];
     char production_note[D1L_UI_CONNECTIVITY_TEXT_LEN];
     uint32_t state_color;
+    uint32_t pairing_passkey;
     bool controls_available;
+    bool pairing_active;
     bool pairing_available;
     bool forget_available;
 } d1l_ui_ble_view_model_t;

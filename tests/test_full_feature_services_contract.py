@@ -147,7 +147,8 @@ def test_server_admin_login_is_available_on_device_and_scrubs_credentials():
 
     assert "lv_textarea_set_password_mode(" in sheets
     assert "D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES" in sheets
-    assert "Password (empty allowed by peer)" in sheets
+    assert "Administrator password" in sheets
+    assert 'controller, sheet, "Guest"' in sheets
     assert "d1l_ui_keyboard_configure_input(" in sheets
     assert "d1l_ui_keyboard_clear_textarea(controller->admin_keyboard)" in sheets
     assert 'lv_textarea_set_text(controller->admin_password_textarea, "")' in \
@@ -194,9 +195,10 @@ def test_repeater_login_opens_a_compact_saved_session_manager():
 
     for label in (
         '"Repeater login"',
-        '"Save: On"',
-        '"Forget saved"',
+        '"Save On"',
+        '"Forget"',
         '"Repeater manager"',
+        '"Repeater guest"',
         '"\\nStatus"',
         '"\\nTelemetry"',
         '"\\nNeighbours"',
@@ -214,6 +216,42 @@ def test_repeater_login_opens_a_compact_saved_session_manager():
     assert "d1l_admin_credential_store_load(" in phase1
     assert "d1l_admin_credential_store_save(" in phase1
     assert "d1l_admin_credential_store_forget(" in phase1
+
+
+def test_guest_login_is_explicit_read_only_and_preserves_saved_password():
+    header = read("main/ui/ui_service_sheets.h")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    assert "D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN" in header
+    assert 'controller, sheet, "Guest"' in sheets
+    assert '"Guest session: read-only server information."' in sheets
+
+    hub = sheets.split("static bool render_admin_hub_compact(", 1)[1].split(
+        "static bool render_admin_metric(", 1
+    )[0]
+    assert "const bool admin_session" in hub
+    assert "if (admin_session)" in hub
+    for admin_only_action in (
+        "D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACCESS",
+        "D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TOOLS",
+        "D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TERMINAL",
+    ):
+        assert admin_only_action in hub.split("if (admin_session)", 1)[1]
+
+    login = phase1.split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN:", 1
+    )[1].split("case D1L_UI_SERVICE_ACTION_ADMIN_REFRESH:", 1)[0]
+    assert "const bool guest_login" in login
+    assert "if (!guest_login && password[0] == '\\0')" in login
+    assert '"Enter an admin password or choose Guest."' in login
+    assert "s_admin_pending_guest = guest_login;" in login
+
+    finalize = phase1.split("static void finalize_admin_login(", 1)[1].split(
+        "static bool admin_state_preserves_selected_page(", 1
+    )[0]
+    assert "if (!s_admin_pending_guest)" in finalize
+    assert '"Guest session opened. Read-only tools only."' in finalize
 
     preserve_page = phase1.split(
         "static bool admin_state_preserves_selected_page(", 1
@@ -300,11 +338,27 @@ def test_admin_login_floods_and_neighbours_resolve_saved_contact_names():
     )[1].split(
         "static esp_err_t meshcore_service_handle_admin_status(", 1
     )[0]
-    assert login.index("prepare_admin_route(") < login.index(
-        "d1l_meshcore_route_select("
-    ) < login.index("d1l_meshcore_admin_build_login_packet(")
-    assert "false, false, NULL, 0U, 0U, now_ms" in login
-    assert "d1l_meshcore_admin_route_valid(&selection)" in login
+    assert login.index("prepare_admin_flood_route(") < login.index(
+        "d1l_meshcore_admin_build_login_packet("
+    )
+    assert "now_ms, &contact," in login
+
+    route = service.split("static esp_err_t prepare_admin_flood_route(", 2)[2].split(
+        "esp_err_t d1l_meshcore_service_admin_login", 1
+    )[0]
+    assert "false, false, NULL, 0U, 0U, now_ms" in route
+    assert "d1l_meshcore_admin_route_valid(&selection)" in route
+    for handler in (
+        "meshcore_service_handle_admin_login",
+        "meshcore_service_handle_admin_request_status",
+        "meshcore_service_handle_admin_query",
+        "meshcore_service_handle_admin_mutation",
+        "meshcore_service_handle_admin_cli",
+    ):
+        body = service.split(f"static esp_err_t {handler}", 1)[1].split(
+            "static esp_err_t", 1
+        )[0]
+        assert "prepare_admin_flood_route(" in body
 
     assert "d1l_meshcore_admin_neighbour_t" in dispatch_h
     parser = dispatch.split("static bool parse_neighbours_query(", 1)[1].split(

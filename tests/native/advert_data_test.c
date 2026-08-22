@@ -206,6 +206,28 @@ static void test_name_sanitization_and_type_mapping(void)
     assert(sanitized.type_code == 'S');
     assert(strcmp(sanitized.name, "A_ ~___B") == 0);
 
+    const uint8_t padded_name[] = {
+        0x82U, 'Y', 'K', 'F', ' ', '-', ' ', 'H', 'i', 'l', 'l', 't', 'o', 'p',
+        0U, 0U, 0U, 0U,
+    };
+    const d1l_advert_data_t padded = parse_ok(padded_name, sizeof(padded_name));
+    assert(strcmp(padded.name, "YKF - Hilltop") == 0);
+
+    const uint8_t meaningful_underscore[] = {
+        0x81U, 'K', 'i', 'n', 'z', 'e', '_', 'S', 'o', 'l', 'a', 'r',
+    };
+    const d1l_advert_data_t underscore = parse_ok(
+        meaningful_underscore, sizeof(meaningful_underscore));
+    assert(strcmp(underscore.name, "Kinze_Solar") == 0);
+
+    const uint8_t fuzz_regression[] = {
+        0x84U, 'A', 0x1fU, 0x84U, 0xafU, 0xccU, 0xc0U, 0x8aU, 0xe5U,
+        0x7fU, 0U, 0U, ' ', '~', 0x7fU, '"', '\\', 'B',
+    };
+    const d1l_advert_data_t fuzzed = parse_ok(
+        fuzz_regression, sizeof(fuzz_regression));
+    assert(strcmp(fuzzed.name, "A________") == 0);
+
     const uint8_t empty_name[] = {0x83U};
     const d1l_advert_data_t empty = parse_ok(empty_name, sizeof(empty_name));
     assert(empty.type_code == 'R');

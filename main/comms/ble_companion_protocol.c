@@ -17,10 +17,14 @@
 #include "freertos/task.h"
 #include "mesh/channel_store.h"
 #include "mesh/contact_store.h"
+#include "mesh/contact_uri.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
+#include "mesh/meshcore_service.h"
+#include "mesh/meshcore_wire.h"
 #include "mesh/node_store.h"
 #include "platform/time_service.h"
+#include "storage/storage_status.h"
 
 #define D1L_BLE_PROTOCOL_TASK_STACK_BYTES 6144U
 #define D1L_BLE_PROTOCOL_TASK_PRIORITY 5U
@@ -29,6 +33,15 @@
 #define D1L_BLE_PROTOCOL_VERSION 10U
 #define D1L_BLE_PROTOCOL_MAX_CHANNELS 8U
 #define D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES 64U
+#define D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN 0xFFU
+#define D1L_BLE_PROTOCOL_ADMIN_TIMEOUT_MS 60000U
+#define D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS 4200U
+#define D1L_BLE_PROTOCOL_SELF_ADV_TYPE 1U
+#define D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS 0U
+#define D1L_BLE_PROTOCOL_AUTOADD_CONFIG 0x1EU
+#define D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS 0U
+#define D1L_BLE_PROTOCOL_RX_DELAY_MILLIS 0U
+#define D1L_BLE_PROTOCOL_AIRTIME_FACTOR_MILLIS 1000U
 
 enum {
     CMD_APP_START = 1,
@@ -39,20 +52,51 @@ enum {
     CMD_SET_DEVICE_TIME = 6,
     CMD_SEND_SELF_ADVERT = 7,
     CMD_SET_ADVERT_NAME = 8,
+    CMD_ADD_UPDATE_CONTACT = 9,
     CMD_SYNC_NEXT_MESSAGE = 10,
     CMD_SET_RADIO_PARAMS = 11,
     CMD_SET_RADIO_TX_POWER = 12,
+    CMD_RESET_PATH = 13,
     CMD_SET_ADVERT_LATLON = 14,
     CMD_REMOVE_CONTACT = 15,
+    CMD_SHARE_CONTACT = 16,
+    CMD_EXPORT_CONTACT = 17,
+    CMD_IMPORT_CONTACT = 18,
     CMD_REBOOT = 19,
     CMD_GET_BATT_AND_STORAGE = 20,
+    CMD_SET_TUNING_PARAMS = 21,
     CMD_DEVICE_QUERY = 22,
     CMD_EXPORT_PRIVATE_KEY = 23,
     CMD_IMPORT_PRIVATE_KEY = 24,
+    CMD_SEND_RAW_DATA = 25,
+    CMD_SEND_LOGIN = 26,
+    CMD_SEND_STATUS_REQ = 27,
+    CMD_HAS_CONNECTION = 28,
+    CMD_LOGOUT = 29,
     CMD_GET_CONTACT_BY_KEY = 30,
     CMD_GET_CHANNEL = 31,
     CMD_SET_CHANNEL = 32,
+    CMD_SIGN_START = 33,
+    CMD_SIGN_DATA = 34,
+    CMD_SIGN_FINISH = 35,
+    CMD_SEND_TRACE_PATH = 36,
+    CMD_SET_DEVICE_PIN = 37,
+    CMD_SET_OTHER_PARAMS = 38,
+    CMD_SEND_TELEMETRY_REQ = 39,
+    CMD_GET_CUSTOM_VARS = 40,
+    CMD_SET_CUSTOM_VAR = 41,
+    CMD_GET_ADVERT_PATH = 42,
+    CMD_GET_TUNING_PARAMS = 43,
+    CMD_SEND_BINARY_REQ = 50,
     CMD_FACTORY_RESET = 51,
+    CMD_SEND_PATH_DISCOVERY_REQ = 52,
+    CMD_SET_FLOOD_SCOPE_KEY = 54,
+    CMD_SEND_CONTROL_DATA = 55,
+    CMD_GET_STATS = 56,
+    CMD_SEND_ANON_REQ = 57,
+    CMD_SET_AUTOADD_CONFIG = 58,
+    CMD_GET_AUTOADD_CONFIG = 59,
+    CMD_GET_ALLOWED_REPEAT_FREQ = 60,
     CMD_SET_PATH_HASH_MODE = 61,
 };
 
@@ -74,7 +118,45 @@ enum {
     RESP_CODE_CONTACT_MSG_RECV_V3 = 16,
     RESP_CODE_CHANNEL_MSG_RECV_V3 = 17,
     RESP_CODE_CHANNEL_INFO = 18,
+    RESP_CODE_CUSTOM_VARS = 21,
+    RESP_CODE_ADVERT_PATH = 22,
+    RESP_CODE_TUNING_PARAMS = 23,
+    RESP_CODE_STATS = 24,
+    RESP_CODE_AUTOADD_CONFIG = 25,
+    RESP_CODE_ALLOWED_REPEAT_FREQ = 26,
+    PUSH_CODE_ADVERT = 0x80,
+    PUSH_CODE_PATH_UPDATED = 0x81,
     PUSH_CODE_MSG_WAITING = 0x83,
+    PUSH_CODE_LOGIN_SUCCESS = 0x85,
+    PUSH_CODE_LOGIN_FAIL = 0x86,
+    PUSH_CODE_STATUS_RESPONSE = 0x87,
+    PUSH_CODE_NEW_ADVERT = 0x8A,
+    PUSH_CODE_TELEMETRY_RESPONSE = 0x8B,
+    PUSH_CODE_BINARY_RESPONSE = 0x8C,
+    PUSH_CODE_CONTACT_DELETED = 0x8F,
+};
+
+enum {
+    BINARY_REQ_STATUS = 1,
+    BINARY_REQ_TELEMETRY = 3,
+    BINARY_REQ_ACCESS_LIST = 5,
+    BINARY_REQ_NEIGHBOURS = 6,
+};
+
+typedef enum {
+    D1L_BLE_ADMIN_REQUEST_NONE = 0,
+    D1L_BLE_ADMIN_REQUEST_LOGIN,
+    D1L_BLE_ADMIN_REQUEST_STATUS,
+    D1L_BLE_ADMIN_REQUEST_TELEMETRY,
+    D1L_BLE_ADMIN_REQUEST_BINARY_STATUS,
+    D1L_BLE_ADMIN_REQUEST_BINARY_QUERY,
+    D1L_BLE_ADMIN_REQUEST_CLI,
+} d1l_ble_admin_request_kind_t;
+
+enum {
+    STATS_TYPE_CORE = 0,
+    STATS_TYPE_RADIO = 1,
+    STATS_TYPE_PACKETS = 2,
 };
 
 enum {
@@ -84,6 +166,16 @@ enum {
     ERR_CODE_BAD_STATE = 4,
     ERR_CODE_FILE_IO_ERROR = 5,
     ERR_CODE_ILLEGAL_ARG = 6,
+};
+
+enum {
+    ADMIN_CLI_STAGE_NONE = 0,
+    ADMIN_CLI_STAGE_RECEIVED,
+    ADMIN_CLI_STAGE_CONTACT_FOUND,
+    ADMIN_CLI_STAGE_SESSION_READY,
+    ADMIN_CLI_STAGE_NORMALIZED,
+    ADMIN_CLI_STAGE_QUEUED,
+    ADMIN_CLI_STAGE_PENDING_TRACKED,
 };
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -103,21 +195,45 @@ static uint8_t
 static size_t s_pending_len;
 static d1l_contact_entry_t
     s_contacts[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_contact_entry_t
+    s_contact_sync_baseline[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_contact_entry_t
+    s_contact_sync_snapshot[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_contact_count;
 static size_t s_contact_index;
+static size_t s_contact_sync_baseline_count;
+static uint64_t s_seen_contact_revision;
 static uint32_t s_contact_since;
 static uint32_t s_contact_most_recent;
 static bool s_contact_iterator_active;
 static d1l_channel_info_t
     s_channels[D1L_CHANNEL_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_channel_store_stats_t s_channel_stats EXT_RAM_BSS_ATTR;
 static d1l_dm_entry_t s_dms[D1L_DM_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_message_entry_t
     s_messages[D1L_MESSAGE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_storage_status_t s_storage_status EXT_RAM_BSS_ATTR;
 static uint32_t s_last_synced_dm_seq;
 static uint32_t s_last_synced_message_seq;
 static uint32_t s_seen_dm_revision;
 static uint32_t s_seen_message_revision;
+static bool s_force_message_notification_check;
 static uint32_t s_seen_connect_count;
+static d1l_meshcore_admin_snapshot_t s_admin_snapshot EXT_RAM_BSS_ATTR;
+static d1l_ble_admin_request_kind_t s_admin_request_kind;
+static uint32_t s_admin_request_generation;
+static uint32_t s_admin_request_tag;
+static uint8_t s_admin_request_public_key[32];
+static char s_admin_request_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static bool s_admin_cli_reply_pending;
+static uint8_t s_admin_cli_public_key[32];
+static uint32_t s_admin_cli_timestamp;
+static char
+    s_admin_cli_reply[D1L_MESHCORE_ADMIN_MAX_CLI_REPLY_BYTES + 1U];
+static bool s_admin_session_authorized;
+static char s_admin_session_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static bool s_admin_guest_requested;
+static char s_admin_guest_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 
 static void write_u16_le(uint8_t *dest, uint16_t value)
 {
@@ -139,6 +255,11 @@ static uint32_t read_u32_le(const uint8_t *source)
            ((uint32_t)source[1] << 8U) |
            ((uint32_t)source[2] << 16U) |
            ((uint32_t)source[3] << 24U);
+}
+
+static uint16_t read_u16_le(const uint8_t *source)
+{
+    return (uint16_t)source[0] | ((uint16_t)source[1] << 8U);
 }
 
 static bool bytes_all_zero(const uint8_t *bytes, size_t length)
@@ -236,7 +357,26 @@ static void note_command(uint8_t command)
     portENTER_CRITICAL(&s_status_lock);
     s_status.command_count++;
     s_status.last_command = command;
+    s_status.last_response_error_code = 0U;
     s_status.last_error = ESP_OK;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static void note_text_command(uint8_t text_type, size_t text_length)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.last_text_type = text_type;
+    s_status.last_text_length =
+        text_length > UINT16_MAX ? UINT16_MAX : (uint16_t)text_length;
+    s_status.last_admin_cli_stage =
+        text_type == 1U ? ADMIN_CLI_STAGE_RECEIVED : ADMIN_CLI_STAGE_NONE;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static void note_admin_cli_stage(uint8_t stage)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.last_admin_cli_stage = stage;
     portEXIT_CRITICAL(&s_status_lock);
 }
 
@@ -252,6 +392,7 @@ static void note_unsupported(void)
 {
     portENTER_CRITICAL(&s_status_lock);
     s_status.unsupported_count++;
+    s_status.last_unsupported_command = s_status.last_command;
     s_status.last_error = ESP_ERR_NOT_SUPPORTED;
     portEXIT_CRITICAL(&s_status_lock);
 }
@@ -275,6 +416,12 @@ static void set_simple_response(uint8_t code)
 
 static void set_error_response(uint8_t code)
 {
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.last_response_error_code = code;
+    s_status.last_failed_command = s_status.last_command;
+    s_status.last_failed_response_error_code = code;
+    s_status.response_error_count++;
+    portEXIT_CRITICAL(&s_status_lock);
     const uint8_t response[] = {RESP_CODE_ERR, code};
     (void)set_pending(response, sizeof(response));
 }
@@ -339,7 +486,7 @@ static bool channel_at_index(uint8_t index, d1l_channel_info_t *out_channel)
     uint64_t active_id = 0U;
     if (d1l_app_model_copy_channels(
             s_channels, D1L_CHANNEL_STORE_CAPACITY, &count, &active_id,
-            NULL) != ESP_OK ||
+            &s_channel_stats) != ESP_OK ||
         index >= count) {
         return false;
     }
@@ -356,7 +503,7 @@ static bool channel_index_for_id(uint64_t channel_id, uint8_t *out_index)
     if (!out_index ||
         d1l_app_model_copy_channels(
             s_channels, D1L_CHANNEL_STORE_CAPACITY, &count, &active_id,
-            NULL) != ESP_OK) {
+            &s_channel_stats) != ESP_OK) {
         return false;
     }
     for (size_t i = 0; i < count && i < D1L_BLE_PROTOCOL_MAX_CHANNELS; ++i) {
@@ -394,6 +541,153 @@ static bool contact_for_prefix(const uint8_t prefix[6],
     return found;
 }
 
+static bool contact_for_public_key(const uint8_t public_key[32],
+                                   d1l_contact_entry_t *out_contact)
+{
+    if (!public_key) {
+        return false;
+    }
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    for (size_t i = 0U; i < 32U; ++i) {
+        (void)snprintf(&public_key_hex[i * 2U], 3U, "%02X", public_key[i]);
+    }
+    const bool found = d1l_contact_store_find_by_public_key(
+        public_key_hex, out_contact);
+    memset(public_key_hex, 0, sizeof(public_key_hex));
+    return found;
+}
+
+static bool admin_state_active(d1l_meshcore_admin_state_t state)
+{
+    return state == D1L_MESHCORE_ADMIN_AUTHENTICATED ||
+           state == D1L_MESHCORE_ADMIN_STATUS_PENDING ||
+           state == D1L_MESHCORE_ADMIN_MUTATION_PENDING ||
+           state == D1L_MESHCORE_ADMIN_CLI_PENDING ||
+           state == D1L_MESHCORE_ADMIN_QUERY_PENDING;
+}
+
+static bool admin_snapshot_matches(const d1l_contact_entry_t *contact)
+{
+    return contact && admin_state_active(s_admin_snapshot.state) &&
+           strcmp(s_admin_snapshot.fingerprint, contact->fingerprint) == 0;
+}
+
+static void clear_admin_access_intent(void)
+{
+    s_admin_guest_requested = false;
+    memset(s_admin_guest_fingerprint, 0,
+           sizeof(s_admin_guest_fingerprint));
+}
+
+static void clear_admin_session_authorization(void)
+{
+    s_admin_session_authorized = false;
+    memset(s_admin_session_fingerprint, 0,
+           sizeof(s_admin_session_fingerprint));
+}
+
+static bool admin_session_matches(const d1l_contact_entry_t *contact)
+{
+    return contact && s_admin_session_authorized &&
+           strcmp(s_admin_session_fingerprint, contact->fingerprint) == 0;
+}
+
+static bool admin_session_matches_or_restore(
+    const d1l_contact_entry_t *contact)
+{
+    if (admin_session_matches(contact)) {
+        return true;
+    }
+    if (!admin_snapshot_matches(contact)) {
+        return false;
+    }
+    s_admin_session_authorized = true;
+    snprintf(s_admin_session_fingerprint,
+             sizeof(s_admin_session_fingerprint), "%s",
+             contact->fingerprint);
+    return true;
+}
+
+static bool admin_guest_session_matches(
+    const d1l_contact_entry_t *contact)
+{
+    return contact && admin_session_matches_or_restore(contact) &&
+           admin_snapshot_matches(contact) &&
+           ((s_admin_guest_requested &&
+             strcmp(s_admin_guest_fingerprint, contact->fingerprint) == 0) ||
+            (s_admin_snapshot.permissions &
+             D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) ==
+                D1L_MESHCORE_ADMIN_PERMISSION_GUEST);
+}
+
+static void clear_admin_request(void)
+{
+    s_admin_request_kind = D1L_BLE_ADMIN_REQUEST_NONE;
+    s_admin_request_generation = 0U;
+    s_admin_request_tag = 0U;
+    memset(s_admin_request_public_key, 0,
+           sizeof(s_admin_request_public_key));
+    memset(s_admin_request_fingerprint, 0,
+           sizeof(s_admin_request_fingerprint));
+}
+
+static void clear_admin_cli_reply(void)
+{
+    s_admin_cli_reply_pending = false;
+    s_admin_cli_timestamp = 0U;
+    memset(s_admin_cli_public_key, 0, sizeof(s_admin_cli_public_key));
+    memset(s_admin_cli_reply, 0, sizeof(s_admin_cli_reply));
+}
+
+static void track_admin_request(
+    d1l_ble_admin_request_kind_t kind, const uint8_t public_key[32],
+    const d1l_contact_entry_t *contact)
+{
+    clear_admin_request();
+    s_admin_request_kind = kind;
+    s_admin_request_generation = s_admin_snapshot.generation;
+    s_admin_request_tag = s_admin_snapshot.pending_tag;
+    memcpy(s_admin_request_public_key, public_key,
+           sizeof(s_admin_request_public_key));
+    snprintf(s_admin_request_fingerprint,
+             sizeof(s_admin_request_fingerprint), "%s", contact->fingerprint);
+}
+
+static void set_admin_sent_response(bool flood, uint32_t tag)
+{
+    uint8_t response[10] = {RESP_CODE_SENT, flood ? 1U : 0U};
+    write_u32_le(&response[2], tag);
+    write_u32_le(&response[6], D1L_BLE_PROTOCOL_ADMIN_TIMEOUT_MS);
+    (void)set_pending(response, sizeof(response));
+}
+
+static uint32_t message_epoch(uint32_t row_uptime_ms);
+
+static void copy_contact_name(uint8_t *dest, size_t capacity,
+                              const char *source)
+{
+    char normalized[32U] = {0};
+    size_t length = source ? strnlen(source, sizeof(normalized) - 1U) : 0U;
+    while (length > 0U &&
+           (source[length - 1U] == '_' || source[length - 1U] == ' ')) {
+        length--;
+    }
+    if (length > 0U) {
+        memcpy(normalized, source, length);
+    }
+    copy_fixed_text(dest, capacity, normalized);
+}
+
+static uint32_t contact_lastmod(const d1l_contact_entry_t *contact)
+{
+    if (!contact) {
+        return 0U;
+    }
+    const uint32_t updated_epoch = message_epoch(contact->updated_ms);
+    return updated_epoch > contact->signed_advert_timestamp ?
+        updated_epoch : contact->signed_advert_timestamp;
+}
+
 static size_t build_contact_response(const d1l_contact_entry_t *contact,
                                      uint8_t *dest, size_t capacity)
 {
@@ -412,19 +706,27 @@ static size_t build_contact_response(const d1l_contact_entry_t *contact,
     offset += sizeof(public_key);
     dest[offset++] = contact_type_code(contact->type);
     dest[offset++] = contact->favorite ? 1U : 0U;
-    const uint8_t path_len =
+    const bool path_known =
         contact->out_path_valid &&
-        contact->out_path_len <= D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES ?
-            contact->out_path_len : 0U;
+        d1l_meshcore_wire_path_len_valid(contact->out_path_len);
+    const uint8_t path_len = path_known ? contact->out_path_len :
+        D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN;
+    const uint8_t path_bytes =
+        path_known && path_len > 0U ?
+            d1l_meshcore_wire_path_byte_len(path_len) : 0U;
     dest[offset++] = path_len;
     memset(&dest[offset], 0, D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES);
-    if (path_len > 0U) {
-        memcpy(&dest[offset], contact->out_path, path_len);
+    if (path_bytes > 0U &&
+        path_bytes <= D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES) {
+        memcpy(&dest[offset], contact->out_path, path_bytes);
     }
     offset += D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES;
     const char *name = contact->alias[0] ? contact->alias :
         (contact->heard_name[0] ? contact->heard_name : contact->fingerprint);
-    copy_fixed_text(&dest[offset], 32U, name);
+    copy_contact_name(&dest[offset], 32U, name);
+    if (dest[offset] == '\0') {
+        copy_fixed_text(&dest[offset], 32U, contact->fingerprint);
+    }
     offset += 32U;
     write_u32_le(&dest[offset], contact->signed_advert_timestamp);
     offset += 4U;
@@ -437,7 +739,7 @@ static size_t build_contact_response(const d1l_contact_entry_t *contact,
         memset(&dest[offset], 0, 8U);
     }
     offset += 8U;
-    write_u32_le(&dest[offset], contact->signed_advert_timestamp);
+    write_u32_le(&dest[offset], contact_lastmod(contact));
     offset += 4U;
     return offset;
 }
@@ -450,15 +752,8 @@ static void begin_contact_iteration(const uint8_t *payload, size_t length)
     s_contact_index = 0U;
     s_contact_most_recent = 0U;
     s_contact_iterator_active = true;
-    uint32_t filtered_count = 0U;
-    for (size_t i = 0; i < s_contact_count; ++i) {
-        if (s_contacts[i].signed_advert_timestamp > s_contact_since &&
-            s_contacts[i].public_key_hex[0] != '\0') {
-            filtered_count++;
-        }
-    }
     uint8_t response[5] = {RESP_CODE_CONTACTS_START};
-    write_u32_le(&response[1], filtered_count);
+    write_u32_le(&response[1], s_contact_count);
     (void)set_pending(response, sizeof(response));
 }
 
@@ -469,7 +764,8 @@ static void prepare_next_contact_response(void)
     }
     while (s_contact_index < s_contact_count) {
         const d1l_contact_entry_t *contact = &s_contacts[s_contact_index++];
-        if (contact->signed_advert_timestamp <= s_contact_since ||
+        const uint32_t lastmod = contact_lastmod(contact);
+        if (lastmod <= s_contact_since ||
             contact->public_key_hex[0] == '\0') {
             continue;
         }
@@ -479,8 +775,8 @@ static void prepare_next_contact_response(void)
             continue;
         }
         s_pending_len = length;
-        if (contact->signed_advert_timestamp > s_contact_most_recent) {
-            s_contact_most_recent = contact->signed_advert_timestamp;
+        if (lastmod > s_contact_most_recent) {
+            s_contact_most_recent = lastmod;
         }
         return;
     }
@@ -488,6 +784,154 @@ static void prepare_next_contact_response(void)
     write_u32_le(&response[1], s_contact_most_recent);
     s_contact_iterator_active = false;
     (void)set_pending(response, sizeof(response));
+}
+
+static size_t capture_contact_sync_snapshot(d1l_contact_entry_t *dest)
+{
+    const size_t copied = d1l_contact_store_copy_recent(
+        dest, D1L_CONTACT_STORE_CAPACITY);
+    size_t retained = 0U;
+    for (size_t index = 0U; index < copied; ++index) {
+        if (dest[index].public_key_hex[0] == '\0') {
+            continue;
+        }
+        if (retained != index) {
+            dest[retained] = dest[index];
+        }
+        retained++;
+    }
+    return retained;
+}
+
+static int contact_sync_index_for_key(const d1l_contact_entry_t *entries,
+                                      size_t count, const char *public_key_hex)
+{
+    for (size_t index = 0U; index < count; ++index) {
+        if (strcmp(entries[index].public_key_hex, public_key_hex) == 0) {
+            return (int)index;
+        }
+    }
+    return -1;
+}
+
+static bool contact_sync_public_key(const d1l_contact_entry_t *contact,
+                                    uint8_t public_key[32])
+{
+    return contact && decode_hex(contact->public_key_hex, 32U, public_key);
+}
+
+static void initialize_contact_sync_baseline(void)
+{
+    s_contact_sync_baseline_count = capture_contact_sync_snapshot(
+        s_contact_sync_baseline);
+    s_seen_contact_revision =
+        d1l_contact_store_stats().persistence_revision;
+}
+
+static void remove_contact_sync_baseline(size_t index)
+{
+    if (index >= s_contact_sync_baseline_count) {
+        return;
+    }
+    if (index + 1U < s_contact_sync_baseline_count) {
+        memmove(&s_contact_sync_baseline[index],
+                &s_contact_sync_baseline[index + 1U],
+                (s_contact_sync_baseline_count - index - 1U) *
+                    sizeof(s_contact_sync_baseline[0]));
+    }
+    s_contact_sync_baseline_count--;
+    memset(&s_contact_sync_baseline[s_contact_sync_baseline_count], 0,
+           sizeof(s_contact_sync_baseline[0]));
+}
+
+static void maybe_queue_contact_change(void)
+{
+    if (s_pending_len != 0U || s_contact_iterator_active) {
+        return;
+    }
+    const d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    if (stats.persistence_revision == s_seen_contact_revision) {
+        return;
+    }
+
+    const size_t current_count = capture_contact_sync_snapshot(
+        s_contact_sync_snapshot);
+    for (size_t index = 0U; index < s_contact_sync_baseline_count; ++index) {
+        const d1l_contact_entry_t *previous =
+            &s_contact_sync_baseline[index];
+        if (contact_sync_index_for_key(
+                s_contact_sync_snapshot, current_count,
+                previous->public_key_hex) >= 0) {
+            continue;
+        }
+        uint8_t public_key[32] = {0};
+        if (contact_sync_public_key(previous, public_key)) {
+            s_pending_payload[0] = PUSH_CODE_CONTACT_DELETED;
+            memcpy(&s_pending_payload[1], public_key, sizeof(public_key));
+            s_pending_len = 1U + sizeof(public_key);
+        }
+        remove_contact_sync_baseline(index);
+        return;
+    }
+
+    for (size_t index = 0U; index < current_count; ++index) {
+        const d1l_contact_entry_t *current = &s_contact_sync_snapshot[index];
+        const int previous_index = contact_sync_index_for_key(
+            s_contact_sync_baseline, s_contact_sync_baseline_count,
+            current->public_key_hex);
+        if (previous_index < 0) {
+            const size_t length = build_contact_response(
+                current, s_pending_payload, sizeof(s_pending_payload));
+            if (length > 0U) {
+                /* An update push contains only a public key and cannot create
+                 * a contact in the phone app. New nodes require the complete
+                 * contact frame used by current MeshCore companions. */
+                s_pending_payload[0] = PUSH_CODE_NEW_ADVERT;
+                s_pending_len = length;
+            }
+            if (s_contact_sync_baseline_count <
+                D1L_CONTACT_STORE_CAPACITY) {
+                s_contact_sync_baseline[s_contact_sync_baseline_count++] =
+                    *current;
+            }
+            return;
+        }
+        d1l_contact_entry_t *previous =
+            &s_contact_sync_baseline[(size_t)previous_index];
+        if (previous->seq == current->seq) {
+            continue;
+        }
+        uint8_t public_key[32] = {0};
+        if (contact_sync_public_key(current, public_key)) {
+            const bool advert_changed =
+                previous->signed_advert_timestamp !=
+                    current->signed_advert_timestamp ||
+                strcmp(previous->heard_name, current->heard_name) != 0 ||
+                strcmp(previous->type, current->type) != 0;
+            const bool path_changed =
+                previous->out_path_valid != current->out_path_valid ||
+                previous->out_path_len != current->out_path_len ||
+                memcmp(previous->out_path, current->out_path,
+                       sizeof(current->out_path)) != 0;
+            s_pending_payload[0] =
+                !advert_changed && path_changed ? PUSH_CODE_PATH_UPDATED :
+                                                  PUSH_CODE_ADVERT;
+            memcpy(&s_pending_payload[1], public_key, sizeof(public_key));
+            s_pending_len = 1U + sizeof(public_key);
+        }
+        *previous = *current;
+        return;
+    }
+
+    memcpy(s_contact_sync_baseline, s_contact_sync_snapshot,
+           current_count * sizeof(s_contact_sync_baseline[0]));
+    if (current_count < D1L_CONTACT_STORE_CAPACITY) {
+        memset(&s_contact_sync_baseline[current_count], 0,
+               (D1L_CONTACT_STORE_CAPACITY - current_count) *
+                   sizeof(s_contact_sync_baseline[0]));
+    }
+    s_contact_sync_baseline_count = current_count;
+    s_seen_contact_revision = stats.persistence_revision;
 }
 
 static void build_self_info(void)
@@ -500,7 +944,7 @@ static void build_self_info(void)
     }
     size_t offset = 0U;
     s_pending_payload[offset++] = RESP_CODE_SELF_INFO;
-    s_pending_payload[offset++] = 1U;
+    s_pending_payload[offset++] = D1L_BLE_PROTOCOL_SELF_ADV_TYPE;
     s_pending_payload[offset++] = (uint8_t)settings.tx_power_dbm;
     s_pending_payload[offset++] = 22U;
     memcpy(&s_pending_payload[offset], settings.identity_public_key,
@@ -517,7 +961,10 @@ static void build_self_info(void)
     s_pending_payload[offset++] = 0U;
     s_pending_payload[offset++] = settings.map_location_set ? 1U : 0U;
     s_pending_payload[offset++] = 0U;
-    s_pending_payload[offset++] = 1U;
+    /* Every verified signed advert is retained as a contact. Keep this flag
+     * in sync with PUSH_CODE_ADVERT so phone clients update Contacts/Recent
+     * instead of treating the same node as an unsaved discovery. */
+    s_pending_payload[offset++] = D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS;
     write_u32_le(&s_pending_payload[offset],
                  settings.frequency_hz / 1000U);
     offset += 4U;
@@ -605,16 +1052,60 @@ static void build_channel_info(uint8_t index)
 
 static void build_battery_storage(void)
 {
-    static d1l_app_snapshot_t snapshot;
-    d1l_app_model_snapshot(&snapshot);
-    const uint32_t total = snapshot.storage_capacity_kb;
-    const uint32_t used = total >= snapshot.storage_free_kb ?
-        total - snapshot.storage_free_kb : 0U;
+    d1l_storage_status(&s_storage_status);
+    const uint32_t total = s_storage_status.capacity_kb;
+    const uint32_t used = total >= s_storage_status.free_kb ?
+        total - s_storage_status.free_kb : 0U;
     uint8_t response[11] = {RESP_CODE_BATT_AND_STORAGE};
-    write_u16_le(&response[1], 0U);
+    /* The Indicator D1L has no battery sense input. The companion protocol has
+     * no wired-power flag, so report a full Li-ion-equivalent voltage instead
+     * of the misleading zero-percent value shown by mobile clients. */
+    write_u16_le(&response[1], D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS);
     write_u32_le(&response[3], used);
     write_u32_le(&response[7], total);
     (void)set_pending(response, sizeof(response));
+}
+
+static uint8_t clamp_u8(uint32_t value)
+{
+    return value > UINT8_MAX ? UINT8_MAX : (uint8_t)value;
+}
+
+static void build_stats(uint8_t type)
+{
+    const d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
+    memset(s_pending_payload, 0, 30U);
+    s_pending_payload[0] = RESP_CODE_STATS;
+    s_pending_payload[1] = type;
+
+    switch (type) {
+    case STATS_TYPE_CORE: {
+        const uint32_t queue_depth = mesh.runtime_command_queue_depth +
+            mesh.runtime_priority_queue_depth + mesh.runtime_event_queue_depth;
+        write_u16_le(&s_pending_payload[2], 0U);
+        write_u32_le(&s_pending_payload[4],
+                     (uint32_t)(esp_timer_get_time() / 1000000ULL));
+        write_u16_le(&s_pending_payload[8],
+                     mesh.radio_ready && mesh.radio_applied ? 0U : 1U);
+        s_pending_payload[10] = clamp_u8(queue_depth);
+        s_pending_len = 11U;
+        return;
+    }
+    case STATS_TYPE_RADIO:
+        /* DeskOS does not retain airtime or noise-floor counters yet. */
+        s_pending_len = 14U;
+        return;
+    case STATS_TYPE_PACKETS:
+        write_u32_le(&s_pending_payload[2], mesh.rx_packets);
+        write_u32_le(&s_pending_payload[6], mesh.tx_packets);
+        write_u32_le(&s_pending_payload[10], mesh.tx_packets);
+        write_u32_le(&s_pending_payload[18], mesh.rx_packets);
+        s_pending_len = 30U;
+        return;
+    default:
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
 }
 
 static uint32_t message_epoch(uint32_t row_uptime_ms)
@@ -631,6 +1122,249 @@ static uint32_t message_epoch(uint32_t row_uptime_ms)
     const uint64_t age_sec = (now_ms - row_uptime_ms) / 1000U;
     const uint64_t wall = (uint64_t)time_status.clock.wall_epoch_sec;
     return age_sec < wall ? (uint32_t)(wall - age_sec) : 0U;
+}
+
+static void build_admin_login_push(bool success)
+{
+    size_t offset = 0U;
+    s_pending_payload[offset++] = success ? PUSH_CODE_LOGIN_SUCCESS :
+                                            PUSH_CODE_LOGIN_FAIL;
+    if (!success) {
+        s_pending_payload[offset++] = 0U;
+        memcpy(&s_pending_payload[offset], s_admin_request_public_key, 6U);
+        offset += 6U;
+        s_pending_len = offset;
+        return;
+    }
+
+    const bool expose_guest = s_admin_guest_requested &&
+        strcmp(s_admin_guest_fingerprint,
+               s_admin_request_fingerprint) == 0;
+    const uint8_t exposed_permissions = expose_guest ?
+        D1L_MESHCORE_ADMIN_PERMISSION_GUEST : s_admin_snapshot.permissions;
+    const uint8_t permission_role = exposed_permissions &
+        D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
+    s_pending_payload[offset++] =
+        permission_role == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ? 1U :
+        (s_admin_snapshot.role == D1L_MESHCORE_ADMIN_ROLE_ROOM &&
+         permission_role == D1L_MESHCORE_ADMIN_PERMISSION_GUEST ? 2U : 0U);
+    memcpy(&s_pending_payload[offset], s_admin_request_public_key, 6U);
+    offset += 6U;
+    write_u32_le(&s_pending_payload[offset],
+                 s_admin_snapshot.server_timestamp);
+    offset += 4U;
+    s_pending_payload[offset++] = exposed_permissions;
+    s_pending_payload[offset++] = s_admin_snapshot.firmware_level;
+    s_pending_len = offset;
+}
+
+static size_t append_admin_status(size_t offset)
+{
+#define APPEND_U16(value)                                                       \
+    do {                                                                        \
+        write_u16_le(&s_pending_payload[offset], (uint16_t)(value));            \
+        offset += 2U;                                                           \
+    } while (0)
+#define APPEND_U32(value)                                                       \
+    do {                                                                        \
+        write_u32_le(&s_pending_payload[offset], (uint32_t)(value));            \
+        offset += 4U;                                                           \
+    } while (0)
+    const d1l_meshcore_admin_status_t *status = &s_admin_snapshot.status;
+    APPEND_U16(status->battery_millivolts);
+    APPEND_U16(status->tx_queue_length);
+    APPEND_U16(status->noise_floor_dbm);
+    APPEND_U16(status->last_rssi_dbm);
+    APPEND_U32(status->packets_received);
+    APPEND_U32(status->packets_sent);
+    APPEND_U32(status->tx_air_time_seconds);
+    APPEND_U32(status->uptime_seconds);
+    APPEND_U32(status->sent_flood);
+    APPEND_U32(status->sent_direct);
+    APPEND_U32(status->received_flood);
+    APPEND_U32(status->received_direct);
+    APPEND_U16(status->error_flags);
+    APPEND_U16(status->last_snr_quarter_db);
+    APPEND_U16(status->direct_duplicates);
+    APPEND_U16(status->flood_duplicates);
+    if (s_admin_snapshot.role == D1L_MESHCORE_ADMIN_ROLE_REPEATER) {
+        APPEND_U32(status->rx_air_time_seconds);
+        APPEND_U32(status->receive_errors);
+    } else {
+        APPEND_U16(status->posts_created);
+        APPEND_U16(status->posts_pushed);
+    }
+#undef APPEND_U16
+#undef APPEND_U32
+    return offset;
+}
+
+static void build_admin_status_push(bool binary)
+{
+    size_t offset = 0U;
+    s_pending_payload[offset++] = binary ? PUSH_CODE_BINARY_RESPONSE :
+                                          PUSH_CODE_STATUS_RESPONSE;
+    s_pending_payload[offset++] = 0U;
+    if (binary) {
+        write_u32_le(&s_pending_payload[offset], s_admin_request_tag);
+        offset += 4U;
+    } else {
+        memcpy(&s_pending_payload[offset], s_admin_request_public_key, 6U);
+        offset += 6U;
+    }
+    s_pending_len = append_admin_status(offset);
+}
+
+static void build_admin_query_push(bool binary)
+{
+    size_t offset = 0U;
+    s_pending_payload[offset++] = binary ? PUSH_CODE_BINARY_RESPONSE :
+                                          PUSH_CODE_TELEMETRY_RESPONSE;
+    s_pending_payload[offset++] = 0U;
+    if (binary) {
+        write_u32_le(&s_pending_payload[offset], s_admin_request_tag);
+        offset += 4U;
+    } else {
+        memcpy(&s_pending_payload[offset], s_admin_request_public_key, 6U);
+        offset += 6U;
+    }
+    if (s_admin_snapshot.query_wire_len >
+        sizeof(s_admin_snapshot.query_wire) ||
+        offset + s_admin_snapshot.query_wire_len >
+            sizeof(s_pending_payload)) {
+        clear_admin_request();
+        return;
+    }
+    memcpy(&s_pending_payload[offset], s_admin_snapshot.query_wire,
+           s_admin_snapshot.query_wire_len);
+    s_pending_len = offset + s_admin_snapshot.query_wire_len;
+}
+
+static void maybe_queue_admin_response(void)
+{
+    if (s_pending_len != 0U ||
+        s_admin_request_kind == D1L_BLE_ADMIN_REQUEST_NONE) {
+        return;
+    }
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    const bool target_matches =
+        strcmp(s_admin_snapshot.fingerprint,
+               s_admin_request_fingerprint) == 0;
+
+    switch (s_admin_request_kind) {
+    case D1L_BLE_ADMIN_REQUEST_LOGIN:
+        if (target_matches &&
+            s_admin_snapshot.state == D1L_MESHCORE_ADMIN_LOGIN_PENDING) {
+            return;
+        }
+        const bool login_succeeded =
+            target_matches && admin_state_active(s_admin_snapshot.state) &&
+            s_admin_snapshot.generation != s_admin_request_generation;
+        if (login_succeeded) {
+            s_admin_session_authorized = true;
+            snprintf(s_admin_session_fingerprint,
+                     sizeof(s_admin_session_fingerprint), "%s",
+                     s_admin_request_fingerprint);
+        }
+        build_admin_login_push(login_succeeded);
+        if (!login_succeeded) {
+            clear_admin_session_authorization();
+            clear_admin_access_intent();
+        }
+        clear_admin_request();
+        return;
+    case D1L_BLE_ADMIN_REQUEST_STATUS:
+    case D1L_BLE_ADMIN_REQUEST_BINARY_STATUS:
+        if (target_matches &&
+            s_admin_snapshot.state == D1L_MESHCORE_ADMIN_STATUS_PENDING &&
+            s_admin_snapshot.pending_tag == s_admin_request_tag) {
+            return;
+        }
+        if (target_matches &&
+            s_admin_snapshot.state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+            s_admin_snapshot.last_completed_tag == s_admin_request_tag &&
+            s_admin_snapshot.status_valid) {
+            build_admin_status_push(
+                s_admin_request_kind ==
+                    D1L_BLE_ADMIN_REQUEST_BINARY_STATUS);
+        }
+        clear_admin_request();
+        return;
+    case D1L_BLE_ADMIN_REQUEST_TELEMETRY:
+    case D1L_BLE_ADMIN_REQUEST_BINARY_QUERY:
+        if (target_matches &&
+            s_admin_snapshot.state == D1L_MESHCORE_ADMIN_QUERY_PENDING &&
+            s_admin_snapshot.pending_tag == s_admin_request_tag) {
+            return;
+        }
+        if (target_matches &&
+            s_admin_snapshot.state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+            s_admin_snapshot.last_completed_tag == s_admin_request_tag &&
+            s_admin_snapshot.query_result.valid) {
+            const bool binary = s_admin_request_kind ==
+                D1L_BLE_ADMIN_REQUEST_BINARY_QUERY;
+            build_admin_query_push(binary);
+        }
+        clear_admin_request();
+        return;
+    case D1L_BLE_ADMIN_REQUEST_CLI:
+        if (target_matches &&
+            s_admin_snapshot.state == D1L_MESHCORE_ADMIN_CLI_PENDING &&
+            s_admin_snapshot.pending_tag == s_admin_request_tag) {
+            return;
+        }
+        if (target_matches &&
+            s_admin_snapshot.state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
+            s_admin_snapshot.last_completed_tag == s_admin_request_tag &&
+            s_admin_snapshot.cli_reply_valid) {
+            clear_admin_cli_reply();
+            memcpy(s_admin_cli_public_key, s_admin_request_public_key,
+                   sizeof(s_admin_cli_public_key));
+            s_admin_cli_timestamp = s_admin_snapshot.server_timestamp;
+            snprintf(s_admin_cli_reply, sizeof(s_admin_cli_reply), "%s",
+                     s_admin_snapshot.cli_reply);
+            s_admin_cli_reply_pending = true;
+            set_simple_response(PUSH_CODE_MSG_WAITING);
+        }
+        clear_admin_request();
+        return;
+    case D1L_BLE_ADMIN_REQUEST_NONE:
+    default:
+        clear_admin_request();
+        return;
+    }
+}
+
+static bool build_admin_cli_message(void)
+{
+    if (!s_admin_cli_reply_pending) {
+        return false;
+    }
+    size_t offset = 0U;
+    if (s_status.client_protocol_version >= 3U) {
+        s_pending_payload[offset++] = RESP_CODE_CONTACT_MSG_RECV_V3;
+        s_pending_payload[offset++] = 0U;
+        s_pending_payload[offset++] = 0U;
+        s_pending_payload[offset++] = 0U;
+    } else {
+        s_pending_payload[offset++] = RESP_CODE_CONTACT_MSG_RECV;
+    }
+    memcpy(&s_pending_payload[offset], s_admin_cli_public_key, 6U);
+    offset += 6U;
+    s_pending_payload[offset++] = 0xFFU;
+    s_pending_payload[offset++] = 1U;
+    write_u32_le(&s_pending_payload[offset], s_admin_cli_timestamp);
+    offset += 4U;
+    size_t text_len = strnlen(s_admin_cli_reply, sizeof(s_admin_cli_reply));
+    const size_t available = sizeof(s_pending_payload) - offset;
+    if (text_len > available) {
+        text_len = available;
+    }
+    memcpy(&s_pending_payload[offset], s_admin_cli_reply, text_len);
+    offset += text_len;
+    s_pending_len = offset;
+    clear_admin_cli_reply();
+    return true;
 }
 
 static bool build_next_dm_message(void)
@@ -686,8 +1420,13 @@ static bool build_next_dm_message(void)
 
 static bool build_next_channel_message(void)
 {
-    const size_t count = d1l_message_store_copy_recent(
-        s_messages, D1L_MESSAGE_STORE_CAPACITY);
+    size_t count = 0U;
+    d1l_message_retained_snapshot_t retained = {0};
+    if (d1l_message_store_snapshot_retained(
+            s_messages, D1L_MESSAGE_STORE_CAPACITY, &count,
+            &retained) != ESP_OK) {
+        return false;
+    }
     const uint8_t protocol_version = s_status.client_protocol_version;
     for (size_t i = 0; i < count; ++i) {
         const d1l_message_entry_t *entry = &s_messages[i];
@@ -713,13 +1452,33 @@ static bool build_next_channel_message(void)
         s_pending_payload[offset++] = channel_index;
         s_pending_payload[offset++] = 0xFFU;
         s_pending_payload[offset++] = 0U;
-        write_u32_le(&s_pending_payload[offset],
-                     message_epoch(entry->uptime_ms));
+        uint32_t timestamp = d1l_message_entry_display_timestamp(entry);
+        if (timestamp == 0U) {
+            timestamp = message_epoch(entry->uptime_ms);
+        }
+        write_u32_le(&s_pending_payload[offset], timestamp);
         offset += 4U;
-        const size_t text_len = strnlen(
-            entry->text, sizeof(s_pending_payload) - offset);
-        memcpy(&s_pending_payload[offset], entry->text, text_len);
-        offset += text_len;
+        const char *channel_name = s_channels[channel_index].name;
+        const bool has_sender = entry->author[0] != '\0' &&
+            strcmp(entry->author, channel_name) != 0;
+        if (has_sender) {
+            const int written = snprintf(
+                (char *)&s_pending_payload[offset],
+                sizeof(s_pending_payload) - offset, "%s: %s",
+                entry->author, entry->text);
+            if (written <= 0) {
+                s_last_synced_message_seq = entry->seq;
+                continue;
+            }
+            const size_t available = sizeof(s_pending_payload) - offset;
+            offset += (size_t)written < available ?
+                (size_t)written : available - 1U;
+        } else {
+            const size_t text_len = strnlen(
+                entry->text, sizeof(s_pending_payload) - offset);
+            memcpy(&s_pending_payload[offset], entry->text, text_len);
+            offset += text_len;
+        }
         s_last_synced_message_seq = entry->seq;
         s_pending_len = offset;
         return true;
@@ -729,20 +1488,401 @@ static bool build_next_channel_message(void)
 
 static void build_next_message(void)
 {
-    if (!build_next_dm_message() && !build_next_channel_message()) {
+    if (!build_admin_cli_message() && !build_next_dm_message() &&
+        !build_next_channel_message()) {
         set_simple_response(RESP_CODE_NO_MORE_MESSAGES);
     }
 }
 
+static bool authenticated_admin_target(
+    const uint8_t public_key[32], d1l_contact_entry_t *out_contact)
+{
+    if (!contact_for_public_key(public_key, out_contact) ||
+        !d1l_contact_store_can_admin(out_contact)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return false;
+    }
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    if (!admin_session_matches_or_restore(out_contact) ||
+        !admin_snapshot_matches(out_contact)) {
+        set_error_response(ERR_CODE_BAD_STATE);
+        return false;
+    }
+    return true;
+}
+
+static bool capture_pending_admin_request(
+    d1l_ble_admin_request_kind_t kind, const uint8_t public_key[32],
+    const d1l_contact_entry_t *contact,
+    d1l_meshcore_admin_state_t expected_state)
+{
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    if (s_admin_snapshot.state != expected_state ||
+        strcmp(s_admin_snapshot.fingerprint, contact->fingerprint) != 0 ||
+        (expected_state != D1L_MESHCORE_ADMIN_LOGIN_PENDING &&
+         s_admin_snapshot.pending_tag == 0U)) {
+        set_error_response(ERR_CODE_BAD_STATE);
+        return false;
+    }
+    track_admin_request(kind, public_key, contact);
+    return true;
+}
+
+static bool join_pending_admin_request(
+    d1l_ble_admin_request_kind_t kind, const uint8_t public_key[32],
+    const d1l_contact_entry_t *contact,
+    d1l_meshcore_admin_state_t expected_state)
+{
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    if (!contact || s_admin_snapshot.state != expected_state ||
+        strcmp(s_admin_snapshot.fingerprint, contact->fingerprint) != 0) {
+        return false;
+    }
+    track_admin_request(kind, public_key, contact);
+    set_admin_sent_response(
+        true, expected_state == D1L_MESHCORE_ADMIN_LOGIN_PENDING ?
+            read_u32_le(public_key) : s_admin_snapshot.pending_tag);
+    return true;
+}
+
+static void send_login_command(const uint8_t *payload, size_t length)
+{
+    if (length < 33U ||
+        length > 33U + D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    d1l_contact_entry_t contact = {0};
+    if (!contact_for_public_key(&payload[1], &contact) ||
+        !d1l_contact_store_can_admin(&contact)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    const size_t password_len = length - 33U;
+    if (memchr(&payload[33], '\0', password_len)) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    char password[D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] = {0};
+    memcpy(password, &payload[33], password_len);
+
+    if (join_pending_admin_request(
+            D1L_BLE_ADMIN_REQUEST_LOGIN, &payload[1], &contact,
+            D1L_MESHCORE_ADMIN_LOGIN_PENDING)) {
+        s_admin_guest_requested = password_len == 0U;
+        if (s_admin_guest_requested) {
+            snprintf(s_admin_guest_fingerprint,
+                     sizeof(s_admin_guest_fingerprint), "%s",
+                     contact.fingerprint);
+        }
+        memset(password, 0, sizeof(password));
+        return;
+    }
+
+    clear_admin_request();
+    clear_admin_cli_reply();
+    clear_admin_session_authorization();
+    clear_admin_access_intent();
+    esp_err_t result = d1l_meshcore_service_admin_logout();
+    if (result == ESP_OK) {
+        result = d1l_meshcore_service_admin_login(
+            contact.fingerprint, password);
+    }
+    memset(password, 0, sizeof(password));
+    if (result != ESP_OK) {
+        set_error_response(protocol_error(result));
+        note_error(result, false);
+        return;
+    }
+    if (!capture_pending_admin_request(
+            D1L_BLE_ADMIN_REQUEST_LOGIN, &payload[1], &contact,
+            D1L_MESHCORE_ADMIN_LOGIN_PENDING)) {
+        return;
+    }
+    s_admin_guest_requested = password_len == 0U;
+    if (s_admin_guest_requested) {
+        snprintf(s_admin_guest_fingerprint,
+                 sizeof(s_admin_guest_fingerprint), "%s",
+                 contact.fingerprint);
+    }
+    set_admin_sent_response(true, read_u32_le(&payload[1]));
+}
+
+static void begin_admin_status_command(
+    const uint8_t public_key[32], d1l_ble_admin_request_kind_t kind)
+{
+    d1l_contact_entry_t contact = {0};
+    if (!authenticated_admin_target(public_key, &contact)) {
+        return;
+    }
+    if (join_pending_admin_request(
+            kind, public_key, &contact,
+            D1L_MESHCORE_ADMIN_STATUS_PENDING)) {
+        return;
+    }
+    const esp_err_t result = d1l_meshcore_service_admin_request_status();
+    if (result != ESP_OK) {
+        set_error_response(protocol_error(result));
+        note_error(result, false);
+        return;
+    }
+    if (!capture_pending_admin_request(
+            kind, public_key, &contact,
+            D1L_MESHCORE_ADMIN_STATUS_PENDING)) {
+        return;
+    }
+    set_admin_sent_response(true, s_admin_request_tag);
+}
+
+static void send_status_command(const uint8_t *payload, size_t length)
+{
+    if (length < 33U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    begin_admin_status_command(
+        &payload[1], D1L_BLE_ADMIN_REQUEST_STATUS);
+}
+
+static void has_connection_command(const uint8_t *payload, size_t length)
+{
+    if (length != 1U && length < 33U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    if (!admin_state_active(s_admin_snapshot.state)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    if (length >= 33U) {
+        d1l_contact_entry_t contact = {0};
+        if (!contact_for_public_key(&payload[1], &contact) ||
+            !admin_session_matches_or_restore(&contact) ||
+            strcmp(s_admin_snapshot.fingerprint, contact.fingerprint) != 0) {
+            set_error_response(ERR_CODE_NOT_FOUND);
+            return;
+        }
+    }
+    set_simple_response(RESP_CODE_OK);
+}
+
+static void logout_command(const uint8_t *payload, size_t length)
+{
+    if (length != 1U && length < 33U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    if (!s_admin_session_authorized) {
+        clear_admin_request();
+        clear_admin_cli_reply();
+        clear_admin_access_intent();
+        set_simple_response(RESP_CODE_OK);
+        return;
+    }
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    if (length >= 33U) {
+        d1l_contact_entry_t contact = {0};
+        if (!contact_for_public_key(&payload[1], &contact) ||
+            !admin_session_matches(&contact) ||
+            strcmp(s_admin_snapshot.fingerprint, contact.fingerprint) != 0) {
+            set_simple_response(RESP_CODE_OK);
+            return;
+        }
+    }
+    clear_admin_request();
+    clear_admin_cli_reply();
+    clear_admin_session_authorization();
+    clear_admin_access_intent();
+    set_result_response(d1l_meshcore_service_admin_logout());
+}
+
+static void begin_admin_query_command(
+    const uint8_t public_key[32], d1l_meshcore_admin_query_t query,
+    uint16_t offset, d1l_ble_admin_request_kind_t kind)
+{
+    d1l_contact_entry_t contact = {0};
+    if (!authenticated_admin_target(public_key, &contact)) {
+        return;
+    }
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    if (s_admin_snapshot.state == D1L_MESHCORE_ADMIN_QUERY_PENDING &&
+        s_admin_snapshot.pending_query == query &&
+        s_admin_snapshot.pending_query_offset == offset &&
+        join_pending_admin_request(
+            kind, public_key, &contact,
+            D1L_MESHCORE_ADMIN_QUERY_PENDING)) {
+        return;
+    }
+    const esp_err_t result =
+        d1l_meshcore_service_admin_request_query(query, offset);
+    if (result != ESP_OK) {
+        set_error_response(protocol_error(result));
+        note_error(result, false);
+        return;
+    }
+    if (!capture_pending_admin_request(
+            kind, public_key, &contact,
+            D1L_MESHCORE_ADMIN_QUERY_PENDING)) {
+        return;
+    }
+    set_admin_sent_response(true, s_admin_request_tag);
+}
+
+static void send_telemetry_command(const uint8_t *payload, size_t length)
+{
+    if (length < 36U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    begin_admin_query_command(
+        &payload[4], D1L_MESHCORE_ADMIN_QUERY_TELEMETRY, 0U,
+        D1L_BLE_ADMIN_REQUEST_TELEMETRY);
+}
+
+static void send_binary_command(const uint8_t *payload, size_t length)
+{
+    if (length < 34U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    const uint8_t *public_key = &payload[1];
+    switch (payload[33]) {
+    case BINARY_REQ_STATUS:
+        begin_admin_status_command(
+            public_key, D1L_BLE_ADMIN_REQUEST_BINARY_STATUS);
+        return;
+    case BINARY_REQ_TELEMETRY:
+        begin_admin_query_command(
+            public_key, D1L_MESHCORE_ADMIN_QUERY_TELEMETRY, 0U,
+            D1L_BLE_ADMIN_REQUEST_BINARY_QUERY);
+        return;
+    case BINARY_REQ_ACCESS_LIST:
+        {
+            d1l_contact_entry_t contact = {0};
+            if (contact_for_public_key(public_key, &contact) &&
+                admin_guest_session_matches(&contact)) {
+                set_error_response(ERR_CODE_BAD_STATE);
+                return;
+            }
+        }
+        begin_admin_query_command(
+            public_key, D1L_MESHCORE_ADMIN_QUERY_ACCESS_LIST, 0U,
+            D1L_BLE_ADMIN_REQUEST_BINARY_QUERY);
+        return;
+    case BINARY_REQ_NEIGHBOURS:
+        if (length < 40U || payload[34] != 0U || payload[35] == 0U ||
+            payload[39] != D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES) {
+            set_error_response(ERR_CODE_ILLEGAL_ARG);
+            return;
+        }
+        begin_admin_query_command(
+            public_key, D1L_MESHCORE_ADMIN_QUERY_NEIGHBOURS,
+            read_u16_le(&payload[36]),
+            D1L_BLE_ADMIN_REQUEST_BINARY_QUERY);
+        return;
+    default:
+        set_error_response(ERR_CODE_UNSUPPORTED_CMD);
+        return;
+    }
+}
+
+static void send_admin_cli_command(
+    const uint8_t *payload, size_t length,
+    const d1l_contact_entry_t *contact)
+{
+    size_t text_len = length - 13U;
+    /* Phone clients may include line endings or C-string padding. */
+    while (text_len > 0U &&
+           (payload[13U + text_len - 1U] == '\0' ||
+            payload[13U + text_len - 1U] == ' ' ||
+            payload[13U + text_len - 1U] == '\t' ||
+            payload[13U + text_len - 1U] == '\r' ||
+            payload[13U + text_len - 1U] == '\n')) {
+        text_len--;
+    }
+    if (text_len == 0U ||
+        text_len > D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES ||
+        memchr(&payload[13], '\0', text_len)) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    if (!admin_session_matches_or_restore(contact) ||
+        !admin_snapshot_matches(contact) ||
+        admin_guest_session_matches(contact)) {
+        set_error_response(ERR_CODE_BAD_STATE);
+        return;
+    }
+    note_admin_cli_stage(ADMIN_CLI_STAGE_SESSION_READY);
+    char command[D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
+    memcpy(command, &payload[13], text_len);
+    if (strcmp(command, "clock sync") == 0) {
+        d1l_time_service_status_t time_status = {0};
+        d1l_time_service_status(&time_status);
+        const int64_t wall_epoch = time_status.clock.wall_epoch_sec;
+        if (!time_status.display_time_valid ||
+            wall_epoch < D1L_TIME_WALL_MIN_EPOCH ||
+            wall_epoch > (int64_t)UINT32_MAX) {
+            memset(command, 0, sizeof(command));
+            set_error_response(ERR_CODE_BAD_STATE);
+            return;
+        }
+        /* MeshCore also supports `time <epoch>`. Use it here because the
+         * anti-replay packet sequence may intentionally be ahead of wall time;
+         * `clock sync` would otherwise copy that sequence into the repeater's
+         * RTC. */
+        const int written = snprintf(
+            command, sizeof(command), "time %lu",
+            (unsigned long)(uint32_t)wall_epoch);
+        if (written <= 0 || (size_t)written >= sizeof(command)) {
+            memset(command, 0, sizeof(command));
+            set_error_response(ERR_CODE_BAD_STATE);
+            return;
+        }
+    }
+    note_admin_cli_stage(ADMIN_CLI_STAGE_NORMALIZED);
+    const esp_err_t result =
+        d1l_meshcore_service_admin_request_cli(command, true);
+    memset(command, 0, sizeof(command));
+    if (result != ESP_OK) {
+        set_error_response(protocol_error(result));
+        note_error(result, false);
+        return;
+    }
+    note_admin_cli_stage(ADMIN_CLI_STAGE_QUEUED);
+    uint8_t public_key[32] = {0};
+    if (!decode_hex(contact->public_key_hex, sizeof(public_key), public_key) ||
+        !capture_pending_admin_request(
+            D1L_BLE_ADMIN_REQUEST_CLI, public_key, contact,
+            D1L_MESHCORE_ADMIN_CLI_PENDING)) {
+        memset(public_key, 0, sizeof(public_key));
+        return;
+    }
+    note_admin_cli_stage(ADMIN_CLI_STAGE_PENDING_TRACKED);
+    memset(public_key, 0, sizeof(public_key));
+    set_admin_sent_response(true, 0U);
+}
+
 static void send_dm_command(const uint8_t *payload, size_t length)
 {
-    if (length < 14U || payload[1] != 0U) {
+    if (length >= 2U) {
+        note_text_command(payload[1], length > 13U ? length - 13U : 0U);
+    }
+    if (length < 14U || (payload[1] != 0U && payload[1] != 1U)) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
     }
     d1l_contact_entry_t contact = {0};
     if (!contact_for_prefix(&payload[7], &contact)) {
         set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    if (payload[1] == 1U) {
+        note_admin_cli_stage(ADMIN_CLI_STAGE_CONTACT_FOUND);
+    }
+    if (payload[1] == 1U) {
+        send_admin_cli_command(payload, length, &contact);
         return;
     }
     const size_t text_len = length - 13U;
@@ -763,6 +1903,42 @@ static void send_dm_command(const uint8_t *payload, size_t length)
     }
     uint8_t response[10] = {RESP_CODE_SENT, 1U};
     (void)set_pending(response, sizeof(response));
+}
+
+static void get_advert_path_command(const uint8_t *payload, size_t length)
+{
+    if (length < 34U || payload[1] != 0U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    d1l_contact_entry_t contact = {0};
+    if (!contact_for_public_key(&payload[2], &contact)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    d1l_meshcore_advert_path_snapshot_t path = {0};
+    if (!d1l_meshcore_service_advert_path_snapshot(contact.fingerprint,
+                                                   &path) ||
+        !path.valid ||
+        !d1l_meshcore_wire_path_len_valid(path.path_len)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    const uint8_t path_bytes =
+        d1l_meshcore_wire_path_byte_len(path.path_len);
+    if (6U + path_bytes > sizeof(s_pending_payload)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    size_t offset = 0U;
+    s_pending_payload[offset++] = RESP_CODE_ADVERT_PATH;
+    write_u32_le(&s_pending_payload[offset], path.received_epoch);
+    offset += 4U;
+    s_pending_payload[offset++] = path.path_len;
+    if (path_bytes > 0U) {
+        memcpy(&s_pending_payload[offset], path.path, path_bytes);
+    }
+    s_pending_len = offset + path_bytes;
 }
 
 static void send_channel_command(const uint8_t *payload, size_t length)
@@ -839,7 +2015,7 @@ static void set_channel_command(const uint8_t *payload, size_t length)
         uint64_t active_id = 0U;
         result = d1l_app_model_copy_channels(
             s_channels, D1L_CHANNEL_STORE_CAPACITY, &count, &active_id,
-            NULL);
+            &s_channel_stats);
         if (result != ESP_OK || payload[1] != count) {
             set_error_response(ERR_CODE_NOT_FOUND);
             return;
@@ -871,6 +2047,98 @@ static void remove_contact_command(const uint8_t *payload, size_t length)
     d1l_contact_entry_t removed = {0};
     set_result_response(d1l_app_model_delete_contact(
         contact.fingerprint, &removed));
+}
+
+static void add_update_contact_command(const uint8_t *payload, size_t length)
+{
+    const size_t required = 1U + 32U + 3U +
+        D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES + 32U + 4U;
+    if (length < required || bytes_all_zero(&payload[1], 32U)) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+
+    d1l_contact_uri_t imported = {0};
+    for (size_t i = 0U; i < 32U; ++i) {
+        (void)snprintf(&imported.public_key_hex[i * 2U], 3U, "%02x",
+                       payload[i + 1U]);
+    }
+    imported.type_id = payload[33U];
+    if (imported.type_id < 1U || imported.type_id > 4U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+
+    const uint8_t flags = payload[34U];
+    const uint8_t path_len = payload[35U];
+    const uint8_t *path = &payload[36U];
+    const uint8_t *wire_name =
+        &payload[36U + D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES];
+    size_t name_len = 0U;
+    while (name_len < sizeof(imported.name) - 1U &&
+           wire_name[name_len] != '\0') {
+        name_len++;
+    }
+    if (name_len > 0U) {
+        memcpy(imported.name, wire_name, name_len);
+    } else {
+        memcpy(imported.name, imported.public_key_hex,
+               D1L_NODE_FINGERPRINT_LEN - 1U);
+    }
+
+    char uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
+    if (!d1l_contact_uri_format(&imported, uri, sizeof(uri))) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    d1l_contact_import_result_t import_result = D1L_CONTACT_IMPORT_NONE;
+    d1l_contact_entry_t contact = {0};
+    esp_err_t result = d1l_contact_store_import_uri(
+        uri, strlen(uri), &import_result, &contact);
+    memset(uri, 0, sizeof(uri));
+    if (result != ESP_OK) {
+        set_result_response(result);
+        return;
+    }
+
+    result = d1l_contact_store_rename(
+        contact.fingerprint, imported.name, &contact);
+    if (result == ESP_OK) {
+        result = d1l_contact_store_set_flags(
+            contact.fingerprint, (flags & 1U) != 0U, contact.muted,
+            &contact);
+    }
+    if (result == ESP_OK) {
+        if (path_len == D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN) {
+            result = d1l_contact_store_reset_path(
+                contact.fingerprint, &contact);
+        } else if (d1l_meshcore_wire_path_len_valid(path_len) &&
+                   d1l_meshcore_wire_path_byte_len(path_len) <=
+                       D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES) {
+            result = d1l_contact_store_update_path_from_source(
+                contact.fingerprint, path, path_len,
+                D1L_MESHCORE_PATH_SOURCE_OBSERVED, &contact);
+        } else {
+            result = ESP_ERR_INVALID_ARG;
+        }
+    }
+    memset(&imported, 0, sizeof(imported));
+    set_result_response(result);
+}
+
+static void reset_contact_path_command(const uint8_t *payload, size_t length)
+{
+    if (length != 33U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    d1l_contact_entry_t contact = {0};
+    if (!contact_for_public_key(&payload[1], &contact)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    set_result_response(
+        d1l_meshcore_service_reset_contact_route(contact.fingerprint));
 }
 
 static void get_contact_command(const uint8_t *payload, size_t length)
@@ -965,14 +2233,114 @@ static void set_tx_power_command(const uint8_t *payload, size_t length)
 
 static void set_path_hash_command(const uint8_t *payload, size_t length)
 {
-    if (length < 2U || payload[1] > 1U) {
+    if (length < 3U || payload[1] != 0U || payload[2] > 2U) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
     }
     d1l_settings_t settings = {0};
-    settings.path_hash_bytes = payload[1] + 1U;
+    settings.path_hash_bytes = payload[2] + 1U;
     set_result_response(d1l_settings_update_fields(
         &settings, D1L_SETTINGS_UPDATE_PATH_HASH));
+}
+
+static void set_flood_scope_command(const uint8_t *payload, size_t length)
+{
+    if (length < 2U || payload[1] > 1U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+
+    if ((payload[1] == 0U && length == 2U) ||
+        (payload[1] == 1U && length == 2U)) {
+        /* DeskOS has no per-transport-key scope override. Clearing an override
+         * and explicitly selecting unscoped floods both match its real state. */
+        set_simple_response(RESP_CODE_OK);
+        return;
+    }
+
+    /* A keyed scope must never be acknowledged and then transmitted unscoped. */
+    set_simple_response(RESP_CODE_DISABLED);
+}
+
+static void set_other_params_command(const uint8_t *payload, size_t length)
+{
+    if (length < 2U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+
+    const uint8_t manual_add_contacts = payload[1];
+    const uint8_t telemetry_mode = length >= 3U ? payload[2] : 0U;
+    const uint8_t advert_location_policy = length >= 4U ? payload[3] : 0U;
+    const uint8_t multi_acks = length >= 5U ? payload[4] : 0U;
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    const uint8_t current_location_policy = settings.map_location_set ? 1U : 0U;
+
+    if (manual_add_contacts == 0U && telemetry_mode == 0U &&
+        advert_location_policy == current_location_policy && multi_acks == 0U) {
+        set_simple_response(RESP_CODE_OK);
+    } else {
+        set_simple_response(RESP_CODE_DISABLED);
+    }
+}
+
+static void set_tuning_params_command(const uint8_t *payload, size_t length)
+{
+    if (length < 9U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    if (read_u32_le(&payload[1]) == D1L_BLE_PROTOCOL_RX_DELAY_MILLIS &&
+        read_u32_le(&payload[5]) == D1L_BLE_PROTOCOL_AIRTIME_FACTOR_MILLIS) {
+        set_simple_response(RESP_CODE_OK);
+    } else {
+        set_simple_response(RESP_CODE_DISABLED);
+    }
+}
+
+static void build_tuning_params(void)
+{
+    uint8_t response[9] = {RESP_CODE_TUNING_PARAMS};
+    write_u32_le(&response[1], D1L_BLE_PROTOCOL_RX_DELAY_MILLIS);
+    write_u32_le(&response[5], D1L_BLE_PROTOCOL_AIRTIME_FACTOR_MILLIS);
+    (void)set_pending(response, sizeof(response));
+}
+
+static void set_autoadd_config_command(const uint8_t *payload, size_t length)
+{
+    if (length < 2U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    const uint8_t max_hops = length >= 3U ? payload[2] : 0U;
+    if (payload[1] == D1L_BLE_PROTOCOL_AUTOADD_CONFIG &&
+        max_hops == D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS) {
+        set_simple_response(RESP_CODE_OK);
+    } else {
+        set_simple_response(RESP_CODE_DISABLED);
+    }
+}
+
+static void queue_self_advert_command(const uint8_t *payload, size_t length)
+{
+    if (length > 2U || (length == 2U && payload[1] > 1U)) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    uint32_t request_id = 0U;
+    set_result_response(d1l_app_model_queue_advert(
+        length == 2U && payload[1] == 1U, &request_id));
+}
+
+static void build_autoadd_config(void)
+{
+    const uint8_t response[] = {
+        RESP_CODE_AUTOADD_CONFIG,
+        D1L_BLE_PROTOCOL_AUTOADD_CONFIG,
+        D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS,
+    };
+    (void)set_pending(response, sizeof(response));
 }
 
 static void dispatch_command(const uint8_t *payload, size_t length)
@@ -1012,11 +2380,13 @@ static void dispatch_command(const uint8_t *payload, size_t length)
         }
         return;
     case CMD_SEND_SELF_ADVERT:
-        set_result_response(d1l_app_model_request_advert(
-            length >= 2U && payload[1] == 1U));
+        queue_self_advert_command(payload, length);
         return;
     case CMD_SET_ADVERT_NAME:
         set_name_command(payload, length);
+        return;
+    case CMD_ADD_UPDATE_CONTACT:
+        add_update_contact_command(payload, length);
         return;
     case CMD_SET_ADVERT_LATLON:
         set_location_command(payload, length);
@@ -1026,6 +2396,24 @@ static void dispatch_command(const uint8_t *payload, size_t length)
         return;
     case CMD_SEND_CHANNEL_TXT_MSG:
         send_channel_command(payload, length);
+        return;
+    case CMD_SEND_LOGIN:
+        send_login_command(payload, length);
+        return;
+    case CMD_SEND_STATUS_REQ:
+        send_status_command(payload, length);
+        return;
+    case CMD_HAS_CONNECTION:
+        has_connection_command(payload, length);
+        return;
+    case CMD_LOGOUT:
+        logout_command(payload, length);
+        return;
+    case CMD_SEND_TELEMETRY_REQ:
+        send_telemetry_command(payload, length);
+        return;
+    case CMD_SEND_BINARY_REQ:
+        send_binary_command(payload, length);
         return;
     case CMD_SYNC_NEXT_MESSAGE:
         build_next_message();
@@ -1040,11 +2428,20 @@ static void dispatch_command(const uint8_t *payload, size_t length)
     case CMD_SET_CHANNEL:
         set_channel_command(payload, length);
         return;
+    case CMD_SET_OTHER_PARAMS:
+        set_other_params_command(payload, length);
+        return;
     case CMD_REMOVE_CONTACT:
         remove_contact_command(payload, length);
         return;
+    case CMD_RESET_PATH:
+        reset_contact_path_command(payload, length);
+        return;
     case CMD_GET_CONTACT_BY_KEY:
         get_contact_command(payload, length);
+        return;
+    case CMD_GET_ADVERT_PATH:
+        get_advert_path_command(payload, length);
         return;
     case CMD_SET_RADIO_PARAMS:
         set_radio_command(payload, length);
@@ -1052,16 +2449,60 @@ static void dispatch_command(const uint8_t *payload, size_t length)
     case CMD_SET_RADIO_TX_POWER:
         set_tx_power_command(payload, length);
         return;
+    case CMD_SET_TUNING_PARAMS:
+        set_tuning_params_command(payload, length);
+        return;
+    case CMD_GET_CUSTOM_VARS:
+        set_simple_response(RESP_CODE_CUSTOM_VARS);
+        return;
+    case CMD_SET_CUSTOM_VAR:
+        set_simple_response(RESP_CODE_DISABLED);
+        return;
+    case CMD_GET_TUNING_PARAMS:
+        build_tuning_params();
+        return;
     case CMD_SET_PATH_HASH_MODE:
         set_path_hash_command(payload, length);
         return;
     case CMD_GET_BATT_AND_STORAGE:
         build_battery_storage();
         return;
+    case CMD_GET_STATS:
+        if (length < 2U) {
+            set_error_response(ERR_CODE_ILLEGAL_ARG);
+            note_malformed();
+        } else {
+            build_stats(payload[1]);
+        }
+        return;
+    case CMD_SET_FLOOD_SCOPE_KEY:
+        set_flood_scope_command(payload, length);
+        return;
+    case CMD_SET_AUTOADD_CONFIG:
+        set_autoadd_config_command(payload, length);
+        return;
+    case CMD_GET_AUTOADD_CONFIG:
+        build_autoadd_config();
+        return;
+    case CMD_GET_ALLOWED_REPEAT_FREQ:
+        set_simple_response(RESP_CODE_ALLOWED_REPEAT_FREQ);
+        return;
+    case CMD_SET_DEVICE_PIN:
     case CMD_REBOOT:
     case CMD_FACTORY_RESET:
     case CMD_EXPORT_PRIVATE_KEY:
     case CMD_IMPORT_PRIVATE_KEY:
+    case CMD_SHARE_CONTACT:
+    case CMD_EXPORT_CONTACT:
+    case CMD_IMPORT_CONTACT:
+    case CMD_SEND_RAW_DATA:
+    case CMD_SIGN_START:
+    case CMD_SIGN_DATA:
+    case CMD_SIGN_FINISH:
+    case CMD_SEND_TRACE_PATH:
+    case CMD_SEND_PATH_DISCOVERY_REQ:
+    case CMD_SEND_CONTROL_DATA:
+    case CMD_SEND_ANON_REQ:
         note_unsupported();
         set_simple_response(RESP_CODE_DISABLED);
         return;
@@ -1078,14 +2519,34 @@ static void reset_session_state(void)
     s_contact_count = 0U;
     s_contact_index = 0U;
     s_contact_iterator_active = false;
-    s_last_synced_dm_seq = 0U;
-    s_last_synced_message_seq = 0U;
-    s_seen_dm_revision = d1l_dm_store_stats().content_revision;
-    s_seen_message_revision = d1l_message_store_stats().content_revision;
+    initialize_contact_sync_baseline();
+    clear_admin_request();
+    clear_admin_cli_reply();
+    clear_admin_session_authorization();
+    /* Keep the requested access level across a transient BLE reconnect. The
+     * remote admin session can be restored below, and forgetting that a blank
+     * password requested Guest could otherwise expose stale Admin ACL bits.
+     * An explicit login or logout still replaces or clears this intent. */
+    s_force_message_notification_check = true;
     portENTER_CRITICAL(&s_status_lock);
     s_status.client_protocol_version = 3U;
     s_status.session_count++;
     portEXIT_CRITICAL(&s_status_lock);
+}
+
+static uint32_t last_existing_seq(uint32_t next_seq)
+{
+    return next_seq > 0U ? next_seq - 1U : 0U;
+}
+
+static void initialize_message_sync_watermarks(void)
+{
+    const d1l_dm_store_stats_t dm = d1l_dm_store_stats();
+    const d1l_message_store_stats_t messages = d1l_message_store_stats();
+    s_last_synced_dm_seq = last_existing_seq(dm.next_seq);
+    s_last_synced_message_seq = last_existing_seq(messages.next_seq);
+    s_seen_dm_revision = dm.content_revision;
+    s_seen_message_revision = messages.content_revision;
 }
 
 static void maybe_queue_message_waiting(void)
@@ -1095,18 +2556,43 @@ static void maybe_queue_message_waiting(void)
     }
     const d1l_dm_store_stats_t dm = d1l_dm_store_stats();
     const d1l_message_store_stats_t messages = d1l_message_store_stats();
-    if (dm.content_revision == s_seen_dm_revision &&
+    if (!s_force_message_notification_check &&
+        dm.content_revision == s_seen_dm_revision &&
         messages.content_revision == s_seen_message_revision) {
         return;
     }
+    s_force_message_notification_check = false;
     s_seen_dm_revision = dm.content_revision;
     s_seen_message_revision = messages.content_revision;
-    set_simple_response(PUSH_CODE_MSG_WAITING);
+
+    bool unsynced = false;
+    const size_t dm_count = d1l_dm_store_copy_recent(
+        s_dms, D1L_DM_STORE_CAPACITY);
+    for (size_t index = 0U; index < dm_count && !unsynced; ++index) {
+        unsynced = s_dms[index].seq > s_last_synced_dm_seq &&
+            strcmp(s_dms[index].direction, "rx") == 0;
+    }
+    size_t message_count = 0U;
+    d1l_message_retained_snapshot_t retained = {0};
+    if (!unsynced &&
+        d1l_message_store_snapshot_retained(
+            s_messages, D1L_MESSAGE_STORE_CAPACITY, &message_count,
+            &retained) == ESP_OK) {
+        for (size_t index = 0U;
+             index < message_count && !unsynced; ++index) {
+            unsynced = s_messages[index].seq > s_last_synced_message_seq &&
+                strcmp(s_messages[index].direction, "rx") == 0;
+        }
+    }
+    if (unsynced) {
+        set_simple_response(PUSH_CODE_MSG_WAITING);
+    }
 }
 
 static void protocol_task(void *context)
 {
     (void)context;
+    initialize_message_sync_watermarks();
     reset_session_state();
     portENTER_CRITICAL(&s_status_lock);
     s_status.running = true;
@@ -1114,6 +2600,7 @@ static void protocol_task(void *context)
     portEXIT_CRITICAL(&s_status_lock);
 
     while (s_start_requested) {
+        d1l_ble_companion_poll();
         d1l_ble_companion_status_t transport = {0};
         d1l_ble_companion_status(&transport);
         portENTER_CRITICAL(&s_status_lock);
@@ -1141,7 +2628,7 @@ static void protocol_task(void *context)
             }
             s_pending_len = 0U;
         }
-        prepare_next_contact_response();
+        maybe_queue_admin_response();
         if (s_pending_len != 0U) {
             continue;
         }
@@ -1172,6 +2659,14 @@ static void protocol_task(void *context)
         }
         if (receive != ESP_ERR_NOT_FOUND) {
             note_error(receive, true);
+        }
+        prepare_next_contact_response();
+        if (s_pending_len != 0U) {
+            continue;
+        }
+        maybe_queue_contact_change();
+        if (s_pending_len != 0U) {
+            continue;
         }
         maybe_queue_message_waiting();
         vTaskDelay(pdMS_TO_TICKS(D1L_BLE_PROTOCOL_POLL_MS));

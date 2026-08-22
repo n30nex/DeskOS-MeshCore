@@ -170,6 +170,7 @@ static d1l_ui_storage_view_model_t s_storage_view EXT_RAM_BSS_ATTR;
 static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_map_sheets_controller_t s_map_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR;
+static bool s_ble_pairing_announced;
 static d1l_ui_device_sheets_controller_t s_device_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_service_sheets_controller_t s_service_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_radio_settings_controller_t s_radio_settings_controller EXT_RAM_BSS_ATTR;
@@ -199,6 +200,7 @@ static d1l_ui_admin_page_t s_admin_page = D1L_UI_ADMIN_PAGE_LOGIN;
 static bool s_admin_remember_password = true;
 static bool s_admin_pending_password_valid;
 static bool s_admin_pending_remember;
+static bool s_admin_pending_guest;
 static bool s_admin_rendered_generation_valid;
 static uint32_t s_admin_rendered_dm_revision;
 static uint32_t s_terminal_clear_deadline;
@@ -674,6 +676,7 @@ static bool nodes_content_generation_changed_from_rendered(
     const d1l_ui_content_generation_t current =
         content_generation_from_snapshot(snapshot);
     return !s_rendered_content_generation_valid ||
+        current.rx_adverts != s_rendered_content_generation.rx_adverts ||
         current.node_total_written !=
             s_rendered_content_generation.node_total_written ||
         current.contact_total_written !=
@@ -1769,6 +1772,7 @@ static void clear_admin_pending_password(void)
         s_admin_pending_password, sizeof(s_admin_pending_password));
     s_admin_pending_password_valid = false;
     s_admin_pending_remember = false;
+    s_admin_pending_guest = false;
 }
 
 static void clear_admin_feedback(void)
@@ -1795,18 +1799,25 @@ static void finalize_admin_login(const d1l_meshcore_admin_snapshot_t *status)
     if (status->state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
         strcmp(status->fingerprint, s_admin_target_fingerprint) == 0) {
         esp_err_t save_result = ESP_OK;
-        if (s_admin_pending_remember &&
-            s_admin_pending_password[0] != '\0') {
-            save_result = d1l_admin_credential_store_save(
-                s_admin_target_fingerprint, s_admin_pending_password);
-        } else {
-            save_result = d1l_admin_credential_store_forget(
-                s_admin_target_fingerprint);
-            if (save_result == ESP_ERR_NOT_FOUND) {
-                save_result = ESP_OK;
+        if (!s_admin_pending_guest) {
+            if (s_admin_pending_remember &&
+                s_admin_pending_password[0] != '\0') {
+                save_result = d1l_admin_credential_store_save(
+                    s_admin_target_fingerprint, s_admin_pending_password);
+            } else {
+                save_result = d1l_admin_credential_store_forget(
+                    s_admin_target_fingerprint);
+                if (save_result == ESP_ERR_NOT_FOUND) {
+                    save_result = ESP_OK;
+                }
             }
         }
+        const bool guest_session =
+            (status->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) ==
+                D1L_MESHCORE_ADMIN_PERMISSION_GUEST;
         set_admin_feedback(
+            guest_session ?
+                "Guest session opened. Read-only tools only." :
             save_result == ESP_OK ?
                 (s_admin_pending_remember &&
                  s_admin_pending_password[0] != '\0' ?
@@ -2473,12 +2484,30 @@ static void handle_home_action(d1l_ui_home_action_t action, void *context)
     case D1L_UI_HOME_ACTION_RADIO:
         open_radio_settings_event_cb(NULL);
         break;
-    case D1L_UI_HOME_ACTION_WIFI:
-        open_wifi_sheet_event_cb(NULL);
+    case D1L_UI_HOME_ACTION_WIFI: {
+        d1l_app_model_snapshot(&s_snapshot);
+        esp_err_t ret = ESP_OK;
+        if (!s_snapshot.wifi_enabled || s_snapshot.ble_companion_enabled) {
+            ret = d1l_app_model_set_wifi_enabled(true);
+            show_toast("Wi-Fi mode", ret);
+        }
+        if (ret == ESP_OK) {
+            open_wifi_sheet_event_cb(NULL);
+        }
         break;
-    case D1L_UI_HOME_ACTION_BLE:
-        open_ble_sheet_event_cb(NULL);
+    }
+    case D1L_UI_HOME_ACTION_BLE: {
+        d1l_app_model_snapshot(&s_snapshot);
+        esp_err_t ret = ESP_OK;
+        if (!s_snapshot.ble_companion_enabled || s_snapshot.wifi_enabled) {
+            ret = d1l_app_model_set_ble_enabled(true);
+            show_toast("Bluetooth mode", ret);
+        }
+        if (ret == ESP_OK) {
+            open_ble_sheet_event_cb(NULL);
+        }
         break;
+    }
     case D1L_UI_HOME_ACTION_STORAGE:
         open_storage_sheet_event_cb(NULL);
         break;
@@ -7857,8 +7886,8 @@ static void service_sheets_action_handler(
             }
         }
         const esp_err_t ret = d1l_observer_set_region(region);
-        show_toast(ret == ESP_OK ? "Observer region saved" :
-                                    "Observer region",
+        show_toast(ret == ESP_OK ? "MQTT IATA saved" :
+                                    "MQTT IATA",
                    ret);
         if (ret == ESP_OK) {
             (void)render_observer_service_sheet();
@@ -7963,8 +7992,11 @@ static void service_sheets_action_handler(
         (void)render_admin_service_sheet();
         return;
     }
+    case D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN:
     case D1L_UI_SERVICE_ACTION_ADMIN_LOGIN: {
         char password[D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] = {0};
+        const bool guest_login =
+            action == D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN;
         clear_admin_cli_confirmation();
         s_admin_cli_secure_input = false;
         if (s_admin_target_fingerprint[0] == '\0') {
@@ -7973,14 +8005,22 @@ static void service_sheets_action_handler(
             (void)render_admin_service_sheet();
             return;
         }
-        if (!d1l_ui_service_sheets_take_admin_password(
+        if (!guest_login &&
+            !d1l_ui_service_sheets_take_admin_password(
                 &s_service_sheets_controller, password, sizeof(password))) {
             set_admin_feedback("Enter a valid server password.", true);
             (void)render_admin_service_sheet();
             return;
         }
-        if (password[0] == '\0' &&
-            d1l_admin_credential_store_has(s_admin_target_fingerprint)) {
+        if (!guest_login && password[0] == '\0') {
+            if (!d1l_admin_credential_store_has(
+                    s_admin_target_fingerprint)) {
+                set_admin_feedback(
+                    "Enter an admin password or choose Guest.", true);
+                d1l_meshcore_admin_secure_zero(password, sizeof(password));
+                (void)render_admin_service_sheet();
+                return;
+            }
             const esp_err_t load_result = d1l_admin_credential_store_load(
                 s_admin_target_fingerprint, password);
             if (load_result != ESP_OK) {
@@ -7998,7 +8038,9 @@ static void service_sheets_action_handler(
             snprintf(s_admin_pending_password,
                      sizeof(s_admin_pending_password), "%s", password);
             s_admin_pending_password_valid = true;
-            s_admin_pending_remember = s_admin_remember_password;
+            s_admin_pending_remember =
+                !guest_login && s_admin_remember_password;
+            s_admin_pending_guest = guest_login;
             clear_admin_feedback();
         } else {
             set_admin_feedback(
@@ -10023,12 +10065,35 @@ static void refresh_timer_cb(lv_timer_t *timer)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     update_startup_overlay(&s_snapshot);
+    const bool ble_pairing_active =
+        s_snapshot.ble_companion_enabled &&
+        s_snapshot.ble_pairing_passkey >= 100000U &&
+        s_snapshot.ble_pairing_passkey <= 999999U &&
+        strcmp(s_snapshot.ble_state ? s_snapshot.ble_state : "", "pairing") == 0;
 #if !D1L_ENABLE_QUALIFICATION_HOOKS
     lv_timer_set_period(
-        timer, s_onboarding_visible ? 250U : 2000U);
+        timer,
+        (s_onboarding_visible ||
+         (s_snapshot.ble_companion_enabled &&
+          !s_snapshot.ble_protocol_ready)) ? 250U : 2000U);
 #endif
+    if (ble_pairing_active && !s_ble_pairing_announced &&
+        !s_onboarding_visible) {
+        s_ble_pairing_announced = true;
+        lv_disp_trig_activity(NULL);
+        if (s_backlight_dimmed) {
+            (void)d1l_backlight_set_percent(desired_backlight_percent());
+            s_backlight_dimmed = false;
+        }
+        open_ble_sheet_event_cb(NULL);
+    } else if (!ble_pairing_active) {
+        s_ble_pairing_announced = false;
+    }
     if (d1l_ui_modal_visible(s_compose_sheet)) {
         update_compose_counter();
+    } else if (d1l_ui_modal_visible(
+                   d1l_ui_ble_sheet(&s_ble_controller))) {
+        (void)render_ble_sheet();
     }
     if (d1l_ui_modal_visible(d1l_ui_service_sheets_update(
             &s_service_sheets_controller))) {

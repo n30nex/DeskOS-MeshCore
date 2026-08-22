@@ -17,6 +17,7 @@ extern "C" {
     (D1L_MESHCORE_ADMIN_ROOM_LOGIN_PREFIX_BYTES + \
      D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES)
 #define D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES 13U
+#define D1L_MESHCORE_ADMIN_LEGACY_LOGIN_RESPONSE_BYTES 6U
 #define D1L_MESHCORE_ADMIN_REQUEST_BYTES 13U
 #define D1L_MESHCORE_ADMIN_REPEATER_STATUS_BYTES 60U
 #define D1L_MESHCORE_ADMIN_ROOM_STATUS_BYTES 56U
@@ -36,6 +37,8 @@ extern "C" {
 #define D1L_MESHCORE_ADMIN_NEIGHBOUR_PAGE_COUNT 10U
 #define D1L_MESHCORE_ADMIN_NEIGHBOUR_PREFIX_BYTES 4U
 #define D1L_MESHCORE_ADMIN_MAX_QUERY_TEXT_BYTES 768U
+/* Maximum decrypted response body after its four-byte correlation tag. */
+#define D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES 251U
 #define D1L_MESHCORE_ADMIN_MUTATION_REPLY_MAX_BYTES 64U
 #define D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES 160U
 #define D1L_MESHCORE_ADMIN_MAX_CLI_REPLY_BYTES 160U
@@ -207,6 +210,8 @@ typedef struct {
     bool status_valid;
     d1l_meshcore_admin_status_t status;
     d1l_meshcore_admin_query_result_t query_result;
+    uint16_t query_wire_len;
+    uint8_t query_wire[D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES];
 } d1l_meshcore_admin_session_t;
 
 void d1l_meshcore_admin_secure_zero(void *value, size_t size);

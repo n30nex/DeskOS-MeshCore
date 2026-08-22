@@ -468,6 +468,9 @@ static int test_server_queries_and_protocol_permissions(void)
     CHECK(session.query_result.kind ==
           D1L_MESHCORE_ADMIN_QUERY_TELEMETRY);
     CHECK(session.query_result.count == 3U);
+    CHECK(session.query_wire_len == sizeof(telemetry) - 4U);
+    CHECK(memcmp(session.query_wire, &telemetry[4],
+                 session.query_wire_len) == 0);
     CHECK(strstr(session.query_result.text, "voltage 4.20 V") != NULL);
     CHECK(strstr(session.query_result.text, "temperature -5.5 C") != NULL);
     CHECK(strstr(session.query_result.text, "humidity 50.5 %") != NULL);
@@ -486,6 +489,9 @@ static int test_server_queries_and_protocol_permissions(void)
               &session, PEER, access, sizeof(access), 150U) ==
           D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
     CHECK(session.query_result.count == 1U);
+    CHECK(session.query_wire_len == sizeof(access) - 4U);
+    CHECK(memcmp(session.query_wire, &access[4],
+                 session.query_wire_len) == 0);
     CHECK(strstr(
               session.query_result.text,
               "A1B2C3D4E5F6  read-write") != NULL);
@@ -516,6 +522,9 @@ static int test_server_queries_and_protocol_permissions(void)
     CHECK(session.query_result.offset == 0U);
     CHECK(session.query_result.total == 12U);
     CHECK(session.query_result.count == 2U);
+    CHECK(session.query_wire_len == sizeof(neighbours) - 4U);
+    CHECK(memcmp(session.query_wire, &neighbours[4],
+                 session.query_wire_len) == 0);
     CHECK(memcmp(
               session.query_result.neighbours[0].public_key_prefix,
               "\x01\x02\x03\x04", 4U) == 0);

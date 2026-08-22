@@ -131,6 +131,19 @@ def test_selector_exposes_bounded_management_entry_points_without_secrets() -> N
     ):
         assert forbidden not in selector
 
+
+def test_channel_root_always_exposes_add_and_import_entry_point() -> None:
+    messages = read("main/ui/ui_messages.c")
+    root = between(
+        messages,
+        "static void messages_render_root",
+        "static int messages_render_notice",
+    )
+
+    assert 'parent, "Add", 262, 6, 72, 44' in root
+    assert "D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR" in root
+    assert root.index('parent, "Add"') < root.index("channel_count == 0U")
+
     dispatch = between(
         messages,
         "static void messages_dispatch_event_cb",

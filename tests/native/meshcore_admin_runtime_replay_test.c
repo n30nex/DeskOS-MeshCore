@@ -108,6 +108,7 @@ static int test_empty_room_login_negotiates_guest_permissions(void)
     d1l_meshcore_admin_replay_cache_t replay = {0};
     uint8_t response[D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES] = {0};
     write_le32(response, timestamp + 1U);
+    response[5] = 4U;
     response[6] = 2U;
     response[7] = D1L_MESHCORE_ADMIN_PERMISSION_GUEST;
     response[8] = 1U;
@@ -159,6 +160,7 @@ static void make_login_response(
 {
     memset(response, 0, D1L_MESHCORE_ADMIN_LOGIN_RESPONSE_BYTES);
     write_le32(response, server_timestamp);
+    response[5] = 4U;
     response[6] = 1U;
     response[7] = D1L_MESHCORE_ADMIN_PERMISSION_ADMIN;
     response[8] = uniqueness;
@@ -166,6 +168,31 @@ static void make_login_response(
     response[10] = 0x30U;
     response[11] = 0x40U;
     response[12] = 2U;
+}
+
+static int test_legacy_repeater_login_response(void)
+{
+    d1l_meshcore_admin_binding_t binding = {0};
+    make_binding(&binding);
+    d1l_meshcore_admin_session_t session = {0};
+    d1l_meshcore_admin_replay_cache_t replay = {0};
+    uint8_t response[D1L_MESHCORE_ADMIN_LEGACY_LOGIN_RESPONSE_BYTES] = {0};
+    write_le32(response, 0x11223344U);
+    response[4] = 'O';
+    response[5] = 'K';
+
+    CHECK(d1l_meshcore_admin_begin_login(
+        &session, binding.role, binding.peer_public_key,
+        binding.local_public_key, binding.session_secret,
+        100U, 100U, 500U));
+    CHECK(d1l_meshcore_admin_accept_login_response(
+              &session, &replay, binding.peer_public_key, response,
+              sizeof(response), 10U) ==
+          D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);
+    CHECK(session.state == D1L_MESHCORE_ADMIN_AUTHENTICATED);
+    CHECK(session.permissions == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN);
+    CHECK(session.firmware_level == 2U);
+    return 0;
 }
 
 static bool dispatch_login(
@@ -192,6 +219,7 @@ static bool dispatch_login(
 int main(void)
 {
     CHECK(test_empty_room_login_negotiates_guest_permissions() == 0);
+    CHECK(test_legacy_repeater_login_response() == 0);
     mock_nvs_reset();
     d1l_meshcore_admin_binding_t binding = {0};
     make_binding(&binding);

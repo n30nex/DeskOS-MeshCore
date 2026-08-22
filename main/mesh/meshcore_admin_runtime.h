@@ -50,6 +50,7 @@ typedef struct {
     uint8_t firmware_level;
     uint32_t server_timestamp;
     uint32_t pending_tag;
+    uint32_t last_completed_tag;
     d1l_meshcore_admin_mutation_t pending_mutation;
     d1l_meshcore_admin_mutation_t last_mutation;
     d1l_meshcore_admin_query_t pending_query;
@@ -62,6 +63,8 @@ typedef struct {
     bool status_valid;
     d1l_meshcore_admin_status_t status;
     d1l_meshcore_admin_query_result_t query_result;
+    uint16_t query_wire_len;
+    uint8_t query_wire[D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES];
     uint32_t login_tx_queued;
     uint32_t status_tx_queued;
     uint32_t query_tx_queued;

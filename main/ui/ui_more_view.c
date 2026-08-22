@@ -263,7 +263,7 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
              D1L_UI_SETTINGS_ACTION_TERMINAL, false);
 
     category = set_category(out_view, D1L_UI_MORE_CATEGORY_CONNECTIONS,
-                            "Connections", "Wi-Fi, Bluetooth, and observer",
+                            "Connections", "Wi-Fi, Bluetooth, and MQTT",
                             COLOR_GREEN, false, 3U);
     set_item(&category->items[0], "Wi-Fi", wifi_status,
              input->wifi_connected ? COLOR_GREEN : COLOR_TEXT,
@@ -271,7 +271,7 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
     set_item(&category->items[1], "Bluetooth", ble_status,
              input->ble_companion_enabled ? COLOR_GREEN : COLOR_TEXT,
              D1L_UI_SETTINGS_ACTION_BLE, false);
-    set_item(&category->items[2], "Observer",
+    set_item(&category->items[2], "MQTT / Observer",
              input->observer_state && input->observer_state[0] ?
                  input->observer_state : "Not configured",
              text_equals(input->observer_state, "connected") ?

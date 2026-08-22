@@ -15,7 +15,9 @@
 | **1.7.7** | Faster verified-advert admission and Contacts rendering | Historical (`v1.7.7`) |
 | **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Historical (`v1.7.8`) |
 | **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Historical (`v1.7.9`) |
-| **1.7.10** | Faster Contacts, retained maps, stable BLE pairing, editable Observer region, hashtag channels, and reliable flood adverts | Current (`v1.7.10`) |
+| **1.7.10** | Faster Contacts, retained maps, editable Observer region, hashtag channels, and reliable flood adverts | Historical (`v1.7.10`) |
+| **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Historical (`v1.7.11`) |
+| **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Current (`v1.7.12`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -145,3 +147,21 @@ lightweight sorting, while Map retains and resumes the current frame across
 ordinary UI navigation. Observer gains an editable IATA region, Channels can
 join standard hashtag-derived channels directly, and received messages fall
 back to trusted local arrival time when the packet timestamp is unusable.
+
+## 1.7.11: explicit connectivity modes
+
+DeskOS 1.7.11 stops and releases one ESP32-S3 radio stack before starting the
+other. Home Wi-Fi and BLE status icons now select that mode directly, and old
+saved configurations with both enabled migrate to BLE mode. A phone connection
+wakes the display and automatically shows the fixed six-digit MeshCore pairing
+PIN in a large live panel.
+
+## 1.7.12: companion sync and discoverability
+
+DeskOS 1.7.12 moves BLE receive and transmit frame scratch space out of the
+small NimBLE host-task stack and into PSRAM, preventing the phone's initial
+channel synchronization burst from resetting the D1L. Channels always exposes
+an **Add** entry, Connections names **MQTT / Observer** explicitly, and the
+editable IATA field is labelled in place. Repeated verified adverts now update
+boot-local recency and refresh Contacts without mutating retained identity or
+location history.

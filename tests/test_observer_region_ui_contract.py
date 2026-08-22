@@ -24,4 +24,5 @@ def test_observer_region_is_editable_with_a_bounded_keyboard():
     assert "LV_EVENT_CANCEL" in sheets
     assert "d1l_ui_service_sheets_copy_observer_region(" in phase1
     assert "d1l_observer_set_region(region)" in phase1
-    assert '"Observer region saved"' in phase1
+    assert '"IATA region (3 letters)"' in sheets
+    assert '"MQTT IATA saved"' in phase1

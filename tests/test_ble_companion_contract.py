@@ -19,16 +19,24 @@ def test_ble_gatt_contract_matches_pinned_meshcore_and_stays_bounded():
         "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
     ):
         assert uuid in header
-    assert "D1L_BLE_COMPANION_QUEUE_DEPTH 4U" in queue
+    assert 'D1L_BLE_COMPANION_DEVICE_NAME "MeshCore-DeskOS"' in header
+    assert "D1L_BLE_COMPANION_QUEUE_DEPTH 16U" in queue
     assert "D1L_COMPANION3_MAX_FRAME_SIZE" in queue
     assert "BLE_GATT_CHR_F_WRITE_NO_RSP" in source
+    assert "BLE_GATT_CHR_F_READ" in source
     assert "BLE_GATT_CHR_F_NOTIFY" in source
     assert ".access_cb = tx_access" in source
-    assert "BLE_ATT_ERR_READ_NOT_PERMITTED" in source
+    assert "empty secure" in source
     assert "BLE_GAP_EVENT_SUBSCRIBE" in source
     assert "BLE_GAP_EVENT_MTU" in source
     assert "ble_gatts_notify_custom" in source
     assert "payload_len > notification_capacity" in source
+    assert "ble_att_set_preferred_mtu" in source
+    assert "D1L_BLE_COMPANION_PREFERRED_ATT_MTU 517U" in header
+    assert "D1L_BLE_COMPANION_TX_MIN_INTERVAL_US 60000LL" in source
+    assert "d1l_ble_companion_poll();" in read(
+        "main/comms/ble_companion_protocol.c"
+    )
 
 
 def test_ble_transport_fails_closed_on_security_and_preserves_wire_contract():
@@ -98,7 +106,7 @@ def test_ble_build_configuration_is_nimble_only_and_memory_bounded():
         "CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2",
         "CONFIG_BT_NIMBLE_MAX_CCCDS=2",
         "CONFIG_BT_NIMBLE_WHITELIST_SIZE=2",
-        "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096",
+        "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144",
         "CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12",
         "CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12",
         "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=8",
@@ -133,3 +141,20 @@ def test_ble_build_configuration_is_nimble_only_and_memory_bounded():
     assert "d1l_ble_companion_start()" in manager
     assert "d1l_ble_companion_stop()" in manager
     assert "d1l_ble_companion_prepare_reboot()" in manager
+
+
+def test_ble_callbacks_keep_frame_scratch_off_the_host_task_stack():
+    source = read("main/comms/ble_companion.c")
+    rx_access = source.split("static int rx_access", 1)[1].split(
+        "static int tx_access", 1
+    )[0]
+    pump_tx = source.split("static void pump_tx(void)\n{", 1)[1].split(
+        "static void update_security", 1
+    )[0]
+
+    for buffer in ("s_rx_payload", "s_rx_frame", "s_tx_frame"):
+        declaration = source.split(f"{buffer}[", 1)[1].split(";", 1)[0]
+        assert "EXT_RAM_BSS_ATTR" in declaration
+    assert "uint8_t payload[" not in rx_access
+    assert "uint8_t frame[" not in rx_access
+    assert "uint8_t frame[" not in pump_tx

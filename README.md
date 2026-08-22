@@ -6,9 +6,9 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.7.10** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.7.10` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.10).
+DeskOS **1.7.12** is the current full-feature production firmware for the
+SenseCAP Indicator D1L. Download `v1.7.12` from the
+[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
 The Actions release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
@@ -16,6 +16,32 @@ DeskOS is a standalone, dark, touch-first MeshCore client. Firmware is built
 and packaged by GitHub Actions. The release provides the ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
+
+## What 1.7.12 fixes
+
+DeskOS 1.7.12 completes the phone-companion and radio-to-screen repair:
+
+- BLE frame scratch space now lives in PSRAM instead of consuming a quarter of
+  the small NimBLE host-task stack during the phone's initial channel sync;
+- **Add** is always visible beside **Direct** on Channels, so hashtag channels
+  can be created or imported even while Public already exists;
+- **MQTT / Observer** is clearly named under Connections and its editable
+  three-letter IATA region is labelled directly in the panel; and
+- every verified advert refreshes live Contacts recency, including repeated
+  adverts whose signed identity timestamp is unchanged, without rewriting
+  retained contact history.
+
+## What 1.7.11 fixes
+
+DeskOS 1.7.11 makes Wi-Fi and Bluetooth explicit operating modes:
+
+- tapping the Wi-Fi or BLE status icon switches modes and safely shuts down the
+  other radio stack first;
+- upgrades with both legacy switches enabled select BLE mode once instead of
+  starting both memory-heavy stacks;
+- an incoming phone connection wakes the display and opens a large six-digit
+  pairing prompt automatically; and
+- the BLE panel stays live while pairing and clearly explains that Wi-Fi is off.
 
 ## What 1.7.10 fixes
 
@@ -211,7 +237,9 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.7.7** | Faster verified-advert admission and Contacts rendering | Historical (`v1.7.7`) |
 | **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Historical (`v1.7.8`) |
 | **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Historical (`v1.7.9`) |
-| **1.7.10** | Faster Contacts, retained maps, stable BLE pairing, editable Observer region, hashtag channels, and reliable flood adverts | Current (`v1.7.10`) |
+| **1.7.10** | Faster Contacts, retained maps, editable Observer region, hashtag channels, and reliable flood adverts | Historical (`v1.7.10`) |
+| **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Historical (`v1.7.11`) |
+| **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Current (`v1.7.12`) |
 
 ## Device UI
 

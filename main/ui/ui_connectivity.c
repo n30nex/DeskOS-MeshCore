@@ -80,16 +80,21 @@ void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
     const bool runtime_available =
         input->build_enabled && input->transport_supported;
     out_view->controls_available = runtime_available;
+    out_view->pairing_active = runtime_available &&
+        input->pairing_passkey >= 100000U &&
+        input->pairing_passkey <= 999999U &&
+        strcmp(safe_text(input->state, "off"), "pairing") == 0;
+    out_view->pairing_passkey = out_view->pairing_active ?
+        input->pairing_passkey : 0U;
     snprintf(out_view->purpose, sizeof(out_view->purpose), "%s",
+             out_view->pairing_active ?
+                 "Pairing request detected from a companion device." :
              runtime_available ?
                  "Bluetooth companion connections are available." :
                  "Bluetooth companion connections are unavailable.");
-    if (runtime_available && input->pairing_passkey >= 100000U &&
-        input->pairing_passkey <= 999999U &&
-        strcmp(safe_text(input->state, "off"), "pairing") == 0) {
+    if (out_view->pairing_active) {
         snprintf(out_view->runtime_note, sizeof(out_view->runtime_note),
-                 "Enter PIN %06lu on the companion device.",
-                 (unsigned long)input->pairing_passkey);
+                 "Enter this PIN in the MeshCore app.");
     } else if (runtime_available && input->protocol_ready) {
         snprintf(out_view->runtime_note, sizeof(out_view->runtime_note),
                  "Paired securely and ready to sync.");
@@ -106,11 +111,12 @@ void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
              runtime_available && input->companion_enabled ?
                  "Disable" : "Enable");
     snprintf(out_view->production_note, sizeof(out_view->production_note), "%s",
-             runtime_available && input->protocol_running ?
-                 "Using the MeshCore connection alongside Wi-Fi." :
+             runtime_available && input->companion_enabled ?
+                 "Bluetooth mode is active; Wi-Fi is off." :
                  "USB stays available for recovery and diagnostics.");
     out_view->pairing_available =
-        runtime_available && input->companion_enabled;
+        runtime_available && input->companion_enabled &&
+        !out_view->pairing_active;
     out_view->forget_available =
         runtime_available && input->peer_known;
     out_view->state_color = runtime_available && input->companion_enabled ?

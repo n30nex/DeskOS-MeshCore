@@ -1,4 +1,4 @@
-# DeskOS D1L 1.7.10 limitations
+# DeskOS D1L 1.7.12 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -16,9 +16,9 @@ SD-primary storage.
 - Fresh Map download also requires user-configured Wi-Fi and an HTTPS provider
   manifest that explicitly permits offline storage and background prefetch.
   OpenStreetMap Standard remains visible-current-view-only.
-- BLE companion and Wi-Fi can run together through the ESP32-S3 coexistence
-  controller. Heavy Wi-Fi traffic can still reduce Bluetooth responsiveness
-  because both share the same 2.4 GHz radio.
+- BLE companion and Wi-Fi are separate operating modes. Selecting either Home
+  status icon safely stops the other stack first. Observer and fresh Map tile
+  downloads pause in BLE mode; cached maps and RF messaging remain available.
 - QR export is deliberately limited to supported public contact and channel
   material. It is not a general QR generator and never exports secrets.
 - Signed update is local-SD only. It does not download firmware or accept an
@@ -28,7 +28,7 @@ SD-primary storage.
 - New messages use a plausible sender timestamp or the trusted local arrival
   time. Older retained rows without either remain labelled `time unknown`.
 - Optional Indicator temperature, humidity, and CO2 sensor integration remains
-  future work and is not represented as live data in 1.7.10.
+  future work and is not represented as live data in 1.7.12.
 
 See [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md)
 for the complete mobile-to-D1L outcome matrix.

@@ -8,6 +8,7 @@
 #include "bsp_sx126x.h"
 #include "comms/observer_manager.h"
 #include "diagnostics/event_log.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -297,7 +298,8 @@ typedef struct {
 static d1l_pending_ack_tx_t s_pending_ack_tx;
 static d1l_meshcore_ack_dedupe_t s_ack_dedupe;
 static d1l_dm_entry_t s_ack_restore_scan[D1L_DM_STORE_CAPACITY];
-static d1l_contact_entry_t s_contact_scan[D1L_CONTACT_STORE_CAPACITY];
+static d1l_contact_entry_t
+    s_contact_scan[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 
 typedef struct {
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
@@ -307,9 +309,23 @@ typedef struct {
     bool valid;
 } d1l_boot_route_t;
 
-static d1l_boot_route_t s_boot_routes[D1L_CONTACT_STORE_CAPACITY];
+static d1l_boot_route_t
+    s_boot_routes[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static uint8_t s_boot_route_next;
 static d1l_store_lock_t s_boot_route_lock = D1L_STORE_LOCK_INITIALIZER;
+
+typedef struct {
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    uint32_t received_epoch;
+    uint8_t path_len;
+    uint8_t path[D1L_MESHCORE_MAX_PATH_BYTES];
+    bool valid;
+} d1l_advert_path_t;
+
+static d1l_advert_path_t
+    s_advert_paths[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static uint8_t s_advert_path_next;
+static d1l_store_lock_t s_advert_path_lock = D1L_STORE_LOCK_INITIALIZER;
 static d1l_meshcore_path_response_expectation_t s_path_response_expectation;
 static char s_path_response_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static d1l_store_lock_t s_path_response_lock = D1L_STORE_LOCK_INITIALIZER;
@@ -432,7 +448,7 @@ static void fail_pending_dm_ack_timeout(esp_err_t error);
 static void record_pending_direct_path_result(bool success);
 static bool finalize_pending_dm_ack_completion(void);
 static void secure_zero_bytes(void *data, size_t size);
-static esp_err_t prepare_admin_route(
+static esp_err_t prepare_admin_flood_route(
     const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
     d1l_contact_entry_t *out_contact,
     d1l_meshcore_route_selection_t *out_selection);
@@ -2119,6 +2135,93 @@ static void clear_boot_routes(void)
     memset(s_boot_routes, 0, sizeof(s_boot_routes));
     s_boot_route_next = 0U;
     d1l_store_lock_give(&s_boot_route_lock);
+}
+
+static void clear_advert_paths(void)
+{
+    d1l_store_lock_take(&s_advert_path_lock);
+    memset(s_advert_paths, 0, sizeof(s_advert_paths));
+    s_advert_path_next = 0U;
+    d1l_store_lock_give(&s_advert_path_lock);
+}
+
+static void remember_advert_path(const char *fingerprint,
+                                 uint32_t received_epoch,
+                                 const uint8_t *path,
+                                 uint8_t path_len)
+{
+    if (!fingerprint || fingerprint[0] == '\0' ||
+        (path_len > 0U && !path) ||
+        !d1l_meshcore_wire_path_len_valid(path_len)) {
+        return;
+    }
+    const uint8_t path_bytes = d1l_meshcore_wire_path_byte_len(path_len);
+    if (path_bytes > D1L_MESHCORE_MAX_PATH_BYTES) {
+        return;
+    }
+
+    d1l_store_lock_take(&s_advert_path_lock);
+    size_t slot = D1L_CONTACT_STORE_CAPACITY;
+    size_t empty = D1L_CONTACT_STORE_CAPACITY;
+    for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
+        if (s_advert_paths[i].valid &&
+            strncmp(s_advert_paths[i].fingerprint, fingerprint,
+                    sizeof(s_advert_paths[i].fingerprint)) == 0) {
+            slot = i;
+            break;
+        }
+        if (!s_advert_paths[i].valid &&
+            empty == D1L_CONTACT_STORE_CAPACITY) {
+            empty = i;
+        }
+    }
+    if (slot == D1L_CONTACT_STORE_CAPACITY) {
+        slot = empty < D1L_CONTACT_STORE_CAPACITY ? empty : s_advert_path_next;
+        s_advert_path_next =
+            (uint8_t)((slot + 1U) % D1L_CONTACT_STORE_CAPACITY);
+    }
+
+    d1l_advert_path_t *record = &s_advert_paths[slot];
+    memset(record, 0, sizeof(*record));
+    snprintf(record->fingerprint, sizeof(record->fingerprint), "%s",
+             fingerprint);
+    record->received_epoch = received_epoch;
+    record->path_len = path_len;
+    if (path_bytes > 0U) {
+        memcpy(record->path, path, path_bytes);
+    }
+    record->valid = true;
+    d1l_store_lock_give(&s_advert_path_lock);
+}
+
+bool d1l_meshcore_service_advert_path_snapshot(
+    const char *fingerprint,
+    d1l_meshcore_advert_path_snapshot_t *out_snapshot)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !out_snapshot) {
+        return false;
+    }
+
+    bool found = false;
+    memset(out_snapshot, 0, sizeof(*out_snapshot));
+    d1l_store_lock_take(&s_advert_path_lock);
+    for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
+        const d1l_advert_path_t *record = &s_advert_paths[i];
+        if (!record->valid ||
+            strncmp(record->fingerprint, fingerprint,
+                    sizeof(record->fingerprint)) != 0) {
+            continue;
+        }
+        out_snapshot->valid = true;
+        out_snapshot->received_epoch = record->received_epoch;
+        out_snapshot->path_len = record->path_len;
+        memcpy(out_snapshot->path, record->path,
+               d1l_meshcore_wire_path_byte_len(record->path_len));
+        found = true;
+        break;
+    }
+    d1l_store_lock_give(&s_advert_path_lock);
+    return found;
 }
 
 static void forget_boot_route(const char *fingerprint)
@@ -4962,6 +5065,12 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
     }
     s_status.rx_packets++;
     s_status.rx_adverts++;
+    uint32_t received_epoch = channel_message_display_timestamp(0U);
+    if (received_epoch == 0U) {
+        received_epoch = advert_timestamp;
+    }
+    remember_advert_path(pub_prefix, received_epoch, packet.path,
+                         packet.path_len);
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(pub_prefix,
                                            advert.name[0] ? advert.name : pub_prefix, "advert",
@@ -6505,19 +6614,10 @@ static esp_err_t meshcore_service_handle_admin_login(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(cmd->admin_fingerprint, &settings_snapshot,
-                              now_ms, &contact, &selection);
+    ret = prepare_admin_flood_route(
+        cmd->admin_fingerprint, &settings_snapshot, now_ms, &contact,
+        &selection);
     if (ret != ESP_OK) {
-        goto admin_login_cleanup;
-    }
-    /* Login is the recovery path for servers beyond direct RF range. Always
-     * flood the handshake; authenticated follow-up commands may use the
-     * learned canonical route once the session is open. */
-    if (!d1l_meshcore_route_select(
-            false, false, NULL, 0U, 0U, now_ms,
-            settings_snapshot.path_hash_bytes, &selection) ||
-        !d1l_meshcore_admin_route_valid(&selection)) {
-        ret = ESP_ERR_INVALID_STATE;
         goto admin_login_cleanup;
     }
 
@@ -6586,9 +6686,9 @@ static esp_err_t meshcore_service_handle_admin_request_status(void)
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
+    ret = prepare_admin_flood_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms,
+        &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
              context.binding.fingerprint);
     if (ret == ESP_OK) {
@@ -6684,9 +6784,9 @@ static esp_err_t meshcore_service_handle_admin_query(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
+    ret = prepare_admin_flood_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms,
+        &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
              context.binding.fingerprint);
     if (ret == ESP_OK) {
@@ -6782,9 +6882,9 @@ static esp_err_t meshcore_service_handle_admin_mutation(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
+    ret = prepare_admin_flood_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms,
+        &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
              context.binding.fingerprint);
     if (ret == ESP_OK) {
@@ -6904,9 +7004,9 @@ static esp_err_t meshcore_service_handle_admin_cli(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
+    ret = prepare_admin_flood_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms,
+        &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
              context.binding.fingerprint);
     if (ret == ESP_OK) {
@@ -7871,6 +7971,7 @@ void d1l_meshcore_service_init(void)
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
     clear_pending_ack_tx();
     clear_boot_routes();
+    clear_advert_paths();
     memset(&s_path_replay_cache, 0, sizeof(s_path_replay_cache));
     d1l_meshcore_packet_hash_cache_reset(&s_rx_packet_hash_cache);
     d1l_store_lock_take(&s_path_response_lock);
@@ -8132,7 +8233,7 @@ void d1l_meshcore_service_admin_snapshot(
     d1l_meshcore_admin_runtime_snapshot(out_snapshot);
 }
 
-static esp_err_t prepare_admin_route(
+static esp_err_t prepare_admin_flood_route(
     const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
     d1l_contact_entry_t *out_contact,
     d1l_meshcore_route_selection_t *out_selection)
@@ -8148,14 +8249,12 @@ static esp_err_t prepare_admin_route(
     if (ret != ESP_OK || !d1l_contact_store_can_admin(&contact)) {
         return ret != ESP_OK ? ret : ESP_ERR_INVALID_STATE;
     }
-    const bool learned_this_boot = contact.out_path_valid &&
-        lookup_boot_route(contact.fingerprint, contact.out_path,
-                          contact.out_path_len,
-                          contact.out_path_state.generation);
     d1l_meshcore_route_selection_t selection = {0};
-    if (!d1l_meshcore_route_select_canonical(
-            contact.out_path_valid, learned_this_boot, contact.out_path,
-            contact.out_path_len, &contact.out_path_state, now_ms,
+    /* Remote management is sparse and user initiated. Flooding avoids
+     * promoting a reverse path learned from the login reply before that path
+     * has ever carried an outbound command successfully. */
+    if (!d1l_meshcore_route_select(
+            false, false, NULL, 0U, 0U, now_ms,
             settings->path_hash_bytes, &selection) ||
         !d1l_meshcore_admin_route_valid(&selection)) {
         return ESP_ERR_INVALID_STATE;

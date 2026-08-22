@@ -519,7 +519,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "settings_advanced_expanded",
     ):
         assert any(target["kind"] == "dock_tab" for target in views_by_name[view_name]["touch_targets"])
-    assert {"Channels", "Group conversations", "Direct", "#Public"} <= labels_by_view["messages"]
+    assert {"Channels", "Group conversations", "Add", "Direct", "#Public"} <= labels_by_view["messages"]
     assert {"Public", "Back", "Read", "...", "Message this channel"} <= labels_by_view["messages_public"]
     assert {"Direct messages", "Back"} <= labels_by_view["messages_dm"]
     public_metrics = views_by_name["messages_public"]["metrics"]
@@ -578,7 +578,13 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Wi-Fi",
     } <= labels_by_view["settings"]
     assert {"Settings", "Tools", "Packets", "Diagnostics", "Terminal"} <= labels_by_view["settings_tools_expanded"]
-    assert {"Settings", "Connections", "Wi-Fi", "Bluetooth", "Observer"} <= labels_by_view["settings_connections_expanded"]
+    assert {
+        "Settings",
+        "Connections",
+        "Wi-Fi",
+        "Bluetooth",
+        "MQTT / Observer",
+    } <= labels_by_view["settings_connections_expanded"]
     assert {"Settings", "Storage & maps", "SD Card", "Map options", "Signed update"} <= labels_by_view["settings_storage_maps_expanded"]
     assert {"Settings", "Device", "Display", "Notifications", "Identity"} <= labels_by_view["settings_device_expanded"]
     assert {"Settings", "Support", "About", "Version 1.0.0"} <= labels_by_view["settings_support_expanded"]

@@ -37,18 +37,32 @@ def c_function(source: str, signature: str) -> str:
     raise AssertionError(f"unterminated function: {signature}")
 
 
+def test_signed_advert_refresh_updates_only_automatic_aliases():
+    source = read("main/mesh/contact_store.c")
+    upsert = c_function(
+        source, "esp_err_t d1l_contact_store_upsert_verified_advert("
+    )
+
+    assert "const bool alias_tracks_advert" in upsert
+    assert "result != D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER" in upsert
+    assert "strcmp(entry->alias, entry->heard_name) == 0" in upsert
+    assert "if (alias_tracks_advert)" in upsert
+
+
 def test_contact_store_is_bounded_and_sd_first():
     header = read("main/mesh/contact_store.h")
     source = read("main/mesh/contact_store.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
     sdkconfig_defaults = read("sdkconfig.defaults")
-    assert "D1L_CONTACT_STORE_CAPACITY 16U" in header
+    assert "D1L_CONTACT_STORE_CAPACITY 64U" in header
     assert "D1L_CONTACT_ALIAS_LEN 32U" in header
     assert "D1L_CONTACT_OUT_PATH_MAX 64U" in header
     assert "public_key_hex" in header
     assert "out_path_valid" in header
-    assert "D1L_CONTACT_STORE_SCHEMA 7U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA 8U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA_V7 7U" in source
+    assert "D1L_CONTACT_STORE_LEGACY_CAPACITY 16U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V6 6U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V5 5U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V4 4U" in source
@@ -58,6 +72,7 @@ def test_contact_store_is_bounded_and_sd_first():
     assert "d1l_contact_store_blob_v4_t" in source
     assert "d1l_contact_store_blob_v5_t" in source
     assert "d1l_contact_store_blob_v6_t" in source
+    assert "d1l_contact_store_blob_v7_t" in source
     assert "d1l_contact_store_blob_v2_t" in source
     assert "d1l_contact_store_blob_v1_t" in source
     assert "migrate_v1_blob" in source
@@ -66,6 +81,7 @@ def test_contact_store_is_bounded_and_sd_first():
     assert "migrate_v4_blob" in source
     assert "migrate_v5_blob" in source
     assert "migrate_v6_blob" in source
+    assert "migrate_v7_blob" in source
     assert "migrate_legacy_advert_type" in source
     assert "contact schema v1 layout changed" in source
     assert "contact schema v2 layout changed" in source
@@ -276,6 +292,15 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "d1l_contact_store_rename(fingerprint, alias, out_contact)" in app_source
     assert "d1l_contact_store_delete(fingerprint, out_contact)" in app_source
     assert "d1l_admin_credential_store_forget(fingerprint)" in app_source
+    delete_contact = app_source.split(
+        "esp_err_t d1l_app_model_delete_contact", 1
+    )[1].split("esp_err_t d1l_app_model_export_contact_uri", 1)[0]
+    assert delete_contact.count(
+        "d1l_contact_store_delete(fingerprint, out_contact)"
+    ) == 2
+    assert "delete_ret == ESP_ERR_INVALID_STATE" in delete_contact
+    assert "delete_ret == ESP_ERR_TIMEOUT" in delete_contact
+    assert "delete_ret == ESP_FAIL" in delete_contact
     assert "nodes_render_contact_row" in nodes_ui
     contact_row = nodes_ui.split(
         "static void nodes_render_contact_row", 1

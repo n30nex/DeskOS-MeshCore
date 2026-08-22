@@ -101,6 +101,9 @@ bool d1l_advert_data_parse(const uint8_t *app_data, size_t app_data_len,
     size_t name_len = 0U;
     while (i < app_data_len && name_len + 1U < sizeof(parsed.name)) {
         unsigned char c = app_data[i++];
+        if (c == '\0') {
+            break;
+        }
         if (c < 32U || c > 126U || c == '"' || c == '\\') {
             c = '_';
         }
