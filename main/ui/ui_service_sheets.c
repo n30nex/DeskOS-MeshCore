@@ -57,6 +57,8 @@ enum {
     BINDING_ADMIN_SHOW_ACL,
     BINDING_ADMIN_REMEMBER_TOGGLE,
     BINDING_ADMIN_FORGET_PASSWORD,
+    /* Login and authenticated status refresh are never rendered together. */
+    BINDING_ADMIN_GUEST_LOGIN = BINDING_ADMIN_REFRESH,
 };
 
 _Static_assert(sizeof(d1l_ui_service_sheets_controller_t) <=
@@ -1164,7 +1166,7 @@ static bool render_admin_login_compact(
         lv_textarea_set_placeholder_text(
             controller->admin_password_textarea,
             saved_password_available ?
-                "Saved password" : "Password (blank is allowed)");
+                "Admin password or saved" : "Admin password");
         lv_textarea_set_text(controller->admin_password_textarea, "");
         lv_obj_set_style_radius(controller->admin_password_textarea, 8, 0);
         lv_obj_set_style_bg_color(
@@ -1195,25 +1197,24 @@ static bool render_admin_login_compact(
         controller, sheet, controller->admin_password_textarea,
         140, 104, D1L_UI_SERVICE_ACTION_ADMIN_LOGIN) && complete;
     complete = create_button(
-        controller, sheet, "Login", 8, 250, 108, 46,
+        controller, sheet, "Admin", 8, 250, 92, 46,
         BINDING_ADMIN_LOGIN,
         D1L_UI_SERVICE_ACTION_ADMIN_LOGIN) != NULL && complete;
     complete = create_button(
+        controller, sheet, "Guest", 108, 250, 92, 46,
+        BINDING_ADMIN_GUEST_LOGIN,
+        D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN) != NULL && complete;
+    complete = create_button(
         controller, sheet,
-        remember_password ? "Save: On" : "Save: Off",
-        124, 250, 132, 46,
+        remember_password ? "Save On" : "Save Off",
+        208, 250, 100, 46,
         BINDING_ADMIN_REMEMBER_TOGGLE,
         D1L_UI_SERVICE_ACTION_ADMIN_REMEMBER_TOGGLE) != NULL && complete;
     if (saved_password_available) {
         complete = create_button(
-            controller, sheet, "Forget saved", 264, 250, 152, 46,
+            controller, sheet, "Forget", 316, 250, 100, 46,
             BINDING_ADMIN_FORGET_PASSWORD,
             D1L_UI_SERVICE_ACTION_ADMIN_FORGET_PASSWORD) != NULL && complete;
-    } else {
-        lv_obj_t *local = create_label(
-            sheet, "Saved only on this D1L", 0x667787);
-        position_dot(local, 270, 264, 140);
-        complete = local && complete;
     }
     return complete;
 }
@@ -1224,10 +1225,22 @@ static bool render_admin_hub_compact(
     const char *selected_fingerprint, const char *selected_name,
     const char *feedback, bool feedback_error)
 {
+    const uint8_t permission_role =
+        status->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
+    const bool admin_session =
+        permission_role == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN;
+    const bool guest_session =
+        permission_role == D1L_MESHCORE_ADMIN_PERMISSION_GUEST;
+    const char *title = NULL;
+    if (status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM) {
+        title = admin_session ? "Room manager" :
+            (guest_session ? "Room guest" : "Room access");
+    } else {
+        title = admin_session ? "Repeater manager" :
+            (guest_session ? "Repeater guest" : "Repeater access");
+    }
     bool complete = render_admin_compact_header(
-        controller, sheet,
-        status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?
-            "Room manager" : "Repeater manager", false);
+        controller, sheet, title, false);
     complete = render_admin_target(
         sheet, status, selected_fingerprint, selected_name, 48, 50) &&
         complete;
@@ -1257,25 +1270,37 @@ static bool render_admin_hub_compact(
             D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ROOM :
             D1L_UI_SERVICE_ACTION_ADMIN_SHOW_NEIGHBOURS,
         0xFBBF24) != NULL && complete;
-    complete = create_admin_grid_button(
-        controller, sheet, LV_SYMBOL_EYE_OPEN "\nAccess",
-        8, 190, BINDING_ADMIN_SHOW_ACCESS,
-        D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACCESS, 0x7D93FF) != NULL && complete;
-    complete = create_admin_grid_button(
-        controller, sheet, LV_SYMBOL_SETTINGS "\nTools",
-        144, 190, BINDING_ADMIN_SHOW_TOOLS,
-        D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TOOLS, 0xFBBF24) != NULL && complete;
-    complete = create_admin_grid_button(
-        controller, sheet, LV_SYMBOL_EDIT "\nConsole",
-        280, 190, BINDING_ADMIN_SHOW_TERMINAL,
-        D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TERMINAL, 0x20D9ED) != NULL &&
-        complete;
+    if (admin_session) {
+        complete = create_admin_grid_button(
+            controller, sheet, LV_SYMBOL_EYE_OPEN "\nAccess",
+            8, 190, BINDING_ADMIN_SHOW_ACCESS,
+            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACCESS, 0x7D93FF) != NULL &&
+            complete;
+        complete = create_admin_grid_button(
+            controller, sheet, LV_SYMBOL_SETTINGS "\nTools",
+            144, 190, BINDING_ADMIN_SHOW_TOOLS,
+            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TOOLS, 0xFBBF24) != NULL &&
+            complete;
+        complete = create_admin_grid_button(
+            controller, sheet, LV_SYMBOL_EDIT "\nConsole",
+            280, 190, BINDING_ADMIN_SHOW_TERMINAL,
+            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TERMINAL, 0x20D9ED) != NULL &&
+            complete;
+    } else {
+        lv_obj_t *read_only = create_label(
+            sheet, guest_session ?
+                "Guest session: read-only server information." :
+                "Limited session: only permitted server information is shown.",
+            0xFBBF24);
+        position_dot(read_only, 8, 202, 408);
+        complete = read_only && complete;
+    }
     char session[96];
     snprintf(session, sizeof(session), "%s  |  firmware level %u",
              admin_permission_name(status->permissions),
              (unsigned)status->firmware_level);
     lv_obj_t *session_label = create_label(sheet, session, 0xA6B0B7);
-    position_dot(session_label, 8, 270, 286);
+    position_dot(session_label, 8, admin_session ? 270 : 232, 286);
     complete = session_label && complete;
     complete = create_button(
         controller, sheet, "Logout", 304, 254, 112, 44,
@@ -1824,13 +1849,19 @@ bool d1l_ui_service_sheets_render_admin(
         !begin_render(controller, sheet, action_handler, action_context)) {
         return false;
     }
+    const uint8_t permission_role =
+        status->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK;
+    const char *header_title =
+        status->state != D1L_MESHCORE_ADMIN_AUTHENTICATED ? "Server Login" :
+        (permission_role == D1L_MESHCORE_ADMIN_PERMISSION_ADMIN ?
+             "Server Admin" : "Server Access");
     bool complete = render_header(
-        controller, sheet, "Server Admin", BINDING_CLOSE_ADMIN,
+        controller, sheet, header_title, BINDING_CLOSE_ADMIN,
         D1L_UI_SERVICE_ACTION_CLOSE_ADMIN);
     char line[160];
-    snprintf(line, sizeof(line), "State %s  role %s  permissions %u",
+    snprintf(line, sizeof(line), "State %s  role %s  %s",
              admin_state_name(status->state), admin_role_name(status->role),
-             (unsigned)status->permissions);
+             admin_permission_name(status->permissions));
     lv_obj_t *state = create_label(
         sheet, line,
         status->state == D1L_MESHCORE_ADMIN_AUTHENTICATED ? 0x20D9ED :
@@ -2412,7 +2443,7 @@ bool d1l_ui_service_sheets_render_admin(
     } else {
         if (selected_fingerprint && selected_fingerprint[0]) {
             lv_obj_t *password_label = create_label(
-                sheet, "Password (empty allowed by peer)", 0x20D9ED);
+                sheet, "Administrator password", 0x20D9ED);
             position_dot(password_label, 8, 232, 408);
             complete = password_label && complete;
 
@@ -2460,9 +2491,13 @@ bool d1l_ui_service_sheets_render_admin(
             }
             complete = controller->admin_password_textarea && complete;
             complete = create_button(
-                controller, sheet, "Login", 8, 298, 120, 44,
+                controller, sheet, "Admin login", 8, 298, 120, 44,
                 BINDING_ADMIN_LOGIN,
                 D1L_UI_SERVICE_ACTION_ADMIN_LOGIN) != NULL && complete;
+            complete = create_button(
+                controller, sheet, "Guest", 140, 298, 120, 44,
+                BINDING_ADMIN_GUEST_LOGIN,
+                D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN) != NULL && complete;
 
             controller->admin_keyboard = lv_keyboard_create(sheet);
             if (controller->admin_keyboard) {

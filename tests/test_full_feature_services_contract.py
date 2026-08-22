@@ -147,7 +147,8 @@ def test_server_admin_login_is_available_on_device_and_scrubs_credentials():
 
     assert "lv_textarea_set_password_mode(" in sheets
     assert "D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES" in sheets
-    assert "Password (empty allowed by peer)" in sheets
+    assert "Administrator password" in sheets
+    assert 'controller, sheet, "Guest"' in sheets
     assert "d1l_ui_keyboard_configure_input(" in sheets
     assert "d1l_ui_keyboard_clear_textarea(controller->admin_keyboard)" in sheets
     assert 'lv_textarea_set_text(controller->admin_password_textarea, "")' in \
@@ -194,9 +195,10 @@ def test_repeater_login_opens_a_compact_saved_session_manager():
 
     for label in (
         '"Repeater login"',
-        '"Save: On"',
-        '"Forget saved"',
+        '"Save On"',
+        '"Forget"',
         '"Repeater manager"',
+        '"Repeater guest"',
         '"\\nStatus"',
         '"\\nTelemetry"',
         '"\\nNeighbours"',
@@ -214,6 +216,42 @@ def test_repeater_login_opens_a_compact_saved_session_manager():
     assert "d1l_admin_credential_store_load(" in phase1
     assert "d1l_admin_credential_store_save(" in phase1
     assert "d1l_admin_credential_store_forget(" in phase1
+
+
+def test_guest_login_is_explicit_read_only_and_preserves_saved_password():
+    header = read("main/ui/ui_service_sheets.h")
+    sheets = read("main/ui/ui_service_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    assert "D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN" in header
+    assert 'controller, sheet, "Guest"' in sheets
+    assert '"Guest session: read-only server information."' in sheets
+
+    hub = sheets.split("static bool render_admin_hub_compact(", 1)[1].split(
+        "static bool render_admin_metric(", 1
+    )[0]
+    assert "const bool admin_session" in hub
+    assert "if (admin_session)" in hub
+    for admin_only_action in (
+        "D1L_UI_SERVICE_ACTION_ADMIN_SHOW_ACCESS",
+        "D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TOOLS",
+        "D1L_UI_SERVICE_ACTION_ADMIN_SHOW_TERMINAL",
+    ):
+        assert admin_only_action in hub.split("if (admin_session)", 1)[1]
+
+    login = phase1.split(
+        "case D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN:", 1
+    )[1].split("case D1L_UI_SERVICE_ACTION_ADMIN_REFRESH:", 1)[0]
+    assert "const bool guest_login" in login
+    assert "if (!guest_login && password[0] == '\\0')" in login
+    assert '"Enter an admin password or choose Guest."' in login
+    assert "s_admin_pending_guest = guest_login;" in login
+
+    finalize = phase1.split("static void finalize_admin_login(", 1)[1].split(
+        "static bool admin_state_preserves_selected_page(", 1
+    )[0]
+    assert "if (!s_admin_pending_guest)" in finalize
+    assert '"Guest session opened. Read-only tools only."' in finalize
 
     preserve_page = phase1.split(
         "static bool admin_state_preserves_selected_page(", 1

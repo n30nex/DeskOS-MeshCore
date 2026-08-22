@@ -200,6 +200,7 @@ static d1l_ui_admin_page_t s_admin_page = D1L_UI_ADMIN_PAGE_LOGIN;
 static bool s_admin_remember_password = true;
 static bool s_admin_pending_password_valid;
 static bool s_admin_pending_remember;
+static bool s_admin_pending_guest;
 static bool s_admin_rendered_generation_valid;
 static uint32_t s_admin_rendered_dm_revision;
 static uint32_t s_terminal_clear_deadline;
@@ -1771,6 +1772,7 @@ static void clear_admin_pending_password(void)
         s_admin_pending_password, sizeof(s_admin_pending_password));
     s_admin_pending_password_valid = false;
     s_admin_pending_remember = false;
+    s_admin_pending_guest = false;
 }
 
 static void clear_admin_feedback(void)
@@ -1797,18 +1799,25 @@ static void finalize_admin_login(const d1l_meshcore_admin_snapshot_t *status)
     if (status->state == D1L_MESHCORE_ADMIN_AUTHENTICATED &&
         strcmp(status->fingerprint, s_admin_target_fingerprint) == 0) {
         esp_err_t save_result = ESP_OK;
-        if (s_admin_pending_remember &&
-            s_admin_pending_password[0] != '\0') {
-            save_result = d1l_admin_credential_store_save(
-                s_admin_target_fingerprint, s_admin_pending_password);
-        } else {
-            save_result = d1l_admin_credential_store_forget(
-                s_admin_target_fingerprint);
-            if (save_result == ESP_ERR_NOT_FOUND) {
-                save_result = ESP_OK;
+        if (!s_admin_pending_guest) {
+            if (s_admin_pending_remember &&
+                s_admin_pending_password[0] != '\0') {
+                save_result = d1l_admin_credential_store_save(
+                    s_admin_target_fingerprint, s_admin_pending_password);
+            } else {
+                save_result = d1l_admin_credential_store_forget(
+                    s_admin_target_fingerprint);
+                if (save_result == ESP_ERR_NOT_FOUND) {
+                    save_result = ESP_OK;
+                }
             }
         }
+        const bool guest_session =
+            (status->permissions & D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) ==
+                D1L_MESHCORE_ADMIN_PERMISSION_GUEST;
         set_admin_feedback(
+            guest_session ?
+                "Guest session opened. Read-only tools only." :
             save_result == ESP_OK ?
                 (s_admin_pending_remember &&
                  s_admin_pending_password[0] != '\0' ?
@@ -7983,8 +7992,11 @@ static void service_sheets_action_handler(
         (void)render_admin_service_sheet();
         return;
     }
+    case D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN:
     case D1L_UI_SERVICE_ACTION_ADMIN_LOGIN: {
         char password[D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] = {0};
+        const bool guest_login =
+            action == D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN;
         clear_admin_cli_confirmation();
         s_admin_cli_secure_input = false;
         if (s_admin_target_fingerprint[0] == '\0') {
@@ -7993,14 +8005,22 @@ static void service_sheets_action_handler(
             (void)render_admin_service_sheet();
             return;
         }
-        if (!d1l_ui_service_sheets_take_admin_password(
+        if (!guest_login &&
+            !d1l_ui_service_sheets_take_admin_password(
                 &s_service_sheets_controller, password, sizeof(password))) {
             set_admin_feedback("Enter a valid server password.", true);
             (void)render_admin_service_sheet();
             return;
         }
-        if (password[0] == '\0' &&
-            d1l_admin_credential_store_has(s_admin_target_fingerprint)) {
+        if (!guest_login && password[0] == '\0') {
+            if (!d1l_admin_credential_store_has(
+                    s_admin_target_fingerprint)) {
+                set_admin_feedback(
+                    "Enter an admin password or choose Guest.", true);
+                d1l_meshcore_admin_secure_zero(password, sizeof(password));
+                (void)render_admin_service_sheet();
+                return;
+            }
             const esp_err_t load_result = d1l_admin_credential_store_load(
                 s_admin_target_fingerprint, password);
             if (load_result != ESP_OK) {
@@ -8018,7 +8038,9 @@ static void service_sheets_action_handler(
             snprintf(s_admin_pending_password,
                      sizeof(s_admin_pending_password), "%s", password);
             s_admin_pending_password_valid = true;
-            s_admin_pending_remember = s_admin_remember_password;
+            s_admin_pending_remember =
+                !guest_login && s_admin_remember_password;
+            s_admin_pending_guest = guest_login;
             clear_admin_feedback();
         } else {
             set_admin_feedback(
