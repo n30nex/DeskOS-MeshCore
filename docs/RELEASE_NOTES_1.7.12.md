@@ -37,6 +37,12 @@ D1L.
 - A repeated verified advert refreshes boot-local last-heard time and Contacts
   sorting while leaving retained identity, location, sequence, and persistence
   state unchanged.
+- Blank-password repeater login from the phone now remains Guest even when the
+  D1L identity already has an admin ACL entry. Guest sessions can read status,
+  telemetry, and neighbours but cannot use ACL or command controls.
+- Recent verified advert routes are kept in a bounded boot-only cache and
+  returned through the official companion command, removing the remaining
+  contact-detail protocol error without adding flash writes.
 
 ## Preserved
 

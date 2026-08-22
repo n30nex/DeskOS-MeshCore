@@ -42,6 +42,7 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "CMD_HAS_CONNECTION",
         "CMD_LOGOUT",
         "CMD_SEND_TELEMETRY_REQ",
+        "CMD_GET_ADVERT_PATH",
         "CMD_SEND_BINARY_REQ",
         "CMD_SET_CHANNEL",
         "CMD_GET_STATS",
@@ -57,6 +58,7 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "RESP_CODE_CHANNEL_INFO",
         "RESP_CODE_CONTACT_MSG_RECV_V3",
         "RESP_CODE_CHANNEL_MSG_RECV_V3",
+        "RESP_CODE_ADVERT_PATH",
         "RESP_CODE_STATS",
         "PUSH_CODE_MSG_WAITING",
         "PUSH_CODE_ADVERT",
@@ -104,6 +106,25 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
     assert "maybe_queue_admin_response();" in protocol
     assert "s_admin_snapshot.last_completed_tag == s_admin_request_tag" in protocol
 
+    login_push = protocol.split("static void build_admin_login_push", 1)[1].split(
+        "static size_t append_admin_status", 1
+    )[0]
+    assert "const bool expose_guest = s_admin_guest_requested" in login_push
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_GUEST" in login_push
+    assert "s_pending_payload[offset++] = exposed_permissions" in login_push
+    assert "s_admin_guest_requested = password_len == 0U" in login
+    assert "s_admin_guest_fingerprint" in login
+
+    access_list = protocol.split("case BINARY_REQ_ACCESS_LIST:", 1)[1].split(
+        "case BINARY_REQ_NEIGHBOURS:", 1
+    )[0]
+    assert "admin_guest_session_matches" in access_list
+
+    cli = protocol.split("static void send_admin_cli_command", 1)[1].split(
+        "static void send_dm_command", 1
+    )[0]
+    assert "admin_guest_session_matches(contact)" in cli
+
     assert "D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES 251U" in dispatch_h
     assert "uint16_t query_wire_len;" in dispatch_h
     assert "uint8_t query_wire[D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES];" in dispatch_h
@@ -131,6 +152,27 @@ def test_repeater_path_reset_uses_the_full_contact_key_and_safe_route_reset():
     assert "path_known ? contact->out_path_len" in response
     assert "D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN" in response
     assert "path_known && path_len > 0U" in response
+
+
+def test_recent_advert_paths_are_available_to_the_phone_without_persistence():
+    protocol = read("main/comms/ble_companion_protocol.c")
+    service = read("main/mesh/meshcore_service.c")
+    service_h = read("main/mesh/meshcore_service.h")
+
+    advert_path = protocol.split(
+        "static void get_advert_path_command", 1
+    )[1].split("static void send_channel_command", 1)[0]
+    assert "length < 34U || payload[1] != 0U" in advert_path
+    assert "contact_for_public_key(&payload[2], &contact)" in advert_path
+    assert "d1l_meshcore_service_advert_path_snapshot" in advert_path
+    assert "RESP_CODE_ADVERT_PATH" in advert_path
+    assert "d1l_meshcore_wire_path_byte_len(path.path_len)" in advert_path
+    assert "case CMD_GET_ADVERT_PATH:" in protocol
+
+    assert "d1l_meshcore_advert_path_snapshot_t" in service_h
+    assert "static d1l_advert_path_t s_advert_paths" in service
+    assert "remember_advert_path(pub_prefix, received_epoch, packet.path" in service
+    assert "clear_advert_paths();" in service
 
 
 def test_admin_and_phone_commands_preempt_bulk_contact_sync():

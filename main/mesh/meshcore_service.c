@@ -310,6 +310,18 @@ typedef struct {
 static d1l_boot_route_t s_boot_routes[D1L_CONTACT_STORE_CAPACITY];
 static uint8_t s_boot_route_next;
 static d1l_store_lock_t s_boot_route_lock = D1L_STORE_LOCK_INITIALIZER;
+
+typedef struct {
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    uint32_t received_epoch;
+    uint8_t path_len;
+    uint8_t path[D1L_MESHCORE_MAX_PATH_BYTES];
+    bool valid;
+} d1l_advert_path_t;
+
+static d1l_advert_path_t s_advert_paths[D1L_CONTACT_STORE_CAPACITY];
+static uint8_t s_advert_path_next;
+static d1l_store_lock_t s_advert_path_lock = D1L_STORE_LOCK_INITIALIZER;
 static d1l_meshcore_path_response_expectation_t s_path_response_expectation;
 static char s_path_response_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static d1l_store_lock_t s_path_response_lock = D1L_STORE_LOCK_INITIALIZER;
@@ -2119,6 +2131,90 @@ static void clear_boot_routes(void)
     memset(s_boot_routes, 0, sizeof(s_boot_routes));
     s_boot_route_next = 0U;
     d1l_store_lock_give(&s_boot_route_lock);
+}
+
+static void clear_advert_paths(void)
+{
+    d1l_store_lock_take(&s_advert_path_lock);
+    memset(s_advert_paths, 0, sizeof(s_advert_paths));
+    s_advert_path_next = 0U;
+    d1l_store_lock_give(&s_advert_path_lock);
+}
+
+static void remember_advert_path(const char *fingerprint,
+                                 uint32_t received_epoch,
+                                 const uint8_t *path,
+                                 uint8_t path_len)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !path ||
+        !d1l_meshcore_wire_path_len_valid(path_len)) {
+        return;
+    }
+    const uint8_t path_bytes = d1l_meshcore_wire_path_byte_len(path_len);
+    if (path_bytes == 0U || path_bytes > D1L_MESHCORE_MAX_PATH_BYTES) {
+        return;
+    }
+
+    d1l_store_lock_take(&s_advert_path_lock);
+    size_t slot = D1L_CONTACT_STORE_CAPACITY;
+    size_t empty = D1L_CONTACT_STORE_CAPACITY;
+    for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
+        if (s_advert_paths[i].valid &&
+            strncmp(s_advert_paths[i].fingerprint, fingerprint,
+                    sizeof(s_advert_paths[i].fingerprint)) == 0) {
+            slot = i;
+            break;
+        }
+        if (!s_advert_paths[i].valid &&
+            empty == D1L_CONTACT_STORE_CAPACITY) {
+            empty = i;
+        }
+    }
+    if (slot == D1L_CONTACT_STORE_CAPACITY) {
+        slot = empty < D1L_CONTACT_STORE_CAPACITY ? empty : s_advert_path_next;
+        s_advert_path_next =
+            (uint8_t)((slot + 1U) % D1L_CONTACT_STORE_CAPACITY);
+    }
+
+    d1l_advert_path_t *record = &s_advert_paths[slot];
+    memset(record, 0, sizeof(*record));
+    snprintf(record->fingerprint, sizeof(record->fingerprint), "%s",
+             fingerprint);
+    record->received_epoch = received_epoch;
+    record->path_len = path_len;
+    memcpy(record->path, path, path_bytes);
+    record->valid = true;
+    d1l_store_lock_give(&s_advert_path_lock);
+}
+
+bool d1l_meshcore_service_advert_path_snapshot(
+    const char *fingerprint,
+    d1l_meshcore_advert_path_snapshot_t *out_snapshot)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !out_snapshot) {
+        return false;
+    }
+
+    bool found = false;
+    memset(out_snapshot, 0, sizeof(*out_snapshot));
+    d1l_store_lock_take(&s_advert_path_lock);
+    for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
+        const d1l_advert_path_t *record = &s_advert_paths[i];
+        if (!record->valid ||
+            strncmp(record->fingerprint, fingerprint,
+                    sizeof(record->fingerprint)) != 0) {
+            continue;
+        }
+        out_snapshot->valid = true;
+        out_snapshot->received_epoch = record->received_epoch;
+        out_snapshot->path_len = record->path_len;
+        memcpy(out_snapshot->path, record->path,
+               d1l_meshcore_wire_path_byte_len(record->path_len));
+        found = true;
+        break;
+    }
+    d1l_store_lock_give(&s_advert_path_lock);
+    return found;
 }
 
 static void forget_boot_route(const char *fingerprint)
@@ -4962,6 +5058,12 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
     }
     s_status.rx_packets++;
     s_status.rx_adverts++;
+    uint32_t received_epoch = channel_message_display_timestamp(0U);
+    if (received_epoch == 0U) {
+        received_epoch = advert_timestamp;
+    }
+    remember_advert_path(pub_prefix, received_epoch, packet.path,
+                         packet.path_len);
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(pub_prefix,
                                            advert.name[0] ? advert.name : pub_prefix, "advert",
@@ -7871,6 +7973,7 @@ void d1l_meshcore_service_init(void)
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
     clear_pending_ack_tx();
     clear_boot_routes();
+    clear_advert_paths();
     memset(&s_path_replay_cache, 0, sizeof(s_path_replay_cache));
     d1l_meshcore_packet_hash_cache_reset(&s_rx_packet_hash_cache);
     d1l_store_lock_take(&s_path_response_lock);

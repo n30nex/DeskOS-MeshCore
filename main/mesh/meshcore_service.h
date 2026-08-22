@@ -8,6 +8,7 @@
 #include "mesh/meshcore_admin_runtime.h"
 #include "mesh/meshcore_discovery.h"
 #include "mesh/meshcore_trace.h"
+#include "mesh/meshcore_wire.h"
 
 typedef enum {
     D1L_MESHCORE_SERVICE_INITIALIZING = 0,
@@ -160,6 +161,13 @@ typedef struct {
 
 typedef d1l_meshcore_admin_runtime_snapshot_t d1l_meshcore_admin_snapshot_t;
 
+typedef struct {
+    bool valid;
+    uint32_t received_epoch;
+    uint8_t path_len;
+    uint8_t path[D1L_MESHCORE_MAX_PATH_BYTES];
+} d1l_meshcore_advert_path_snapshot_t;
+
 #define D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY 4U
 
 typedef enum {
@@ -202,6 +210,9 @@ void d1l_meshcore_service_discovery_snapshot(
     d1l_meshcore_discovery_snapshot_t *out_snapshot);
 void d1l_meshcore_service_admin_snapshot(
     d1l_meshcore_admin_snapshot_t *out_snapshot);
+bool d1l_meshcore_service_advert_path_snapshot(
+    const char *fingerprint,
+    d1l_meshcore_advert_path_snapshot_t *out_snapshot);
 void d1l_meshcore_service_contact_telemetry_snapshot(
     const char *fingerprint,
     d1l_meshcore_contact_telemetry_snapshot_t *out_snapshot);
