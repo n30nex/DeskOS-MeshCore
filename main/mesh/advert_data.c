@@ -99,14 +99,20 @@ bool d1l_advert_data_parse(const uint8_t *app_data, size_t app_data_len,
     }
 
     size_t name_len = 0U;
+    size_t meaningful_len = 0U;
     while (i < app_data_len && name_len + 1U < sizeof(parsed.name)) {
         unsigned char c = app_data[i++];
+        if (c == '\0') {
+            break;
+        }
         if (c < 32U || c > 126U || c == '"' || c == '\\') {
             c = '_';
+        } else if (c != ' ') {
+            meaningful_len = name_len + 1U;
         }
         parsed.name[name_len++] = (char)c;
     }
-    parsed.name[name_len] = '\0';
+    parsed.name[meaningful_len] = '\0';
     *out = parsed;
     return true;
 }

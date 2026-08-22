@@ -1868,6 +1868,10 @@ esp_err_t d1l_contact_store_upsert_verified_advert(
         memset(entry, 0, sizeof(*entry));
         entry->created_ms = now_ms;
     }
+    const bool alias_tracks_advert =
+        result != D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER &&
+        (entry->alias[0] == '\0' ||
+         strcmp(entry->alias, entry->heard_name) == 0);
     entry->seq = s_next_seq++;
     entry->updated_ms = now_ms;
     copy_lower_hex(entry->fingerprint, sizeof(entry->fingerprint), fingerprint,
@@ -1878,6 +1882,11 @@ esp_err_t d1l_contact_store_upsert_verified_advert(
     if (verified_node->name[0] != '\0') {
         sanitize_ascii_bounded(entry->heard_name, sizeof(entry->heard_name),
                                verified_node->name, sizeof(verified_node->name));
+        if (alias_tracks_advert) {
+            sanitize_ascii_bounded(entry->alias, sizeof(entry->alias),
+                                   verified_node->name,
+                                   sizeof(verified_node->name));
+        }
     }
     if (verified_node->type[0] != '\0') {
         sanitize_ascii_bounded(entry->type, sizeof(entry->type),

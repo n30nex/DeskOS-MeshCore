@@ -73,6 +73,9 @@ def test_admin_login_permissions_and_binary_queries_match_upstream() -> None:
     assert "expected_legacy_role" in login_accept
     assert "permission_role == D1L_MESHCORE_ADMIN_PERMISSION_GUEST ? 2U" in \
         login_accept
+    assert "D1L_MESHCORE_ADMIN_LEGACY_LOGIN_RESPONSE_BYTES 6U" in dispatch_h
+    assert "plaintext[4] == 'O' && plaintext[5] == 'K'" in login_accept
+    assert "plaintext[5] != 0U" not in login_accept
 
     for constant in (
         "D1L_MESHCORE_ADMIN_REQUEST_GET_TELEMETRY 0x03U",

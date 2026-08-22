@@ -37,6 +37,18 @@ def c_function(source: str, signature: str) -> str:
     raise AssertionError(f"unterminated function: {signature}")
 
 
+def test_signed_advert_refresh_updates_only_automatic_aliases():
+    source = read("main/mesh/contact_store.c")
+    upsert = c_function(
+        source, "esp_err_t d1l_contact_store_upsert_verified_advert("
+    )
+
+    assert "const bool alias_tracks_advert" in upsert
+    assert "result != D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER" in upsert
+    assert "strcmp(entry->alias, entry->heard_name) == 0" in upsert
+    assert "if (alias_tracks_advert)" in upsert
+
+
 def test_contact_store_is_bounded_and_sd_first():
     header = read("main/mesh/contact_store.h")
     source = read("main/mesh/contact_store.c")

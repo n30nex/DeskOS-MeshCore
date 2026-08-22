@@ -34,6 +34,7 @@
 #define D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES 64U
 #define D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN 0xFFU
 #define D1L_BLE_PROTOCOL_ADMIN_TIMEOUT_MS 60000U
+#define D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS 4200U
 
 enum {
     CMD_APP_START = 1,
@@ -89,12 +90,15 @@ enum {
     RESP_CODE_CHANNEL_MSG_RECV_V3 = 17,
     RESP_CODE_CHANNEL_INFO = 18,
     RESP_CODE_STATS = 24,
+    PUSH_CODE_ADVERT = 0x80,
     PUSH_CODE_MSG_WAITING = 0x83,
     PUSH_CODE_LOGIN_SUCCESS = 0x85,
     PUSH_CODE_LOGIN_FAIL = 0x86,
     PUSH_CODE_STATUS_RESPONSE = 0x87,
+    PUSH_CODE_NEW_ADVERT = 0x8A,
     PUSH_CODE_TELEMETRY_RESPONSE = 0x8B,
     PUSH_CODE_BINARY_RESPONSE = 0x8C,
+    PUSH_CODE_CONTACT_DELETED = 0x8F,
 };
 
 enum {
@@ -146,8 +150,14 @@ static uint8_t
 static size_t s_pending_len;
 static d1l_contact_entry_t
     s_contacts[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_contact_entry_t
+    s_contact_sync_baseline[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_contact_entry_t
+    s_contact_sync_snapshot[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_contact_count;
 static size_t s_contact_index;
+static size_t s_contact_sync_baseline_count;
+static uint64_t s_seen_contact_revision;
 static uint32_t s_contact_since;
 static uint32_t s_contact_most_recent;
 static bool s_contact_iterator_active;
@@ -528,6 +538,33 @@ static void set_admin_sent_response(bool flood, uint32_t tag)
     (void)set_pending(response, sizeof(response));
 }
 
+static uint32_t message_epoch(uint32_t row_uptime_ms);
+
+static void copy_contact_name(uint8_t *dest, size_t capacity,
+                              const char *source)
+{
+    char normalized[32U] = {0};
+    size_t length = source ? strnlen(source, sizeof(normalized) - 1U) : 0U;
+    while (length > 0U &&
+           (source[length - 1U] == '_' || source[length - 1U] == ' ')) {
+        length--;
+    }
+    if (length > 0U) {
+        memcpy(normalized, source, length);
+    }
+    copy_fixed_text(dest, capacity, normalized);
+}
+
+static uint32_t contact_lastmod(const d1l_contact_entry_t *contact)
+{
+    if (!contact) {
+        return 0U;
+    }
+    const uint32_t updated_epoch = message_epoch(contact->updated_ms);
+    return updated_epoch > contact->signed_advert_timestamp ?
+        updated_epoch : contact->signed_advert_timestamp;
+}
+
 static size_t build_contact_response(const d1l_contact_entry_t *contact,
                                      uint8_t *dest, size_t capacity)
 {
@@ -563,7 +600,10 @@ static size_t build_contact_response(const d1l_contact_entry_t *contact,
     offset += D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES;
     const char *name = contact->alias[0] ? contact->alias :
         (contact->heard_name[0] ? contact->heard_name : contact->fingerprint);
-    copy_fixed_text(&dest[offset], 32U, name);
+    copy_contact_name(&dest[offset], 32U, name);
+    if (dest[offset] == '\0') {
+        copy_fixed_text(&dest[offset], 32U, contact->fingerprint);
+    }
     offset += 32U;
     write_u32_le(&dest[offset], contact->signed_advert_timestamp);
     offset += 4U;
@@ -576,7 +616,7 @@ static size_t build_contact_response(const d1l_contact_entry_t *contact,
         memset(&dest[offset], 0, 8U);
     }
     offset += 8U;
-    write_u32_le(&dest[offset], contact->signed_advert_timestamp);
+    write_u32_le(&dest[offset], contact_lastmod(contact));
     offset += 4U;
     return offset;
 }
@@ -601,7 +641,8 @@ static void prepare_next_contact_response(void)
     }
     while (s_contact_index < s_contact_count) {
         const d1l_contact_entry_t *contact = &s_contacts[s_contact_index++];
-        if (contact->signed_advert_timestamp <= s_contact_since ||
+        const uint32_t lastmod = contact_lastmod(contact);
+        if (lastmod <= s_contact_since ||
             contact->public_key_hex[0] == '\0') {
             continue;
         }
@@ -611,8 +652,8 @@ static void prepare_next_contact_response(void)
             continue;
         }
         s_pending_len = length;
-        if (contact->signed_advert_timestamp > s_contact_most_recent) {
-            s_contact_most_recent = contact->signed_advert_timestamp;
+        if (lastmod > s_contact_most_recent) {
+            s_contact_most_recent = lastmod;
         }
         return;
     }
@@ -620,6 +661,139 @@ static void prepare_next_contact_response(void)
     write_u32_le(&response[1], s_contact_most_recent);
     s_contact_iterator_active = false;
     (void)set_pending(response, sizeof(response));
+}
+
+static size_t capture_contact_sync_snapshot(d1l_contact_entry_t *dest)
+{
+    const size_t copied = d1l_contact_store_copy_recent(
+        dest, D1L_CONTACT_STORE_CAPACITY);
+    size_t retained = 0U;
+    for (size_t index = 0U; index < copied; ++index) {
+        if (dest[index].public_key_hex[0] == '\0') {
+            continue;
+        }
+        if (retained != index) {
+            dest[retained] = dest[index];
+        }
+        retained++;
+    }
+    return retained;
+}
+
+static int contact_sync_index_for_key(const d1l_contact_entry_t *entries,
+                                      size_t count, const char *public_key_hex)
+{
+    for (size_t index = 0U; index < count; ++index) {
+        if (strcmp(entries[index].public_key_hex, public_key_hex) == 0) {
+            return (int)index;
+        }
+    }
+    return -1;
+}
+
+static bool contact_sync_public_key(const d1l_contact_entry_t *contact,
+                                    uint8_t public_key[32])
+{
+    return contact && decode_hex(contact->public_key_hex, 32U, public_key);
+}
+
+static void initialize_contact_sync_baseline(void)
+{
+    s_contact_sync_baseline_count = capture_contact_sync_snapshot(
+        s_contact_sync_baseline);
+    s_seen_contact_revision =
+        d1l_contact_store_stats().persistence_revision;
+}
+
+static void remove_contact_sync_baseline(size_t index)
+{
+    if (index >= s_contact_sync_baseline_count) {
+        return;
+    }
+    if (index + 1U < s_contact_sync_baseline_count) {
+        memmove(&s_contact_sync_baseline[index],
+                &s_contact_sync_baseline[index + 1U],
+                (s_contact_sync_baseline_count - index - 1U) *
+                    sizeof(s_contact_sync_baseline[0]));
+    }
+    s_contact_sync_baseline_count--;
+    memset(&s_contact_sync_baseline[s_contact_sync_baseline_count], 0,
+           sizeof(s_contact_sync_baseline[0]));
+}
+
+static void maybe_queue_contact_change(void)
+{
+    if (s_pending_len != 0U || s_contact_iterator_active) {
+        return;
+    }
+    const d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    if (stats.persistence_revision == s_seen_contact_revision) {
+        return;
+    }
+
+    const size_t current_count = capture_contact_sync_snapshot(
+        s_contact_sync_snapshot);
+    for (size_t index = 0U; index < s_contact_sync_baseline_count; ++index) {
+        const d1l_contact_entry_t *previous =
+            &s_contact_sync_baseline[index];
+        if (contact_sync_index_for_key(
+                s_contact_sync_snapshot, current_count,
+                previous->public_key_hex) >= 0) {
+            continue;
+        }
+        uint8_t public_key[32] = {0};
+        if (contact_sync_public_key(previous, public_key)) {
+            s_pending_payload[0] = PUSH_CODE_CONTACT_DELETED;
+            memcpy(&s_pending_payload[1], public_key, sizeof(public_key));
+            s_pending_len = 1U + sizeof(public_key);
+        }
+        remove_contact_sync_baseline(index);
+        return;
+    }
+
+    for (size_t index = 0U; index < current_count; ++index) {
+        const d1l_contact_entry_t *current = &s_contact_sync_snapshot[index];
+        const int previous_index = contact_sync_index_for_key(
+            s_contact_sync_baseline, s_contact_sync_baseline_count,
+            current->public_key_hex);
+        if (previous_index < 0) {
+            const size_t length = build_contact_response(
+                current, s_pending_payload, sizeof(s_pending_payload));
+            if (length > 0U) {
+                s_pending_payload[0] = PUSH_CODE_NEW_ADVERT;
+                s_pending_len = length;
+            }
+            if (s_contact_sync_baseline_count <
+                D1L_CONTACT_STORE_CAPACITY) {
+                s_contact_sync_baseline[s_contact_sync_baseline_count++] =
+                    *current;
+            }
+            return;
+        }
+        d1l_contact_entry_t *previous =
+            &s_contact_sync_baseline[(size_t)previous_index];
+        if (previous->seq == current->seq) {
+            continue;
+        }
+        uint8_t public_key[32] = {0};
+        if (contact_sync_public_key(current, public_key)) {
+            s_pending_payload[0] = PUSH_CODE_ADVERT;
+            memcpy(&s_pending_payload[1], public_key, sizeof(public_key));
+            s_pending_len = 1U + sizeof(public_key);
+        }
+        *previous = *current;
+        return;
+    }
+
+    memcpy(s_contact_sync_baseline, s_contact_sync_snapshot,
+           current_count * sizeof(s_contact_sync_baseline[0]));
+    if (current_count < D1L_CONTACT_STORE_CAPACITY) {
+        memset(&s_contact_sync_baseline[current_count], 0,
+               (D1L_CONTACT_STORE_CAPACITY - current_count) *
+                   sizeof(s_contact_sync_baseline[0]));
+    }
+    s_contact_sync_baseline_count = current_count;
+    s_seen_contact_revision = stats.persistence_revision;
 }
 
 static void build_self_info(void)
@@ -742,7 +916,10 @@ static void build_battery_storage(void)
     const uint32_t used = total >= s_storage_status.free_kb ?
         total - s_storage_status.free_kb : 0U;
     uint8_t response[11] = {RESP_CODE_BATT_AND_STORAGE};
-    write_u16_le(&response[1], 0U);
+    /* The Indicator D1L has no battery sense input. The companion protocol has
+     * no wired-power flag, so report a full Li-ion-equivalent voltage instead
+     * of the misleading zero-percent value shown by mobile clients. */
+    write_u16_le(&response[1], D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS);
     write_u32_le(&response[3], used);
     write_u32_le(&response[7], total);
     (void)set_pending(response, sizeof(response));
@@ -1801,6 +1978,7 @@ static void reset_session_state(void)
     s_contact_count = 0U;
     s_contact_index = 0U;
     s_contact_iterator_active = false;
+    initialize_contact_sync_baseline();
     clear_admin_request();
     clear_admin_cli_reply();
     portENTER_CRITICAL(&s_status_lock);
@@ -1912,6 +2090,10 @@ static void protocol_task(void *context)
             note_error(receive, true);
         }
         prepare_next_contact_response();
+        if (s_pending_len != 0U) {
+            continue;
+        }
+        maybe_queue_contact_change();
         if (s_pending_len != 0U) {
             continue;
         }

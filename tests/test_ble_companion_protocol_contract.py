@@ -59,6 +59,9 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "RESP_CODE_CHANNEL_MSG_RECV_V3",
         "RESP_CODE_STATS",
         "PUSH_CODE_MSG_WAITING",
+        "PUSH_CODE_ADVERT",
+        "PUSH_CODE_NEW_ADVERT",
+        "PUSH_CODE_CONTACT_DELETED",
         "PUSH_CODE_LOGIN_SUCCESS",
         "PUSH_CODE_LOGIN_FAIL",
         "PUSH_CODE_STATUS_RESPONSE",
@@ -209,12 +212,43 @@ def test_phone_startup_uses_protocol_owned_storage_and_official_contact_count():
     )[0]
     assert "d1l_storage_status(&s_storage_status);" in battery
     assert "d1l_app_model_snapshot" not in battery
+    assert "D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS" in battery
+    assert "write_u16_le(&response[1], 0U)" not in battery
 
     contacts = protocol.split("static void begin_contact_iteration", 1)[1].split(
         "static void prepare_next_contact_response", 1
     )[0]
     assert "write_u32_le(&response[1], s_contact_count);" in contacts
     assert "filtered_count" not in contacts
+
+
+def test_phone_contacts_use_lastmod_and_live_official_pushes():
+    protocol = read("main/comms/ble_companion_protocol.c")
+
+    response = protocol.split(
+        "static size_t build_contact_response", 1
+    )[1].split("static void begin_contact_iteration", 1)[0]
+    assert "contact_lastmod(contact)" in response
+    assert "copy_contact_name" in response
+    assert response.index("contact->signed_advert_timestamp") < response.index(
+        "contact_lastmod(contact)"
+    )
+
+    iterator = protocol.split(
+        "static void prepare_next_contact_response", 1
+    )[1].split("static size_t capture_contact_sync_snapshot", 1)[0]
+    assert "const uint32_t lastmod = contact_lastmod(contact);" in iterator
+    assert "lastmod <= s_contact_since" in iterator
+    assert "s_contact_most_recent = lastmod" in iterator
+
+    live_sync = protocol.split(
+        "static void maybe_queue_contact_change", 1
+    )[1].split("static void build_self_info", 1)[0]
+    assert "PUSH_CODE_CONTACT_DELETED" in live_sync
+    assert "PUSH_CODE_NEW_ADVERT" in live_sync
+    assert "PUSH_CODE_ADVERT" in live_sync
+    assert "previous->seq == current->seq" in live_sync
+    assert "maybe_queue_contact_change();" in protocol
 
 
 def test_protocol_fails_closed_for_privileged_and_malformed_commands():
