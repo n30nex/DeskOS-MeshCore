@@ -46,9 +46,12 @@ D1L.
 - Direct adverts return a valid zero-hop route, and each new Bluetooth
   connection must establish its own repeater-management session instead of
   inheriting stale Guest or Admin state from a previous connection.
-- Repeater command buttons accept the optional trailing string terminator sent
-  by current phone clients, so Clock Sync, Advert, and other admin actions are
-  handed to the authenticated radio session instead of returning an error.
+- Repeater command buttons accept phone line endings and fixed-field padding,
+  so Clock Sync, Advert, and other admin actions reach the authenticated radio
+  session instead of failing local validation.
+- Clock Sync uses DeskOS's validated wall clock rather than its independent
+  anti-replay counter, preventing an incorrect future repeater clock while
+  retaining replay-safe packet tags.
 
 ## Preserved
 

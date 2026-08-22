@@ -865,6 +865,8 @@ void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status)
     out_status->protocol_last_command = protocol.last_command;
     out_status->protocol_last_unsupported_command =
         protocol.last_unsupported_command;
+    out_status->protocol_last_response_error_code =
+        protocol.last_response_error_code;
     out_status->security_policy = "secure_connections_mitm_bonded";
     out_status->wire_policy = "raw_gatt_internal_meshcore_3byte";
 }

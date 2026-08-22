@@ -142,9 +142,17 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
         "static void send_dm_command", 1
     )[0]
     assert "admin_guest_session_matches(contact)" in cli
-    assert "payload[13U + text_len - 1U] == '\\0'" in cli
-    assert cli.index("text_len--;") < cli.index(
+    for suffix in ("'\\0'", "' '", "'\\t'", "'\\r'", "'\\n'"):
+        assert f"payload[13U + text_len - 1U] == {suffix}" in cli
+    assert cli.index("while (text_len > 0U") < cli.index(
         "memchr(&payload[13], '\\0', text_len)"
+    )
+    assert 'strcmp(command, "clock sync") == 0' in cli
+    assert "d1l_time_service_status(&time_status);" in cli
+    assert "!time_status.display_time_valid" in cli
+    assert '"time %lu"' in cli
+    assert cli.index('strcmp(command, "clock sync") == 0') < cli.index(
+        "d1l_meshcore_service_admin_request_cli(command, true)"
     )
 
     assert "D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES 251U" in dispatch_h
@@ -259,6 +267,8 @@ def test_current_phone_stats_and_multibyte_paths_follow_official_wire_shape():
     assert "payload[2] > 2U" in path_mode
     assert "payload[2] + 1U" in path_mode
     assert "last_unsupported_command = s_status.last_command" in protocol
+    assert "s_status.last_response_error_code = 0U" in protocol
+    assert "s_status.last_response_error_code = code" in protocol
 
     flood_scope = protocol.split(
         "static void set_flood_scope_command", 1
@@ -272,6 +282,8 @@ def test_current_phone_stats_and_multibyte_paths_follow_official_wire_shape():
     console = read("main/comms/usb_console.c")
     assert "protocol.last_unsupported_command" in transport
     assert "protocol_last_unsupported_command" in console
+    assert "protocol.last_response_error_code" in transport
+    assert "protocol_last_response_error_code" in console
 
 
 def test_phone_startup_uses_protocol_owned_storage_and_official_contact_count():

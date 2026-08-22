@@ -313,6 +313,7 @@ static void note_command(uint8_t command)
     portENTER_CRITICAL(&s_status_lock);
     s_status.command_count++;
     s_status.last_command = command;
+    s_status.last_response_error_code = 0U;
     s_status.last_error = ESP_OK;
     portEXIT_CRITICAL(&s_status_lock);
 }
@@ -353,6 +354,9 @@ static void set_simple_response(uint8_t code)
 
 static void set_error_response(uint8_t code)
 {
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.last_response_error_code = code;
+    portEXIT_CRITICAL(&s_status_lock);
     const uint8_t response[] = {RESP_CODE_ERR, code};
     (void)set_pending(response, sizeof(response));
 }
@@ -1618,8 +1622,13 @@ static void send_admin_cli_command(
     const d1l_contact_entry_t *contact)
 {
     size_t text_len = length - 13U;
-    /* Some clients include the C-string terminator in CLI frames. */
-    if (text_len > 0U && payload[13U + text_len - 1U] == '\0') {
+    /* Phone clients may include line endings or C-string padding. */
+    while (text_len > 0U &&
+           (payload[13U + text_len - 1U] == '\0' ||
+            payload[13U + text_len - 1U] == ' ' ||
+            payload[13U + text_len - 1U] == '\t' ||
+            payload[13U + text_len - 1U] == '\r' ||
+            payload[13U + text_len - 1U] == '\n')) {
         text_len--;
     }
     if (text_len == 0U ||
@@ -1637,6 +1646,26 @@ static void send_admin_cli_command(
     }
     char command[D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
     memcpy(command, &payload[13], text_len);
+    if (strcmp(command, "clock sync") == 0) {
+        d1l_time_service_status_t time_status = {0};
+        d1l_time_service_status(&time_status);
+        const int64_t wall_epoch = time_status.clock.wall_epoch_sec;
+        if (!time_status.display_time_valid ||
+            wall_epoch < D1L_TIME_WALL_MIN_EPOCH ||
+            wall_epoch > (int64_t)UINT32_MAX) {
+            memset(command, 0, sizeof(command));
+            set_error_response(ERR_CODE_BAD_STATE);
+            return;
+        }
+        const int written = snprintf(
+            command, sizeof(command), "time %lu",
+            (unsigned long)(uint32_t)wall_epoch);
+        if (written <= 0 || (size_t)written >= sizeof(command)) {
+            memset(command, 0, sizeof(command));
+            set_error_response(ERR_CODE_BAD_STATE);
+            return;
+        }
+    }
     const esp_err_t result =
         d1l_meshcore_service_admin_request_cli(command, true);
     memset(command, 0, sizeof(command));

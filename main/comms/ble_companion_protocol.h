@@ -11,6 +11,7 @@ typedef struct {
     uint8_t client_protocol_version;
     uint8_t last_command;
     uint8_t last_unsupported_command;
+    uint8_t last_response_error_code;
     uint32_t session_count;
     uint32_t command_count;
     uint32_t response_count;

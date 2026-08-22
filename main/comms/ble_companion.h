@@ -50,6 +50,7 @@ typedef struct {
     uint32_t protocol_malformed_count;
     uint8_t protocol_last_command;
     uint8_t protocol_last_unsupported_command;
+    uint8_t protocol_last_response_error_code;
     esp_err_t last_error;
     int last_nimble_error;
     const char *state;
