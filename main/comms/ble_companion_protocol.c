@@ -186,6 +186,8 @@ static uint8_t s_admin_cli_public_key[32];
 static uint32_t s_admin_cli_timestamp;
 static char
     s_admin_cli_reply[D1L_MESHCORE_ADMIN_MAX_CLI_REPLY_BYTES + 1U];
+static bool s_admin_session_authorized;
+static char s_admin_session_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static bool s_admin_guest_requested;
 static char s_admin_guest_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 
@@ -508,10 +510,24 @@ static void clear_admin_access_intent(void)
            sizeof(s_admin_guest_fingerprint));
 }
 
+static void clear_admin_session_authorization(void)
+{
+    s_admin_session_authorized = false;
+    memset(s_admin_session_fingerprint, 0,
+           sizeof(s_admin_session_fingerprint));
+}
+
+static bool admin_session_matches(const d1l_contact_entry_t *contact)
+{
+    return contact && s_admin_session_authorized &&
+           strcmp(s_admin_session_fingerprint, contact->fingerprint) == 0;
+}
+
 static bool admin_guest_session_matches(
     const d1l_contact_entry_t *contact)
 {
     return contact && s_admin_guest_requested &&
+           admin_session_matches(contact) &&
            admin_snapshot_matches(contact) &&
            strcmp(s_admin_guest_fingerprint, contact->fingerprint) == 0;
 }
@@ -1138,8 +1154,15 @@ static void maybe_queue_admin_response(void)
         const bool login_succeeded =
             target_matches && admin_state_active(s_admin_snapshot.state) &&
             s_admin_snapshot.generation != s_admin_request_generation;
+        if (login_succeeded) {
+            s_admin_session_authorized = true;
+            snprintf(s_admin_session_fingerprint,
+                     sizeof(s_admin_session_fingerprint), "%s",
+                     s_admin_request_fingerprint);
+        }
         build_admin_login_push(login_succeeded);
         if (!login_succeeded) {
+            clear_admin_session_authorization();
             clear_admin_access_intent();
         }
         clear_admin_request();
@@ -1349,7 +1372,8 @@ static bool authenticated_admin_target(
         return false;
     }
     d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
-    if (!admin_snapshot_matches(out_contact)) {
+    if (!admin_session_matches(out_contact) ||
+        !admin_snapshot_matches(out_contact)) {
         set_error_response(ERR_CODE_BAD_STATE);
         return false;
     }
@@ -1396,6 +1420,7 @@ static void send_login_command(const uint8_t *payload, size_t length)
 
     clear_admin_request();
     clear_admin_cli_reply();
+    clear_admin_session_authorization();
     clear_admin_access_intent();
     esp_err_t result = d1l_meshcore_service_admin_logout();
     if (result == ESP_OK) {
@@ -1460,13 +1485,15 @@ static void has_connection_command(const uint8_t *payload, size_t length)
         return;
     }
     d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
-    if (!admin_state_active(s_admin_snapshot.state)) {
+    if (!s_admin_session_authorized ||
+        !admin_state_active(s_admin_snapshot.state)) {
         set_error_response(ERR_CODE_NOT_FOUND);
         return;
     }
     if (length >= 33U) {
         d1l_contact_entry_t contact = {0};
         if (!contact_for_public_key(&payload[1], &contact) ||
+            !admin_session_matches(&contact) ||
             strcmp(s_admin_snapshot.fingerprint, contact.fingerprint) != 0) {
             set_error_response(ERR_CODE_NOT_FOUND);
             return;
@@ -1481,10 +1508,18 @@ static void logout_command(const uint8_t *payload, size_t length)
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
     }
+    if (!s_admin_session_authorized) {
+        clear_admin_request();
+        clear_admin_cli_reply();
+        clear_admin_access_intent();
+        set_simple_response(RESP_CODE_OK);
+        return;
+    }
     d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
-    if (length >= 33U && admin_state_active(s_admin_snapshot.state)) {
+    if (length >= 33U) {
         d1l_contact_entry_t contact = {0};
         if (!contact_for_public_key(&payload[1], &contact) ||
+            !admin_session_matches(&contact) ||
             strcmp(s_admin_snapshot.fingerprint, contact.fingerprint) != 0) {
             set_simple_response(RESP_CODE_OK);
             return;
@@ -1492,6 +1527,7 @@ static void logout_command(const uint8_t *payload, size_t length)
     }
     clear_admin_request();
     clear_admin_cli_reply();
+    clear_admin_session_authorization();
     clear_admin_access_intent();
     set_result_response(d1l_meshcore_service_admin_logout());
 }
@@ -1589,7 +1625,8 @@ static void send_admin_cli_command(
         return;
     }
     d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
-    if (!admin_snapshot_matches(contact) ||
+    if (!admin_session_matches(contact) ||
+        !admin_snapshot_matches(contact) ||
         admin_guest_session_matches(contact)) {
         set_error_response(ERR_CODE_BAD_STATE);
         return;
@@ -1672,8 +1709,7 @@ static void get_advert_path_command(const uint8_t *payload, size_t length)
     }
     const uint8_t path_bytes =
         d1l_meshcore_wire_path_byte_len(path.path_len);
-    if (path_bytes == 0U ||
-        6U + path_bytes > sizeof(s_pending_payload)) {
+    if (6U + path_bytes > sizeof(s_pending_payload)) {
         set_error_response(ERR_CODE_NOT_FOUND);
         return;
     }
@@ -1682,7 +1718,9 @@ static void get_advert_path_command(const uint8_t *payload, size_t length)
     write_u32_le(&s_pending_payload[offset], path.received_epoch);
     offset += 4U;
     s_pending_payload[offset++] = path.path_len;
-    memcpy(&s_pending_payload[offset], path.path, path_bytes);
+    if (path_bytes > 0U) {
+        memcpy(&s_pending_payload[offset], path.path, path_bytes);
+    }
     s_pending_len = offset + path_bytes;
 }
 
@@ -2063,6 +2101,8 @@ static void reset_session_state(void)
     initialize_contact_sync_baseline();
     clear_admin_request();
     clear_admin_cli_reply();
+    clear_admin_session_authorization();
+    clear_admin_access_intent();
     portENTER_CRITICAL(&s_status_lock);
     s_status.client_protocol_version = 3U;
     s_status.session_count++;

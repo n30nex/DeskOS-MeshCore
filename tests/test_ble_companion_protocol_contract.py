@@ -114,6 +114,24 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
     assert "s_pending_payload[offset++] = exposed_permissions" in login_push
     assert "s_admin_guest_requested = password_len == 0U" in login
     assert "s_admin_guest_fingerprint" in login
+    assert "clear_admin_session_authorization()" in login
+
+    auth_target = protocol.split(
+        "static bool authenticated_admin_target", 1
+    )[1].split("static bool capture_pending_admin_request", 1)[0]
+    assert "admin_session_matches(out_contact)" in auth_target
+
+    reset = protocol.split("static void reset_session_state", 1)[1].split(
+        "static uint32_t last_existing_seq", 1
+    )[0]
+    assert "clear_admin_session_authorization();" in reset
+    assert "clear_admin_access_intent();" in reset
+
+    connection = protocol.split(
+        "static void has_connection_command", 1
+    )[1].split("static void logout_command", 1)[0]
+    assert "!s_admin_session_authorized" in connection
+    assert "admin_session_matches(&contact)" in connection
 
     access_list = protocol.split("case BINARY_REQ_ACCESS_LIST:", 1)[1].split(
         "case BINARY_REQ_NEIGHBOURS:", 1
@@ -167,11 +185,17 @@ def test_recent_advert_paths_are_available_to_the_phone_without_persistence():
     assert "d1l_meshcore_service_advert_path_snapshot" in advert_path
     assert "RESP_CODE_ADVERT_PATH" in advert_path
     assert "d1l_meshcore_wire_path_byte_len(path.path_len)" in advert_path
+    assert "if (path_bytes > 0U)" in advert_path
     assert "case CMD_GET_ADVERT_PATH:" in protocol
 
     assert "d1l_meshcore_advert_path_snapshot_t" in service_h
     assert "static d1l_advert_path_t s_advert_paths" in service
     assert "remember_advert_path(pub_prefix, received_epoch, packet.path" in service
+    remember = service.split("static void remember_advert_path", 1)[1].split(
+        "bool d1l_meshcore_service_advert_path_snapshot", 1
+    )[0]
+    assert "(path_len > 0U && !path)" in remember
+    assert "if (path_bytes > 0U)" in remember
     assert "clear_advert_paths();" in service
 
 

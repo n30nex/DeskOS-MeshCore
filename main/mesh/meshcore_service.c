@@ -2146,12 +2146,13 @@ static void remember_advert_path(const char *fingerprint,
                                  const uint8_t *path,
                                  uint8_t path_len)
 {
-    if (!fingerprint || fingerprint[0] == '\0' || !path ||
+    if (!fingerprint || fingerprint[0] == '\0' ||
+        (path_len > 0U && !path) ||
         !d1l_meshcore_wire_path_len_valid(path_len)) {
         return;
     }
     const uint8_t path_bytes = d1l_meshcore_wire_path_byte_len(path_len);
-    if (path_bytes == 0U || path_bytes > D1L_MESHCORE_MAX_PATH_BYTES) {
+    if (path_bytes > D1L_MESHCORE_MAX_PATH_BYTES) {
         return;
     }
 
@@ -2182,7 +2183,9 @@ static void remember_advert_path(const char *fingerprint,
              fingerprint);
     record->received_epoch = received_epoch;
     record->path_len = path_len;
-    memcpy(record->path, path, path_bytes);
+    if (path_bytes > 0U) {
+        memcpy(record->path, path, path_bytes);
+    }
     record->valid = true;
     d1l_store_lock_give(&s_advert_path_lock);
 }

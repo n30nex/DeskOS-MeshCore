@@ -43,6 +43,9 @@ D1L.
 - Recent verified advert routes are kept in a bounded boot-only cache and
   returned through the official companion command, removing the remaining
   contact-detail protocol error without adding flash writes.
+- Direct adverts return a valid zero-hop route, and each new Bluetooth
+  connection must establish its own repeater-management session instead of
+  inheriting stale Guest or Admin state from a previous connection.
 
 ## Preserved
 
