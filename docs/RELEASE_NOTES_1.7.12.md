@@ -46,6 +46,9 @@ D1L.
 - Direct adverts return a valid zero-hop route, and each new Bluetooth
   connection must establish its own repeater-management session instead of
   inheriting stale Guest or Admin state from a previous connection.
+- Repeater command buttons accept the optional trailing string terminator sent
+  by current phone clients, so Clock Sync, Advert, and other admin actions are
+  handed to the authenticated radio session instead of returning an error.
 
 ## Preserved
 

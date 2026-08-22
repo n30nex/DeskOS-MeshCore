@@ -142,6 +142,10 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
         "static void send_dm_command", 1
     )[0]
     assert "admin_guest_session_matches(contact)" in cli
+    assert "payload[13U + text_len - 1U] == '\\0'" in cli
+    assert cli.index("text_len--;") < cli.index(
+        "memchr(&payload[13], '\\0', text_len)"
+    )
 
     assert "D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES 251U" in dispatch_h
     assert "uint16_t query_wire_len;" in dispatch_h

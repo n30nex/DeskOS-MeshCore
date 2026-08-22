@@ -1617,7 +1617,11 @@ static void send_admin_cli_command(
     const uint8_t *payload, size_t length,
     const d1l_contact_entry_t *contact)
 {
-    const size_t text_len = length - 13U;
+    size_t text_len = length - 13U;
+    /* Some clients include the C-string terminator in CLI frames. */
+    if (text_len > 0U && payload[13U + text_len - 1U] == '\0') {
+        text_len--;
+    }
     if (text_len == 0U ||
         text_len > D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES ||
         memchr(&payload[13], '\0', text_len)) {
