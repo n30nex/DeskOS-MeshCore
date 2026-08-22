@@ -12,9 +12,15 @@ typedef struct {
     uint8_t last_command;
     uint8_t last_unsupported_command;
     uint8_t last_response_error_code;
+    uint8_t last_failed_command;
+    uint8_t last_failed_response_error_code;
+    uint8_t last_text_type;
+    uint8_t last_admin_cli_stage;
+    uint16_t last_text_length;
     uint32_t session_count;
     uint32_t command_count;
     uint32_t response_count;
+    uint32_t response_error_count;
     uint32_t unsupported_count;
     uint32_t malformed_count;
     uint32_t transport_error_count;

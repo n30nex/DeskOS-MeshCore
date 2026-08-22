@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "mesh/channel_store.h"
 #include "mesh/contact_store.h"
+#include "mesh/contact_uri.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
 #include "mesh/meshcore_service.h"
@@ -35,6 +36,12 @@
 #define D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN 0xFFU
 #define D1L_BLE_PROTOCOL_ADMIN_TIMEOUT_MS 60000U
 #define D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS 4200U
+#define D1L_BLE_PROTOCOL_SELF_ADV_TYPE 1U
+#define D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS 0U
+#define D1L_BLE_PROTOCOL_AUTOADD_CONFIG 0x1EU
+#define D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS 0U
+#define D1L_BLE_PROTOCOL_RX_DELAY_MILLIS 0U
+#define D1L_BLE_PROTOCOL_AIRTIME_FACTOR_MILLIS 1000U
 
 enum {
     CMD_APP_START = 1,
@@ -45,17 +52,23 @@ enum {
     CMD_SET_DEVICE_TIME = 6,
     CMD_SEND_SELF_ADVERT = 7,
     CMD_SET_ADVERT_NAME = 8,
+    CMD_ADD_UPDATE_CONTACT = 9,
     CMD_SYNC_NEXT_MESSAGE = 10,
     CMD_SET_RADIO_PARAMS = 11,
     CMD_SET_RADIO_TX_POWER = 12,
     CMD_RESET_PATH = 13,
     CMD_SET_ADVERT_LATLON = 14,
     CMD_REMOVE_CONTACT = 15,
+    CMD_SHARE_CONTACT = 16,
+    CMD_EXPORT_CONTACT = 17,
+    CMD_IMPORT_CONTACT = 18,
     CMD_REBOOT = 19,
     CMD_GET_BATT_AND_STORAGE = 20,
+    CMD_SET_TUNING_PARAMS = 21,
     CMD_DEVICE_QUERY = 22,
     CMD_EXPORT_PRIVATE_KEY = 23,
     CMD_IMPORT_PRIVATE_KEY = 24,
+    CMD_SEND_RAW_DATA = 25,
     CMD_SEND_LOGIN = 26,
     CMD_SEND_STATUS_REQ = 27,
     CMD_HAS_CONNECTION = 28,
@@ -63,12 +76,27 @@ enum {
     CMD_GET_CONTACT_BY_KEY = 30,
     CMD_GET_CHANNEL = 31,
     CMD_SET_CHANNEL = 32,
+    CMD_SIGN_START = 33,
+    CMD_SIGN_DATA = 34,
+    CMD_SIGN_FINISH = 35,
+    CMD_SEND_TRACE_PATH = 36,
+    CMD_SET_DEVICE_PIN = 37,
+    CMD_SET_OTHER_PARAMS = 38,
     CMD_SEND_TELEMETRY_REQ = 39,
+    CMD_GET_CUSTOM_VARS = 40,
+    CMD_SET_CUSTOM_VAR = 41,
     CMD_GET_ADVERT_PATH = 42,
+    CMD_GET_TUNING_PARAMS = 43,
     CMD_SEND_BINARY_REQ = 50,
     CMD_FACTORY_RESET = 51,
+    CMD_SEND_PATH_DISCOVERY_REQ = 52,
     CMD_SET_FLOOD_SCOPE_KEY = 54,
+    CMD_SEND_CONTROL_DATA = 55,
     CMD_GET_STATS = 56,
+    CMD_SEND_ANON_REQ = 57,
+    CMD_SET_AUTOADD_CONFIG = 58,
+    CMD_GET_AUTOADD_CONFIG = 59,
+    CMD_GET_ALLOWED_REPEAT_FREQ = 60,
     CMD_SET_PATH_HASH_MODE = 61,
 };
 
@@ -90,9 +118,14 @@ enum {
     RESP_CODE_CONTACT_MSG_RECV_V3 = 16,
     RESP_CODE_CHANNEL_MSG_RECV_V3 = 17,
     RESP_CODE_CHANNEL_INFO = 18,
+    RESP_CODE_CUSTOM_VARS = 21,
     RESP_CODE_ADVERT_PATH = 22,
+    RESP_CODE_TUNING_PARAMS = 23,
     RESP_CODE_STATS = 24,
+    RESP_CODE_AUTOADD_CONFIG = 25,
+    RESP_CODE_ALLOWED_REPEAT_FREQ = 26,
     PUSH_CODE_ADVERT = 0x80,
+    PUSH_CODE_PATH_UPDATED = 0x81,
     PUSH_CODE_MSG_WAITING = 0x83,
     PUSH_CODE_LOGIN_SUCCESS = 0x85,
     PUSH_CODE_LOGIN_FAIL = 0x86,
@@ -135,6 +168,16 @@ enum {
     ERR_CODE_ILLEGAL_ARG = 6,
 };
 
+enum {
+    ADMIN_CLI_STAGE_NONE = 0,
+    ADMIN_CLI_STAGE_RECEIVED,
+    ADMIN_CLI_STAGE_CONTACT_FOUND,
+    ADMIN_CLI_STAGE_SESSION_READY,
+    ADMIN_CLI_STAGE_NORMALIZED,
+    ADMIN_CLI_STAGE_QUEUED,
+    ADMIN_CLI_STAGE_PENDING_TRACKED,
+};
+
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_task;
 static bool s_start_requested;
@@ -174,6 +217,7 @@ static uint32_t s_last_synced_dm_seq;
 static uint32_t s_last_synced_message_seq;
 static uint32_t s_seen_dm_revision;
 static uint32_t s_seen_message_revision;
+static bool s_force_message_notification_check;
 static uint32_t s_seen_connect_count;
 static d1l_meshcore_admin_snapshot_t s_admin_snapshot EXT_RAM_BSS_ATTR;
 static d1l_ble_admin_request_kind_t s_admin_request_kind;
@@ -318,6 +362,24 @@ static void note_command(uint8_t command)
     portEXIT_CRITICAL(&s_status_lock);
 }
 
+static void note_text_command(uint8_t text_type, size_t text_length)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.last_text_type = text_type;
+    s_status.last_text_length =
+        text_length > UINT16_MAX ? UINT16_MAX : (uint16_t)text_length;
+    s_status.last_admin_cli_stage =
+        text_type == 1U ? ADMIN_CLI_STAGE_RECEIVED : ADMIN_CLI_STAGE_NONE;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static void note_admin_cli_stage(uint8_t stage)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.last_admin_cli_stage = stage;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
 static void note_malformed(void)
 {
     portENTER_CRITICAL(&s_status_lock);
@@ -356,6 +418,9 @@ static void set_error_response(uint8_t code)
 {
     portENTER_CRITICAL(&s_status_lock);
     s_status.last_response_error_code = code;
+    s_status.last_failed_command = s_status.last_command;
+    s_status.last_failed_response_error_code = code;
+    s_status.response_error_count++;
     portEXIT_CRITICAL(&s_status_lock);
     const uint8_t response[] = {RESP_CODE_ERR, code};
     (void)set_pending(response, sizeof(response));
@@ -527,13 +592,32 @@ static bool admin_session_matches(const d1l_contact_entry_t *contact)
            strcmp(s_admin_session_fingerprint, contact->fingerprint) == 0;
 }
 
+static bool admin_session_matches_or_restore(
+    const d1l_contact_entry_t *contact)
+{
+    if (admin_session_matches(contact)) {
+        return true;
+    }
+    if (!admin_snapshot_matches(contact)) {
+        return false;
+    }
+    s_admin_session_authorized = true;
+    snprintf(s_admin_session_fingerprint,
+             sizeof(s_admin_session_fingerprint), "%s",
+             contact->fingerprint);
+    return true;
+}
+
 static bool admin_guest_session_matches(
     const d1l_contact_entry_t *contact)
 {
-    return contact && s_admin_guest_requested &&
-           admin_session_matches(contact) &&
+    return contact && admin_session_matches_or_restore(contact) &&
            admin_snapshot_matches(contact) &&
-           strcmp(s_admin_guest_fingerprint, contact->fingerprint) == 0;
+           ((s_admin_guest_requested &&
+             strcmp(s_admin_guest_fingerprint, contact->fingerprint) == 0) ||
+            (s_admin_snapshot.permissions &
+             D1L_MESHCORE_ADMIN_PERMISSION_ROLE_MASK) ==
+                D1L_MESHCORE_ADMIN_PERMISSION_GUEST);
 }
 
 static void clear_admin_request(void)
@@ -799,6 +883,9 @@ static void maybe_queue_contact_change(void)
             const size_t length = build_contact_response(
                 current, s_pending_payload, sizeof(s_pending_payload));
             if (length > 0U) {
+                /* An update push contains only a public key and cannot create
+                 * a contact in the phone app. New nodes require the complete
+                 * contact frame used by current MeshCore companions. */
                 s_pending_payload[0] = PUSH_CODE_NEW_ADVERT;
                 s_pending_len = length;
             }
@@ -816,7 +903,19 @@ static void maybe_queue_contact_change(void)
         }
         uint8_t public_key[32] = {0};
         if (contact_sync_public_key(current, public_key)) {
-            s_pending_payload[0] = PUSH_CODE_ADVERT;
+            const bool advert_changed =
+                previous->signed_advert_timestamp !=
+                    current->signed_advert_timestamp ||
+                strcmp(previous->heard_name, current->heard_name) != 0 ||
+                strcmp(previous->type, current->type) != 0;
+            const bool path_changed =
+                previous->out_path_valid != current->out_path_valid ||
+                previous->out_path_len != current->out_path_len ||
+                memcmp(previous->out_path, current->out_path,
+                       sizeof(current->out_path)) != 0;
+            s_pending_payload[0] =
+                !advert_changed && path_changed ? PUSH_CODE_PATH_UPDATED :
+                                                  PUSH_CODE_ADVERT;
             memcpy(&s_pending_payload[1], public_key, sizeof(public_key));
             s_pending_len = 1U + sizeof(public_key);
         }
@@ -845,7 +944,7 @@ static void build_self_info(void)
     }
     size_t offset = 0U;
     s_pending_payload[offset++] = RESP_CODE_SELF_INFO;
-    s_pending_payload[offset++] = 1U;
+    s_pending_payload[offset++] = D1L_BLE_PROTOCOL_SELF_ADV_TYPE;
     s_pending_payload[offset++] = (uint8_t)settings.tx_power_dbm;
     s_pending_payload[offset++] = 22U;
     memcpy(&s_pending_payload[offset], settings.identity_public_key,
@@ -862,7 +961,10 @@ static void build_self_info(void)
     s_pending_payload[offset++] = 0U;
     s_pending_payload[offset++] = settings.map_location_set ? 1U : 0U;
     s_pending_payload[offset++] = 0U;
-    s_pending_payload[offset++] = 1U;
+    /* Every verified signed advert is retained as a contact. Keep this flag
+     * in sync with PUSH_CODE_ADVERT so phone clients update Contacts/Recent
+     * instead of treating the same node as an unsaved discovery. */
+    s_pending_payload[offset++] = D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS;
     write_u32_le(&s_pending_payload[offset],
                  settings.frequency_hz / 1000U);
     offset += 4U;
@@ -1318,8 +1420,13 @@ static bool build_next_dm_message(void)
 
 static bool build_next_channel_message(void)
 {
-    const size_t count = d1l_message_store_copy_recent(
-        s_messages, D1L_MESSAGE_STORE_CAPACITY);
+    size_t count = 0U;
+    d1l_message_retained_snapshot_t retained = {0};
+    if (d1l_message_store_snapshot_retained(
+            s_messages, D1L_MESSAGE_STORE_CAPACITY, &count,
+            &retained) != ESP_OK) {
+        return false;
+    }
     const uint8_t protocol_version = s_status.client_protocol_version;
     for (size_t i = 0; i < count; ++i) {
         const d1l_message_entry_t *entry = &s_messages[i];
@@ -1345,13 +1452,33 @@ static bool build_next_channel_message(void)
         s_pending_payload[offset++] = channel_index;
         s_pending_payload[offset++] = 0xFFU;
         s_pending_payload[offset++] = 0U;
-        write_u32_le(&s_pending_payload[offset],
-                     message_epoch(entry->uptime_ms));
+        uint32_t timestamp = d1l_message_entry_display_timestamp(entry);
+        if (timestamp == 0U) {
+            timestamp = message_epoch(entry->uptime_ms);
+        }
+        write_u32_le(&s_pending_payload[offset], timestamp);
         offset += 4U;
-        const size_t text_len = strnlen(
-            entry->text, sizeof(s_pending_payload) - offset);
-        memcpy(&s_pending_payload[offset], entry->text, text_len);
-        offset += text_len;
+        const char *channel_name = s_channels[channel_index].name;
+        const bool has_sender = entry->author[0] != '\0' &&
+            strcmp(entry->author, channel_name) != 0;
+        if (has_sender) {
+            const int written = snprintf(
+                (char *)&s_pending_payload[offset],
+                sizeof(s_pending_payload) - offset, "%s: %s",
+                entry->author, entry->text);
+            if (written <= 0) {
+                s_last_synced_message_seq = entry->seq;
+                continue;
+            }
+            const size_t available = sizeof(s_pending_payload) - offset;
+            offset += (size_t)written < available ?
+                (size_t)written : available - 1U;
+        } else {
+            const size_t text_len = strnlen(
+                entry->text, sizeof(s_pending_payload) - offset);
+            memcpy(&s_pending_payload[offset], entry->text, text_len);
+            offset += text_len;
+        }
         s_last_synced_message_seq = entry->seq;
         s_pending_len = offset;
         return true;
@@ -1376,7 +1503,7 @@ static bool authenticated_admin_target(
         return false;
     }
     d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
-    if (!admin_session_matches(out_contact) ||
+    if (!admin_session_matches_or_restore(out_contact) ||
         !admin_snapshot_matches(out_contact)) {
         set_error_response(ERR_CODE_BAD_STATE);
         return false;
@@ -1489,15 +1616,14 @@ static void has_connection_command(const uint8_t *payload, size_t length)
         return;
     }
     d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
-    if (!s_admin_session_authorized ||
-        !admin_state_active(s_admin_snapshot.state)) {
+    if (!admin_state_active(s_admin_snapshot.state)) {
         set_error_response(ERR_CODE_NOT_FOUND);
         return;
     }
     if (length >= 33U) {
         d1l_contact_entry_t contact = {0};
         if (!contact_for_public_key(&payload[1], &contact) ||
-            !admin_session_matches(&contact) ||
+            !admin_session_matches_or_restore(&contact) ||
             strcmp(s_admin_snapshot.fingerprint, contact.fingerprint) != 0) {
             set_error_response(ERR_CODE_NOT_FOUND);
             return;
@@ -1638,12 +1764,13 @@ static void send_admin_cli_command(
         return;
     }
     d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
-    if (!admin_session_matches(contact) ||
+    if (!admin_session_matches_or_restore(contact) ||
         !admin_snapshot_matches(contact) ||
         admin_guest_session_matches(contact)) {
         set_error_response(ERR_CODE_BAD_STATE);
         return;
     }
+    note_admin_cli_stage(ADMIN_CLI_STAGE_SESSION_READY);
     char command[D1L_MESHCORE_ADMIN_MAX_CLI_COMMAND_BYTES + 1U] = {0};
     memcpy(command, &payload[13], text_len);
     if (strcmp(command, "clock sync") == 0) {
@@ -1657,6 +1784,10 @@ static void send_admin_cli_command(
             set_error_response(ERR_CODE_BAD_STATE);
             return;
         }
+        /* MeshCore also supports `time <epoch>`. Use it here because the
+         * anti-replay packet sequence may intentionally be ahead of wall time;
+         * `clock sync` would otherwise copy that sequence into the repeater's
+         * RTC. */
         const int written = snprintf(
             command, sizeof(command), "time %lu",
             (unsigned long)(uint32_t)wall_epoch);
@@ -1666,6 +1797,7 @@ static void send_admin_cli_command(
             return;
         }
     }
+    note_admin_cli_stage(ADMIN_CLI_STAGE_NORMALIZED);
     const esp_err_t result =
         d1l_meshcore_service_admin_request_cli(command, true);
     memset(command, 0, sizeof(command));
@@ -1674,6 +1806,7 @@ static void send_admin_cli_command(
         note_error(result, false);
         return;
     }
+    note_admin_cli_stage(ADMIN_CLI_STAGE_QUEUED);
     uint8_t public_key[32] = {0};
     if (!decode_hex(contact->public_key_hex, sizeof(public_key), public_key) ||
         !capture_pending_admin_request(
@@ -1682,12 +1815,16 @@ static void send_admin_cli_command(
         memset(public_key, 0, sizeof(public_key));
         return;
     }
+    note_admin_cli_stage(ADMIN_CLI_STAGE_PENDING_TRACKED);
     memset(public_key, 0, sizeof(public_key));
     set_admin_sent_response(false, 0U);
 }
 
 static void send_dm_command(const uint8_t *payload, size_t length)
 {
+    if (length >= 2U) {
+        note_text_command(payload[1], length > 13U ? length - 13U : 0U);
+    }
     if (length < 14U || (payload[1] != 0U && payload[1] != 1U)) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
@@ -1696,6 +1833,9 @@ static void send_dm_command(const uint8_t *payload, size_t length)
     if (!contact_for_prefix(&payload[7], &contact)) {
         set_error_response(ERR_CODE_NOT_FOUND);
         return;
+    }
+    if (payload[1] == 1U) {
+        note_admin_cli_stage(ADMIN_CLI_STAGE_CONTACT_FOUND);
     }
     if (payload[1] == 1U) {
         send_admin_cli_command(payload, length, &contact);
@@ -1865,6 +2005,83 @@ static void remove_contact_command(const uint8_t *payload, size_t length)
         contact.fingerprint, &removed));
 }
 
+static void add_update_contact_command(const uint8_t *payload, size_t length)
+{
+    const size_t required = 1U + 32U + 3U +
+        D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES + 32U + 4U;
+    if (length < required || bytes_all_zero(&payload[1], 32U)) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+
+    d1l_contact_uri_t imported = {0};
+    for (size_t i = 0U; i < 32U; ++i) {
+        (void)snprintf(&imported.public_key_hex[i * 2U], 3U, "%02x",
+                       payload[i + 1U]);
+    }
+    imported.type_id = payload[33U];
+    if (imported.type_id < 1U || imported.type_id > 4U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+
+    const uint8_t flags = payload[34U];
+    const uint8_t path_len = payload[35U];
+    const uint8_t *path = &payload[36U];
+    const uint8_t *wire_name =
+        &payload[36U + D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES];
+    size_t name_len = 0U;
+    while (name_len < sizeof(imported.name) - 1U &&
+           wire_name[name_len] != '\0') {
+        name_len++;
+    }
+    if (name_len > 0U) {
+        memcpy(imported.name, wire_name, name_len);
+    } else {
+        memcpy(imported.name, imported.public_key_hex,
+               D1L_NODE_FINGERPRINT_LEN - 1U);
+    }
+
+    char uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
+    if (!d1l_contact_uri_format(&imported, uri, sizeof(uri))) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    d1l_contact_import_result_t import_result = D1L_CONTACT_IMPORT_NONE;
+    d1l_contact_entry_t contact = {0};
+    esp_err_t result = d1l_contact_store_import_uri(
+        uri, strlen(uri), &import_result, &contact);
+    memset(uri, 0, sizeof(uri));
+    if (result != ESP_OK) {
+        set_result_response(result);
+        return;
+    }
+
+    result = d1l_contact_store_rename(
+        contact.fingerprint, imported.name, &contact);
+    if (result == ESP_OK) {
+        result = d1l_contact_store_set_flags(
+            contact.fingerprint, (flags & 1U) != 0U, contact.muted,
+            &contact);
+    }
+    if (result == ESP_OK) {
+        if (path_len == D1L_BLE_PROTOCOL_OUT_PATH_UNKNOWN) {
+            result = d1l_contact_store_reset_path(
+                contact.fingerprint, &contact);
+        } else if (d1l_meshcore_wire_path_len_valid(path_len) &&
+                   d1l_meshcore_wire_path_byte_len(path_len) <=
+                       D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES) {
+            result = d1l_contact_store_update_path_from_source(
+                contact.fingerprint, path, path_len,
+                D1L_MESHCORE_PATH_SOURCE_OBSERVED, &contact);
+        } else {
+            result = ESP_ERR_INVALID_ARG;
+        }
+    }
+    memset(&imported, 0, sizeof(imported));
+    set_result_response(result);
+}
+
 static void reset_contact_path_command(const uint8_t *payload, size_t length)
 {
     if (length != 33U) {
@@ -1984,13 +2201,102 @@ static void set_path_hash_command(const uint8_t *payload, size_t length)
 
 static void set_flood_scope_command(const uint8_t *payload, size_t length)
 {
-    if (length != 2U || payload[1] > 1U) {
+    if (length < 2U || payload[1] > 1U) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
     }
 
-    /* DeskOS already sends unscoped floods, so clearing an override is true. */
-    set_result_response(ESP_OK);
+    if ((payload[1] == 0U && length == 2U) ||
+        (payload[1] == 1U && length == 2U)) {
+        /* DeskOS has no per-transport-key scope override. Clearing an override
+         * and explicitly selecting unscoped floods both match its real state. */
+        set_simple_response(RESP_CODE_OK);
+        return;
+    }
+
+    /* A keyed scope must never be acknowledged and then transmitted unscoped. */
+    set_simple_response(RESP_CODE_DISABLED);
+}
+
+static void set_other_params_command(const uint8_t *payload, size_t length)
+{
+    if (length < 2U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+
+    const uint8_t manual_add_contacts = payload[1];
+    const uint8_t telemetry_mode = length >= 3U ? payload[2] : 0U;
+    const uint8_t advert_location_policy = length >= 4U ? payload[3] : 0U;
+    const uint8_t multi_acks = length >= 5U ? payload[4] : 0U;
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    const uint8_t current_location_policy = settings.map_location_set ? 1U : 0U;
+
+    if (manual_add_contacts == 0U && telemetry_mode == 0U &&
+        advert_location_policy == current_location_policy && multi_acks == 0U) {
+        set_simple_response(RESP_CODE_OK);
+    } else {
+        set_simple_response(RESP_CODE_DISABLED);
+    }
+}
+
+static void set_tuning_params_command(const uint8_t *payload, size_t length)
+{
+    if (length < 9U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    if (read_u32_le(&payload[1]) == D1L_BLE_PROTOCOL_RX_DELAY_MILLIS &&
+        read_u32_le(&payload[5]) == D1L_BLE_PROTOCOL_AIRTIME_FACTOR_MILLIS) {
+        set_simple_response(RESP_CODE_OK);
+    } else {
+        set_simple_response(RESP_CODE_DISABLED);
+    }
+}
+
+static void build_tuning_params(void)
+{
+    uint8_t response[9] = {RESP_CODE_TUNING_PARAMS};
+    write_u32_le(&response[1], D1L_BLE_PROTOCOL_RX_DELAY_MILLIS);
+    write_u32_le(&response[5], D1L_BLE_PROTOCOL_AIRTIME_FACTOR_MILLIS);
+    (void)set_pending(response, sizeof(response));
+}
+
+static void set_autoadd_config_command(const uint8_t *payload, size_t length)
+{
+    if (length < 2U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    const uint8_t max_hops = length >= 3U ? payload[2] : 0U;
+    if (payload[1] == D1L_BLE_PROTOCOL_AUTOADD_CONFIG &&
+        max_hops == D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS) {
+        set_simple_response(RESP_CODE_OK);
+    } else {
+        set_simple_response(RESP_CODE_DISABLED);
+    }
+}
+
+static void queue_self_advert_command(const uint8_t *payload, size_t length)
+{
+    if (length > 2U || (length == 2U && payload[1] > 1U)) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    uint32_t request_id = 0U;
+    set_result_response(d1l_app_model_queue_advert(
+        length == 2U && payload[1] == 1U, &request_id));
+}
+
+static void build_autoadd_config(void)
+{
+    const uint8_t response[] = {
+        RESP_CODE_AUTOADD_CONFIG,
+        D1L_BLE_PROTOCOL_AUTOADD_CONFIG,
+        D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS,
+    };
+    (void)set_pending(response, sizeof(response));
 }
 
 static void dispatch_command(const uint8_t *payload, size_t length)
@@ -2030,11 +2336,13 @@ static void dispatch_command(const uint8_t *payload, size_t length)
         }
         return;
     case CMD_SEND_SELF_ADVERT:
-        set_result_response(d1l_app_model_request_advert(
-            length >= 2U && payload[1] == 1U));
+        queue_self_advert_command(payload, length);
         return;
     case CMD_SET_ADVERT_NAME:
         set_name_command(payload, length);
+        return;
+    case CMD_ADD_UPDATE_CONTACT:
+        add_update_contact_command(payload, length);
         return;
     case CMD_SET_ADVERT_LATLON:
         set_location_command(payload, length);
@@ -2076,6 +2384,9 @@ static void dispatch_command(const uint8_t *payload, size_t length)
     case CMD_SET_CHANNEL:
         set_channel_command(payload, length);
         return;
+    case CMD_SET_OTHER_PARAMS:
+        set_other_params_command(payload, length);
+        return;
     case CMD_REMOVE_CONTACT:
         remove_contact_command(payload, length);
         return;
@@ -2094,6 +2405,18 @@ static void dispatch_command(const uint8_t *payload, size_t length)
     case CMD_SET_RADIO_TX_POWER:
         set_tx_power_command(payload, length);
         return;
+    case CMD_SET_TUNING_PARAMS:
+        set_tuning_params_command(payload, length);
+        return;
+    case CMD_GET_CUSTOM_VARS:
+        set_simple_response(RESP_CODE_CUSTOM_VARS);
+        return;
+    case CMD_SET_CUSTOM_VAR:
+        set_simple_response(RESP_CODE_DISABLED);
+        return;
+    case CMD_GET_TUNING_PARAMS:
+        build_tuning_params();
+        return;
     case CMD_SET_PATH_HASH_MODE:
         set_path_hash_command(payload, length);
         return;
@@ -2111,10 +2434,31 @@ static void dispatch_command(const uint8_t *payload, size_t length)
     case CMD_SET_FLOOD_SCOPE_KEY:
         set_flood_scope_command(payload, length);
         return;
+    case CMD_SET_AUTOADD_CONFIG:
+        set_autoadd_config_command(payload, length);
+        return;
+    case CMD_GET_AUTOADD_CONFIG:
+        build_autoadd_config();
+        return;
+    case CMD_GET_ALLOWED_REPEAT_FREQ:
+        set_simple_response(RESP_CODE_ALLOWED_REPEAT_FREQ);
+        return;
+    case CMD_SET_DEVICE_PIN:
     case CMD_REBOOT:
     case CMD_FACTORY_RESET:
     case CMD_EXPORT_PRIVATE_KEY:
     case CMD_IMPORT_PRIVATE_KEY:
+    case CMD_SHARE_CONTACT:
+    case CMD_EXPORT_CONTACT:
+    case CMD_IMPORT_CONTACT:
+    case CMD_SEND_RAW_DATA:
+    case CMD_SIGN_START:
+    case CMD_SIGN_DATA:
+    case CMD_SIGN_FINISH:
+    case CMD_SEND_TRACE_PATH:
+    case CMD_SEND_PATH_DISCOVERY_REQ:
+    case CMD_SEND_CONTROL_DATA:
+    case CMD_SEND_ANON_REQ:
         note_unsupported();
         set_simple_response(RESP_CODE_DISABLED);
         return;
@@ -2135,7 +2479,11 @@ static void reset_session_state(void)
     clear_admin_request();
     clear_admin_cli_reply();
     clear_admin_session_authorization();
-    clear_admin_access_intent();
+    /* Keep the requested access level across a transient BLE reconnect. The
+     * remote admin session can be restored below, and forgetting that a blank
+     * password requested Guest could otherwise expose stale Admin ACL bits.
+     * An explicit login or logout still replaces or clears this intent. */
+    s_force_message_notification_check = true;
     portENTER_CRITICAL(&s_status_lock);
     s_status.client_protocol_version = 3U;
     s_status.session_count++;
@@ -2164,13 +2512,37 @@ static void maybe_queue_message_waiting(void)
     }
     const d1l_dm_store_stats_t dm = d1l_dm_store_stats();
     const d1l_message_store_stats_t messages = d1l_message_store_stats();
-    if (dm.content_revision == s_seen_dm_revision &&
+    if (!s_force_message_notification_check &&
+        dm.content_revision == s_seen_dm_revision &&
         messages.content_revision == s_seen_message_revision) {
         return;
     }
+    s_force_message_notification_check = false;
     s_seen_dm_revision = dm.content_revision;
     s_seen_message_revision = messages.content_revision;
-    set_simple_response(PUSH_CODE_MSG_WAITING);
+
+    bool unsynced = false;
+    const size_t dm_count = d1l_dm_store_copy_recent(
+        s_dms, D1L_DM_STORE_CAPACITY);
+    for (size_t index = 0U; index < dm_count && !unsynced; ++index) {
+        unsynced = s_dms[index].seq > s_last_synced_dm_seq &&
+            strcmp(s_dms[index].direction, "rx") == 0;
+    }
+    size_t message_count = 0U;
+    d1l_message_retained_snapshot_t retained = {0};
+    if (!unsynced &&
+        d1l_message_store_snapshot_retained(
+            s_messages, D1L_MESSAGE_STORE_CAPACITY, &message_count,
+            &retained) == ESP_OK) {
+        for (size_t index = 0U;
+             index < message_count && !unsynced; ++index) {
+            unsynced = s_messages[index].seq > s_last_synced_message_seq &&
+                strcmp(s_messages[index].direction, "rx") == 0;
+        }
+    }
+    if (unsynced) {
+        set_simple_response(PUSH_CODE_MSG_WAITING);
+    }
 }
 
 static void protocol_task(void *context)

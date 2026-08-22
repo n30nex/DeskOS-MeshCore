@@ -51,6 +51,12 @@ typedef struct {
     uint8_t protocol_last_command;
     uint8_t protocol_last_unsupported_command;
     uint8_t protocol_last_response_error_code;
+    uint8_t protocol_last_failed_command;
+    uint8_t protocol_last_failed_response_error_code;
+    uint8_t protocol_last_text_type;
+    uint8_t protocol_last_admin_cli_stage;
+    uint16_t protocol_last_text_length;
+    uint32_t protocol_response_error_count;
     esp_err_t last_error;
     int last_nimble_error;
     const char *state;

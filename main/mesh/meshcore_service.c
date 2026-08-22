@@ -8,6 +8,7 @@
 #include "bsp_sx126x.h"
 #include "comms/observer_manager.h"
 #include "diagnostics/event_log.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -297,7 +298,8 @@ typedef struct {
 static d1l_pending_ack_tx_t s_pending_ack_tx;
 static d1l_meshcore_ack_dedupe_t s_ack_dedupe;
 static d1l_dm_entry_t s_ack_restore_scan[D1L_DM_STORE_CAPACITY];
-static d1l_contact_entry_t s_contact_scan[D1L_CONTACT_STORE_CAPACITY];
+static d1l_contact_entry_t
+    s_contact_scan[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 
 typedef struct {
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
@@ -307,7 +309,8 @@ typedef struct {
     bool valid;
 } d1l_boot_route_t;
 
-static d1l_boot_route_t s_boot_routes[D1L_CONTACT_STORE_CAPACITY];
+static d1l_boot_route_t
+    s_boot_routes[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static uint8_t s_boot_route_next;
 static d1l_store_lock_t s_boot_route_lock = D1L_STORE_LOCK_INITIALIZER;
 
@@ -319,7 +322,8 @@ typedef struct {
     bool valid;
 } d1l_advert_path_t;
 
-static d1l_advert_path_t s_advert_paths[D1L_CONTACT_STORE_CAPACITY];
+static d1l_advert_path_t
+    s_advert_paths[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static uint8_t s_advert_path_next;
 static d1l_store_lock_t s_advert_path_lock = D1L_STORE_LOCK_INITIALIZER;
 static d1l_meshcore_path_response_expectation_t s_path_response_expectation;

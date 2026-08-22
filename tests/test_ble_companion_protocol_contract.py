@@ -33,6 +33,7 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "CMD_GET_CHANNEL",
         "CMD_GET_DEVICE_TIME",
         "CMD_SET_DEVICE_TIME",
+        "CMD_ADD_UPDATE_CONTACT",
         "CMD_SYNC_NEXT_MESSAGE",
         "CMD_RESET_PATH",
         "CMD_SEND_TXT_MSG",
@@ -45,8 +46,16 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "CMD_GET_ADVERT_PATH",
         "CMD_SEND_BINARY_REQ",
         "CMD_SET_CHANNEL",
+        "CMD_SET_OTHER_PARAMS",
+        "CMD_SET_TUNING_PARAMS",
+        "CMD_GET_CUSTOM_VARS",
+        "CMD_SET_CUSTOM_VAR",
+        "CMD_GET_TUNING_PARAMS",
         "CMD_GET_STATS",
         "CMD_SET_FLOOD_SCOPE_KEY",
+        "CMD_SET_AUTOADD_CONFIG",
+        "CMD_GET_AUTOADD_CONFIG",
+        "CMD_GET_ALLOWED_REPEAT_FREQ",
     ):
         assert f"case {command}:" in protocol
     for response in (
@@ -59,10 +68,15 @@ def test_official_initial_sync_and_messaging_commands_are_real():
         "RESP_CODE_CONTACT_MSG_RECV_V3",
         "RESP_CODE_CHANNEL_MSG_RECV_V3",
         "RESP_CODE_ADVERT_PATH",
+        "RESP_CODE_CUSTOM_VARS",
+        "RESP_CODE_TUNING_PARAMS",
         "RESP_CODE_STATS",
+        "RESP_CODE_AUTOADD_CONFIG",
+        "RESP_CODE_ALLOWED_REPEAT_FREQ",
         "PUSH_CODE_MSG_WAITING",
         "PUSH_CODE_ADVERT",
         "PUSH_CODE_NEW_ADVERT",
+        "PUSH_CODE_PATH_UPDATED",
         "PUSH_CODE_CONTACT_DELETED",
         "PUSH_CODE_LOGIN_SUCCESS",
         "PUSH_CODE_LOGIN_FAIL",
@@ -119,24 +133,33 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
     auth_target = protocol.split(
         "static bool authenticated_admin_target", 1
     )[1].split("static bool capture_pending_admin_request", 1)[0]
-    assert "admin_session_matches(out_contact)" in auth_target
+    assert "admin_session_matches_or_restore(out_contact)" in auth_target
 
     reset = protocol.split("static void reset_session_state", 1)[1].split(
         "static uint32_t last_existing_seq", 1
     )[0]
     assert "clear_admin_session_authorization();" in reset
-    assert "clear_admin_access_intent();" in reset
+    assert "clear_admin_access_intent();" not in reset
+    assert "Keep the requested access level across a transient BLE reconnect" in reset
+    assert "clear_admin_access_intent();" in login
 
     connection = protocol.split(
         "static void has_connection_command", 1
     )[1].split("static void logout_command", 1)[0]
-    assert "!s_admin_session_authorized" in connection
-    assert "admin_session_matches(&contact)" in connection
+    assert "admin_state_active(s_admin_snapshot.state)" in connection
+    assert "admin_session_matches_or_restore(&contact)" in connection
 
     access_list = protocol.split("case BINARY_REQ_ACCESS_LIST:", 1)[1].split(
         "case BINARY_REQ_NEIGHBOURS:", 1
     )[0]
     assert "admin_guest_session_matches" in access_list
+
+    guest_session = protocol.split(
+        "static bool admin_guest_session_matches", 1
+    )[1].split("static void clear_admin_request", 1)[0]
+    assert "s_admin_guest_requested" in guest_session
+    assert "s_admin_guest_fingerprint" in guest_session
+    assert "D1L_MESHCORE_ADMIN_PERMISSION_GUEST" in guest_session
 
     cli = protocol.split("static void send_admin_cli_command", 1)[1].split(
         "static void send_dm_command", 1
@@ -147,13 +170,10 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
     assert cli.index("while (text_len > 0U") < cli.index(
         "memchr(&payload[13], '\\0', text_len)"
     )
-    assert 'strcmp(command, "clock sync") == 0' in cli
-    assert "d1l_time_service_status(&time_status);" in cli
-    assert "!time_status.display_time_valid" in cli
+    assert 'strcmp(command, "clock sync")' in cli
     assert '"time %lu"' in cli
-    assert cli.index('strcmp(command, "clock sync") == 0') < cli.index(
-        "d1l_meshcore_service_admin_request_cli(command, true)"
-    )
+    assert "anti-replay packet sequence may intentionally be ahead" in cli
+    assert "d1l_meshcore_service_admin_request_cli(command, true)" in cli
 
     assert "D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES 251U" in dispatch_h
     assert "uint16_t query_wire_len;" in dispatch_h
@@ -201,7 +221,7 @@ def test_recent_advert_paths_are_available_to_the_phone_without_persistence():
     assert "case CMD_GET_ADVERT_PATH:" in protocol
 
     assert "d1l_meshcore_advert_path_snapshot_t" in service_h
-    assert "static d1l_advert_path_t s_advert_paths" in service
+    assert "s_advert_paths[D1L_CONTACT_STORE_CAPACITY] EXT_RAM_BSS_ATTR" in service
     assert "remember_advert_path(pub_prefix, received_epoch, packet.path" in service
     remember = service.split("static void remember_advert_path", 1)[1].split(
         "bool d1l_meshcore_service_advert_path_snapshot", 1
@@ -209,6 +229,37 @@ def test_recent_advert_paths_are_available_to_the_phone_without_persistence():
     assert "(path_len > 0U && !path)" in remember
     assert "if (path_bytes > 0U)" in remember
     assert "clear_advert_paths();" in service
+
+
+def test_phone_contact_updates_use_the_official_wire_shape_and_notify_paths():
+    protocol = read("main/comms/ble_companion_protocol.c")
+
+    update = protocol.split(
+        "static void add_update_contact_command", 1
+    )[1].split("static void reset_contact_path_command", 1)[0]
+    assert "1U + 32U + 3U +" in update
+    assert "D1L_BLE_PROTOCOL_CONTACT_PATH_BYTES + 32U + 4U" in update
+    assert "imported.type_id = payload[33U]" in update
+    assert "const uint8_t flags = payload[34U]" in update
+    assert "const uint8_t path_len = payload[35U]" in update
+    assert "const uint8_t *path = &payload[36U]" in update
+    assert "d1l_contact_store_import_uri(" in update
+    assert "d1l_contact_store_rename(" in update
+    assert "d1l_contact_store_set_flags(" in update
+    assert "d1l_contact_store_reset_path(" in update
+    assert "d1l_contact_store_update_path_from_source(" in update
+    assert "case CMD_ADD_UPDATE_CONTACT:" in protocol
+
+    changes = protocol.split(
+        "static void maybe_queue_contact_change", 1
+    )[1].split("static void build_self_info", 1)[0]
+    assert "PUSH_CODE_PATH_UPDATED" in changes
+    assert "PUSH_CODE_ADVERT" in changes
+    new_contact = changes.split("if (previous_index < 0)", 1)[1].split(
+        "d1l_contact_entry_t *previous", 1
+    )[0]
+    assert "PUSH_CODE_NEW_ADVERT" in new_contact
+    assert "build_contact_response" in new_contact
 
 
 def test_admin_and_phone_commands_preempt_bulk_contact_sync():
@@ -223,7 +274,7 @@ def test_admin_and_phone_commands_preempt_bulk_contact_sync():
     assert admin < receive < contacts
 
 
-def test_reconnect_preserves_message_watermarks_without_replaying_history():
+def test_reconnect_preserves_watermarks_and_rechecks_unsynced_messages():
     protocol = read("main/comms/ble_companion_protocol.c")
     reset = protocol.split("static void reset_session_state", 1)[1].split(
         "static uint32_t last_existing_seq", 1
@@ -237,13 +288,40 @@ def test_reconnect_preserves_message_watermarks_without_replaying_history():
 
     assert "s_last_synced_dm_seq" not in reset
     assert "s_last_synced_message_seq" not in reset
-    assert "s_seen_dm_revision" not in reset
-    assert "s_seen_message_revision" not in reset
+    assert "s_force_message_notification_check = true" in reset
     assert "last_existing_seq(dm.next_seq)" in initialize
     assert "last_existing_seq(messages.next_seq)" in initialize
     assert worker.index("initialize_message_sync_watermarks();") < worker.index(
         "reset_session_state();"
     )
+
+
+def test_phone_message_sync_covers_all_channels_and_keeps_real_timestamps():
+    protocol = read("main/comms/ble_companion_protocol.c")
+    sync = protocol.split(
+        "static bool build_next_channel_message", 1
+    )[1].split("static void build_next_message", 1)[0]
+    waiting = protocol.split(
+        "static void maybe_queue_message_waiting", 1
+    )[1].split("static void protocol_task", 1)[0]
+
+    assert "d1l_message_store_snapshot_retained(" in sync
+    assert "d1l_message_store_copy_recent(" not in sync
+    assert "d1l_message_entry_display_timestamp(entry)" in sync
+    assert '"%s: %s"' in sync
+    assert "d1l_message_store_snapshot_retained(" in waiting
+    assert "s_force_message_notification_check" in waiting
+
+
+def test_phone_advert_uses_the_nonblocking_radio_owner_queue():
+    protocol = read("main/comms/ble_companion_protocol.c")
+    advert = protocol.split(
+        "static void queue_self_advert_command", 1
+    )[1].split("static void dispatch_command", 1)[0]
+
+    assert "d1l_app_model_queue_advert(" in advert
+    assert "payload[1] > 1U" in advert
+    assert "queue_self_advert_command(payload, length);" in protocol
 
 
 def test_current_phone_stats_and_multibyte_paths_follow_official_wire_shape():
@@ -273,9 +351,11 @@ def test_current_phone_stats_and_multibyte_paths_follow_official_wire_shape():
     flood_scope = protocol.split(
         "static void set_flood_scope_command", 1
     )[1].split("static void dispatch_command", 1)[0]
-    assert "length != 2U" in flood_scope
+    assert "length < 2U" in flood_scope
     assert "payload[1] > 1U" in flood_scope
-    assert "set_result_response(ESP_OK)" in flood_scope
+    assert "payload[1] == 0U && length == 2U" in flood_scope
+    assert "payload[1] == 1U && length == 2U" in flood_scope
+    assert "RESP_CODE_DISABLED" in flood_scope
     assert "case CMD_SET_FLOOD_SCOPE_KEY:" in protocol
 
     transport = read("main/comms/ble_companion.c")
@@ -303,6 +383,38 @@ def test_phone_startup_uses_protocol_owned_storage_and_official_contact_count():
     assert "write_u32_le(&response[1], s_contact_count);" in contacts
     assert "filtered_count" not in contacts
 
+    self_info = protocol.split("static void build_self_info(void)", 1)[1].split(
+        "static void build_device_info", 1
+    )[0]
+    assert "D1L_BLE_PROTOCOL_SELF_ADV_TYPE 1U" in protocol
+    assert "D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS 0U" in protocol
+    assert (
+        self_info.index("D1L_BLE_PROTOCOL_SELF_ADV_TYPE")
+        < self_info.index("settings.identity_public_key")
+        < self_info.index("D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS")
+        < self_info.index("settings.frequency_hz")
+    )
+    assert "Every verified signed advert is retained as a contact" in self_info
+
+
+def test_v10_phone_settings_are_truthful_and_bounded():
+    protocol = read("main/comms/ble_companion_protocol.c")
+
+    assert "D1L_BLE_PROTOCOL_AUTOADD_CONFIG 0x1EU" in protocol
+    assert "D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS 0U" in protocol
+    assert "static void set_other_params_command" in protocol
+    assert "static void set_tuning_params_command" in protocol
+    assert "static void build_tuning_params" in protocol
+    assert "static void set_autoadd_config_command" in protocol
+    assert "static void build_autoadd_config" in protocol
+    assert "case CMD_SET_DEVICE_PIN:" in protocol
+    assert "case CMD_SET_TUNING_PARAMS:" in protocol
+
+    disabled = protocol.split("case CMD_SET_DEVICE_PIN:", 1)[1].split(
+        "default:", 1
+    )[0]
+    assert "RESP_CODE_DISABLED" in disabled
+
 
 def test_phone_contacts_use_lastmod_and_live_official_pushes():
     protocol = read("main/comms/ble_companion_protocol.c")
@@ -327,8 +439,8 @@ def test_phone_contacts_use_lastmod_and_live_official_pushes():
         "static void maybe_queue_contact_change", 1
     )[1].split("static void build_self_info", 1)[0]
     assert "PUSH_CODE_CONTACT_DELETED" in live_sync
-    assert "PUSH_CODE_NEW_ADVERT" in live_sync
     assert "PUSH_CODE_ADVERT" in live_sync
+    assert "PUSH_CODE_PATH_UPDATED" in live_sync
     assert "previous->seq == current->seq" in live_sync
     assert "maybe_queue_contact_change();" in protocol
 

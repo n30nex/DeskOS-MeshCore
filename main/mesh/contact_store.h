@@ -9,7 +9,7 @@
 #include "mesh/meshcore_path_state.h"
 #include "mesh/node_store.h"
 
-#define D1L_CONTACT_STORE_CAPACITY 16U
+#define D1L_CONTACT_STORE_CAPACITY 64U
 #define D1L_CONTACT_ALIAS_LEN 32U
 #define D1L_CONTACT_OUT_PATH_MAX 64U
 #define D1L_CONTACT_EXPORT_URI_LEN 224U

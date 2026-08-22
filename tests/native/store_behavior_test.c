@@ -86,6 +86,8 @@ static size_t native_store_copy_blob(const char *namespace_name,
 #define mock_nvs_seed_blob native_store_seed_blob
 #define mock_nvs_copy_blob native_store_copy_blob
 
+#define LEGACY_CONTACT_STORE_CAPACITY 16U
+
 static void mock_node_sd_fail_next_write(esp_err_t error)
 {
     d1l_test_retained_blob_store_fail_next_sd_write(
@@ -162,7 +164,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    contact_entry_v3_t entries[D1L_CONTACT_STORE_CAPACITY];
+    contact_entry_v3_t entries[LEGACY_CONTACT_STORE_CAPACITY];
 } contact_blob_v3_t;
 
 typedef struct {
@@ -192,7 +194,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    contact_entry_v4_t entries[D1L_CONTACT_STORE_CAPACITY];
+    contact_entry_v4_t entries[LEGACY_CONTACT_STORE_CAPACITY];
 } contact_blob_v4_t;
 
 typedef struct {
@@ -226,7 +228,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    contact_entry_v5_t entries[D1L_CONTACT_STORE_CAPACITY];
+    contact_entry_v5_t entries[LEGACY_CONTACT_STORE_CAPACITY];
 } contact_blob_v5_t;
 
 typedef struct {
@@ -260,7 +262,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    contact_entry_v6_t entries[D1L_CONTACT_STORE_CAPACITY];
+    contact_entry_v6_t entries[LEGACY_CONTACT_STORE_CAPACITY];
 } contact_blob_v6_t;
 
 typedef struct {
@@ -269,8 +271,17 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
+    d1l_contact_entry_t entries[LEGACY_CONTACT_STORE_CAPACITY];
+} contact_blob_v7_legacy_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
     d1l_contact_entry_t entries[D1L_CONTACT_STORE_CAPACITY];
-} contact_blob_v7_t;
+} contact_blob_v8_t;
 
 _Static_assert(sizeof(node_entry_v3_t) == 148U,
                "native node v3 fixture no longer matches production migration layout");
@@ -298,7 +309,7 @@ static void mock_contact_sd_set_enabled(bool enabled)
     }
 }
 
-static void mock_contact_sd_replace_blob(const contact_blob_v7_t *blob)
+static void mock_contact_sd_replace_blob(const contact_blob_v8_t *blob)
 {
     assert(blob != NULL);
     s_contact_sd_generation++;
@@ -309,9 +320,9 @@ static void mock_contact_sd_replace_blob(const contact_blob_v7_t *blob)
         s_contact_sd_generation);
 }
 
-static contact_blob_v7_t mock_contact_sd_current_blob(void)
+static contact_blob_v8_t mock_contact_sd_current_blob(void)
 {
-    contact_blob_v7_t blob = {0};
+    contact_blob_v8_t blob = {0};
     assert(d1l_test_retained_blob_store_copy_sd(
                D1L_RETAINED_BLOB_STORE_CONTACTS, CONTACT_KEY, &blob,
                sizeof(blob)) == sizeof(blob));
@@ -336,7 +347,7 @@ static bool mock_contact_sd_is_empty(void)
                D1L_RETAINED_BLOB_STORE_CONTACTS, CONTACT_KEY, NULL, 0U) == 0U;
 }
 
-static size_t contact_blob_index(const contact_blob_v7_t *blob,
+static size_t contact_blob_index(const contact_blob_v8_t *blob,
                                  const char *fingerprint)
 {
     assert(blob != NULL);
@@ -518,7 +529,7 @@ static void test_node_v3_to_v4_migration(void)
     assert(strcmp(node.type, "unknown") == 0);
 }
 
-static void test_contact_v3_to_v7_migration(void)
+static void test_contact_v3_to_v8_migration(void)
 {
     mock_nvs_reset();
     contact_blob_v3_t legacy = {0};
@@ -560,17 +571,17 @@ static void test_contact_v3_to_v7_migration(void)
            ESP_ERR_INVALID_STATE);
     assert(uri[0] == '\0');
 
-    contact_blob_v7_t current = {0};
+    contact_blob_v8_t current = {0};
     assert(mock_nvs_copy_blob(CONTACT_NAMESPACE, CONTACT_KEY, &current,
                               sizeof(current)) == sizeof(current));
-    assert(current.schema == 7U);
+    assert(current.schema == 8U);
     assert(current.count == 2U);
     assert(d1l_contact_store_init() == ESP_OK);
     assert(d1l_contact_store_find_by_fingerprint("4444444444444444", &contact));
     assert(strcmp(contact.type, "repeater") == 0);
 }
 
-static void test_contact_v4_to_v7_migration_is_truthful(void)
+static void test_contact_v4_to_v8_migration_is_truthful(void)
 {
     mock_nvs_reset();
     contact_blob_v4_t legacy = {0};
@@ -613,14 +624,14 @@ static void test_contact_v4_to_v7_migration_is_truthful(void)
     assert(!d1l_contact_store_is_canonical(&contact));
     assert(!d1l_contact_store_can_dm(&contact));
 
-    contact_blob_v7_t current = {0};
+    contact_blob_v8_t current = {0};
     assert(mock_nvs_copy_blob(CONTACT_NAMESPACE, CONTACT_KEY, &current,
                               sizeof(current)) == sizeof(current));
-    assert(current.schema == 7U);
+    assert(current.schema == 8U);
     assert(current.count == 2U);
 }
 
-static void test_contact_v5_to_v7_migration_preserves_provenance(void)
+static void test_contact_v5_to_v8_migration_preserves_provenance(void)
 {
     mock_nvs_reset();
     contact_blob_v5_t legacy = {0};
@@ -676,16 +687,16 @@ static void test_contact_v5_to_v7_migration_preserves_provenance(void)
     assert(contact.out_path_state.source == D1L_MESHCORE_PATH_SOURCE_MIGRATED);
     assert(d1l_contact_store_can_dm(&contact));
 
-    contact_blob_v7_t current = {0};
+    contact_blob_v8_t current = {0};
     assert(mock_nvs_copy_blob(CONTACT_NAMESPACE, CONTACT_KEY, &current,
                               sizeof(current)) == sizeof(current));
-    assert(current.schema == 7U);
+    assert(current.schema == 8U);
     assert(current.next_seq == 18U);
     assert(current.total_written == 13U);
     assert(current.dropped_oldest == 2U);
 }
 
-static void test_contact_v6_to_v7_migration_creates_preboot_path_record(void)
+static void test_contact_v6_to_v8_migration_creates_preboot_path_record(void)
 {
     mock_nvs_reset();
     contact_blob_v6_t legacy = {0};
@@ -718,10 +729,72 @@ static void test_contact_v6_to_v7_migration_creates_preboot_path_record(void)
     assert(contact.out_path_state.learned_at_ms == 150U);
     assert(contact.out_path_state.generation == 1U);
 
-    contact_blob_v7_t current = {0};
+    contact_blob_v8_t current = {0};
     assert(mock_nvs_copy_blob(CONTACT_NAMESPACE, CONTACT_KEY, &current,
                               sizeof(current)) == sizeof(current));
-    assert(current.schema == 7U);
+    assert(current.schema == 8U);
+}
+
+static void test_contact_v7_to_v8_migration_preserves_all_records(void)
+{
+    mock_nvs_reset();
+    contact_blob_v7_legacy_t legacy = {0};
+    legacy.schema = 7U;
+    legacy.next_seq = 19U;
+    legacy.total_written = 41U;
+    legacy.dropped_oldest = 3U;
+    legacy.count = 2U;
+
+    char first_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char second_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    make_public_key(first_key, 0x71U);
+    make_public_key(second_key, 0x72U);
+    d1l_contact_entry_t *first = &legacy.entries[0];
+    d1l_contact_entry_t *second = &legacy.entries[1];
+    first->seq = 17U;
+    first->created_ms = 100U;
+    first->updated_ms = 200U;
+    fingerprint_from_key(first->fingerprint, first_key);
+    copy_field(first->public_key_hex, sizeof(first->public_key_hex), first_key);
+    copy_field(first->alias, sizeof(first->alias), "First retained");
+    copy_field(first->heard_name, sizeof(first->heard_name), "First retained");
+    copy_field(first->type, sizeof(first->type), "repeater");
+    first->favorite = true;
+    first->verification_source = D1L_CONTACT_VERIFICATION_SIGNED_ADVERT;
+    d1l_meshcore_path_state_reset(&first->out_path_state);
+
+    *second = *first;
+    second->seq = 18U;
+    fingerprint_from_key(second->fingerprint, second_key);
+    copy_field(second->public_key_hex, sizeof(second->public_key_hex),
+               second_key);
+    copy_field(second->alias, sizeof(second->alias), "Second retained");
+    copy_field(second->heard_name, sizeof(second->heard_name),
+               "Second retained");
+    second->favorite = false;
+    assert(mock_nvs_seed_blob(CONTACT_NAMESPACE, CONTACT_KEY, &legacy,
+                              sizeof(legacy)));
+
+    assert(d1l_contact_store_init() == ESP_OK);
+    const d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    assert(stats.capacity == D1L_CONTACT_STORE_CAPACITY);
+    assert(stats.count == 2U);
+    assert(stats.next_seq == 19U);
+    assert(stats.total_written == 41U);
+    assert(stats.dropped_oldest == 3U);
+    d1l_contact_entry_t migrated = {0};
+    assert(d1l_contact_store_find_by_public_key(first_key, &migrated));
+    assert(strcmp(migrated.alias, "First retained") == 0);
+    assert(migrated.favorite);
+    assert(d1l_contact_store_find_by_public_key(second_key, &migrated));
+    assert(strcmp(migrated.alias, "Second retained") == 0);
+
+    contact_blob_v8_t current = {0};
+    assert(mock_nvs_copy_blob(CONTACT_NAMESPACE, CONTACT_KEY, &current,
+                              sizeof(current)) == sizeof(current));
+    assert(current.schema == 8U);
+    assert(current.count == 2U);
+    assert(current.entries[2].public_key_hex[0] == '\0');
 }
 
 static void test_canonical_path_lifecycle_is_atomic_and_retained(void)
@@ -749,7 +822,7 @@ static void test_canonical_path_lifecycle_is_atomic_and_retained(void)
            1000U + D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS);
     d1l_contact_store_stats_t path_stats = d1l_contact_store_stats();
     assert(path_stats.persistence_dirty);
-    contact_blob_v7_t persisted_before_flush = {0};
+    contact_blob_v8_t persisted_before_flush = {0};
     assert(mock_nvs_copy_blob(
         CONTACT_NAMESPACE, CONTACT_KEY, &persisted_before_flush,
         sizeof(persisted_before_flush)) == sizeof(persisted_before_flush));
@@ -914,7 +987,7 @@ static void test_forced_path_flush_rejects_prewrite_revision_change(void)
     assert(d1l_contact_store_find_by_fingerprint(fingerprint, &in_ram));
     assert(memcmp(&in_ram, &s_path_flush_race_expected, sizeof(in_ram)) == 0);
 
-    contact_blob_v7_t stale = {0};
+    contact_blob_v8_t stale = {0};
     assert(mock_nvs_copy_blob(
         CONTACT_NAMESPACE, CONTACT_KEY, &stale, sizeof(stale)) == sizeof(stale));
     assert(stale.entries[0].out_path_state.lifecycle ==
@@ -949,7 +1022,7 @@ static void test_forced_path_flush_rejects_during_write_revision_change(void)
     assert(stats.persistence_fail_count == before.persistence_fail_count + 1U);
     assert(stats.persistence_last_error == ESP_ERR_INVALID_STATE);
 
-    contact_blob_v7_t stale = {0};
+    contact_blob_v8_t stale = {0};
     assert(mock_nvs_copy_blob(
         CONTACT_NAMESPACE, CONTACT_KEY, &stale, sizeof(stale)) == sizeof(stale));
     assert(stale.entries[0].out_path_state.lifecycle ==
@@ -982,7 +1055,7 @@ static void test_contact_persistence_revision_saturates_fail_closed(void)
     const d1l_contact_store_stats_t max_stats = d1l_contact_store_stats();
     assert(max_stats.persistence_revision == UINT32_MAX);
     assert(strcmp(at_max.alias, "last-valid-mutation") == 0);
-    contact_blob_v7_t durable_at_max = {0};
+    contact_blob_v8_t durable_at_max = {0};
     assert(mock_nvs_copy_blob(
                CONTACT_NAMESPACE, CONTACT_KEY, &durable_at_max,
                sizeof(durable_at_max)) == sizeof(durable_at_max));
@@ -999,7 +1072,7 @@ static void test_contact_persistence_revision_saturates_fail_closed(void)
     assert(after.total_written == max_stats.total_written);
     assert(after.persistence_commit_count == max_stats.persistence_commit_count);
     assert(!after.persistence_dirty);
-    contact_blob_v7_t durable_after_reject = {0};
+    contact_blob_v8_t durable_after_reject = {0};
     assert(mock_nvs_copy_blob(
                CONTACT_NAMESPACE, CONTACT_KEY, &durable_after_reject,
                sizeof(durable_after_reject)) == sizeof(durable_after_reject));
@@ -1020,7 +1093,7 @@ static void test_contact_next_sequence_exhaustion_preserves_ram_and_nvs(void)
     assert(d1l_contact_store_upsert_from_node(
                fingerprint, "sequence-boundary", NULL) == ESP_OK);
 
-    contact_blob_v7_t exhausted = {0};
+    contact_blob_v8_t exhausted = {0};
     assert(mock_nvs_copy_blob(
                CONTACT_NAMESPACE, CONTACT_KEY, &exhausted,
                sizeof(exhausted)) == sizeof(exhausted));
@@ -1033,7 +1106,7 @@ static void test_contact_next_sequence_exhaustion_preserves_ram_and_nvs(void)
     assert(d1l_contact_store_find_by_fingerprint(fingerprint, &before));
     const d1l_contact_store_stats_t stats_before = d1l_contact_store_stats();
     assert(stats_before.next_seq == UINT32_MAX);
-    contact_blob_v7_t nvs_before = {0};
+    contact_blob_v8_t nvs_before = {0};
     assert(mock_nvs_copy_blob(
                CONTACT_NAMESPACE, CONTACT_KEY, &nvs_before,
                sizeof(nvs_before)) == sizeof(nvs_before));
@@ -1058,7 +1131,7 @@ static void test_contact_next_sequence_exhaustion_preserves_ram_and_nvs(void)
            stats_before.persistence_commit_count);
     assert(stats_after.persistence_fail_count == stats_before.persistence_fail_count);
     assert(!stats_after.persistence_dirty);
-    contact_blob_v7_t nvs_after = {0};
+    contact_blob_v8_t nvs_after = {0};
     assert(mock_nvs_copy_blob(
                CONTACT_NAMESPACE, CONTACT_KEY, &nvs_after,
                sizeof(nvs_after)) == sizeof(nvs_after));
@@ -1067,7 +1140,7 @@ static void test_contact_next_sequence_exhaustion_preserves_ram_and_nvs(void)
 
 static void assert_contact_blob_preserved(const void *expected, size_t length)
 {
-    uint8_t actual[sizeof(contact_blob_v7_t) + 32U] = {0};
+    uint8_t actual[sizeof(contact_blob_v8_t) + 32U] = {0};
     assert(expected != NULL);
     assert(length <= sizeof(actual));
     assert(mock_nvs_copy_blob(CONTACT_NAMESPACE, CONTACT_KEY, actual,
@@ -1078,8 +1151,8 @@ static void assert_contact_blob_preserved(const void *expected, size_t length)
 static void test_current_path_record_corruption_is_preserved_fail_closed(void)
 {
     mock_nvs_reset();
-    contact_blob_v7_t corrupt = {0};
-    corrupt.schema = 7U;
+    contact_blob_v8_t corrupt = {0};
+    corrupt.schema = 8U;
     corrupt.next_seq = 2U;
     corrupt.total_written = 1U;
     corrupt.count = 1U;
@@ -1101,8 +1174,8 @@ static void test_current_path_record_corruption_is_preserved_fail_closed(void)
 static void test_same_size_future_contact_schema_is_preserved_fail_closed(void)
 {
     mock_nvs_reset();
-    contact_blob_v7_t future = {0};
-    future.schema = 8U;
+    contact_blob_v8_t future = {0};
+    future.schema = 9U;
     future.next_seq = 1U;
     assert(mock_nvs_seed_blob(CONTACT_NAMESPACE, CONTACT_KEY, &future,
                               sizeof(future)));
@@ -1115,9 +1188,9 @@ static void test_same_size_future_contact_schema_is_preserved_fail_closed(void)
 static void test_oversized_future_contact_schema_is_preserved_fail_closed(void)
 {
     mock_nvs_reset();
-    uint8_t future[sizeof(contact_blob_v7_t) + 16U];
+    uint8_t future[sizeof(contact_blob_v8_t) + 16U];
     memset(future, 0x5a, sizeof(future));
-    const uint32_t schema = 8U;
+    const uint32_t schema = 9U;
     memcpy(future, &schema, sizeof(schema));
     assert(mock_nvs_seed_blob(CONTACT_NAMESPACE, CONTACT_KEY, future,
                               sizeof(future)));
@@ -1796,7 +1869,7 @@ static void test_d1l_accepted_contact_failure_hash_not_remembered(void)
 
     char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
     char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
-    make_public_key(key, 0x90U);
+    make_public_key(key, 0xF0U);
     fingerprint_from_key(fingerprint, key);
     const d1l_meshcore_advert_admission_receipt_t failed =
         admit_verified_advert(fingerprint, key, "No Space", 800U, false, 0, 0);
@@ -2444,7 +2517,7 @@ static void test_contact_clean_generation_drift_adopts_sd_without_write(void)
     assert(d1l_contact_store_upsert_from_node(
                fingerprint, "Before card change", NULL) == ESP_OK);
 
-    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    contact_blob_v8_t replacement = mock_contact_sd_current_blob();
     const size_t index = contact_blob_index(&replacement, fingerprint);
     copy_field(replacement.entries[index].alias,
                sizeof(replacement.entries[index].alias), "From new card");
@@ -2476,7 +2549,7 @@ static void test_contact_generation_fence_rejects_mid_read_change(void)
     assert(d1l_contact_store_upsert_from_node(
                fingerprint, "Before fenced read", NULL) == ESP_OK);
 
-    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    contact_blob_v8_t replacement = mock_contact_sd_current_blob();
     const size_t index = contact_blob_index(&replacement, fingerprint);
     copy_field(replacement.entries[index].alias,
                sizeof(replacement.entries[index].alias), "After fenced read");
@@ -2521,7 +2594,7 @@ static void test_contact_ambiguous_write_error_rereads_committed_sd(void)
     d1l_contact_entry_t contact = {0};
     assert(d1l_contact_store_find_by_fingerprint(fingerprint, &contact));
     assert(strcmp(contact.alias, "Before ambiguous write") == 0);
-    const contact_blob_v7_t committed = mock_contact_sd_current_blob();
+    const contact_blob_v8_t committed = mock_contact_sd_current_blob();
     assert(strcmp(committed.entries[
                       contact_blob_index(&committed, fingerprint)].alias,
                   "Committed on card") == 0);
@@ -2550,7 +2623,7 @@ static void test_contact_local_touch_merges_with_current_sd(void)
                fingerprint_a, "A original", NULL) == ESP_OK);
     assert(d1l_contact_store_upsert_from_node(
                fingerprint_b, "B original", NULL) == ESP_OK);
-    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    contact_blob_v8_t replacement = mock_contact_sd_current_blob();
     const size_t index_a = contact_blob_index(&replacement, fingerprint_a);
     const size_t index_b = contact_blob_index(&replacement, fingerprint_b);
     copy_field(replacement.entries[index_a].alias,
@@ -2573,7 +2646,7 @@ static void test_contact_local_touch_merges_with_current_sd(void)
     assert(strcmp(contact.alias, "A local") == 0);
     assert(d1l_contact_store_find_by_fingerprint(fingerprint_b, &contact));
     assert(strcmp(contact.alias, "B card") == 0);
-    const contact_blob_v7_t merged = mock_contact_sd_current_blob();
+    const contact_blob_v8_t merged = mock_contact_sd_current_blob();
     assert(strcmp(merged.entries[contact_blob_index(&merged, fingerprint_a)].alias,
                   "A local") == 0);
     assert(strcmp(merged.entries[contact_blob_index(&merged, fingerprint_b)].alias,
@@ -2594,7 +2667,7 @@ static void test_contact_delete_tombstone_does_not_resurrect_from_sd(void)
                deleted_fingerprint, "Delete me", NULL) == ESP_OK);
     assert(d1l_contact_store_upsert_from_node(
                retained_fingerprint, "B original", NULL) == ESP_OK);
-    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    contact_blob_v8_t replacement = mock_contact_sd_current_blob();
     const size_t retained_index =
         contact_blob_index(&replacement, retained_fingerprint);
     copy_field(replacement.entries[retained_index].alias,
@@ -2612,7 +2685,7 @@ static void test_contact_delete_tombstone_does_not_resurrect_from_sd(void)
     assert(d1l_contact_store_find_by_fingerprint(
         retained_fingerprint, &retained));
     assert(strcmp(retained.alias, "B card") == 0);
-    const contact_blob_v7_t merged = mock_contact_sd_current_blob();
+    const contact_blob_v8_t merged = mock_contact_sd_current_blob();
     assert(merged.count == 1U);
     assert(strcmp(merged.entries[0].fingerprint, retained_fingerprint) == 0);
 }
@@ -2624,7 +2697,7 @@ static void test_contact_explicit_clear_does_not_resurrect_replacement_sd(void)
     assert(d1l_contact_store_init() == ESP_OK);
     assert(d1l_contact_store_upsert_from_node(
                fingerprint, "Old card contact", NULL) == ESP_OK);
-    contact_blob_v7_t replacement = mock_contact_sd_current_blob();
+    contact_blob_v8_t replacement = mock_contact_sd_current_blob();
     const size_t index = contact_blob_index(&replacement, fingerprint);
     copy_field(replacement.entries[index].alias,
                sizeof(replacement.entries[index].alias),
@@ -2672,10 +2745,11 @@ static void test_contact_clear_then_add_persists(void)
 int main(void)
 {
     test_node_v3_to_v4_migration();
-    test_contact_v3_to_v7_migration();
-    test_contact_v4_to_v7_migration_is_truthful();
-    test_contact_v5_to_v7_migration_preserves_provenance();
-    test_contact_v6_to_v7_migration_creates_preboot_path_record();
+    test_contact_v3_to_v8_migration();
+    test_contact_v4_to_v8_migration_is_truthful();
+    test_contact_v5_to_v8_migration_preserves_provenance();
+    test_contact_v6_to_v8_migration_creates_preboot_path_record();
+    test_contact_v7_to_v8_migration_preserves_all_records();
     test_canonical_path_lifecycle_is_atomic_and_retained();
     test_forced_path_flush_rejects_prewrite_revision_change();
     test_forced_path_flush_rejects_during_write_revision_change();

@@ -10,6 +10,7 @@
 
 #define D1L_ADMIN_CREDENTIAL_MAGIC UINT32_C(0x41445057)
 #define D1L_ADMIN_CREDENTIAL_VERSION UINT32_C(1)
+#define D1L_ADMIN_CREDENTIAL_CAPACITY 16U
 
 typedef struct {
     bool valid;
@@ -22,7 +23,7 @@ typedef struct {
     uint32_t magic;
     uint32_t version;
     uint32_t next_use;
-    d1l_admin_credential_record_t records[D1L_CONTACT_STORE_CAPACITY];
+    d1l_admin_credential_record_t records[D1L_ADMIN_CREDENTIAL_CAPACITY];
 } d1l_admin_credential_blob_t;
 
 static d1l_store_lock_t s_lock = D1L_STORE_LOCK_INITIALIZER;
@@ -89,7 +90,7 @@ static esp_err_t blob_load(nvs_handle_t handle,
         secure_zero(blob, sizeof(*blob));
         return ESP_ERR_INVALID_STATE;
     }
-    for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
+    for (size_t i = 0U; i < D1L_ADMIN_CREDENTIAL_CAPACITY; ++i) {
         const d1l_admin_credential_record_t *record = &blob->records[i];
         if (record->valid &&
             (!fingerprint_valid(record->fingerprint) ||
@@ -113,7 +114,7 @@ static esp_err_t blob_commit(nvs_handle_t handle,
 static int record_index(const d1l_admin_credential_blob_t *blob,
                         const char *fingerprint)
 {
-    for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
+    for (size_t i = 0U; i < D1L_ADMIN_CREDENTIAL_CAPACITY; ++i) {
         if (blob->records[i].valid &&
             strcmp(blob->records[i].fingerprint, fingerprint) == 0) {
             return (int)i;
@@ -125,7 +126,7 @@ static int record_index(const d1l_admin_credential_blob_t *blob,
 static size_t replacement_index(const d1l_admin_credential_blob_t *blob)
 {
     size_t oldest = 0U;
-    for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
+    for (size_t i = 0U; i < D1L_ADMIN_CREDENTIAL_CAPACITY; ++i) {
         if (!blob->records[i].valid) {
             return i;
         }
@@ -212,11 +213,11 @@ esp_err_t d1l_admin_credential_store_save(
         memcpy(record->password, password, password_len + 1U);
         record->last_used = blob.next_use++;
         if (blob.next_use == 0U) {
-            for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
+            for (size_t i = 0U; i < D1L_ADMIN_CREDENTIAL_CAPACITY; ++i) {
                 blob.records[i].last_used = blob.records[i].valid ?
                     (uint32_t)(i + 1U) : 0U;
             }
-            blob.next_use = D1L_CONTACT_STORE_CAPACITY + 1U;
+            blob.next_use = D1L_ADMIN_CREDENTIAL_CAPACITY + 1U;
         }
         ret = blob_commit(handle, &blob);
     }
@@ -256,4 +257,3 @@ esp_err_t d1l_admin_credential_store_forget(const char *fingerprint)
     d1l_store_lock_give(&s_lock);
     return ret;
 }
-

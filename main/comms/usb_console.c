@@ -8901,7 +8901,13 @@ static void print_ble_status_result(const char *command)
            "\"protocol_malformed\":%lu,"
            "\"protocol_last_command\":%u,"
            "\"protocol_last_unsupported_command\":%u,"
-           "\"protocol_last_response_error_code\":%u}\n",
+           "\"protocol_last_response_error_code\":%u,"
+           "\"protocol_last_failed_command\":%u,"
+           "\"protocol_last_failed_response_error_code\":%u,"
+           "\"protocol_response_errors\":%lu,"
+           "\"protocol_last_text_type\":%u,"
+           "\"protocol_last_text_length\":%u,"
+           "\"protocol_last_admin_cli_stage\":%u}\n",
            bool_json(available),
            bool_json(
                available && status.ble_companion_enabled_setting),
@@ -8932,7 +8938,13 @@ static void print_ble_status_result(const char *command)
            (unsigned long)ble.protocol_malformed_count,
            ble.protocol_last_command,
            ble.protocol_last_unsupported_command,
-           ble.protocol_last_response_error_code);
+           ble.protocol_last_response_error_code,
+           ble.protocol_last_failed_command,
+           ble.protocol_last_failed_response_error_code,
+           (unsigned long)ble.protocol_response_error_count,
+           ble.protocol_last_text_type,
+           ble.protocol_last_text_length,
+           ble.protocol_last_admin_cli_stage);
 }
 
 static void cmd_ble_status(void)

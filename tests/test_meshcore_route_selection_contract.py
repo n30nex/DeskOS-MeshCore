@@ -150,7 +150,8 @@ def test_direct_results_mutate_retained_path_only_in_runtime_owner():
     )[0]
 
     assert "d1l_meshcore_path_state_t out_path_state" in contact_header
-    assert "D1L_CONTACT_STORE_SCHEMA 7U" in contact_source
+    assert "D1L_CONTACT_STORE_SCHEMA 8U" in contact_source
+    assert "D1L_CONTACT_STORE_SCHEMA_V7 7U" in contact_source
     assert "D1L_CONTACT_STORE_SCHEMA_V6 6U" in contact_source
     assert "migrate_v6_blob" in contact_source
     assert "finalize_migrated_path_state" in contact_source

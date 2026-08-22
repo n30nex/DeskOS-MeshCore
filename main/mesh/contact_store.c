@@ -20,7 +20,9 @@
 #define D1L_CONTACT_STORE_SCHEMA_V4 4U
 #define D1L_CONTACT_STORE_SCHEMA_V5 5U
 #define D1L_CONTACT_STORE_SCHEMA_V6 6U
-#define D1L_CONTACT_STORE_SCHEMA 7U
+#define D1L_CONTACT_STORE_SCHEMA_V7 7U
+#define D1L_CONTACT_STORE_SCHEMA 8U
+#define D1L_CONTACT_STORE_LEGACY_CAPACITY 16U
 
 typedef struct {
     uint32_t seq;
@@ -44,7 +46,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    d1l_contact_entry_v1_t entries[D1L_CONTACT_STORE_CAPACITY];
+    d1l_contact_entry_v1_t entries[D1L_CONTACT_STORE_LEGACY_CAPACITY];
 } d1l_contact_store_blob_v1_t;
 
 typedef struct {
@@ -70,7 +72,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    d1l_contact_entry_v2_t entries[D1L_CONTACT_STORE_CAPACITY];
+    d1l_contact_entry_v2_t entries[D1L_CONTACT_STORE_LEGACY_CAPACITY];
 } d1l_contact_store_blob_v2_t;
 
 /* Schema v3 predates canonical advert roles and the 9-byte repeater string. */
@@ -101,7 +103,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    d1l_contact_entry_v3_t entries[D1L_CONTACT_STORE_CAPACITY];
+    d1l_contact_entry_v3_t entries[D1L_CONTACT_STORE_LEGACY_CAPACITY];
 } d1l_contact_store_blob_v3_t;
 
 /* Schema v4 is the last layout before explicit identity provenance. */
@@ -132,7 +134,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    d1l_contact_entry_v4_t entries[D1L_CONTACT_STORE_CAPACITY];
+    d1l_contact_entry_v4_t entries[D1L_CONTACT_STORE_LEGACY_CAPACITY];
 } d1l_contact_store_blob_v4_t;
 
 /* Schema v5 is the frozen provenance layout with a 23-byte name capacity. */
@@ -167,7 +169,7 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    d1l_contact_entry_v5_t entries[D1L_CONTACT_STORE_CAPACITY];
+    d1l_contact_entry_v5_t entries[D1L_CONTACT_STORE_LEGACY_CAPACITY];
 } d1l_contact_store_blob_v5_t;
 
 /* Schema v6 is the last layout before canonical retained path lifecycle. */
@@ -202,8 +204,17 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    d1l_contact_entry_v6_t entries[D1L_CONTACT_STORE_CAPACITY];
+    d1l_contact_entry_v6_t entries[D1L_CONTACT_STORE_LEGACY_CAPACITY];
 } d1l_contact_store_blob_v6_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_contact_entry_t entries[D1L_CONTACT_STORE_LEGACY_CAPACITY];
+} d1l_contact_store_blob_v7_t;
 
 _Static_assert(sizeof(d1l_contact_entry_v1_t) == 100U,
                "contact schema v1 layout changed");
@@ -219,6 +230,9 @@ _Static_assert(sizeof(d1l_contact_entry_v6_t) == 256U,
                 "contact schema v6 layout changed");
 _Static_assert(sizeof(d1l_contact_entry_t) == 280U,
                 "contact schema v7 layout changed");
+_Static_assert(D1L_CONTACT_STORE_LEGACY_CAPACITY <
+                   D1L_CONTACT_STORE_CAPACITY,
+               "contact schema v8 must expand retained capacity");
 _Static_assert(offsetof(d1l_contact_entry_v1_t, last_rssi_dbm) == 88U,
                "contact schema v1 type offset changed");
 _Static_assert(offsetof(d1l_contact_entry_v2_t, last_rssi_dbm) == 152U,
@@ -946,7 +960,7 @@ static bool blob_v1_is_valid(const d1l_contact_store_blob_v1_t *blob, size_t len
 {
     return blob && len == sizeof(*blob) &&
            blob->schema == D1L_CONTACT_STORE_SCHEMA_V1 &&
-           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->count <= D1L_CONTACT_STORE_LEGACY_CAPACITY &&
            blob->next_seq > 0;
 }
 
@@ -954,7 +968,7 @@ static bool blob_v2_is_valid(const d1l_contact_store_blob_v2_t *blob, size_t len
 {
     return blob && len == sizeof(*blob) &&
            blob->schema == D1L_CONTACT_STORE_SCHEMA_V2 &&
-           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->count <= D1L_CONTACT_STORE_LEGACY_CAPACITY &&
            blob->next_seq > 0;
 }
 
@@ -962,7 +976,7 @@ static bool blob_v3_is_valid(const d1l_contact_store_blob_v3_t *blob, size_t len
 {
     return blob && len == sizeof(*blob) &&
            blob->schema == D1L_CONTACT_STORE_SCHEMA_V3 &&
-           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->count <= D1L_CONTACT_STORE_LEGACY_CAPACITY &&
            blob->next_seq > 0;
 }
 
@@ -970,7 +984,7 @@ static bool blob_v4_is_valid(const d1l_contact_store_blob_v4_t *blob, size_t len
 {
     return blob && len == sizeof(*blob) &&
            blob->schema == D1L_CONTACT_STORE_SCHEMA_V4 &&
-           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->count <= D1L_CONTACT_STORE_LEGACY_CAPACITY &&
            blob->next_seq > 0;
 }
 
@@ -978,7 +992,7 @@ static bool blob_v5_is_valid(const d1l_contact_store_blob_v5_t *blob, size_t len
 {
     return blob && len == sizeof(*blob) &&
            blob->schema == D1L_CONTACT_STORE_SCHEMA_V5 &&
-           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->count <= D1L_CONTACT_STORE_LEGACY_CAPACITY &&
            blob->next_seq > 0;
 }
 
@@ -986,8 +1000,25 @@ static bool blob_v6_is_valid(const d1l_contact_store_blob_v6_t *blob, size_t len
 {
     return blob && len == sizeof(*blob) &&
            blob->schema == D1L_CONTACT_STORE_SCHEMA_V6 &&
-           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->count <= D1L_CONTACT_STORE_LEGACY_CAPACITY &&
            blob->next_seq > 0;
+}
+
+static bool blob_v7_is_valid(const d1l_contact_store_blob_v7_t *blob,
+                             size_t len)
+{
+    if (!blob || len != sizeof(*blob) ||
+        blob->schema != D1L_CONTACT_STORE_SCHEMA_V7 ||
+        blob->count > D1L_CONTACT_STORE_LEGACY_CAPACITY ||
+        blob->next_seq == 0U) {
+        return false;
+    }
+    for (size_t i = 0U; i < blob->count; ++i) {
+        if (!retained_path_record_is_valid(&blob->entries[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
@@ -1163,6 +1194,17 @@ static void migrate_v6_blob(const d1l_contact_store_blob_v6_t *old_blob)
         memcpy(&s_entries[i], &old_blob->entries[i],
                sizeof(old_blob->entries[i]));
     }
+}
+
+static void migrate_v7_blob(const d1l_contact_store_blob_v7_t *old_blob)
+{
+    clear_ram();
+    s_count = old_blob->count;
+    s_next_seq = old_blob->next_seq;
+    s_total_written = old_blob->total_written;
+    s_dropped_oldest = old_blob->dropped_oldest;
+    memcpy(s_entries, old_blob->entries,
+           s_count * sizeof(old_blob->entries[0]));
 }
 
 static void finalize_migrated_path_state(void)
@@ -1392,6 +1434,7 @@ esp_err_t d1l_contact_store_init(void)
     reset_persistence_state(backend.generation);
     s_loaded = false;
     bool migrated = false;
+    bool migrated_path_layout = false;
     bool loaded_from_legacy = false;
     bool loaded_from_sd = false;
 
@@ -1421,30 +1464,42 @@ esp_err_t d1l_contact_store_init(void)
         s_next_seq = s_blob_scratch.next_seq;
         s_total_written = s_blob_scratch.total_written;
         s_dropped_oldest = s_blob_scratch.dropped_oldest;
+    } else if (ret == ESP_OK && blob_v7_is_valid(
+                   (const d1l_contact_store_blob_v7_t *)&s_blob_scratch,
+                   len)) {
+        migrate_v7_blob(
+            (const d1l_contact_store_blob_v7_t *)&s_blob_scratch);
+        migrated = true;
     } else if (ret == ESP_OK &&
                blob_v6_is_valid((const d1l_contact_store_blob_v6_t *)&s_blob_scratch, len)) {
         migrate_v6_blob((const d1l_contact_store_blob_v6_t *)&s_blob_scratch);
         migrated = true;
+        migrated_path_layout = true;
     } else if (ret == ESP_OK &&
                blob_v5_is_valid((const d1l_contact_store_blob_v5_t *)&s_blob_scratch, len)) {
         migrate_v5_blob((const d1l_contact_store_blob_v5_t *)&s_blob_scratch);
         migrated = true;
+        migrated_path_layout = true;
     } else if (ret == ESP_OK &&
                blob_v4_is_valid((const d1l_contact_store_blob_v4_t *)&s_blob_scratch, len)) {
         migrate_v4_blob((const d1l_contact_store_blob_v4_t *)&s_blob_scratch);
         migrated = true;
+        migrated_path_layout = true;
     } else if (ret == ESP_OK &&
                blob_v3_is_valid((const d1l_contact_store_blob_v3_t *)&s_blob_scratch, len)) {
         migrate_v3_blob((const d1l_contact_store_blob_v3_t *)&s_blob_scratch);
         migrated = true;
+        migrated_path_layout = true;
     } else if (ret == ESP_OK &&
                blob_v1_is_valid((const d1l_contact_store_blob_v1_t *)&s_blob_scratch, len)) {
         migrate_v1_blob((const d1l_contact_store_blob_v1_t *)&s_blob_scratch);
         migrated = true;
+        migrated_path_layout = true;
     } else if (ret == ESP_OK &&
                blob_v2_is_valid((const d1l_contact_store_blob_v2_t *)&s_blob_scratch, len)) {
         migrate_v2_blob((const d1l_contact_store_blob_v2_t *)&s_blob_scratch);
         migrated = true;
+        migrated_path_layout = true;
     } else if (ret == ESP_OK) {
         /* A retained contact blob is user data.  An unrecognised schema or a
          * corrupt record must never be converted into an empty, committed
@@ -1455,7 +1510,7 @@ esp_err_t d1l_contact_store_init(void)
         ret = s_blob_scratch.schema > D1L_CONTACT_STORE_SCHEMA ?
                   ESP_ERR_NOT_SUPPORTED : ESP_ERR_INVALID_STATE;
     }
-    if (ret == ESP_OK && migrated) {
+    if (ret == ESP_OK && migrated_path_layout) {
         finalize_migrated_path_state();
     }
     d1l_retained_blob_store_backend_state_t settled_backend = {0};

@@ -39,19 +39,32 @@ D1L.
   state unchanged.
 - Blank-password repeater login from the phone now remains Guest even when the
   D1L identity already has an admin ACL entry. Guest sessions can read status,
-  telemetry, and neighbours but cannot use ACL or command controls.
+  telemetry, and neighbours but cannot use ACL or command controls. That Guest
+  intent is retained across a brief Bluetooth reconnect, so restoring the
+  active repeater session cannot silently promote it to Admin.
 - Recent verified advert routes are kept in a bounded boot-only cache and
   returned through the official companion command, removing the remaining
   contact-detail protocol error without adding flash writes.
-- Direct adverts return a valid zero-hop route, and each new Bluetooth
-  connection must establish its own repeater-management session instead of
-  inheriting stale Guest or Admin state from a previous connection.
+- The contact store now retains up to 64 nodes. Existing 16-slot data migrates
+  in place, and newly heard repeaters are pushed to the phone as complete new
+  contacts instead of unusable update-only notifications.
+- Pending-message sync now includes every configured hashtag channel, keeps
+  the received wall-clock timestamp and sender name, and re-announces unread
+  traffic after a Bluetooth reconnect without replaying old history.
+- Phone-requested nearby and flood adverts use the same nonblocking radio-owner
+  queue as the top button, avoiding false timeout errors while earlier radio
+  traffic finishes.
+- Direct adverts return a valid zero-hop route. Active repeater-management
+  sessions recover across a brief phone reconnect with the same access level;
+  an explicit login or logout replaces or clears that session.
 - Repeater command buttons accept phone line endings and fixed-field padding,
   so Clock Sync, Advert, and other admin actions reach the authenticated radio
   session instead of failing local validation.
 - Clock Sync uses DeskOS's validated wall clock rather than its independent
   anti-replay counter, preventing an incorrect future repeater clock while
   retaining replay-safe packet tags.
+- Advanced companion commands that DeskOS cannot safely perform now report
+  **Disabled** instead of the phone app's ambiguous generic **Error**.
 
 ## Preserved
 

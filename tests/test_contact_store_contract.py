@@ -55,12 +55,14 @@ def test_contact_store_is_bounded_and_sd_first():
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
     sdkconfig_defaults = read("sdkconfig.defaults")
-    assert "D1L_CONTACT_STORE_CAPACITY 16U" in header
+    assert "D1L_CONTACT_STORE_CAPACITY 64U" in header
     assert "D1L_CONTACT_ALIAS_LEN 32U" in header
     assert "D1L_CONTACT_OUT_PATH_MAX 64U" in header
     assert "public_key_hex" in header
     assert "out_path_valid" in header
-    assert "D1L_CONTACT_STORE_SCHEMA 7U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA 8U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA_V7 7U" in source
+    assert "D1L_CONTACT_STORE_LEGACY_CAPACITY 16U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V6 6U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V5 5U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V4 4U" in source
@@ -70,6 +72,7 @@ def test_contact_store_is_bounded_and_sd_first():
     assert "d1l_contact_store_blob_v4_t" in source
     assert "d1l_contact_store_blob_v5_t" in source
     assert "d1l_contact_store_blob_v6_t" in source
+    assert "d1l_contact_store_blob_v7_t" in source
     assert "d1l_contact_store_blob_v2_t" in source
     assert "d1l_contact_store_blob_v1_t" in source
     assert "migrate_v1_blob" in source
@@ -78,6 +81,7 @@ def test_contact_store_is_bounded_and_sd_first():
     assert "migrate_v4_blob" in source
     assert "migrate_v5_blob" in source
     assert "migrate_v6_blob" in source
+    assert "migrate_v7_blob" in source
     assert "migrate_legacy_advert_type" in source
     assert "contact schema v1 layout changed" in source
     assert "contact schema v2 layout changed" in source

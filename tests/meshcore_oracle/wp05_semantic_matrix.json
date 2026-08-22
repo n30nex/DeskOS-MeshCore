@@ -495,8 +495,8 @@
     "main/mesh/dm_delivery_state.h": "d27b3666f03d27e74cb30efb2e77c47bd50f0273d7991e29315e55d5a2fd4185",
     "main/mesh/meshcore_admin_dispatch.c": "52f1c0adfff03a0b5972a2d9e3d671d2acc851880791645c915b24ffce206597",
     "main/mesh/meshcore_admin_dispatch.h": "afccb81e8e17ac446062e197dbd7f857916dbf284ea73fb192a9ab67973c6675",
-    "main/mesh/contact_store.c": "7e98b9b462092d474f055fc090e32bf42d8428556e09b3d67eb01a6e098fc3dc",
-    "main/mesh/contact_store.h": "b2d708ebf0871a4684555dfd134d2026ed21a2bbcd3b8f03936d655d9553d3ed",
+    "main/mesh/contact_store.c": "47e1eeda5fc1d7bfbdfe41c10ef03ef4d556cf35c2ec06f6c133a778e5d65263",
+    "main/mesh/contact_store.h": "49213ca66ff795091f35470c003af85feb1d514d8bb88e6c336dd6599fbe322f",
     "main/mesh/contact_uri.c": "a65175e4a07023adc2777a0504a2c83f5d409fdc4bd497cbddd4a4868f51fc8b",
     "main/mesh/contact_uri.h": "1a06f9d47c284f1c9990f71357434e3b5446a516331e37447ef1e3d7676662ef",
     "main/mesh/meshcore_advert_admission.c": "dc026a50d6283b0442fe7a046a3f606062385ec98c73d664e367629c065c1174",
@@ -532,7 +532,7 @@
     "main/storage/map_tile_store.h": "6be24bbf0af09711f7fd877b51518fb267c4007ea82f9067bc60e2cceea2d992",
     "main/storage/retained_blob_store.h": "e7da30658e4490adec17daede16088b9748b02d9ff34edc204d4faca512c5498",
     "main/storage/storage_status.h": "ee8b6ab5afabaef050a26d816ac32c06f1ebf0877836dd057bdf222e2f4fe4fd",
-    "tests/native/esp_nvs_stubs.c": "a101adfcb640eeffe32d039a9ad4a8ae775a959eabd45d05d53ce75a2a1375ec",
+    "tests/native/esp_nvs_stubs.c": "32b85b2c09f1f7ae3788fd5765250fbcf594857b03c37be90a225e6fc582970a",
     "tests/native/retained_blob_store_nvs_adapter.c": "1a81213df9d83d91d6bf7d5f0c84da59ff4e240e3b08668c0bdc77be1959bb58",
     "tests/native/mbedtls_md_stub.c": "db5f82347ce2e70303a71a7b8dc0cae4c7de237e3a353605845763f6e61bda52",
     "tests/native/meshcore_admin_dispatch_test.c": "cdab5d363ac319158bb6a09bbbd04cd024e89f2c51f1102e17b199fe057d121e",
@@ -555,6 +555,6 @@
     "tests/native/stubs/nvs.h": "ded0795263a44587b01dfb5b9cd664a1baa40fd460e27dd79ee50c902ccc32e0",
     "tests/native/stubs/sys/time.h": "251d586ea591ff51aa9d51e6843deadd6c578b5591658df50eb5121c9e6b39c7",
     "tests/native/time_service_checkpoint_integration_test.c": "2de100718160702b5ab54f5d8ca0f3d802e8b89f3d16756185be1b0f82f0ad41",
-    "tests/native/store_behavior_test.c": "013437d09110e929f96d1cfb1b154ca43cb12f976eef756b3177d63c8843a014"
+    "tests/native/store_behavior_test.c": "0beea323358204c6240013b59967cc0b502a280506b3cf758839b34a00cb85c4"
   }
 }
