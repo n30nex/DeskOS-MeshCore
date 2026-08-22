@@ -338,11 +338,27 @@ def test_admin_login_floods_and_neighbours_resolve_saved_contact_names():
     )[1].split(
         "static esp_err_t meshcore_service_handle_admin_status(", 1
     )[0]
-    assert login.index("prepare_admin_route(") < login.index(
-        "d1l_meshcore_route_select("
-    ) < login.index("d1l_meshcore_admin_build_login_packet(")
-    assert "false, false, NULL, 0U, 0U, now_ms" in login
-    assert "d1l_meshcore_admin_route_valid(&selection)" in login
+    assert login.index("prepare_admin_flood_route(") < login.index(
+        "d1l_meshcore_admin_build_login_packet("
+    )
+    assert "now_ms, &contact," in login
+
+    route = service.split("static esp_err_t prepare_admin_flood_route(", 2)[2].split(
+        "esp_err_t d1l_meshcore_service_admin_login", 1
+    )[0]
+    assert "false, false, NULL, 0U, 0U, now_ms" in route
+    assert "d1l_meshcore_admin_route_valid(&selection)" in route
+    for handler in (
+        "meshcore_service_handle_admin_login",
+        "meshcore_service_handle_admin_request_status",
+        "meshcore_service_handle_admin_query",
+        "meshcore_service_handle_admin_mutation",
+        "meshcore_service_handle_admin_cli",
+    ):
+        body = service.split(f"static esp_err_t {handler}", 1)[1].split(
+            "static esp_err_t", 1
+        )[0]
+        assert "prepare_admin_flood_route(" in body
 
     assert "d1l_meshcore_admin_neighbour_t" in dispatch_h
     parser = dispatch.split("static bool parse_neighbours_query(", 1)[1].split(

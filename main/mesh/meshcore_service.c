@@ -448,7 +448,7 @@ static void fail_pending_dm_ack_timeout(esp_err_t error);
 static void record_pending_direct_path_result(bool success);
 static bool finalize_pending_dm_ack_completion(void);
 static void secure_zero_bytes(void *data, size_t size);
-static esp_err_t prepare_admin_route(
+static esp_err_t prepare_admin_flood_route(
     const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
     d1l_contact_entry_t *out_contact,
     d1l_meshcore_route_selection_t *out_selection);
@@ -6614,19 +6614,10 @@ static esp_err_t meshcore_service_handle_admin_login(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(cmd->admin_fingerprint, &settings_snapshot,
-                              now_ms, &contact, &selection);
+    ret = prepare_admin_flood_route(
+        cmd->admin_fingerprint, &settings_snapshot, now_ms, &contact,
+        &selection);
     if (ret != ESP_OK) {
-        goto admin_login_cleanup;
-    }
-    /* Login is the recovery path for servers beyond direct RF range. Always
-     * flood the handshake; authenticated follow-up commands may use the
-     * learned canonical route once the session is open. */
-    if (!d1l_meshcore_route_select(
-            false, false, NULL, 0U, 0U, now_ms,
-            settings_snapshot.path_hash_bytes, &selection) ||
-        !d1l_meshcore_admin_route_valid(&selection)) {
-        ret = ESP_ERR_INVALID_STATE;
         goto admin_login_cleanup;
     }
 
@@ -6695,9 +6686,9 @@ static esp_err_t meshcore_service_handle_admin_request_status(void)
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
+    ret = prepare_admin_flood_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms,
+        &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
              context.binding.fingerprint);
     if (ret == ESP_OK) {
@@ -6793,9 +6784,9 @@ static esp_err_t meshcore_service_handle_admin_query(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
+    ret = prepare_admin_flood_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms,
+        &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
              context.binding.fingerprint);
     if (ret == ESP_OK) {
@@ -6891,9 +6882,9 @@ static esp_err_t meshcore_service_handle_admin_mutation(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
+    ret = prepare_admin_flood_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms,
+        &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
              context.binding.fingerprint);
     if (ret == ESP_OK) {
@@ -7013,9 +7004,9 @@ static esp_err_t meshcore_service_handle_admin_cli(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
+    ret = prepare_admin_flood_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms,
+        &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
              context.binding.fingerprint);
     if (ret == ESP_OK) {
@@ -8242,7 +8233,7 @@ void d1l_meshcore_service_admin_snapshot(
     d1l_meshcore_admin_runtime_snapshot(out_snapshot);
 }
 
-static esp_err_t prepare_admin_route(
+static esp_err_t prepare_admin_flood_route(
     const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
     d1l_contact_entry_t *out_contact,
     d1l_meshcore_route_selection_t *out_selection)
@@ -8258,14 +8249,12 @@ static esp_err_t prepare_admin_route(
     if (ret != ESP_OK || !d1l_contact_store_can_admin(&contact)) {
         return ret != ESP_OK ? ret : ESP_ERR_INVALID_STATE;
     }
-    const bool learned_this_boot = contact.out_path_valid &&
-        lookup_boot_route(contact.fingerprint, contact.out_path,
-                          contact.out_path_len,
-                          contact.out_path_state.generation);
     d1l_meshcore_route_selection_t selection = {0};
-    if (!d1l_meshcore_route_select_canonical(
-            contact.out_path_valid, learned_this_boot, contact.out_path,
-            contact.out_path_len, &contact.out_path_state, now_ms,
+    /* Remote management is sparse and user initiated. Flooding avoids
+     * promoting a reverse path learned from the login reply before that path
+     * has ever carried an outbound command successfully. */
+    if (!d1l_meshcore_route_select(
+            false, false, NULL, 0U, 0U, now_ms,
             settings->path_hash_bytes, &selection) ||
         !d1l_meshcore_admin_route_valid(&selection)) {
         return ESP_ERR_INVALID_STATE;

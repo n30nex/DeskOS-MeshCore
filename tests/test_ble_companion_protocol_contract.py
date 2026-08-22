@@ -119,6 +119,21 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
     assert "s_pending_payload[offset++] = 1U" in protocol
     assert "maybe_queue_admin_response();" in protocol
     assert "s_admin_snapshot.last_completed_tag == s_admin_request_tag" in protocol
+    assert "static bool join_pending_admin_request" in protocol
+    assert protocol.count("join_pending_admin_request(") == 4
+    status = protocol.split("static void begin_admin_status_command", 1)[1].split(
+        "static void send_status_command", 1
+    )[0]
+    assert status.index("join_pending_admin_request(") < status.index(
+        "d1l_meshcore_service_admin_request_status()"
+    )
+    assert "set_admin_sent_response(true, s_admin_request_tag);" in status
+    query = protocol.split("static void begin_admin_query_command", 1)[1].split(
+        "static void send_telemetry_command", 1
+    )[0]
+    assert "s_admin_snapshot.pending_query == query" in query
+    assert "s_admin_snapshot.pending_query_offset == offset" in query
+    assert "set_admin_sent_response(true, s_admin_request_tag);" in query
 
     login_push = protocol.split("static void build_admin_login_push", 1)[1].split(
         "static size_t append_admin_status", 1
