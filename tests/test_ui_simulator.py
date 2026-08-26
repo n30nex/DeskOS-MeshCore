@@ -331,7 +331,7 @@ def test_nodes_role_summary_uses_exact_render_query_roles(tmp_path):
         ]
         assert len(destructive_targets) == metrics["nodes_destructive_actions"], scenario
         if destructive_targets:
-            assert destructive_targets[0]["label"] == "Clear", scenario
+            assert destructive_targets[0]["label"] == "Clear nearby", scenario
 
 
 def test_node_role_counts_reject_noncanonical_case_spacing_and_aliases() -> None:
@@ -481,10 +481,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert ui_simulator.DOCKED_VIEWS == expected_docked_views
 
     assert {
-        "Messages",
-        "Nodes",
+        "Channels",
+        "Contacts",
         "Map",
-        "Tools",
+        "Settings",
         "Mesh",
         "Wi-Fi",
         "BLE",
@@ -531,7 +531,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {
         "Contacts",
         "Find",
-        "Clear",
+        "Clear nearby",
         "Search contacts",
         "Sort: Recent",
         "Saved contacts",
@@ -1157,7 +1157,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         {
             "view": "nodes",
             "action": "clear_heard",
-            "label": "Clear",
+            "label": "Clear nearby",
             "destination": None,
         },
         {

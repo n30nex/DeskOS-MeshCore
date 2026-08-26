@@ -910,7 +910,7 @@ static const char *admin_failure_message(d1l_meshcore_admin_state_t state)
         return "The management session ended. Sign in again.";
     case D1L_MESHCORE_ADMIN_IDLE:
     default:
-        return "Enter the password used by this server.";
+        return "Use Admin with a password, or Guest without one.";
     }
 }
 
@@ -936,23 +936,26 @@ static bool render_admin_compact_header(
     d1l_ui_service_sheets_controller_t *controller, lv_obj_t *sheet,
     const char *title_text, bool show_back)
 {
+    bool complete = true;
+    if (show_back) {
+        complete = create_button(
+            controller, sheet, "Back", 0, 0, 76, 44,
+            BINDING_ADMIN_SHOW_HUB,
+            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB) != NULL;
+    }
     lv_obj_t *title = create_label(sheet, title_text, 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        position_dot(title, 8, 4, show_back ? 226 : 290);
+        position_dot(title, show_back ? 88 : 8, 4,
+                     show_back ? 320 : 290);
     }
-    bool complete = title != NULL;
-    if (show_back) {
+    complete = title != NULL && complete;
+    if (!show_back) {
         complete = create_button(
-            controller, sheet, "Back", 254, 0, 76, 44,
-            BINDING_ADMIN_SHOW_HUB,
-            D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB) != NULL && complete;
+            controller, sheet, "Close", 340, 0, 76, 44,
+            BINDING_CLOSE_ADMIN,
+            D1L_UI_SERVICE_ACTION_CLOSE_ADMIN) != NULL && complete;
     }
-    complete = create_button(
-        controller, sheet, "Close", 340, 0, 76, 44,
-        BINDING_CLOSE_ADMIN,
-        show_back ? D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB :
-                    D1L_UI_SERVICE_ACTION_CLOSE_ADMIN) != NULL && complete;
     return complete;
 }
 
@@ -1089,7 +1092,7 @@ static bool render_admin_pending(
     }
     complete = timeout && complete;
     complete = create_button(
-        controller, sheet, "Cancel", 132, 254, 160, 44,
+        controller, sheet, "Cancel & sign out", 112, 254, 200, 44,
         BINDING_ADMIN_LOGOUT,
         D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT) != NULL && complete;
     return complete;
@@ -1303,7 +1306,7 @@ static bool render_admin_hub_compact(
     position_dot(session_label, 8, admin_session ? 270 : 232, 286);
     complete = session_label && complete;
     complete = create_button(
-        controller, sheet, "Logout", 304, 254, 112, 44,
+        controller, sheet, "Sign out", 304, 254, 112, 44,
         BINDING_ADMIN_LOGOUT,
         D1L_UI_SERVICE_ACTION_ADMIN_LOGOUT) != NULL && complete;
     return complete;
@@ -1333,7 +1336,10 @@ static bool render_admin_status_compact(
     const char *feedback, bool feedback_error)
 {
     bool complete = render_admin_compact_header(
-        controller, sheet, "Server status", true);
+        controller, sheet,
+        status->role == D1L_MESHCORE_ADMIN_ROLE_ROOM ?
+            "Room status" : "Repeater status",
+        true);
     if (!status->status_valid) {
         lv_obj_t *empty = create_label(
             sheet, "No current status has been received yet.", 0xFBBF24);
@@ -1362,8 +1368,8 @@ static bool render_admin_status_compact(
                  (unsigned long)status->status.tx_air_time_seconds,
                  (unsigned long)status->status.rx_air_time_seconds);
         char errors[24];
-        snprintf(errors, sizeof(errors), "0x%04x",
-                 (unsigned)status->status.error_flags);
+        snprintf(errors, sizeof(errors), "%s",
+                 status->status.error_flags ? "Attention" : "None");
         complete = render_admin_metric(
             sheet, "RSSI / SNR", signal, 8, 52, 0x20D9ED) && complete;
         complete = render_admin_metric(
@@ -1377,15 +1383,16 @@ static bool render_admin_status_compact(
             sheet, "TX / RX airtime", airtime, 144, 120, 0x20D9ED) &&
             complete;
         complete = render_admin_metric(
-            sheet, "Error flags", errors, 280, 120,
+            sheet, "Errors", errors, 280, 120,
             status->status.error_flags ? 0xF87171 : 0x84FF2E) && complete;
         char detail[160];
         snprintf(detail, sizeof(detail),
-                 "Noise %d dBm  |  duplicates %u direct, %u flood  |  voltage %u mV",
+                 "Noise %d dBm  |  duplicates %u direct, %u flood  |  power %u.%02u V",
                  (int)status->status.noise_floor_dbm,
                  (unsigned)status->status.direct_duplicates,
                  (unsigned)status->status.flood_duplicates,
-                 (unsigned)status->status.battery_millivolts);
+                 (unsigned)(status->status.battery_millivolts / 1000U),
+                 (unsigned)((status->status.battery_millivolts % 1000U) / 10U));
         lv_obj_t *detail_label = create_label(sheet, detail, 0xA6B0B7);
         position_dot(detail_label, 8, 194, 408);
         complete = detail_label && complete;

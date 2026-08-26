@@ -67,6 +67,14 @@ D1L.
   retaining replay-safe packet tags.
 - Advanced companion commands that DeskOS cannot safely perform now report
   **Disabled** instead of the phone app's ambiguous generic **Error**.
+- Home destination cards now use the same **Channels**, **Contacts**, **Map**,
+  and **Settings** names as the dock, with immediate pressed-state feedback.
+- Contacts labels its destructive boot-local action **Clear nearby**, making it
+  clear that saved contacts are not removed.
+- Repeater and room management now gives nested pages one familiar **Back**
+  action instead of duplicate Back/Close choices. Login explicitly separates
+  **Admin** and **Guest**, request cancellation states that it signs out, and
+  status uses plain-language error and power values.
 
 ## Preserved
 

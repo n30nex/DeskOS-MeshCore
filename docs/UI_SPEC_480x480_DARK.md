@@ -25,8 +25,9 @@ available in development builds, not in customer firmware:
 - Home keeps its compact status treatment. Every non-Home destination owns a
   compact mobile-style app bar, so the old global diagnostic header does not
   consume chat, list, settings, or map space.
-- Home remains the quiet dashboard. The persistent 48 px bottom dock is
-  `Home`, `Channels`, `Contacts`, `Map`, and `Settings`.
+- Home remains the quiet dashboard. Its four destination cards use the same
+  `Channels`, `Contacts`, `Map`, and `Settings` names as the persistent 48 px
+  bottom dock, so opening a card never appears to change terminology.
 - Channels is list-first: Public, #bot, and #test are ordinary channel rows with
   selection and unread state, while Direct opens direct conversations. Opening
   a channel shows message bubbles and a composer affordance routed through the
@@ -35,9 +36,15 @@ available in development builds, not in customer firmware:
 - Message Detail and DM Thread are full-screen nested pages with one Back
   control, a scrolling body, and a sticky Reply action. Long Public text sizes
   before Technical details; opening a DM thread marks it read.
-- Contacts mirrors the mobile client hierarchy: Find and Clear actions, Saved
-  and Nearby sections, compact role-aware rows, and a direct Message action
-  only for compatible contacts. Duplicate nearby entries are suppressed.
+- Contacts mirrors the mobile client hierarchy: Find and explicit Clear nearby
+  actions, Saved and Nearby sections, compact role-aware rows, and a direct
+  Message action only for compatible contacts. Duplicate nearby entries are
+  suppressed.
+- Repeater and room administration uses an explicit Admin-or-Guest login,
+  visible working state, and one Back control on each nested result or command
+  page. Cancelling a pending request says that it also signs out. Status uses
+  plain-language error and power values; raw protocol state stays in advanced
+  diagnostics.
 - Map is the actual current-view surface, not a setup dashboard. The map canvas fills the complete content region above the dock; there is no global diagnostic header or redundant map-local title row. OpenStreetMap Standard is dark-styled locally after decode, preserving the single built-in source/cache and attribution while giving bright signed-advert node markers and their names below them strong contrast. Marker refresh is a bounded lightweight overlay and does not rebuild tiles: it reads at most the 32 newest located nodes, displays at most eight, keeps its non-clickable marker/name layer aligned with the tile image during drag, and skips a marker when its required below-marker name would collide with an earlier marker, a control, progress/status copy, or attribution. A viewport-level 44 px hit area opens existing Contact Detail by retained fingerprint; the detail row says `Shared location`, and closing it reacquires the unchanged retained Map view. Its sparse edge overlays provide one-finger pan, direct 48x48-or-larger `-`, `+`, and `Center` controls, one `Options` setup action, an unobtrusive zoom/status badge, and the always-visible ASCII attribution `(c) OpenStreetMap contributors`. It starts at regional zoom 10, clamps user zoom to the runtime range 8 through 18 subject to provider limits, and `Center` returns to the saved manual location. D1L has no onboard GPS; peer coordinates are labelled `Shared location`, never live GPS. If the SD file gate is still preparing, the uncluttered overlay says `Waiting for SD` and the same physically opened generation resumes automatically when ready. While a bounded plan is active, the drag hint becomes a compact `Loading n/N` or `Downloading n/N` label above a thin completed-tile progress bar rather than leaving a static spinner/message with no progress feedback. The open Map requests only its visible 3x3 tile window; separately authorized background prefetch may run only while Map is closed and its saved provider, location, Wi-Fi, and SD prerequisites are ready.
 - Contact Detail uses the full-height nested-page pattern. A canonical chat contact exposes only `Message` and `Contact options`; repeater, room, sensor, or unknown roles do not expose a dead Message action. Contact Options owns Route, Export, Rename, favorite/mute state, and the destructive contact-removal path. Export QR is actionable only for a retained full public key plus a known canonical MeshCore role; an unknown or malformed role shows a non-clickable unavailable row. Route, Export, and Rename return to Contact Options rather than flattening those functions back into Contact Detail.
 - Removing a contact requires a dedicated confirmation page. `Cancel` and every `Back` path are non-destructive and restore Contact Options; only the explicit confirmation callback may delete the retained contact.

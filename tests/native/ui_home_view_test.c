@@ -16,7 +16,7 @@ static void test_default_view_is_bounded_and_truthful(void)
     d1l_ui_home_view(&input, &view);
 
     assert(strcmp(view.messages_status, "All caught up") == 0);
-    assert(strcmp(view.network_status, "0 contacts | 0 nearby") == 0);
+    assert(strcmp(view.network_status, "0 saved | 0 nearby") == 0);
     assert(strcmp(view.map_status, "Set a location") == 0);
     assert(strcmp(view.more_status, "0 packets captured") == 0);
     assert(strcmp(view.mesh_value, "Starting") == 0);
@@ -58,7 +58,7 @@ static void test_ready_view_owns_all_rendered_strings(void)
     d1l_ui_home_view(&input, &view);
 
     assert(strcmp(view.messages_status, "5 unread") == 0);
-    assert(strcmp(view.network_status, "4 contacts | 5 nearby") == 0);
+    assert(strcmp(view.network_status, "4 saved | 5 nearby") == 0);
     assert(strcmp(view.map_status, "Ready to open") == 0);
     assert(strcmp(view.more_status, "1 packet captured") == 0);
     assert(strcmp(view.mesh_value, "Ready") == 0);

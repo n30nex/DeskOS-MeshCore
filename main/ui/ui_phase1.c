@@ -6365,11 +6365,12 @@ static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
                 s_nodes_clear_armed, s_nodes_clear_deadline)) {
             s_nodes_clear_armed = true;
             s_nodes_clear_deadline = lv_tick_get() + 5000U;
-            show_toast_text("Tap Clear again to erase heard nodes", true);
+            show_toast_text(
+                "Tap Clear nearby again to erase heard nodes", true);
         } else {
             s_nodes_clear_armed = false;
             const esp_err_t ret = d1l_app_model_clear_nodes(true);
-            show_toast("Clear heard nodes", ret);
+            show_toast("Clear nearby", ret);
             if (ret == ESP_OK) {
                 request_content_refresh();
             }

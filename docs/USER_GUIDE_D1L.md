@@ -42,7 +42,8 @@ Wi-Fi remains optional for offline MeshCore use. The prepared FAT32 card and
 NRCan provider manifest are required for the complete 1.5 setup.
 
 The dock is **Home**, **Channels**, **Contacts**, **Map**, and **Settings**.
-Home is a summary page; lists and long pages scroll vertically.
+Home uses those same four destination names, so the card you open matches the
+selected dock tab. Lists and long pages scroll vertically.
 
 A factory-fresh DeskOS does not advertise before onboarding is complete. When
 the entered name is saved, DeskOS starts MeshCore receive and queues the first
@@ -100,7 +101,8 @@ The same Contacts area provides:
 - **Ping** on a repeater sends a direct zero-hop TRACE.
 - **PATH/TRACE** on a verified contact displays pending, timeout, reply, RTT,
   RSSI and hop SNR state.
-- **Clear** requires confirmation and removes the retained heard-node list.
+- **Clear nearby** requires confirmation and removes the retained heard-node
+  list without deleting saved contacts.
 
 Ordinary inspection, scrolling, filtering and refresh are RF-silent.
 The retained list is bounded to 512 nodes. At capacity, only an unlocated
@@ -219,14 +221,16 @@ unavailable.
 The administration capability uses an exact verified Repeater or Room key and
 a masked password. Choose **Login** beside a saved repeater or room contact, or
 open its detail and choose **Login**. DeskOS opens a large password field and
-on-screen keyboard. **Save: On** remembers a non-empty password for that server
-on this D1L after login succeeds; **Forget saved** removes it. Blank-password
-negotiation remains available when supported by the peer.
+on-screen keyboard. Choose **Admin** after entering a password, or **Guest**
+without one for read-only access. **Save On** remembers a non-empty password
+for that server on this D1L after login succeeds; **Forget** removes it.
 
 After authentication, DeskOS opens a command dashboard rather than returning
 to the contact list. The server reports the session permissions (guest,
 read-only, write or admin). Logging out or switching targets clears volatile
-session authority.
+session authority. Nested status and command pages use one **Back** action to
+return to the manager. **Sign out** ends the session; cancelling a pending
+request also says clearly that it signs out.
 
 The on-device admin surface provides:
 

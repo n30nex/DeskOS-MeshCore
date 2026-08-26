@@ -27,7 +27,7 @@ def test_core_dock_and_home_expose_only_the_five_contract_destinations():
     assert "D1L_UI_TAB_PACKETS" not in core_dock
     assert "active_dock_items" in phase1
     assert 'map_available ? "Map" : "Packets"' in home
-    assert 'map_available ? "Tools" : "Settings"' in home
+    assert '"Settings"' in home
 
 
 def test_core_deep_links_are_denied_before_probe_or_screen_work():
@@ -141,7 +141,7 @@ def test_core_copy_describes_only_reachable_conversations_and_unread_behavior():
 
     assert '"Public and direct conversations"' in home
     assert "D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT" in home
-    assert '"Public, DMs, and rooms"' in home
+    assert '"Public, channels, and DMs"' in home
     assert '"Include in unread count"' in contacts
     assert '"Exclude from unread count"' in contacts
     assert "Mute notifications" not in contacts

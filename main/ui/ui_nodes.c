@@ -434,10 +434,10 @@ static void nodes_render_header(d1l_ui_nodes_controller_t *controller,
     controller->cycle_sort = (d1l_ui_nodes_action_binding_t) {
         .controller = controller,
     };
-    nodes_create_button(parent, "Find", 304, 4, 70, 44, 0x84FF2E, true,
+    nodes_create_button(parent, "Find", 282, 4, 70, 44, 0x84FF2E, true,
                         nodes_dispatch_global_event_cb,
                         &controller->find_nearby);
-    nodes_create_button(parent, "Clear", 382, 4, 70, 44, 0xF87171,
+    nodes_create_button(parent, "Clear nearby", 360, 4, 104, 44, 0xF87171,
                         controller->rendered.node_row_count > 0U,
                         nodes_dispatch_global_event_cb,
                         &controller->clear_heard);

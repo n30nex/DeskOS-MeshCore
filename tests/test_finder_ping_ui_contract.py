@@ -43,14 +43,14 @@ def test_nodes_expose_finder_and_confirmed_retained_clear() -> None:
     assert "D1L_UI_NODES_ACTION_FIND_NEARBY" in nodes_header
     assert "D1L_UI_NODES_ACTION_CLEAR_HEARD" in nodes_header
     assert 'nodes_create_button(parent, "Find"' in nodes
-    assert 'nodes_create_button(parent, "Clear"' in nodes
+    assert 'nodes_create_button(parent, "Clear nearby"' in nodes
     assert '"Find Nearby"' in phase1
     assert "Zero-hop RF only." in phase1
     assert "Discovery keys are unverified until a signed advert is received." in phase1
     assert "d1l_app_model_find_contact_by_public_key(" in phase1
     assert "d1l_app_model_discover_nearby()" in phase1
     assert "d1l_app_model_clear_nodes(true)" in phase1
-    assert "Tap Clear again to erase heard nodes" in phase1
+    assert "Tap Clear nearby again to erase heard nodes" in phase1
     assert "if (!confirmed)" in app
     assert "d1l_node_store_clear()" in app
     assert "d1l_meshcore_service_clear_discovery_results()" in app

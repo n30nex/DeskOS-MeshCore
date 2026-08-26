@@ -88,7 +88,7 @@ def test_core_profile_exposes_production_root_affordances(tmp_path: Path):
     views = views_by_name(report)
 
     home_labels = set(views["home"]["labels"])
-    assert {"Map", "Tools", "Wi-Fi", "SD"} <= home_labels
+    assert {"Map", "Settings", "Wi-Fi", "SD"} <= home_labels
     assert "BLE" not in home_labels
 
     settings_labels = set(views["settings"]["labels"])
@@ -327,7 +327,7 @@ def test_full_feature_simulator_remains_the_default(tmp_path: Path):
 
     assert report["release_profile"] == "full_feature"
     assert "core_surface_report" not in report
-    assert {"Map", "Tools", "Wi-Fi", "BLE", "SD"} <= set(
+    assert {"Map", "Settings", "Wi-Fi", "BLE", "SD"} <= set(
         views["home"]["labels"]
     )
     packet_actions = {

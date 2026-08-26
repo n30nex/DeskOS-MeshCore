@@ -68,7 +68,7 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
     for label in (
         '"Contacts"',
         '"Find"',
-        '"Clear"',
+        '"Clear nearby"',
         '"Search contacts"',
         '"Sort: Recent"',
         '"Saved contacts"',

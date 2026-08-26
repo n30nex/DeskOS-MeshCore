@@ -2394,8 +2394,8 @@ def draw_home_body(s: Surface, snap: Snapshot):
         (
             (12, 52, 234, 188),
             "chat",
-            "Messages",
-            "Public, DMs, and rooms",
+            "Channels",
+            "Public, channels, and DMs",
             messages_status,
             AMBER if audible_unread else (MUTED if snap.muted_unread_dm else ACCENT),
             "open_messages_root",
@@ -2404,9 +2404,9 @@ def draw_home_body(s: Surface, snap: Snapshot):
         (
             (246, 52, 468, 188),
             "signal",
-            "Nodes",
-            "Contacts, nearby, and routes",
-            f"{len(snap.contacts)} contacts | {len(snap.heard)} nearby",
+            "Contacts",
+            "Saved, nearby, and routes",
+            f"{len(snap.contacts)} saved | {len(snap.heard)} nearby",
             GREEN if snap.contacts else MUTED,
             "open_nodes",
             "nodes",
@@ -2424,8 +2424,8 @@ def draw_home_body(s: Surface, snap: Snapshot):
         (
             (246, 196, 468, 332),
             "settings",
-            "Tools",
-            "Settings, utilities, and support",
+            "Settings",
+            "Radio, connections, and device",
             f"{len(snap.packets)} packet{'s' if len(snap.packets) != 1 else ''} captured",
             VIOLET if snap.packets else MUTED,
             "open_settings",
@@ -3374,7 +3374,7 @@ def render_nodes(s: Surface, snap: Snapshot):
     )
     draw_button(
         s,
-        (304, 4, 374, 48),
+        (282, 4, 352, 48),
         "Find",
         GREEN,
         action="find_nearby",
@@ -3382,8 +3382,8 @@ def render_nodes(s: Surface, snap: Snapshot):
     )
     draw_button(
         s,
-        (382, 4, 452, 48),
-        "Clear",
+        (360, 4, 464, 48),
+        "Clear nearby",
         RED,
         action="clear_heard",
         destructive=heard_query_count > 0,
@@ -5481,24 +5481,26 @@ ADMIN_Y = 94
 def draw_admin_shell(s: Surface, title: str, *, back: bool = False) -> None:
     s.rect((0, 0, WIDTH, HEIGHT), (17, 25, 35))
     s.round_rect(ADMIN_SHEET, SURFACE, BORDER, 8)
-    s.text(title, (36, 98, 262 if back else 290, 130), 22, TEXT, True)
     if back:
         draw_button(
             s,
-            (282, 94, 358, 138),
+            (16, 94, 92, 138),
             "Back",
             MUTED,
             action="admin_back",
             destination="repeater_manager",
         )
-    draw_button(
-        s,
-        (368, 94, 444, 138),
-        "Close",
-        MUTED,
-        action="close_repeater_admin",
-        destination="repeater_manager" if back else "nodes",
-    )
+        s.text(title, (104, 98, 432, 130), 22, TEXT, True)
+    else:
+        s.text(title, (36, 98, 290, 130), 22, TEXT, True)
+        draw_button(
+            s,
+            (368, 94, 444, 138),
+            "Close",
+            MUTED,
+            action="close_repeater_admin",
+            destination="nodes",
+        )
 
 
 def draw_admin_target(s: Surface, *, authenticated: bool = False) -> None:
@@ -5528,7 +5530,11 @@ def render_repeater_login(s: Surface, snap: Snapshot, *, saved: bool = False) ->
     del snap
     draw_admin_shell(s, "Repeater login")
     s.text("Krabs Lagoon  |  60B6ABA17831F883", (36, 140, 444, 160), 11, ACCENT, True)
-    prompt = "Saved password ready. Type to replace it." if saved else "Enter the password used by this repeater."
+    prompt = (
+        "Saved password ready. Type to replace it."
+        if saved else
+        "Use Admin with a password, or Guest without one."
+    )
     s.text(prompt, (36, 162, 444, 182), 10, MUTED)
     password_box = (36, 184, 444, 228)
     s.round_rect(password_box, (16, 23, 25), ACCENT, 8)
@@ -5538,16 +5544,24 @@ def render_repeater_login(s: Surface, snap: Snapshot, *, saved: bool = False) ->
     draw_button(
         s,
         (36, 348, 144, 392),
-        "Login",
+        "Admin",
         GREEN,
         action="submit_repeater_login",
         destination="repeater_login_pending",
     )
-    draw_button(s, (152, 348, 284, 392), "Save: On", ACCENT, action="toggle_save_password")
+    draw_button(
+        s,
+        (152, 348, 244, 392),
+        "Guest",
+        ACCENT,
+        action="submit_repeater_guest_login",
+        destination="repeater_login_pending",
+    )
+    draw_button(s, (252, 348, 344, 392), "Save On", ACCENT, action="toggle_save_password")
     if saved:
-        draw_button(s, (292, 348, 444, 392), "Forget saved", RED, action="forget_repeater_password")
+        draw_button(s, (352, 348, 444, 392), "Forget", RED, action="forget_repeater_password")
     else:
-        s.text("Saved only on this D1L", (294, 360, 442, 382), 9, MUTED, False, "center")
+        s.text("Local only", (352, 360, 444, 382), 9, MUTED, False, "center")
     s.metrics.update(
         {
             "admin_page": "login",
@@ -5581,7 +5595,14 @@ def render_repeater_login_pending(s: Surface, snap: Snapshot) -> None:
         align="center",
     )
     s.text("A slow mesh route can take up to 60 seconds.", (36, 330, 444, 350), 10, MUTED, False, "center")
-    draw_button(s, (160, 348, 320, 392), "Cancel", MUTED, action="cancel_repeater_login", destination="repeater_login")
+    draw_button(
+        s,
+        (140, 348, 340, 392),
+        "Cancel & sign out",
+        MUTED,
+        action="cancel_repeater_login",
+        destination="repeater_login",
+    )
     s.metrics.update(
         {
             "admin_page": "pending",
@@ -5625,7 +5646,7 @@ def render_repeater_manager(s: Surface, snap: Snapshot) -> None:
     for args in buttons:
         draw_admin_grid_button(s, *args)
     s.text("Admin access  |  firmware level 2", (36, 360, 326, 382), 10, MUTED)
-    draw_button(s, (332, 348, 444, 392), "Logout", RED, action="logout_repeater", destination="repeater_login")
+    draw_button(s, (332, 348, 444, 392), "Sign out", RED, action="logout_repeater", destination="repeater_login")
     s.metrics.update(
         {
             "admin_page": "hub",
@@ -5646,7 +5667,7 @@ def draw_admin_metric(s: Surface, box: tuple[int, int, int, int], title: str, va
 
 def render_repeater_status(s: Surface, snap: Snapshot) -> None:
     del snap
-    draw_admin_shell(s, "Server status", back=True)
+    draw_admin_shell(s, "Repeater status", back=True)
     metrics = (
         ((36, 146, 164, 206), "RSSI / SNR", "-52 / 22.00", ACCENT),
         ((172, 146, 300, 206), "Send queue", "0 queued", GREEN),
@@ -5657,7 +5678,7 @@ def render_repeater_status(s: Surface, snap: Snapshot) -> None:
     )
     for args in metrics:
         draw_admin_metric(s, *args)
-    s.text("Noise -118 dBm  |  voltage 5026 mV", (36, 288, 444, 310), 10, MUTED)
+    s.text("Noise -118 dBm  |  power 5.02 V", (36, 288, 444, 310), 10, MUTED)
     draw_button(s, (140, 348, 340, 392), "Refresh status", ACCENT, action="refresh_admin_status", destination="repeater_login_pending")
     s.metrics.update({"admin_page": "status", "admin_metric_count": 6, "admin_results_persistent": True})
 
@@ -7497,10 +7518,10 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "DeskOS",
         "Lock",
-        "Messages",
-        "Nodes",
+        "Channels",
+        "Contacts",
         "Map",
-        "Tools",
+        "Settings",
         "Mesh",
         "Wi-Fi",
         "BLE",
@@ -7554,7 +7575,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "nodes": (
         "Contacts",
         "Find",
-        "Clear",
+        "Clear nearby",
         "Search contacts",
         "Sort: Recent",
     ),
@@ -7820,19 +7841,19 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Close",
     ),
     "repeater_login": (
-        "Repeater login", "Krabs Lagoon  |  60B6ABA17831F883", "Password", "Login", "Save: On", "Close",
+        "Repeater login", "Krabs Lagoon  |  60B6ABA17831F883", "Use Admin with a password, or Guest without one.", "Password", "Admin", "Guest", "Save On", "Close",
     ),
     "repeater_login_saved": (
-        "Repeater login", "Saved password ready. Type to replace it.", "Saved password", "Forget saved", "Login", "Close",
+        "Repeater login", "Saved password ready. Type to replace it.", "Saved password", "Forget", "Admin", "Guest", "Close",
     ),
     "repeater_login_pending": (
-        "Working", "Signing in", "Checking the password and opening a secure session.", "A slow mesh route can take up to 60 seconds.", "Cancel", "Close",
+        "Working", "Signing in", "Checking the password and opening a secure session.", "A slow mesh route can take up to 60 seconds.", "Cancel & sign out", "Close",
     ),
     "repeater_manager": (
-        "Repeater manager", "Krabs Lagoon", "Status", "Telemetry", "Neighbours", "Access", "Tools", "Console", "Logout",
+        "Repeater manager", "Krabs Lagoon", "Status", "Telemetry", "Neighbours", "Access", "Tools", "Console", "Sign out",
     ),
     "repeater_status": (
-        "Server status", "RSSI / SNR", "Send queue", "RX / TX", "Uptime", "Errors", "Refresh status", "Back", "Close",
+        "Repeater status", "RSSI / SNR", "Send queue", "RX / TX", "Uptime", "Errors", "Refresh status", "Back",
     ),
     "repeater_telemetry": (
         "Telemetry",
@@ -7842,7 +7863,6 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Updated from signed server reply",
         "Refresh",
         "Back",
-        "Close",
     ),
     "repeater_neighbours": (
         "Neighbours",
@@ -7852,7 +7872,6 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Next page",
         "Refresh",
         "Back",
-        "Close",
     ),
     "repeater_access": (
         "Access list",
@@ -7862,11 +7881,10 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Edit access",
         "Refresh",
         "Back",
-        "Close",
     ),
-    "repeater_tools": ("Server tools", "Clear statistics", "Zero-hop advert", "Changes require a second tap and a confirmed server reply.", "Back", "Close"),
-    "repeater_console": ("Server console", "Secure input: Off", "Server command", "Send", "Back", "Close"),
-    "room_console": ("Room console", "You: Morning Lagoon [delivered]", "Message the room", "Send", "Back", "Close"),
+    "repeater_tools": ("Server tools", "Clear statistics", "Zero-hop advert", "Changes require a second tap and a confirmed server reply.", "Back"),
+    "repeater_console": ("Server console", "Secure input: Off", "Server command", "Send", "Back"),
+    "room_console": ("Room console", "You: Morning Lagoon [delivered]", "Message the room", "Send", "Back"),
     "contact_edit_sheet": ("Rename Contact", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"),
     "contact_export_sheet": ("Export Contact", "Back", "MeshCore QR", "Fingerprint", "URI", "Ready to scan"),
     "forget_contact_confirm_page": (
@@ -8029,10 +8047,10 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
 CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "DeskOS",
-        "Messages",
-        "Nodes",
+        "Channels",
+        "Contacts",
         "Map",
-        "Tools",
+        "Settings",
         "Mesh",
         "Wi-Fi",
         "SD",
@@ -8438,7 +8456,6 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "repeater_login_pending", "action": "cancel_repeater_login", "destination": "repeater_login"},
             {"view": "repeater_manager", "action": "open_admin_status", "destination": "repeater_status"},
             {"view": "repeater_status", "action": "admin_back", "destination": "repeater_manager"},
-            {"view": "repeater_status", "action": "close_repeater_admin", "destination": "repeater_manager"},
             {"view": "repeater_manager", "action": "open_admin_telemetry", "destination": "repeater_telemetry"},
             {"view": "repeater_manager", "action": "open_admin_neighbours", "destination": "repeater_neighbours"},
             {"view": "repeater_manager", "action": "open_admin_access", "destination": "repeater_access"},

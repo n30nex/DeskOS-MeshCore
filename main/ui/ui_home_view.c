@@ -210,7 +210,7 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
                  (unsigned long long)input->node_count);
     } else {
         snprintf(out_view->network_status, sizeof(out_view->network_status),
-                 "%llu contacts | %llu nearby",
+                 "%llu saved | %llu nearby",
                  (unsigned long long)input->contact_count,
                  (unsigned long long)input->node_count);
     }

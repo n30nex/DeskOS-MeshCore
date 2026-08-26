@@ -233,6 +233,8 @@ static void render_destination_card(lv_obj_t *parent,
         return;
     }
     lv_obj_set_style_border_color(card, lv_color_hex(0x1F372E), 0);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x183329), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(card, lv_color_hex(accent), LV_STATE_PRESSED);
     lv_obj_set_style_pad_all(card, 0, 0);
     home_bind_action(card, binding, controller, action);
 
@@ -399,11 +401,11 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
     const char *messages_detail =
         d1l_release_feature_available(
             D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT) ?
-        "Public, DMs, and rooms" :
+        "Public, channels, and DMs" :
         "Public and direct conversations";
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MESSAGES,
-                            LV_SYMBOL_ENVELOPE, "Messages",
+                            LV_SYMBOL_ENVELOPE, "Channels",
                             messages_detail,
                             controller->rendered.messages_status,
                             controller->rendered.messages_status_color,
@@ -412,8 +414,8 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
                             controller);
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_NETWORK,
-                            LV_SYMBOL_LIST, "Nodes",
-                            "Contacts, nearby, and routes",
+                            LV_SYMBOL_LIST, "Contacts",
+                            "Saved, nearby, and routes",
                             controller->rendered.network_status,
                             controller->rendered.network_status_color,
                             D1L_UI_HOME_ACTION_NETWORK,
@@ -428,8 +430,8 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
                             controller);
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MORE, LV_SYMBOL_SETTINGS,
-                            map_available ? "Tools" : "Settings",
-                            "Settings, utilities, and support",
+                            "Settings",
+                            "Radio, connections, and device",
                             controller->rendered.more_status,
                             controller->rendered.more_status_color,
                             D1L_UI_HOME_ACTION_MORE,

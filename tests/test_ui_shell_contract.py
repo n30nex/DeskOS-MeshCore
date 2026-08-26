@@ -242,10 +242,14 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "set_object_hidden(s_status_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_identity_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_lock_button, !layout.header_detail_visible)" in source
-    assert '"Messages"' in home_module
-    assert '"Nodes"' in home_module
+    assert '"Channels"' in home_module
+    assert '"Contacts"' in home_module
     assert '"Map"' in home_module
-    assert '"Tools"' in home_module
+    assert '"Settings"' in home_module
+    assert (
+        "lv_obj_set_style_border_color(card, lv_color_hex(accent), "
+        "LV_STATE_PRESSED)"
+    ) in home_module
     assert '"Mesh"' in home_module
     assert '"Wi-Fi"' in home_module
     assert '"BLE"' in home_module

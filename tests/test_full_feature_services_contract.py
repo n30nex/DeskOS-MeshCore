@@ -306,10 +306,10 @@ def test_server_admin_close_preserves_session_and_target_change_logs_out():
     header = sheets.split(
         "static bool render_admin_compact_header(", 1
     )[1].split("static bool render_admin_target(", 1)[0]
-    assert (
-        "show_back ? D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB :\n"
-        "                    D1L_UI_SERVICE_ACTION_CLOSE_ADMIN"
-    ) in header
+    assert 'controller, sheet, "Back", 0, 0, 76, 44' in header
+    assert "if (!show_back)" in header
+    assert "D1L_UI_SERVICE_ACTION_CLOSE_ADMIN" in header
+    assert "show_back ? D1L_UI_SERVICE_ACTION_ADMIN_SHOW_HUB" not in header
     begin_render = sheets.split(
         "static bool begin_render(", 1
     )[1].split(
