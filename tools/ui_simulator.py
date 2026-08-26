@@ -2590,7 +2590,7 @@ def render_messages(s: Surface, snap: Snapshot):
     draw_button(
         s,
         (342, 6, 442, 50),
-        "Direct",
+        "DMs",
         GREEN,
         action="open_messages_dm",
         destination="messages_dm",
@@ -3528,7 +3528,7 @@ def map_view_status(snap: Snapshot) -> tuple[str, str, tuple[int, int, int]]:
     if storage_sd_needs_attention(snap):
         return ("Map unavailable", "Check the SD card, then reopen Map.", AMBER)
     if not snap.map_location_set:
-        return ("Set a location", "Open Options to choose the area shown here.", AMBER)
+        return ("Set a location", "Tap Set up to choose the area shown here.", AMBER)
     if not map_center_is_trusted(snap):
         return ("Center unavailable", "Map center provenance is unknown; save it again.", AMBER)
     if not snap.map_tile_cache_ready:
@@ -3775,8 +3775,8 @@ def render_map(s: Surface, snap: Snapshot):
     draw_button(
         s,
         (8, 8, 104, 56),
-        "Options",
-        MUTED,
+        "Options" if center_trusted else "Set up",
+        MUTED if center_trusted else GREEN,
         action="open_map_options",
         destination="map_options",
     )
@@ -3831,21 +3831,23 @@ def render_map(s: Surface, snap: Snapshot):
         s.text(f"z{snap.map_tile_zoom}", (420, 66, 472, 88), 11, TEXT, True, "center")
         draw_button(s, (420, 92, 472, 144), "-", TEXT, action="map_zoom_out")
 
-    pin_truth = (
-        "Location shared by node\nrecently verified\naccuracy unknown"
-        if snap.map_marker_age_reference_valid
-        else "Location hidden\nsource not verified"
-    )
-    s.round_rect((112, 298, 224, 356), (7, 16, 24), (7, 16, 24), 4)
-    s.wrapped_text(
-        pin_truth,
-        (114, 300, 222, 354),
-        8, GREEN if snap.map_marker_age_reference_valid else AMBER,
-        line_height=16, align="center",
-    )
+    pin_truth = ""
+    if center_trusted:
+        pin_truth = (
+            "Nodes shown\ntime verified\naccuracy unknown"
+            if snap.map_marker_age_reference_valid
+            else "Nodes hidden\ntime not verified"
+        )
+        s.round_rect((112, 298, 224, 356), (7, 16, 24), (7, 16, 24), 4)
+        s.wrapped_text(
+            pin_truth,
+            (114, 300, 222, 354),
+            8, GREEN if snap.map_marker_age_reference_valid else AMBER,
+            line_height=16, align="center",
+        )
 
-    s.round_rect((228, DOCK_Y - 30, 472, DOCK_Y - 6), (7, 16, 24), (7, 16, 24), 4)
-    s.text(MAP_ATTRIBUTION, (234, DOCK_Y - 28, 466, DOCK_Y - 8), 10, TEXT, True, "right")
+        s.round_rect((228, DOCK_Y - 30, 472, DOCK_Y - 6), (7, 16, 24), (7, 16, 24), 4)
+        s.text(MAP_ATTRIBUTION, (234, DOCK_Y - 28, 466, DOCK_Y - 8), 10, TEXT, True, "right")
     s.metrics.update(
         {
             "map_hierarchy_level": "actual_view",
@@ -3880,6 +3882,7 @@ def render_map(s: Surface, snap: Snapshot):
             "map_trust_loss_invalidates_retained_view": True,
             "map_backward_time_rechecks_future_pins": True,
             "map_pin_truth_legend": pin_truth,
+            "map_pin_truth_visible": center_trusted,
             "map_marker_age_reference_valid": snap.map_marker_age_reference_valid,
             "map_marker_reference_timestamp": snap.map_marker_reference_timestamp,
             "map_center_lat_e7": snap.map_lat_e7,
@@ -3892,7 +3895,7 @@ def render_map(s: Surface, snap: Snapshot):
             "map_background_download": False,
             "map_area_download": False,
             "map_probe_network_allowed": False,
-            "map_attribution_visible": True,
+            "map_attribution_visible": center_trusted,
             "map_attribution": MAP_ATTRIBUTION,
             "map_policy": MAP_POLICY,
             **marker_metrics,
@@ -5192,15 +5195,22 @@ def render_contact_detail_page(s: Surface, snap: Snapshot, dm_reason: str):
         back_action="close_contact_detail",
         back_destination="nodes",
     )
-    s.text("Chat  normal  unread counted", (16, 64, 464, 86), 13, MUTED)
+    s.text("Chat  |  Active", (16, 64, 464, 86), 13, MUTED)
     s.text(
-        f"Identity  {contact.fingerprint}",
+        f"Node ID  {contact.fingerprint}",
         (16, 98, 464, 120),
         13,
         TEXT,
     )
-    s.text("Direct route  |  0 hops", (16, 132, 464, 154), 13, MUTED)
-    s.text(f"Last signal {contact.signal}", (16, 166, 464, 188), 13, MUTED)
+    s.text("Route  Direct", (16, 132, 464, 154), 13, MUTED)
+    rssi = int(contact.signal.split(" ", 1)[0])
+    quality = (
+        "Excellent" if rssi >= -70 else
+        "Good" if rssi >= -90 else
+        "Fair" if rssi >= -110 else
+        "Weak"
+    )
+    s.text(f"Signal  {quality}  |  {contact.signal}", (16, 166, 464, 188), 13, MUTED)
     s.text("Contact actions", (16, 210, 464, 232), 14, GREEN, True)
     status_lines = 1
     status_end_y = 188
@@ -7532,7 +7542,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Channels",
         "Group conversations",
         "Add",
-        "Direct",
+        "DMs",
         "#Public",
     ),
     "messages_public": ("Public", "Back", "Read", "...", "Message this channel"),
@@ -7544,7 +7554,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Channels",
         "Group conversations",
         "Add",
-        "Direct",
+        "DMs",
         "#Public",
     ),
     "messages_public_storage_degraded": (
@@ -7579,10 +7589,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Search contacts",
         "Sort: Recent",
     ),
-    "map": (
-        "Options",
-        "(c) OpenStreetMap contributors",
-    ),
+    "map": (),
     "map_options": (
         "Map options",
         "Back to Map",
@@ -8060,7 +8067,7 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Channels",
         "Group conversations",
         "Add",
-        "Direct",
+        "DMs",
         "#Public",
     ),
     "messages_public": ("Public", "Back", "Read", "...", "Message this channel"),
@@ -8107,6 +8114,12 @@ def required_labels_for_profile(
     release_profile: str,
     snap: Snapshot | None = None,
 ) -> tuple[str, ...]:
+    if view == "map" and snap is not None:
+        return (
+            ("Options", MAP_ATTRIBUTION)
+            if map_center_is_trusted(snap)
+            else ("Set up",)
+        )
     if release_profile == CORE_RELEASE_PROFILE:
         return CORE_REQUIRED_LABELS.get(view, REQUIRED_LABELS.get(view, ()))
     if release_profile == FULL_FEATURE_RELEASE_PROFILE:

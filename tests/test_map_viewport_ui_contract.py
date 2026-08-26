@@ -85,7 +85,7 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
         "bool d1l_ui_map_viewport_refresh",
     )
 
-    assert 'viewport, "Options", 8, 8, 96, 48' in render
+    assert 'viewport, center_available ? "Options" : "Set up"' in render
     assert (
         'viewport, "Center", 8, (int)MAP_VIEWPORT_HEIGHT - 60, 96, 52'
         in render
@@ -97,6 +97,7 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
     assert "lv_obj_set_scroll_dir(parent, LV_DIR_NONE)" in render
     assert "lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF)" in render
     assert 'map_label(viewport, "Drag to pan"' in render
+    assert "const bool center_available = map_center_available(snapshot);" in render
     assert "s_viewport_drag_hint_label = drag_hint" in render
     assert "s_viewport_progress_bar = lv_bar_create(viewport)" in render
     assert "lv_obj_set_size(s_viewport_progress_bar, 280, 8)" in render

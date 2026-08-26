@@ -519,7 +519,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "settings_advanced_expanded",
     ):
         assert any(target["kind"] == "dock_tab" for target in views_by_name[view_name]["touch_targets"])
-    assert {"Channels", "Group conversations", "Add", "Direct", "#Public"} <= labels_by_view["messages"]
+    assert {"Channels", "Group conversations", "Add", "DMs", "#Public"} <= labels_by_view["messages"]
     assert {"Public", "Back", "Read", "...", "Message this channel"} <= labels_by_view["messages_public"]
     assert {"Direct messages", "Back"} <= labels_by_view["messages_dm"]
     public_metrics = views_by_name["messages_public"]["metrics"]
@@ -538,7 +538,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Nearby",
         "Chat",
     } <= labels_by_view["nodes"]
-    assert {"Map", "Options", "(c) OpenStreetMap contributors"} <= labels_by_view["map"]
+    assert {"Map", "Set up"} <= labels_by_view["map"]
+    assert "(c) OpenStreetMap contributors" not in labels_by_view["map"]
     assert {
         "Map options",
         "Back to Map",
@@ -696,9 +697,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "YKF Corebot",
         "Contact detail",
         "Back",
-        "Identity  0BF0A701D5AE2DB6",
-        "Direct route  |  0 hops",
-        "Last signal -41 dBm / 30 dB",
+        "Chat  |  Active",
+        "Node ID  0BF0A701D5AE2DB6",
+        "Route  Direct",
+        "Signal  Excellent  |  -41 dBm / 30 dB",
         "Contact actions",
         "Message",
         "Contact options",
@@ -1644,7 +1646,8 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
             assert map_view["metrics"]["map_tile_download_supported"] is False
             assert map_view["metrics"]["map_tile_render_supported"] is False
             assert "Set a location" in set(map_view["labels"])
-            assert "(c) OpenStreetMap contributors" in set(map_view["labels"])
+            assert "Set up" in set(map_view["labels"])
+            assert "(c) OpenStreetMap contributors" not in set(map_view["labels"])
             assert "sd_map_tiles_ready" not in set(map_view["labels"])
 
 
@@ -2262,7 +2265,7 @@ def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_pat
     assert map_view["metrics"]["map_trust_loss_invalidates_retained_view"] is True
     assert map_view["metrics"]["map_backward_time_rechecks_future_pins"] is True
     assert map_view["metrics"]["map_pin_truth_legend"] == (
-        "Location shared by node\nrecently verified\naccuracy unknown"
+        "Nodes shown\ntime verified\naccuracy unknown"
     )
     assert map_view["metrics"]["map_saved_center_pin"] == "omitted"
     assert len(set(map_view["metrics"]["map_marker_colors"])) == 3
@@ -2314,7 +2317,7 @@ def test_ui_simulator_map_markers_fail_closed_without_verified_age():
     assert surface.metrics["map_marker_displayed_count"] == 0
     assert surface.metrics["map_marker_age_verified"] is False
     assert surface.metrics["map_pin_truth_legend"] == (
-        "Location hidden\nsource not verified"
+        "Nodes hidden\ntime not verified"
     )
 
 

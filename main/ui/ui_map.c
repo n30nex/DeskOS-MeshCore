@@ -417,7 +417,7 @@ static void map_viewport_copy(const d1l_app_snapshot_t *snapshot,
         *color = MAP_COLOR_WARN;
     } else if (!snapshot->map_location_set) {
         *title = "Set a location";
-        *detail = "Open Options to choose the area shown here.";
+        *detail = "Tap Set up to choose the area shown here.";
         *color = MAP_COLOR_WARN;
     } else if (!map_center_available(snapshot)) {
         *title = "Center unavailable";
@@ -537,8 +537,8 @@ static void map_viewport_update_pin_truth_label(void)
     lv_label_set_text(
         s_viewport_pin_truth_label,
         s_viewport_marker_age_reference_valid ?
-            "Location shared by node\nrecently verified\naccuracy unknown" :
-            "Location hidden\nsource not verified");
+            "Nodes shown\ntime verified\naccuracy unknown" :
+            "Nodes hidden\ntime not verified");
     lv_obj_set_style_text_color(
         s_viewport_pin_truth_label,
         lv_color_hex(s_viewport_marker_age_reference_valid ?
@@ -1640,39 +1640,46 @@ void d1l_ui_map_render(lv_obj_t *parent,
         lv_obj_set_style_text_align(ready, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(ready, 30, (int)MAP_VIEWPORT_HEIGHT / 2 + 28);
     }
-    lv_obj_t *attribution = map_label(viewport, "(c) OpenStreetMap contributors",
-                                      MAP_COLOR_DETAIL);
-    s_viewport_attribution_label = attribution;
-    if (attribution) {
-        map_label_dot(attribution, 240);
-        lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_pos(attribution, 228, (int)MAP_VIEWPORT_HEIGHT - 36);
-        lv_obj_set_style_bg_color(attribution, lv_color_hex(0x17191A), 0);
-        lv_obj_set_style_bg_opa(attribution, LV_OPA_80, 0);
-        lv_obj_set_style_pad_all(attribution, 2, 0);
-    }
-    s_viewport_pin_truth_label = map_label(
-        viewport, "", MAP_COLOR_WARN);
-    if (s_viewport_pin_truth_label) {
-        lv_label_set_long_mode(s_viewport_pin_truth_label, LV_LABEL_LONG_WRAP);
-        lv_obj_set_size(s_viewport_pin_truth_label, 112, 58);
-        lv_obj_set_pos(s_viewport_pin_truth_label, 112,
-                       (int)MAP_VIEWPORT_HEIGHT - 74);
-        lv_obj_set_style_text_align(s_viewport_pin_truth_label,
-                                    LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_bg_color(s_viewport_pin_truth_label,
-                                  lv_color_hex(MAP_COLOR_BG), 0);
-        lv_obj_set_style_bg_opa(s_viewport_pin_truth_label, LV_OPA_80, 0);
-        lv_obj_set_style_pad_all(s_viewport_pin_truth_label, 2, 0);
-        map_viewport_update_pin_truth_label();
-    }
-
+    const bool center_available = map_center_available(snapshot);
     lv_obj_t *options_button = map_button(
-        viewport, "Options", 8, 8, 96, 48, callbacks->open_options);
+        viewport, center_available ? "Options" : "Set up",
+        8, 8, 96, 48, callbacks->open_options);
     s_viewport_options_button = options_button;
-    map_style_overlay_button(options_button);
+    if (center_available) {
+        map_style_overlay_button(options_button);
+    } else {
+        map_style_primary_button(options_button);
+    }
 
-    if (snapshot->map_location_set && map_center_available(snapshot)) {
+    if (center_available) {
+        lv_obj_t *attribution = map_label(
+            viewport, "(c) OpenStreetMap contributors", MAP_COLOR_DETAIL);
+        s_viewport_attribution_label = attribution;
+        if (attribution) {
+            map_label_dot(attribution, 240);
+            lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_RIGHT, 0);
+            lv_obj_set_pos(attribution, 228, (int)MAP_VIEWPORT_HEIGHT - 36);
+            lv_obj_set_style_bg_color(attribution, lv_color_hex(0x17191A), 0);
+            lv_obj_set_style_bg_opa(attribution, LV_OPA_80, 0);
+            lv_obj_set_style_pad_all(attribution, 2, 0);
+        }
+        s_viewport_pin_truth_label = map_label(
+            viewport, "", MAP_COLOR_WARN);
+        if (s_viewport_pin_truth_label) {
+            lv_label_set_long_mode(
+                s_viewport_pin_truth_label, LV_LABEL_LONG_WRAP);
+            lv_obj_set_size(s_viewport_pin_truth_label, 112, 58);
+            lv_obj_set_pos(s_viewport_pin_truth_label, 112,
+                           (int)MAP_VIEWPORT_HEIGHT - 74);
+            lv_obj_set_style_text_align(s_viewport_pin_truth_label,
+                                        LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_bg_color(s_viewport_pin_truth_label,
+                                      lv_color_hex(MAP_COLOR_BG), 0);
+            lv_obj_set_style_bg_opa(
+                s_viewport_pin_truth_label, LV_OPA_80, 0);
+            lv_obj_set_style_pad_all(s_viewport_pin_truth_label, 2, 0);
+            map_viewport_update_pin_truth_label();
+        }
         char center_source[24];
         snprintf(center_source, sizeof(center_source), "%s source",
                  d1l_map_center_source_label(snapshot->map_center_source));

@@ -59,6 +59,7 @@ reseeded.
 
 The Public channel is always configured. Open **Channels** and tap Public or
 any other enabled channel to select it and immediately open its conversation.
+Choose **DMs** for private conversations with verified contacts.
 Use the channel controls to create or import, select, enable, rename, make
 default, and remove with local confirmation. A selected channel can display a
 one-time QR containing only its supported public import URI.
@@ -84,8 +85,10 @@ Contacts can be imported from the USB console with
 `contacts import <meshcore-uri>`. The touchscreen list shows every saved
 contact. Use **Search** to match name, role, fingerprint, or public key, and use
 **Sort** to cycle **Recent**, **A-Z**, **Role**, and **Signal**. Selecting a row
-shows direct **Message** and **Manage** actions alongside rename, favorite,
-mute, and confirmed removal.
+opens a plain-language summary of its node ID, route, signal quality, and
+last-heard path. Verified chat contacts expose **Message** and **Contact
+options**; rename, favorite, mute, export, and confirmed removal stay under
+Contact options.
 
 **Message** opens the existing DM composer/thread for a verified Chat or
 Companion contact. **Manage** opens node detail for a Repeater or Room and
@@ -113,7 +116,9 @@ located, a new fingerprint is rejected rather than evicting a marker.
 ## Map
 
 The D1L has no onboard GPS. The GPS/location boundary is explicit: set the
-device location from the Map location workflow. DeskOS centers on that
+device location from the Map location workflow. An unconfigured device shows
+one highlighted **Set up** action; map attribution and node-location status
+appear only after a trusted map center exists. DeskOS centers on that
 configured location and plots only valid signed peer-advert coordinates.
 Markers follow the bounded retained-node list and update when newer signed
 data replaces an advert.

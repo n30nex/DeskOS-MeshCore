@@ -62,7 +62,7 @@ def test_messages_hierarchy_is_simple_bounded_and_navigation_is_rf_silent():
     assert "D1L_UI_MESSAGES_ACTION_SHOW_ROOT" in header
     assert '"Channels"' in source
     assert '"Group conversations"' in source
-    assert '"Direct"' in source
+    assert '"DMs"' in source
     assert "messages_render_channel_row(" in source
     assert "messages_create_scroll_body(parent, 18, 66, 424, 288)" in source
     assert "D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL" in source

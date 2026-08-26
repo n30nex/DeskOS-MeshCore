@@ -30,7 +30,7 @@ D1L.
   burst.
 - `ble status` now reports the secure-link, MTU, queue, frame, and protocol
   counters needed to diagnose a phone session without enabling verbose logs.
-- Channels always shows **Add** beside **Direct**. The existing create and
+- Channels always shows **Add** beside **DMs**. The existing create and
   import screen is reachable even when Public is already configured.
 - Connections now names **MQTT / Observer** directly. Its panel labels the
   editable three-letter **IATA region** and confirms a successful save.
@@ -75,6 +75,12 @@ D1L.
   action instead of duplicate Back/Close choices. Login explicitly separates
   **Admin** and **Guest**, request cancellation states that it signs out, and
   status uses plain-language error and power values.
+- Contact Detail now labels the node ID, direct/flood route, signal quality,
+  and optional last-heard path in plain language instead of exposing terse
+  store terminology.
+- An unconfigured Map presents one highlighted **Set up** action and hides map
+  attribution and node-location truth overlays until a trusted center exists.
+  Configured maps retain **Options**, attribution, and verified marker status.
 
 ## Preserved
 

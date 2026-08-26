@@ -9190,6 +9190,7 @@ static void scroll_probe_contact_entry(d1l_contact_entry_t *entry)
     snprintf(entry->type, sizeof(entry->type), "%s", "chat");
     entry->last_rssi_dbm = -42;
     entry->last_snr_tenths = 30;
+    entry->last_heard_ms = 1U;
     entry->out_path_valid = true;
 }
 

@@ -703,7 +703,7 @@ static void messages_render_root(d1l_ui_messages_controller_t *controller,
         lv_obj_set_pos(title, 18, 10);
     }
     messages_create_button(
-        parent, "Direct", 342, 6, 100, 44,
+        parent, "DMs", 342, 6, 100, 44,
         messages_bind_control(controller, 1U,
                               D1L_UI_MESSAGES_ACTION_SHOW_DIRECT));
     if (d1l_ui_messages_action_available(

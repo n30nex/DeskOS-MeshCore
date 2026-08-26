@@ -173,9 +173,15 @@ def test_contact_progressive_disclosure_layout_and_truth_are_preserved():
     ):
         assert f'"{label}"' in detail
     assert '"Messaging unavailable"' in detail
-    assert '"Direct route  |  %u hop%s"' in detail
-    assert '"Broadcast route  |  no saved direct path"' in detail
-    assert '"Identity  %.16s"' in detail
+    assert '"Route  %u hop%s"' in detail
+    assert '"Route  Flood when needed"' in detail
+    assert '"Node ID  %.16s"' in detail
+    assert '"Signal  Not heard yet"' in detail
+    assert '"Signal  %s  |  %d dBm / %s%d.%d dB"' in detail
+    assert '"Last heard via  %.24s"' in detail
+    assert "contact_type_label(entry->type)" in detail
+    for role_label in ("Room", "Repeater", "Sensor", "Chat", "Node"):
+        assert f'"{role_label}"' in source
     assert "d1l_ui_dm_identity_reason_code(" not in detail
     assert "d1l_ui_dm_identity_reason_text(" in detail
     assert "controller->rendered.dm_identity_reason" in detail

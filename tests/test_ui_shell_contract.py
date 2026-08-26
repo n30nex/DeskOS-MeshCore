@@ -1303,7 +1303,7 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
         "static void map_render_options_root", 1
     )[0]
     assert 'map_label(parent, "Map"' not in landing
-    assert landing.count('viewport, "Options", 8, 8, 96, 48') == 1
+    assert landing.count('viewport, center_available ? "Options" : "Set up"') == 1
     assert "map_view_service_acquire_visible" in landing
     assert "s_viewport_lat_e7, s_viewport_lon_e7, s_viewport_zoom" in landing
     assert (

@@ -493,6 +493,26 @@ static bool configure_title(lv_obj_t *title, int y)
     return true;
 }
 
+static const char *contact_type_label(const char *type)
+{
+    if (!type || type[0] == '\0') {
+        return "Node";
+    }
+    if (strcmp(type, "room") == 0) {
+        return "Room";
+    }
+    if (strcmp(type, "repeater") == 0) {
+        return "Repeater";
+    }
+    if (strcmp(type, "sensor") == 0) {
+        return "Sensor";
+    }
+    if (strcmp(type, "companion") == 0 || strcmp(type, "chat") == 0) {
+        return "Chat";
+    }
+    return "Node";
+}
+
 bool d1l_ui_contact_sheets_render_detail(
     d1l_ui_contact_sheets_controller_t *controller,
     d1l_ui_contact_action_handler_t action_handler,
@@ -514,17 +534,17 @@ bool d1l_ui_contact_sheets_render_detail(
         10) && complete;
 
     char line[160];
-    snprintf(line, sizeof(line), "%s  %s  %s",
-             entry->type[0] ? entry->type : "node",
-             entry->favorite ? "favorite" : "normal",
-             entry->muted ? "unread excluded" : "unread counted");
+    snprintf(line, sizeof(line), "%s%s  |  %s",
+             contact_type_label(entry->type),
+             entry->favorite ? "  |  Favorite" : "",
+             entry->muted ? "Muted" : "Active");
     lv_obj_t *flags = create_label(sheet, line, 0xA6B0B7);
     if (flags) {
         lv_obj_set_pos(flags, 16, 64);
     } else {
         complete = false;
     }
-    snprintf(line, sizeof(line), "Identity  %.16s", entry->fingerprint);
+    snprintf(line, sizeof(line), "Node ID  %.16s", entry->fingerprint);
     lv_obj_t *fingerprint = create_label(sheet, line, 0xF4F7FB);
     if (fingerprint) {
         lv_obj_set_pos(fingerprint, 16, 98);
@@ -532,11 +552,15 @@ bool d1l_ui_contact_sheets_render_detail(
         complete = false;
     }
     if (entry->out_path_valid) {
-        snprintf(line, sizeof(line), "Direct route  |  %u hop%s",
-                 (unsigned)entry->path_hops,
-                 entry->path_hops == 1U ? "" : "s");
+        if (entry->path_hops == 0U) {
+            snprintf(line, sizeof(line), "Route  Direct");
+        } else {
+            snprintf(line, sizeof(line), "Route  %u hop%s",
+                     (unsigned)entry->path_hops,
+                     entry->path_hops == 1U ? "" : "s");
+        }
     } else {
-        snprintf(line, sizeof(line), "Broadcast route  |  no saved direct path");
+        snprintf(line, sizeof(line), "Route  Flood when needed");
     }
     lv_obj_t *key = create_label(sheet, line, 0xA6B0B7);
     if (key) {
@@ -546,13 +570,20 @@ bool d1l_ui_contact_sheets_render_detail(
     } else {
         complete = false;
     }
-    const int snr_abs = entry->last_snr_tenths < 0 ?
-        -entry->last_snr_tenths : entry->last_snr_tenths;
-    snprintf(line, sizeof(line), "Last signal %d dBm  |  SNR %s%d.%d  |  via %.18s",
-             entry->last_rssi_dbm,
-             entry->last_snr_tenths < 0 ? "-" : "",
-             snr_abs / 10, snr_abs % 10,
-             entry->heard_name[0] ? entry->heard_name : "-");
+    if (entry->last_heard_ms == 0U) {
+        snprintf(line, sizeof(line), "Signal  Not heard yet");
+    } else {
+        const int snr_abs = entry->last_snr_tenths < 0 ?
+            -entry->last_snr_tenths : entry->last_snr_tenths;
+        const char *quality = entry->last_rssi_dbm >= -70 ? "Excellent" :
+            (entry->last_rssi_dbm >= -90 ? "Good" :
+             (entry->last_rssi_dbm >= -110 ? "Fair" : "Weak"));
+        snprintf(line, sizeof(line),
+                 "Signal  %s  |  %d dBm / %s%d.%d dB",
+                 quality, entry->last_rssi_dbm,
+                 entry->last_snr_tenths < 0 ? "-" : "",
+                 snr_abs / 10, snr_abs % 10);
+    }
     lv_obj_t *signal = create_label(sheet, line, 0xA6B0B7);
     if (signal) {
         lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
@@ -560,6 +591,17 @@ bool d1l_ui_contact_sheets_render_detail(
         lv_obj_set_pos(signal, 16, 166);
     } else {
         complete = false;
+    }
+    if (entry->last_heard_ms != 0U && entry->heard_name[0] != '\0') {
+        snprintf(line, sizeof(line), "Last heard via  %.24s", entry->heard_name);
+        lv_obj_t *via = create_label(sheet, line, 0xA6B0B7);
+        if (via) {
+            lv_label_set_long_mode(via, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(via, 448);
+            lv_obj_set_pos(via, 16, 190);
+        } else {
+            complete = false;
+        }
     }
     lv_obj_t *actions = create_label(sheet, "Contact actions", 0x20D9ED);
     if (actions) {
