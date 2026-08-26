@@ -141,7 +141,22 @@ def test_repeater_login_and_management_use_the_existing_admin_runtime():
     assert "const bool expose_guest = s_admin_guest_requested" in login_push
     assert "D1L_MESHCORE_ADMIN_PERMISSION_GUEST" in login_push
     assert "s_pending_payload[offset++] = exposed_permissions" in login_push
-    assert "s_admin_guest_requested = password_len == 0U" in login
+    intent_guard = protocol.split(
+        "static bool pending_admin_login_intent_conflicts", 1
+    )[1].split("static void send_login_command", 1)[0]
+    assert "s_admin_snapshot.state != D1L_MESHCORE_ADMIN_LOGIN_PENDING" in intent_guard
+    assert "s_admin_guest_requested != guest_requested" in intent_guard
+    assert "s_admin_guest_fingerprint" in intent_guard
+    assert login.index("pending_admin_login_intent_conflicts") < login.index(
+        "join_pending_admin_request("
+    )
+    joined_retry = login.split("if (join_pending_admin_request(", 1)[1].split(
+        "clear_admin_request();", 1
+    )[0]
+    assert "s_admin_guest_requested =" not in joined_retry
+    assert "s_admin_guest_fingerprint" not in joined_retry
+    assert login.count("s_admin_guest_requested = guest_requested;") == 1
+    assert "set_error_response(ERR_CODE_BAD_STATE);" in login
     assert "s_admin_guest_fingerprint" in login
     assert "clear_admin_session_authorization()" in login
 

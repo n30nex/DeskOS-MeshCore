@@ -41,7 +41,9 @@ D1L.
   D1L identity already has an admin ACL entry. Guest sessions can read status,
   telemetry, and neighbours but cannot use ACL or command controls. That Guest
   intent is retained across a brief Bluetooth reconnect, so restoring the
-  active repeater session cannot silently promote it to Admin.
+  active repeater session cannot silently promote it to Admin. Repeated phone
+  requests can join the same login without changing its Guest/Admin access
+  level; a conflicting retry is rejected without cancelling the radio request.
 - Recent verified advert routes are kept in a bounded boot-only cache and
   returned through the official companion command, removing the remaining
   contact-detail protocol error without adding flash writes.

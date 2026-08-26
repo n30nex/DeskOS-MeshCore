@@ -1545,6 +1545,22 @@ static bool join_pending_admin_request(
     return true;
 }
 
+static bool pending_admin_login_intent_conflicts(
+    const d1l_contact_entry_t *contact, bool guest_requested)
+{
+    d1l_meshcore_service_admin_snapshot(&s_admin_snapshot);
+    if (!contact ||
+        s_admin_snapshot.state != D1L_MESHCORE_ADMIN_LOGIN_PENDING ||
+        strcmp(s_admin_snapshot.fingerprint, contact->fingerprint) != 0) {
+        return false;
+    }
+    if (s_admin_guest_requested != guest_requested) {
+        return true;
+    }
+    return guest_requested &&
+           strcmp(s_admin_guest_fingerprint, contact->fingerprint) != 0;
+}
+
 static void send_login_command(const uint8_t *payload, size_t length)
 {
     if (length < 33U ||
@@ -1565,16 +1581,17 @@ static void send_login_command(const uint8_t *payload, size_t length)
     }
     char password[D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] = {0};
     memcpy(password, &payload[33], password_len);
+    const bool guest_requested = password_len == 0U;
+
+    if (pending_admin_login_intent_conflicts(&contact, guest_requested)) {
+        memset(password, 0, sizeof(password));
+        set_error_response(ERR_CODE_BAD_STATE);
+        return;
+    }
 
     if (join_pending_admin_request(
             D1L_BLE_ADMIN_REQUEST_LOGIN, &payload[1], &contact,
             D1L_MESHCORE_ADMIN_LOGIN_PENDING)) {
-        s_admin_guest_requested = password_len == 0U;
-        if (s_admin_guest_requested) {
-            snprintf(s_admin_guest_fingerprint,
-                     sizeof(s_admin_guest_fingerprint), "%s",
-                     contact.fingerprint);
-        }
         memset(password, 0, sizeof(password));
         return;
     }
@@ -1599,7 +1616,7 @@ static void send_login_command(const uint8_t *payload, size_t length)
             D1L_MESHCORE_ADMIN_LOGIN_PENDING)) {
         return;
     }
-    s_admin_guest_requested = password_len == 0U;
+    s_admin_guest_requested = guest_requested;
     if (s_admin_guest_requested) {
         snprintf(s_admin_guest_fingerprint,
                  sizeof(s_admin_guest_fingerprint), "%s",
