@@ -454,6 +454,27 @@ static void test_authenticated_path_replay_mutates_and_responds_once(void)
 
 int main(void)
 {
+    d1l_meshcore_path_state_t admin_path = {0};
+    d1l_meshcore_route_selection_t admin_route = {0};
+    assert(d1l_meshcore_path_state_learn(
+        &admin_path, D1L_MESHCORE_PATH_SOURCE_PATH_RESPONSE, 1000U));
+    assert(d1l_meshcore_route_select_admin_request(
+        true, true, NULL, 0U, &admin_path, 1100U, 1U, &admin_route));
+    assert(admin_route.route == D1L_MESHCORE_ROUTE_DIRECT);
+    assert(d1l_meshcore_route_select_admin_request(
+        true, false, NULL, 0U, &admin_path, 1100U, 1U, &admin_route));
+    assert(admin_route.route == D1L_MESHCORE_ROUTE_FLOOD);
+    assert(d1l_meshcore_path_state_learn(
+        &admin_path, D1L_MESHCORE_PATH_SOURCE_ADVERT, 1000U));
+    assert(d1l_meshcore_route_select_admin_request(
+        true, true, NULL, 0U, &admin_path, 1100U, 1U, &admin_route));
+    assert(admin_route.route == D1L_MESHCORE_ROUTE_FLOOD);
+    assert(d1l_meshcore_path_state_learn(
+        &admin_path, D1L_MESHCORE_PATH_SOURCE_PATH_RESPONSE, 1000U));
+    assert(d1l_meshcore_route_select_admin_request(
+        true, true, NULL, 0U, &admin_path,
+        1101U + D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS, 1U, &admin_route));
+    assert(admin_route.route == D1L_MESHCORE_ROUTE_FLOOD);
     test_valid_direct_path_selection();
     test_missing_stale_and_malformed_fallback();
     test_preboot_timestamp_alias_never_becomes_fresh();

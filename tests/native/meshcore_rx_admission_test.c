@@ -90,6 +90,12 @@ static void test_peer_authority_and_self_are_full_key_bound(void)
 
 int main(void)
 {
+    assert(d1l_meshcore_peer_text_authorized(1U, false, true));
+    assert(!d1l_meshcore_peer_text_authorized(0U, false, true));
+    assert(!d1l_meshcore_peer_text_authorized(1U, true, false));
+    assert(d1l_meshcore_peer_text_authorized(0U, true, false));
+    assert(d1l_meshcore_peer_text_authorized(2U, true, false));
+    assert(!d1l_meshcore_peer_text_authorized(3U, true, true));
     test_unknown_and_failed_channel_are_closed();
     test_every_collision_candidate_is_executable();
     test_ambiguous_authentication_is_closed();

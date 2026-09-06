@@ -452,6 +452,10 @@ static esp_err_t prepare_admin_flood_route(
     const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
     d1l_contact_entry_t *out_contact,
     d1l_meshcore_route_selection_t *out_selection);
+static esp_err_t prepare_admin_request_route(
+    const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
+    d1l_contact_entry_t *out_contact,
+    d1l_meshcore_route_selection_t *out_selection);
 
 static void meshcore_service_command_wipe(
     d1l_meshcore_service_cmd_t *cmd)
@@ -3634,7 +3638,8 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         const d1l_meshcore_peer_dispatch_outcome_t peer_outcome =
             d1l_meshcore_peer_dispatch_classify(
                 settings->identity_public_key, sender_pub,
-                d1l_contact_store_can_dm(contact));
+                d1l_contact_store_can_dm(contact) ||
+                    d1l_contact_store_can_admin(contact));
         if (peer_outcome != D1L_MESHCORE_PEER_AUTHORIZED) {
             continue;
         }
@@ -3655,6 +3660,13 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         }
 
         const uint8_t txt_type = plain[4] >> 2;
+        if (!d1l_meshcore_peer_text_authorized(
+                txt_type, d1l_contact_store_can_dm(contact),
+                d1l_contact_store_can_admin(contact))) {
+            secure_zero_bytes(secret, sizeof(secret));
+            secure_zero_bytes(plain, sizeof(plain));
+            continue;
+        }
         if (txt_type == D1L_MESHCORE_TXT_TYPE_CLI_DATA) {
             d1l_meshcore_text_plaintext_view_t text_view = {0};
             d1l_meshcore_admin_context_t mutation_context = {0};
@@ -6686,7 +6698,7 @@ static esp_err_t meshcore_service_handle_admin_request_status(void)
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_flood_route(
+    ret = prepare_admin_request_route(
         context.binding.fingerprint, &settings_snapshot, now_ms,
         &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
@@ -6784,7 +6796,7 @@ static esp_err_t meshcore_service_handle_admin_query(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_flood_route(
+    ret = prepare_admin_request_route(
         context.binding.fingerprint, &settings_snapshot, now_ms,
         &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
@@ -6882,7 +6894,7 @@ static esp_err_t meshcore_service_handle_admin_mutation(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_flood_route(
+    ret = prepare_admin_request_route(
         context.binding.fingerprint, &settings_snapshot, now_ms,
         &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
@@ -7004,7 +7016,7 @@ static esp_err_t meshcore_service_handle_admin_cli(
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    ret = prepare_admin_flood_route(
+    ret = prepare_admin_request_route(
         context.binding.fingerprint, &settings_snapshot, now_ms,
         &contact, &selection);
     snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
@@ -8262,6 +8274,27 @@ static esp_err_t prepare_admin_flood_route(
     *out_contact = contact;
     *out_selection = selection;
     return ESP_OK;
+}
+
+static esp_err_t prepare_admin_request_route(
+    const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
+    d1l_contact_entry_t *out_contact,
+    d1l_meshcore_route_selection_t *out_selection)
+{
+    const esp_err_t result = prepare_admin_flood_route(
+        fingerprint, settings, now_ms, out_contact, out_selection);
+    if (result != ESP_OK) {
+        return result;
+    }
+    const bool learned_this_boot = out_contact->out_path_valid &&
+        lookup_boot_route(out_contact->fingerprint, out_contact->out_path,
+                          out_contact->out_path_len,
+                          out_contact->out_path_state.generation);
+    return d1l_meshcore_route_select_admin_request(
+        out_contact->out_path_valid, learned_this_boot,
+        out_contact->out_path, out_contact->out_path_len,
+        &out_contact->out_path_state, now_ms, settings->path_hash_bytes,
+        out_selection) ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,

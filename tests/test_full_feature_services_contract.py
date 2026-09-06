@@ -358,7 +358,12 @@ def test_admin_login_floods_and_neighbours_resolve_saved_contact_names():
         body = service.split(f"static esp_err_t {handler}", 1)[1].split(
             "static esp_err_t", 1
         )[0]
-        assert "prepare_admin_flood_route(" in body
+        expected_route = (
+            "prepare_admin_flood_route("
+            if handler == "meshcore_service_handle_admin_login"
+            else "prepare_admin_request_route("
+        )
+        assert expected_route in body
 
     assert "d1l_meshcore_admin_neighbour_t" in dispatch_h
     parser = dispatch.split("static bool parse_neighbours_query(", 1)[1].split(

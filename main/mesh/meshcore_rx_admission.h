@@ -10,6 +10,9 @@ extern "C" {
 
 #define D1L_MESHCORE_CHANNEL_CANDIDATE_CAPACITY 8U
 
+bool d1l_meshcore_peer_text_authorized(uint8_t text_type,
+                                     bool can_message, bool can_admin);
+
 typedef enum {
     D1L_MESHCORE_CHANNEL_DISPATCH_INVALID = 0,
     D1L_MESHCORE_CHANNEL_DISPATCH_UNKNOWN,

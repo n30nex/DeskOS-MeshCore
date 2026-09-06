@@ -165,6 +165,21 @@ static inline bool d1l_meshcore_route_select_canonical(
     return true;
 }
 
+/* Server requests may reuse an authenticated PATH response from this boot.
+ * An advert's reverse path is not proof of a route to the server. */
+static inline bool d1l_meshcore_route_select_admin_request(
+    bool path_known, bool learned_this_boot, const uint8_t *path,
+    uint8_t path_len, const d1l_meshcore_path_state_t *path_state,
+    uint32_t now_ms, uint8_t flood_path_hash_bytes,
+    d1l_meshcore_route_selection_t *out_selection)
+{
+    const bool response_path = path_state &&
+        path_state->source == D1L_MESHCORE_PATH_SOURCE_PATH_RESPONSE;
+    return d1l_meshcore_route_select_canonical(
+        path_known, learned_this_boot && response_path, path, path_len,
+        path_state, now_ms, flood_path_hash_bytes, out_selection);
+}
+
 static inline const char *d1l_meshcore_route_selection_reason_name(
     d1l_meshcore_route_selection_reason_t reason)
 {

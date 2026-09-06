@@ -64,6 +64,14 @@ d1l_meshcore_channel_dispatch_finish(
     return D1L_MESHCORE_CHANNEL_DISPATCH_ACCEPTED;
 }
 
+bool d1l_meshcore_peer_text_authorized(uint8_t text_type,
+                                     bool can_message, bool can_admin)
+{
+    /* MeshCore text types: ordinary=0, CLI=1, signed room post=2. */
+    return text_type == 1U ? can_admin :
+        ((text_type == 0U || text_type == 2U) && can_message);
+}
+
 d1l_meshcore_peer_dispatch_outcome_t d1l_meshcore_peer_dispatch_classify(
     const uint8_t local_public_key[32],
     const uint8_t candidate_public_key[32], bool candidate_authorized)
