@@ -1,11 +1,11 @@
-# MeshCore DeskOS D1L 1.8.0-rc.1 User Guide
+# MeshCore DeskOS D1L 1.8.0-rc.2 User Guide
 
 This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.8.0-rc.1 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.8.0-rc.2 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -204,7 +204,7 @@ are not written to status, logs, screenshots, or exports.
 
 ## Signed local update and rollback
 
-Each trusted 1.5 release package includes one matching set under `update/`:
+Each trusted release package includes one matching set under `update/`:
 
 ```text
 d1l-update.manifest
@@ -212,12 +212,14 @@ d1l-update.sig
 d1l-update.bin
 ```
 
-Copy all three files from the same release to `updates/` on the prepared SD
-card. Open **Settings -> Signed Update**, choose **Install from SD**, and tap
+Copy all three files from the same release to `deskos/updates/` on the prepared
+SD card, inside its existing `deskos` directory. Open **Settings -> Signed Update**, choose **Install from SD**, and tap
 the second confirmation within five seconds. DeskOS verifies the product,
 target, partition-table hash, image size/hash, signer, Ed25519 signature, and
-anti-downgrade security sequence before writing the inactive slot. It never
-accepts an RF-triggered update.
+anti-downgrade security sequence before writing the inactive slot. It also
+checks the bytes read back from flash before selecting that slot for boot.
+Cancellation is available until writing starts. Once the update is ready,
+restart before attempting another install. Updates cannot be triggered over RF.
 
 When the write completes, choose **Reboot to Update** and confirm it. The new
 image starts in pending-verification state. A successful normal boot confirms
@@ -357,7 +359,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.8.0-rc.1 download and
+Use the guided browser flasher or the published DeskOS D1L 1.8.0-rc.2 download and
 follow its `START_HERE.md`.
 
 The browser waits for DeskOS to finish startup and verifies its exact build,

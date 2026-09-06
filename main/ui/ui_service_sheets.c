@@ -721,11 +721,31 @@ bool d1l_ui_service_sheets_render_update(
     bool complete = render_header(
         controller, sheet, "Signed Update", BINDING_CLOSE_UPDATE,
         D1L_UI_SERVICE_ACTION_CLOSE_UPDATE);
+    const char *state_text = "Update unavailable";
+    switch (status->state) {
+    case D1L_UPDATE_STATE_IDLE: state_text = "Ready to install"; break;
+    case D1L_UPDATE_STATE_INSPECTING: state_text = "Checking update files"; break;
+    case D1L_UPDATE_STATE_VERIFYING_SIGNATURE: state_text = "Checking signature"; break;
+    case D1L_UPDATE_STATE_VERIFYING_IMAGE: state_text = "Checking image"; break;
+    case D1L_UPDATE_STATE_WRITING: state_text = "Writing update"; break;
+    case D1L_UPDATE_STATE_FINALIZING: state_text = "Checking written image"; break;
+    case D1L_UPDATE_STATE_REBOOT_REQUIRED: state_text = "Ready to restart"; break;
+    case D1L_UPDATE_STATE_CANCELLED: state_text = "Update cancelled"; break;
+    case D1L_UPDATE_STATE_ROLLED_BACK: state_text = "Previous version restored"; break;
+    case D1L_UPDATE_STATE_ERROR: state_text = "Update stopped"; break;
+    default: break;
+    }
     char line[160];
-    snprintf(line, sizeof(line), "State %s  %u%%  error %s",
-             d1l_update_state_name(status->state),
-             (unsigned)status->progress_percent,
-             esp_err_to_name(status->last_error));
+    if (status->state == D1L_UPDATE_STATE_ERROR) {
+        snprintf(line, sizeof(line), "%s: %s", state_text,
+                 esp_err_to_name(status->last_error));
+    } else if (status->state >= D1L_UPDATE_STATE_INSPECTING &&
+               status->state <= D1L_UPDATE_STATE_FINALIZING) {
+        snprintf(line, sizeof(line), "%s  %u%%", state_text,
+                 (unsigned)status->progress_percent);
+    } else {
+        snprintf(line, sizeof(line), "%s", state_text);
+    }
     lv_obj_t *state = create_label(
         sheet, line,
         status->state == D1L_UPDATE_STATE_ERROR ? 0xF87171 :
@@ -748,7 +768,7 @@ bool d1l_ui_service_sheets_render_update(
     complete = version && complete;
     lv_obj_t *policy = create_label(
         sheet,
-        "Local SD only. Manifest, target, partition table, image hash, Ed25519 signature, and anti-downgrade sequence are verified before the inactive slot is written.",
+        "Copy the three signed update files to deskos/updates on your SD card. DeskOS checks the signature and written image before switching versions. Keep power connected while installing.",
         0x4D7FFF);
     position_wrap(policy, 8, 148, 408);
     complete = policy && complete;
@@ -764,7 +784,8 @@ bool d1l_ui_service_sheets_render_update(
             controller, sheet, "Cancel Before Write",
             8, 250, 188, 44, BINDING_UPDATE_CANCEL,
             D1L_UI_SERVICE_ACTION_UPDATE_CANCEL) != NULL && complete;
-    } else {
+    } else if (status->state != D1L_UPDATE_STATE_WRITING &&
+               status->state != D1L_UPDATE_STATE_FINALIZING) {
         complete = create_button(
             controller, sheet,
             install_armed ? "Confirm Install" : "Install from SD",

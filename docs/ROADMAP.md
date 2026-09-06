@@ -18,7 +18,8 @@
 | **1.7.10** | Faster Contacts, retained maps, editable Observer region, hashtag channels, and reliable flood adverts | Historical (`v1.7.10`) |
 | **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Included in `v1.7.12` |
 | **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Stable (`v1.7.12`) |
-| **1.8.0-rc.1** | Radio timing and diagnostics audit, clearer startup/maps, and verified browser installation | Release candidate; exact acceptance in the tagged release |
+| **1.8.0-rc.1** | Radio timing and diagnostics audit, clearer startup/maps, and verified browser installation | Previous candidate |
+| **1.8.0-rc.2** | Verify the written update image, reliable cancellation, and correct SD installation paths | Release candidate; exact acceptance in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -190,3 +191,11 @@ Builds, protocol checks, hardware work, and packaging run locally at the
 maintainer's request. Publication uses the exact validated source, signed
 update bundle, public checksums, current documentation, product page, and
 flasher catalog.
+
+## 1.8.0-rc.2: signed-update acceptance
+
+The updater now verifies the inactive flash contents against the signed digest,
+honours cancellation until writing begins, and blocks another install while
+waiting for reboot. Package destinations and instructions match the bridge's
+`deskos/updates` directory. The update screen uses clearer progress text and
+shows no install action while a write is active.

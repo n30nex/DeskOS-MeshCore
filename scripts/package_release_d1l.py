@@ -2219,17 +2219,17 @@ def write_signed_update_bundle(
         "partition_table_sha256": sha256_file(partition_table),
         "image": {
             **update_image,
-            "sd_destination": "updates/d1l-update.bin",
+            "sd_destination": "deskos/updates/d1l-update.bin",
         },
         "manifest": {
             "path": manifest_path.relative_to(package_dir).as_posix(),
-            "sd_destination": "updates/d1l-update.manifest",
+            "sd_destination": "deskos/updates/d1l-update.manifest",
             "size": manifest_path.stat().st_size,
             "sha256": sha256_file(manifest_path),
         },
         "signature": {
             "path": signature_path.relative_to(package_dir).as_posix(),
-            "sd_destination": "updates/d1l-update.sig",
+            "sd_destination": "deskos/updates/d1l-update.sig",
             "size": signature_path.stat().st_size,
             "sha256": sha256_file(signature_path),
             "algorithm": "Ed25519",
@@ -3433,11 +3433,11 @@ recovery because it can overwrite settings, logs, contacts, and message state.
 
 ## Signed local update
 
-Copy this exact set to the mounted card without renaming:
+Copy this exact set inside the card's existing `deskos/` directory:
 
-- `update/d1l-update.bin` -> `updates/d1l-update.bin`
-- `update/d1l-update.manifest` -> `updates/d1l-update.manifest`
-- `update/d1l-update.sig` -> `updates/d1l-update.sig`
+- `update/d1l-update.bin` -> `deskos/updates/d1l-update.bin`
+- `update/d1l-update.manifest` -> `deskos/updates/d1l-update.manifest`
+- `update/d1l-update.sig` -> `deskos/updates/d1l-update.sig`
 
 Then use the on-device Update sheet, or the local USB console:
 
@@ -3450,7 +3450,8 @@ update reboot CONFIRM-REBOOT-UPDATE
 
 The device verifies product, target, exact image size/hash, partition-table
 hash, signer identity, signature, and monotonic security sequence before
-writing the inactive OTA slot. It confirms the new image after a healthy boot
+writing the inactive OTA slot, then checks the written bytes before selecting
+that slot for boot. It confirms the new image after a healthy boot
 and otherwise retains ESP-IDF rollback behavior. Never format the SD card.
 
 ## Checksums and reporting

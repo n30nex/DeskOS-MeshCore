@@ -1,7 +1,7 @@
 #pragma once
 
 #define D1L_FIRMWARE_NAME "MeshCore DeskOS D1L"
-#define D1L_FIRMWARE_VERSION "1.8.0-rc.1"
+#define D1L_FIRMWARE_VERSION "1.8.0-rc.2"
 #define D1L_CONSOLE_SCHEMA 1
 
 #define D1L_DISPLAY_WIDTH 480

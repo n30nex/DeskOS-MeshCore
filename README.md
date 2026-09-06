@@ -6,11 +6,11 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.8.0-rc.1** is the release candidate for the SenseCAP Indicator D1L.
+DeskOS **1.8.0-rc.2** is the release candidate for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.1)
+[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.2)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
@@ -20,6 +20,8 @@ The previous stable release is
 
 ## What the candidate improves
 
+- Signed SD updates verify the written flash image, honour cancellation before
+  writing, and use the correct `deskos/updates` folder with clearer progress.
 - Slow LoRa profiles get a transmit deadline that covers their actual frame
   airtime; normal fast profiles retain the existing recovery deadline.
 - Local SNR uses the correct units, and phone diagnostics show signal,
@@ -33,7 +35,7 @@ The previous stable release is
 - An ordinary update can finish without optional SD storage. Fresh clean
   installations retain the complete three-stage verification.
 
-See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.1.md) for the full
+See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.2.md) for the full
 change and validation record. Earlier releases remain documented in the
 [roadmap](docs/ROADMAP.md) and their release notes.
 

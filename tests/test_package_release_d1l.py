@@ -461,6 +461,7 @@ def test_local_full_feature_package_has_no_actions_claim(tmp_path, monkeypatch):
     )
     readme = (package / "README_RELEASE.md").read_text()
     assert "Build origin: local" in readme
+    assert "deskos/updates/d1l-update.bin" in readme
     assert "GitHub Actions run:" not in readme
     assert verify_checksum_tree(package)
     runner = types.ModuleType("local_update_runner")

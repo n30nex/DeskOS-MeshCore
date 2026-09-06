@@ -393,6 +393,37 @@ static esp_err_t write_image(const char *path, uint32_t image_size,
     return esp_ota_end(ota_handle);
 }
 
+static esp_err_t hash_written_image(const esp_partition_t *partition,
+                                    uint32_t image_size, uint8_t digest[32])
+{
+    if (!partition || !digest || image_size == 0U ||
+        image_size > partition->size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    mbedtls_sha256_context context;
+    mbedtls_sha256_init(&context);
+    esp_err_t ret = mbedtls_sha256_starts(&context, 0) == 0 ?
+        ESP_OK : ESP_FAIL;
+    uint8_t chunk[D1L_RP2040_FILE_CHUNK_MAX] = {0};
+    for (uint32_t offset = 0U; ret == ESP_OK && offset < image_size;) {
+        const size_t length = image_size - offset < sizeof(chunk) ?
+            image_size - offset : sizeof(chunk);
+        ret = esp_partition_read(partition, offset, chunk, length);
+        if (ret == ESP_OK &&
+            mbedtls_sha256_update(&context, chunk, length) != 0) {
+            ret = ESP_FAIL;
+        }
+        offset += length;
+        taskYIELD();
+    }
+    if (ret == ESP_OK && mbedtls_sha256_finish(&context, digest) != 0) {
+        ret = ESP_FAIL;
+    }
+    mbedtls_sha256_free(&context);
+    secure_zero(chunk, sizeof(chunk));
+    return ret;
+}
+
 static uint32_t load_highest_sequence(void)
 {
     nvs_handle_t handle = 0U;
@@ -459,6 +490,9 @@ static void clear_pending(bool confirmed)
 static esp_err_t run_install(void)
 {
     set_state(D1L_UPDATE_STATE_INSPECTING, ESP_OK, 1U);
+    if (cancel_requested()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     uint32_t manifest_size = 0U;
     uint32_t signature_size = 0U;
     uint32_t image_size = 0U;
@@ -557,13 +591,35 @@ static esp_err_t run_install(void)
              "%s", target->label);
     portEXIT_CRITICAL(&s_lock);
 
-    set_state(D1L_UPDATE_STATE_WRITING, ESP_OK, 50U);
+    /* Serialize the last cancellation with the first irreversible write. */
+    portENTER_CRITICAL(&s_lock);
+    const bool cancelled = s_cancel_requested;
+    if (!cancelled) {
+        s_status.state = D1L_UPDATE_STATE_WRITING;
+        s_status.cancel_allowed = false;
+        s_status.progress_percent = 50U;
+    }
+    portEXIT_CRITICAL(&s_lock);
+    if (cancelled) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto digest_cleanup;
+    }
     ret = write_image(
         D1L_UPDATE_IMAGE_PATH, manifest.image_size, target);
     if (ret != ESP_OK) {
         goto digest_cleanup;
     }
     set_state(D1L_UPDATE_STATE_FINALIZING, ESP_OK, 96U);
+    /* The card may change between verification and the second read. Trust
+     * only the bytes now in flash before selecting the next boot image. */
+    ret = hash_written_image(target, manifest.image_size, actual_digest);
+    if (ret == ESP_OK &&
+        memcmp(expected_digest, actual_digest, sizeof(actual_digest)) != 0) {
+        ret = ESP_ERR_INVALID_CRC;
+    }
+    if (ret != ESP_OK) {
+        goto digest_cleanup;
+    }
     esp_app_desc_t descriptor = {0};
     if (esp_ota_get_partition_description(target, &descriptor) != ESP_OK ||
         strcmp(descriptor.project_name, D1L_UPDATE_PROJECT_NAME) != 0) {
@@ -602,7 +658,6 @@ static void update_task(void *argument)
         if (requested) {
             s_install_requested = false;
             s_status.install_requested = false;
-            s_cancel_requested = false;
             s_status.bytes_verified = 0U;
             s_status.bytes_written = 0U;
         }
@@ -716,11 +771,15 @@ esp_err_t d1l_update_request_install(void)
     }
     portENTER_CRITICAL(&s_lock);
     const bool busy = s_install_requested ||
+        s_reboot_prepared ||
         (s_status.state >= D1L_UPDATE_STATE_INSPECTING &&
-         s_status.state <= D1L_UPDATE_STATE_FINALIZING);
+         s_status.state <= D1L_UPDATE_STATE_REBOOT_REQUIRED);
     if (!busy) {
+        s_cancel_requested = false;
         s_install_requested = true;
         s_status.install_requested = true;
+        s_status.state = D1L_UPDATE_STATE_INSPECTING;
+        s_status.cancel_allowed = true;
     }
     portEXIT_CRITICAL(&s_lock);
     return busy ? ESP_ERR_INVALID_STATE : ESP_OK;

@@ -9,7 +9,7 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
-## 1.8.0-rc.1 local release candidate
+## 1.8.0-rc.2 local release candidate
 
 The maintainer requested local Pi 5 builds for this candidate. Do not dispatch
 GitHub Actions. The Actions requirements below describe historical releases.
@@ -28,7 +28,7 @@ GitHub Actions. The Actions requirements below describe historical releases.
   are not new-candidate phone acceptance.
 - Exercise the actual flasher console against the D1L and verify its normal
   update, clean-install, failure and storage readiness paths locally.
-- Publish `v1.8.0-rc.1` as a prerelease tied to the tested source. Freshly
+- Publish `v1.8.0-rc.2` as a prerelease tied to the tested source. Freshly
   download and compare every public asset, update the product page and flasher,
   and verify public downloads and desktop/mobile layouts.
 - Retain the signed release, a device recovery copy and deployment rollback;
