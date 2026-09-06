@@ -26,3 +26,14 @@ The following rules are non-negotiable:
 - At most one implementation PR may be active.
 - A reproducible product defect produces a code fix; otherwise continue the
   shortest path to the published user package.
+
+## Shared Canadaverse hygiene
+
+- Inspect `git status --short --branch` and recent commits before editing; preserve unrelated and concurrent work.
+- Use a scoped `codex/<task>` branch or isolated worktree. Never force-push or reset shared work.
+- On the shared Windows workstation, keep builds, caches, worktrees, and temporary files on `F:`; use the platform workspace elsewhere. Do not commit generated caches, logs, device backups, or downloaded artifacts.
+- Never commit credentials, `.env` files, Wi-Fi/MQTT passwords, API keys, Cloudflare tokens, MeshCore private keys, live databases, packet captures, or user messages.
+- Resolve the exact device, build environment, artifact, offset, host, service, and rollback boundary before hardware or deployment work.
+- Preserve firmware identity/settings and unrelated Pi services by default.
+- Run focused checks plus `git diff --check`; use the repository's existing CI/release path rather than creating a parallel one.
+- Release and deployment claims require exact-commit artifacts and observable verification. Mark anything not physically or publicly tested as unverified.
