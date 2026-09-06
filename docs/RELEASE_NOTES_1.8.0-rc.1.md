@@ -32,6 +32,9 @@ installation path. It uses the production `full_feature` profile with
 - Unused legacy UI callbacks and an unused update logging declaration were
   removed.
 - Signed-update boot acceptance requires the retained identity to be usable.
+- A successful retained-store commit clears that store's recovered SD warning
+  while preserving its historical error counters. Reads, unrelated-store writes,
+  and a commit from a changed card cannot falsely clear the warning.
 
 ## Installation and support
 

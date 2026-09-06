@@ -108,6 +108,8 @@ typedef struct {
 } test_sd_event_t;
 
 static bool s_toggle_backend_during_write;
+static bool s_toggle_backend_during_rename;
+static esp_err_t s_sd_write_error;
 static bool s_toggle_backend_during_delete;
 static bool s_worker_should_yield;
 static bool s_chunked_read_case;
@@ -900,6 +902,9 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path, uint32_t offset,
     (void)truncate;
     assert(out_result);
     (void)timeout_ms;
+    if (s_sd_write_error != ESP_OK) {
+        return s_sd_write_error;
+    }
     if (s_sd_file_mode) {
         assert(path);
         assert(data || len == 0U);
@@ -1026,6 +1031,12 @@ esp_err_t d1l_rp2040_bridge_file_rename(const char *from_path, const char *to_pa
         out_result->exists = true;
         out_result->size = (uint32_t)length;
         out_result->last_error = ESP_OK;
+    }
+    if (s_toggle_backend_during_rename) {
+        s_toggle_backend_during_rename = false;
+        d1l_retained_blob_store_note_sd_backend(false, false, false, 0U, 0U, 0U);
+        d1l_retained_blob_store_note_sd_backend(true, true, true,
+            D1L_RP2040_FILE_LINE_MAX, D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
     }
     return ESP_OK;
 }
@@ -2700,6 +2711,45 @@ static void test_completed_lineage_reads_exact_marker_and_data_backups(void)
     assert(s_delete_count == deletes_before);
 }
 
+static void test_sd_write_warning_requires_a_successful_same_media_commit(void)
+{
+    static const uint8_t payload[] = "retained contacts";
+    uint8_t readback[sizeof(payload)] = {0};
+    size_t length = sizeof(readback);
+    clear_nvs_case();
+    reset_sd_files();
+    d1l_retained_blob_store_note_sd_backend(true, true, true,
+        D1L_RP2040_FILE_LINE_MAX, D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    const d1l_retained_blob_store_id_t store = D1L_RETAINED_BLOB_STORE_CONTACTS;
+    d1l_retained_blob_store_backend_state_t backend = state_for(store);
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        store, "contacts", payload, sizeof(payload), backend.generation) == ESP_OK);
+    s_sd_write_error = ESP_ERR_TIMEOUT;
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        store, "contacts", payload, sizeof(payload), backend.generation) == ESP_ERR_TIMEOUT);
+    s_sd_write_error = ESP_OK;
+    d1l_retained_blob_store_sd_stats_t failed = {0}, after = {0};
+    assert(d1l_retained_blob_store_sd_stats(store, &failed));
+    assert(failed.sd_degraded_latched && failed.sd_last_error == ESP_ERR_TIMEOUT);
+    assert(d1l_retained_blob_store_read_sd_primary(store, "contacts", readback, &length) == ESP_OK);
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public", payload,
+        sizeof(payload), backend.generation) == ESP_OK);
+    assert(d1l_retained_blob_store_sd_stats(store, &after));
+    assert(after.sd_degraded_latched); /* Readability and another store do not prove recovery. */
+    s_toggle_backend_during_rename = true;
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        store, "contacts", payload, sizeof(payload), backend.generation) == ESP_ERR_INVALID_STATE);
+    assert(d1l_retained_blob_store_sd_stats(store, &after));
+    assert(after.sd_degraded_latched);
+    backend = state_for(store);
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        store, "contacts", payload, sizeof(payload), backend.generation) == ESP_OK);
+    assert(d1l_retained_blob_store_sd_stats(store, &after));
+    assert(!after.sd_degraded_latched && after.sd_last_error == ESP_OK);
+    assert(after.sd_write_fail_count == failed.sd_write_fail_count);
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 2 && strcmp(argv[1], "profile-gate") == 0) {
@@ -2803,6 +2853,7 @@ int main(int argc, char **argv)
     test_interrupted_dm_erase_keeps_primary_authoritative();
     test_factory_reset_sd_recovery_end_to_end();
     test_completed_lineage_reads_exact_marker_and_data_backups();
+    test_sd_write_warning_requires_a_successful_same_media_commit();
 
     puts("native retained backend generation and NVS partition: ok");
     return 0;

@@ -1317,7 +1317,8 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert "MAP_VIEWPORT_HEIGHT (D1L_UI_DOCKED_CONTENT_HEIGHT - 2U)" in map_source
     assert "MAP_VIEWPORT_PANEL_HEIGHT (MAP_VIEWPORT_HEIGHT + 2U)" in map_source
     assert "parent, 0, 0, 480, MAP_VIEWPORT_PANEL_HEIGHT" in landing
-    assert "(int)MAP_VIEWPORT_HEIGHT - 36" in landing
+    assert "lv_obj_align(attribution, LV_ALIGN_BOTTOM_RIGHT, -8, -4)" in landing
+    assert "lv_obj_set_style_text_font(attribution, &lv_font_montserrat_12, 0)" in landing
 
     options = map_source.split("static void map_render_options_root", 1)[1].split(
         "static void map_render_cache_status", 1

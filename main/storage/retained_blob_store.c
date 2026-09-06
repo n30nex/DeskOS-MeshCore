@@ -166,6 +166,27 @@ static esp_err_t s_retained_nvs_migration_error = ESP_OK;
 static d1l_retained_blob_store_nvs_telemetry_t s_retained_nvs_telemetry;
 
 static esp_err_t retained_nvs_unavailable_error(void);
+static esp_err_t sd_commit_result_for_generation(
+    const d1l_retained_blob_store_config_t *config,
+    uint32_t expected_generation, esp_err_t result)
+{
+    if (result != ESP_OK) {
+        return result;
+    }
+    portENTER_CRITICAL(&s_store_state_mux);
+    if (!s_store_sd_enabled[config->id] ||
+        s_store_backend_generation[config->id] != expected_generation) {
+        result = ESP_ERR_INVALID_STATE;
+    } else {
+        /* A completed write/erase on this media proves recovery. Reads and
+         * mount probes cannot clear a write failure; keep historical counts. */
+        s_store_sd_stats[config->id].sd_degraded_latched = false;
+        s_store_sd_stats[config->id].sd_last_error = ESP_OK;
+    }
+    portEXIT_CRITICAL(&s_store_state_mux);
+    return result;
+}
+
 static esp_err_t sd_write_blob_with_lineage(
     const d1l_retained_blob_store_config_t *config, const char *key,
     const void *src, size_t len, uint32_t expected_generation);
@@ -1881,8 +1902,9 @@ static esp_err_t sd_write_blob_with_lineage(
         return ret;
     }
     if (ready) {
-        return sd_write_blob_for_generation(config, key, src, len,
-                                            expected_generation);
+        ret = sd_write_blob_for_generation(config, key, src, len,
+                                           expected_generation);
+        return sd_commit_result_for_generation(config, expected_generation, ret);
     }
     if (config->id == D1L_RETAINED_BLOB_STORE_PACKET_LOG) {
         /* Packet history has 64 segment aliases. packet_log.c must delete
@@ -1898,8 +1920,9 @@ static esp_err_t sd_write_blob_with_lineage(
     if (ret != ESP_OK) {
         return ret;
     }
-    return sd_finalize_lineage_for_generation(
+    ret = sd_finalize_lineage_for_generation(
         config, lineage_generation, expected_generation);
+    return sd_commit_result_for_generation(config, expected_generation, ret);
 }
 
 static esp_err_t sd_erase_blob_with_lineage(
@@ -1922,8 +1945,9 @@ static esp_err_t sd_erase_blob_with_lineage(
         return ret;
     }
     if (ready) {
-        return sd_erase_blob_for_generation(config, key,
-                                            expected_generation);
+        ret = sd_erase_blob_for_generation(config, key,
+                                           expected_generation);
+        return sd_commit_result_for_generation(config, expected_generation, ret);
     }
     if (config->id == D1L_RETAINED_BLOB_STORE_PACKET_LOG) {
         return ESP_ERR_INVALID_STATE;
@@ -1932,8 +1956,9 @@ static esp_err_t sd_erase_blob_with_lineage(
     if (ret != ESP_OK) {
         return ret;
     }
-    return sd_finalize_lineage_for_generation(
+    ret = sd_finalize_lineage_for_generation(
         config, lineage_generation, expected_generation);
+    return sd_commit_result_for_generation(config, expected_generation, ret);
 }
 
 static esp_err_t sd_erase_blob(const d1l_retained_blob_store_config_t *config,
