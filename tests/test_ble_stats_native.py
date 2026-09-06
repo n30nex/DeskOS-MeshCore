@@ -82,3 +82,68 @@ int main(void) {
     subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "main"),
                     "-I", str(ROOT / "tests/native/stubs"), str(program), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
+
+
+def test_self_telemetry_uses_local_identity_and_preserves_remote_requests(tmp_path):
+    source = (ROOT / "main/comms/ble_companion_protocol.c").read_text()
+    function = "static void send_telemetry_command" + source.split(
+        "static void send_telemetry_command", 1)[1].split("static void send_binary_command", 1)[0]
+    program = tmp_path / "self_telemetry.c"
+    program.write_text(r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#define ESP_OK 0
+#define ERR_CODE_ILLEGAL_ARG 6U
+#define ERR_CODE_BAD_STATE 4U
+#define PUSH_CODE_TELEMETRY_RESPONSE 0x8bU
+#define D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS 4200U
+#define D1L_MESHCORE_ADMIN_QUERY_TELEMETRY 3U
+#define D1L_BLE_ADMIN_REQUEST_TELEMETRY 4U
+typedef struct {bool identity_ready; uint8_t identity_public_key[32];} d1l_settings_t;
+static d1l_settings_t provided;
+static int snapshot_error;
+static uint8_t reply[32], last_error, remote_key[32];
+static size_t reply_length;
+static unsigned remote_requests;
+static int d1l_settings_public_snapshot(d1l_settings_t *out) {*out=provided; return snapshot_error;}
+static void set_error_response(uint8_t error) {last_error=error;}
+static bool set_pending(const uint8_t *bytes, size_t length) {
+    assert(length<=sizeof(reply)); memcpy(reply,bytes,length); reply_length=length; return true;
+}
+static void begin_admin_query_command(const uint8_t *key, unsigned query, unsigned offset, unsigned kind) {
+    assert(query==3 && offset==0 && kind==4); memcpy(remote_key,key,32); ++remote_requests;
+}
+''' + function + r'''
+int main(void) {
+    uint8_t request[36]={39,0,0,0};
+    provided.identity_ready=true;
+    for(unsigned i=0;i<32;++i) provided.identity_public_key[i]=(uint8_t)(i+1);
+    send_telemetry_command(request,4);
+    assert(last_error==0 && remote_requests==0 && reply_length==12);
+    assert(reply[0]==0x8b && reply[1]==0 && !memcmp(reply+2,provided.identity_public_key,6));
+    assert(reply[8]==1 && reply[9]==116 && reply[10]==1 && reply[11]==164);
+    for(unsigned i=0;i<32;++i) request[i+4]=(uint8_t)(i+42);
+    send_telemetry_command(request,sizeof(request));
+    assert(remote_requests==1 && !memcmp(remote_key,request+4,32));
+    const unsigned invalid[]={0,1,2,3,5,35};
+    for(unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i) {
+        last_error=0; reply_length=0;
+        send_telemetry_command(request,invalid[i]);
+        assert(last_error==6 && reply_length==0 && remote_requests==1);
+    }
+    provided.identity_ready=false; last_error=0;
+    send_telemetry_command(request,4);
+    assert(last_error==4 && reply_length==0 && remote_requests==1);
+    provided.identity_ready=true; snapshot_error=1; last_error=0;
+    send_telemetry_command(request,4);
+    assert(last_error==4 && reply_length==0 && remote_requests==1);
+    return 0;
+}
+''')
+    compiler = shutil.which("gcc") or shutil.which("clang")
+    assert compiler, "A C compiler is required for companion wire tests"
+    binary = tmp_path / "self_telemetry"
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", str(program), "-o", str(binary)], check=True)
+    subprocess.run([str(binary)], check=True)

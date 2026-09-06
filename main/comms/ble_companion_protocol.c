@@ -1781,6 +1781,25 @@ static void begin_admin_query_command(
 
 static void send_telemetry_command(const uint8_t *payload, size_t length)
 {
+    if (length == 4U) {
+        d1l_settings_t settings = {0};
+        if (d1l_settings_public_snapshot(&settings) != ESP_OK ||
+            !settings.identity_ready) {
+            set_error_response(ERR_CODE_BAD_STATE);
+            return;
+        }
+        uint8_t response[12] = {PUSH_CODE_TELEMETRY_RESPONSE, 0U};
+        memcpy(&response[2], settings.identity_public_key, 6U);
+        /* Cayenne LPP: self channel, voltage, unsigned big-endian 0.01 V.
+         * Match the existing wired-power substitute; no sensor is implied. */
+        const uint16_t centivolts = D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS / 10U;
+        response[8] = 1U;
+        response[9] = 116U;
+        response[10] = (uint8_t)(centivolts >> 8U);
+        response[11] = (uint8_t)centivolts;
+        (void)set_pending(response, sizeof(response));
+        return;
+    }
     if (length < 36U) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;

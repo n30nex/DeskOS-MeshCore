@@ -3,6 +3,16 @@
 This candidate keeps the 1.8.0 radio, Bluetooth and map improvements and
 corrects problems found while exercising the signed-update path.
 
+## Phone telemetry
+
+The official app's four-byte request for local telemetry now receives the
+documented self-telemetry response instead of an invalid-argument error and
+misleading firmware-update prompt. The reply uses the device's own identity
+and its existing 4.20 V wired-power compatibility value. It requires no RF
+request; remote-node telemetry retains its authenticated request path.
+The D1L still has no battery-voltage sensor or environmental telemetry in this
+build.
+
 ## Signed SD installation
 
 - The inactive flash image is read back and checked against its signed digest

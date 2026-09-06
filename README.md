@@ -22,6 +22,7 @@ The previous stable release is
 
 - Signed SD updates verify the written flash image, honour cancellation before
   writing, and use the correct `deskos/updates` folder with clearer progress.
+- The phone app's **View Telemetry** recognizes the D1L's local response.
 - Slow LoRa profiles get a transmit deadline that covers their actual frame
   airtime; normal fast profiles retain the existing recovery deadline.
 - Local SNR uses the correct units, and phone diagnostics show signal,

@@ -309,7 +309,9 @@ signal, a recent sampled noise floor, and airtime calculated from frame length
 and radio settings. The board reports local SNR in whole dB. The D1L has no
 battery sensor; the phone protocol uses a full-battery equivalent for this
 externally powered device. Wi-Fi signal strength refreshes while connected
-without requiring a scan.
+without a scan. The phone's **View Telemetry** uses that same wired-power
+equivalent; its voltage value is a compatibility value, not a sensor reading.
+Environmental telemetry remains unavailable on this build.
 
 The console emits bounded JSON. Start with:
 
