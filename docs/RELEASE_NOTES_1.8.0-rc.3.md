@@ -33,6 +33,13 @@ clients to close, and client startup/publication rechecks the live network
 under its ownership lock. A failed drain keeps the driver alive and reports
 the failure. Observer settings and queued data remain intact.
 
+USB responses are also assembled as bounded JSONL records before a single
+stdio write. Wi-Fi/MQTT log lines therefore stay outside the reply instead of
+splitting a quoted field and causing the flasher or support tools to time out.
+The writer keeps formatting work outside the stdout lock, preserves escaped
+text, and reports oversized/unavailable output without suggesting an automatic
+repeat of a potentially completed command.
+
 The [parity record](DESKOS_MESHCORE_FEATURE_PARITY.md) pins WadaMesh source
 `8e94e250366632ee2e7a7198551e551aaa8b8024`, covers its primary UI areas and lists
 the remaining differences. Complete WadaMesh feature parity is not claimed.

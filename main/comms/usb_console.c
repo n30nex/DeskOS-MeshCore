@@ -61,6 +61,12 @@
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
 #include "update/update_manager.h"
+#include "comms/console_output.h"
+
+/* Keep asynchronous Wi-Fi/MQTT logs between complete JSONL responses. The
+ * writer does not hold stdout while command handlers wait for other tasks. */
+#define printf d1l_console_printf
+#define putchar d1l_console_putchar
 
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 #if D1L_ENABLE_QUALIFICATION_HOOKS
@@ -197,25 +203,25 @@ static void print_json_string(const char *text)
         for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
             switch (*p) {
             case '"':
-                fputs("\\\"", stdout);
+                printf("\\\"");
                 break;
             case '\\':
-                fputs("\\\\", stdout);
+                printf("\\\\");
                 break;
             case '\b':
-                fputs("\\b", stdout);
+                printf("\\b");
                 break;
             case '\f':
-                fputs("\\f", stdout);
+                printf("\\f");
                 break;
             case '\n':
-                fputs("\\n", stdout);
+                printf("\\n");
                 break;
             case '\r':
-                fputs("\\r", stdout);
+                printf("\\r");
                 break;
             case '\t':
-                fputs("\\t", stdout);
+                printf("\\t");
                 break;
             default:
                 if (*p < 0x20U) {

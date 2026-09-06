@@ -26,6 +26,7 @@ idf_component_register(
         "comms/companion_3byte.c"
         "comms/usb_command_parser.c"
         "comms/usb_console.c"
+        "comms/console_output.c"
         "diagnostics/crash_log.c"
         "diagnostics/event_log.c"
         "diagnostics/health_monitor.c"
