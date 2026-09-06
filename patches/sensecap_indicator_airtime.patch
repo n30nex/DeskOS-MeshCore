@@ -1,0 +1,17 @@
+diff --git a/components/lora/radio.c b/components/lora/radio.c
+--- a/components/lora/radio.c
++++ b/components/lora/radio.c
+@@ -425 +425 @@
+-const RadioLoRaBandwidths_t Bandwidths[] = { LORA_BW_125, LORA_BW_250, LORA_BW_500 };
++const RadioLoRaBandwidths_t Bandwidths[] = { LORA_BW_125, LORA_BW_250, LORA_BW_500, LORA_BW_062 };
+@@ -972,8 +972,9 @@
+     if( ( ( bandwidth == 0 ) && ( ( datarate == 11 ) || ( datarate == 12 ) ) ) ||
+-        ( ( bandwidth == 1 ) && ( datarate == 12 ) ) )
++        ( ( bandwidth == 1 ) && ( datarate == 12 ) ) ||
++        ( ( bandwidth == 3 ) && ( datarate >= 10 ) ) )
+     {
+         lowDatareOptimize = true;
+     }
+ 
+     int32_t ceilDenominator;
+     int32_t ceilNumerator = ( payloadLen << 3 ) +

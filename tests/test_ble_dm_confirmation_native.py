@@ -50,7 +50,7 @@ int main(void) {
     stored.ack_hash=0x11223344;
     stored.delivery_state=D1L_DM_DELIVERY_AWAITING_ACK;
     stored.delivered=true;
-    set_dm_sent_response(&stored, true);
+    set_dm_sent_response(&stored, true, 5000);
     assert(s_pending_len==10 && s_pending_payload[0]==6 && s_pending_payload[1]==1);
     assert(read_u32(s_pending_payload+2)==0x11223344);
     assert(read_u32(s_pending_payload+6)==55000);
@@ -72,14 +72,15 @@ int main(void) {
     s_pending_len=0;
     maybe_queue_dm_confirmation();
     assert(s_pending_len==0);
-    set_dm_sent_response(&stored, false);
+    set_dm_sent_response(&stored, false, 11000);
     assert(s_pending_payload[1]==0);
+    assert(read_u32(s_pending_payload+6)==67000);
     s_pending_len=0;
     stored.acked=false;
     stored.delivery_state=D1L_DM_DELIVERY_FAILED_RADIO;
     maybe_queue_dm_confirmation();
     assert(s_pending_len==0 && s_phone_dm_session==0);
-    set_dm_sent_response(&stored, true);
+    set_dm_sent_response(&stored, true, 5000);
     s_pending_len=0;
     stored.delivery_session_id=8;
     stored.acked=true;

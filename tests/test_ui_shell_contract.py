@@ -841,7 +841,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_dm_thread": "D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD",
         "open_dm_reply": "D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD",
         "toggle_dm_details": "D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS",
-        "open_contact_detail": "open_contact_detail_event_cb",
+        "open_contact_detail": "D1L_UI_NODES_ACTION_OPEN_CONTACT",
         "close_contact_detail": "D1L_UI_CONTACT_ACTION_CLOSE_DETAIL",
         "open_dm_compose": "D1L_UI_CONTACT_ACTION_MESSAGE",
         "open_contact_options": "D1L_UI_CONTACT_ACTION_OPEN_OPTIONS",
@@ -1489,7 +1489,7 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     assert "static lv_obj_t *s_route_trace_sheet" in source
     assert "static d1l_contact_entry_t s_route_trace_contact" in source
     assert "static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY]" in source
-    assert "open_contact_detail_event_cb" in source
+    assert "case D1L_UI_NODES_ACTION_OPEN_CONTACT:" in source
     assert "contact_sheets_action_handler" in source
     assert "open_route_trace_event_cb" in source
     for legacy in (

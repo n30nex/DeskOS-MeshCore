@@ -2499,6 +2499,24 @@ static void cmd_mesh_status(void)
                (d1l_meshcore_route_selection_reason_t)status.dm_route_last_reason),
            (unsigned long)status.dm_route_last_path_age_ms);
     printf(
+        ",\"radio_stats\":{\"received\":%lu,\"receive_errors\":%lu,"
+        "\"flood_tx\":%lu,\"direct_tx\":%lu,\"flood_rx\":%lu,\"direct_rx\":%lu,"
+        "\"tx_airtime_ms\":%" PRIu64 ",\"rx_airtime_ms\":%" PRIu64 ","
+        "\"tx_timeout_ms\":%lu,\"signal_valid\":%s,\"last_rssi_dbm\":%d,"
+        "\"last_snr_quarter_db\":%d,\"noise_valid\":%s,\"noise_floor_dbm\":%d,"
+        "\"airtime_source\":\"frame_length_and_active_radio_profile\"}",
+        (unsigned long)status.radio_rx_packets,
+        (unsigned long)status.radio_rx_errors,
+        (unsigned long)status.radio_flood_tx,
+        (unsigned long)status.radio_direct_tx,
+        (unsigned long)status.radio_flood_rx,
+        (unsigned long)status.radio_direct_rx,
+        status.radio_tx_airtime_ms, status.radio_rx_airtime_ms,
+        (unsigned long)status.radio_tx_timeout_ms,
+        bool_json(status.radio_signal_valid), status.radio_last_rssi_dbm,
+        status.radio_last_snr_quarter_db, bool_json(status.radio_noise_valid),
+        status.radio_noise_floor_dbm);
+    printf(
         ",\"dm_delivery\":{\"session_id\":%" PRIu64
         ",\"revision\":%lu,\"state\":\"%s\",\"state_id\":%u,"
         "\"last_error\":\"%s\",\"active\":%s}",

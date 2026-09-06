@@ -6,339 +6,112 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.7.12** is the current full-feature production firmware for the
-SenseCAP Indicator D1L. Download `v1.7.12` from the
-[GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
-The release is compiled with the immutable `full_feature` profile and
-`conditional` SD history mode.
-
-DeskOS is a standalone, dark, touch-first MeshCore client. This release was built
-and packaged locally on the Pi 5 with the pinned toolchains. It provides ESP32 update and
-full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
-update bundle, and end-user instructions.
-
-## What 1.7.12 fixes
-
-DeskOS 1.7.12 completes the phone-companion and radio-to-screen repair:
-
-- unused channel slots are reported correctly, so the official app can add and
-  synchronize channels instead of reporting a full radio after Public;
-- direct messages carry their real acknowledgement reference and delivery
-  confirmation, so the phone shows **Delivered** when the radio receives an ACK;
-- repeater requests reuse a fresh authenticated return path, while login still
-  floods and stale or unproven routes fall back to flood;
-- authenticated repeater console replies reach the phone, including valid
-  Unicode names and multiline responses;
-- the full-feature download includes the preserving update installers,
-  complete SD-bridge UF2, signed update bundle, and `START_HERE.md`;
-- BLE frame scratch space now lives in PSRAM instead of consuming a quarter of
-  the small NimBLE host-task stack during the phone's initial channel sync;
-- **Add** is always visible beside **Direct** on Channels, so hashtag channels
-  can be created or imported even while Public already exists;
-- **MQTT / Observer** is clearly named under Connections and its editable
-  three-letter IATA region is labelled directly in the panel; and
-- every verified advert refreshes live Contacts recency, including repeated
-  adverts whose signed identity timestamp is unchanged, without rewriting
-  retained contact history.
-
-## What 1.7.11 fixes
-
-DeskOS 1.7.11 makes Wi-Fi and Bluetooth explicit operating modes:
-
-- tapping the Wi-Fi or BLE status icon switches modes and safely shuts down the
-  other radio stack first;
-- upgrades with both legacy switches enabled select BLE mode once instead of
-  starting both memory-heavy stacks;
-- an incoming phone connection wakes the display and opens a large six-digit
-  pairing prompt automatically; and
-- the BLE panel stays live while pairing and clearly explains that Wi-Fi is off.
-
-## What 1.7.10 fixes
-
-DeskOS 1.7.10 is a radio-to-screen reliability and usability patch:
-
-- a top-button double press queues one flood advert without blocking the UI,
-  then reports whether it was sent or failed;
-- BLE repeat pairing replaces only the connecting client's stale bond, while
-  a smaller Wi-Fi receive pool preserves internal memory for encrypted
-  companion requests;
-- Contacts sorts compact indexes, snapshots contact state once, and copies
-  only the bounded visible result set instead of moving 512 large records;
-- Map keeps its current frame across Options and ordinary tab changes, and a
-  partial healthy tile pass resumes from the SD cache;
-- Observer region is editable as a three-letter IATA code such as `YYC`;
-- entering a channel name beginning with `#` derives the standard interoperable
-  MeshCore hashtag secret, so channels such as `#chat` can be joined directly;
-  and
-- a received channel packet with a missing or implausible sender timestamp uses
-  the trusted local arrival time instead of displaying `time unknown`.
-
-## What 1.7.9 fixes
-
-DeskOS 1.7.9 is a focused connectivity-stability patch:
-
-- Bluetooth companion mode keeps its dynamic host state in PSRAM, leaving
-  enough internal memory for Wi-Fi, the radio, and the touch interface;
-- the Observer control task also uses PSRAM while its broker clients retain
-  their required internal stacks; and
-- Observer waits for freshly validated network or companion time before
-  signing either MeshCore Canada broker login, instead of using an older
-  retained display clock.
-
-## What 1.7.8 added
-
-DeskOS 1.7.8 is a connectivity and screen-response release:
-
-- Observer now sends received packet data to both secure MeshCore Canada
-  brokers using the standard signed identity format and `YKF` topic region;
-- one optional secure custom broker remains available, while MQTT work runs
-  away from the radio and screen paths in bounded queues;
-- Wi-Fi and Bluetooth companion mode can remain on together, with the familiar
-  `123456` pairing PIN;
-- Recent Contacts uses only adverts heard during the current boot and updates
-  from the live radio state;
-- message rows save and show their real local time when a trusted clock is
-  available; older rows without a saved time remain honestly unknown; and
-- Map keeps showing saved tiles while missing tiles retry instead of replacing
-  the whole view with a premature error; and
-- a deliberate top-button double press sends one flood advert, with a one-minute
-  cooldown to prevent accidental repeats.
-
-## What 1.7.7 improves
-
-DeskOS 1.7.7 shortens the path from radio receipt to the Contacts screen:
-
-- verified adverts become readable immediately instead of waiting behind an
-  SD-card write;
-- the existing retained-store worker coalesces ambient contact updates once
-  per second while preserving forced flushes before a controlled reboot;
-- explicit contact edits such as rename, favorite, and mute remain
-  synchronously durable; and
-- heard-node sorting now uses an efficient library sort instead of repeatedly
-  scanning all 512 slots for every row.
-
-## What 1.7.6 fixes
-
-DeskOS 1.7.6 completes the first-install path and makes local time practical:
-
-- the [NeonPocket flasher](https://flasher.canadaverse.org/) can identify the
-  RP2040 BOOTSEL drive, checksum the matching bridge UF2, and copy it directly;
-- the flasher can prepare an already-formatted FAT32 card by adding only
-  missing, checksum-verified DeskOS files. It never formats, deletes, or
-  replaces a different existing file;
-- both bridge and card steps include a separate device-side verification so a
-  copied file is never presented as a working installation; and
-- **Settings -> Display** now has **Time -1h** and **Time +1h** controls for the
-  displayed local clock. Mountain Time is UTC-7 in standard time and UTC-6 in
-  daylight time; daylight-saving changes are manual.
-
-Radio, security, and retained protocol timestamps remain UTC.
-
-## What 1.7.5 improved
-
-DeskOS 1.7.5 makes remote repeater work and everyday display use more reliable:
-
-- repeater and room login always uses flood delivery, so servers beyond direct
-  range can receive the sign-in request through the mesh;
-- **Close** on Status, Telemetry, Neighbours, and other signed-in pages returns
-  to the repeater manager instead of dropping back to Contacts;
-- Neighbours shows saved repeater names, friendly elapsed time, and SNR while
-  retaining a short identity prefix for unknown entries;
-- the screen now locks and turns off after ten minutes of inactivity, with a
-  true full-screen cover that cannot leave old controls visible above it;
-- the top button wakes the display; double-pressing it while awake sends one
-  normal advert; and
-- maps already stored on the SD card render without an artificial delay between
-  tiles.
-
-## What 1.7.1 added
-
-Repeater and room management now behaves like a first-class touch workflow:
-
-- saved repeater and room contacts have a direct **Login** button;
-- login opens a large masked password field and on-screen keyboard;
-- passwords can be remembered per server on this D1L, forgotten at any time,
-  and are removed with the contact or a factory reset;
-- successful login opens a dedicated command grid for Status, Telemetry,
-  Neighbours, Access, Tools, Room, and Console functions as permitted;
-- requests show an animated working screen, timeout guidance, and persistent
-  results instead of disappearing into a queued toast; and
-- server changes still require local confirmation and verified replies.
-
-## What 1.7 adds
-
-DeskOS 1.7 gives the firmware a clear identity inspired by the bright visual
-family of [NeonPocketMC](https://github.com/n30nex/NeonPocketMC):
-
-- a new DeskOS touch-display and three-node mesh mark;
-- a smooth, non-blocking 3.2-second opening animation;
-- electric cyan, cobalt, neon lime, and charcoal across the complete UI;
-- simpler opening messages that describe what is actually on screen; and
-- matching repository artwork and interface previews.
-
-<p align="center">
-  <img src="docs/images/branding/deskos-boot.gif" width="360" alt="DeskOS animated opening preview">
-</p>
-
-The animation above is generated from the same bounded timeline as the
-firmware. The on-device scene is drawn with lightweight LVGL shapes rather
-than storing a large bitmap in flash.
-
-## Everyday improvements from 1.6
-
-DeskOS 1.6 keeps the complete 1.5 feature set and refines the everyday touch
-experience:
-
-- a compact Home dashboard with an always-visible lock control and live time;
-- directly reachable Contacts search plus Recent, Favorites, A-Z, Role, and
-  Signal sort modes;
-- clearer, shorter labels and consistent 44 px touch targets across Contacts,
-  radio, Wi-Fi, diagnostics, and messaging;
-- truthful full-feature BLE and diagnostics states in the release simulator;
-- safer visual semantics so advanced actions no longer look like failures; and
-- an owned Contacts sorting/search model extracted from the main UI controller.
-
-DeskOS 1.5 previously added:
-
-- secure BLE companion pairing, bonding, reconnect, disconnect, and forget;
-- the current MeshCore companion protocol over an encrypted BLE transport;
-- deliberate one-time contact and channel QR sharing with public data only;
-- Ed25519-signed local SD updates, inactive-slot installation, anti-downgrade
-  sequencing, first-boot confirmation, and automatic rollback;
-- expanded bounded diagnostics, event history, display preferences, and
-  notification controls; and
-- the corrected channel, Contacts, Finder, Ping, PATH, TRACE, Map, Wi-Fi,
-  storage, administration, Observer/MQTT, and messaging workflows from 1.2.
-
-DeskOS is a non-forwarding client. It sends user-requested traffic but does not
-repeat other devices' traffic. Its conditional SD-primary retained history
-becomes visibly live-only when storage is missing; history is never silently
-redirected into default NVS.
-
-## Security boundaries
-
-- BLE requires Secure Connections, MITM protection, encryption,
-  authentication, bonding, and an explicit notification subscription before
-  the companion protocol becomes ready.
-- BLE cannot export or import private keys, factory-reset the device, or reboot
-  it remotely.
-- QR codes contain only the public contact or channel material selected by the
-  owner. Their temporary URI buffer is cleared after rendering.
-- Signed updates are read from local SD, verified before the inactive slot is
-  written, and require two deliberate on-device confirmations.
-- USB remains the recovery path. DeskOS never formats the user's SD card.
-
-See the [user guide](docs/USER_GUIDE_D1L.md),
-[known limitations](docs/KNOWN_LIMITATIONS.md), and
-[companion security/protocol notes](docs/COMPANION_3BYTE_COMPATIBILITY.md).
-
-## Release train
-
-| Release | Purpose | State |
-|---|---|---|
-| **1.0 / RC1** | Initial production baseline | Historical |
-| **1.2 / RC2** | Channel, Contacts, parity, packaging, and screenshot correction | Historical (`v1.2.0`) |
-| **1.5 / RC3** | BLE, signed update/rollback, sharing, diagnostics, and full-feature activation | Historical (`v1.5.0`) |
-| **1.6** | Compact Home, Contacts search/sorts, UI truthfulness, and diagnostics polish | Historical (`v1.6.0`) |
-| **1.7** | DeskOS identity, animated opening, and NeonPocket-inspired product theme | Historical (`v1.7.0`) |
-| **1.7.1** | Direct repeater login, saved passwords, and touch-first server management | Historical (`v1.7.1`) |
-| **1.7.5** | Reliable remote login, better results/navigation, display wake/lock, and faster cached maps | Historical (`v1.7.5`) |
-| **1.7.6** | Guided bridge/SD installation and adjustable local display time | Historical (`v1.7.6`) |
-| **1.7.7** | Faster verified-advert admission and Contacts rendering | Historical (`v1.7.7`) |
-| **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Historical (`v1.7.8`) |
-| **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Historical (`v1.7.9`) |
-| **1.7.10** | Faster Contacts, retained maps, editable Observer region, hashtag channels, and reliable flood adverts | Historical (`v1.7.10`) |
-| **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Included in `v1.7.12` |
-| **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Current (`v1.7.12`) |
-
-## Device UI
-
-### Physical 1.7.5 device captures
-
-These current 480x480 frames came directly from the physically flashed D1L.
-Their CRCs, firmware identity, safety receipt, and collection notes are in
-[`docs/screenshots/device-1.7.5/README.md`](docs/screenshots/device-1.7.5/README.md).
-
-| Home | Channels |
-|---|---|
-| ![DeskOS 1.7.5 Home on D1L](docs/screenshots/device-1.7.5/home.png) | ![DeskOS 1.7.5 Channels on D1L](docs/screenshots/device-1.7.5/messages.png) |
-
-| Contacts | Settings |
-|---|---|
-| ![DeskOS 1.7.5 Contacts on D1L](docs/screenshots/device-1.7.5/nodes.png) | ![DeskOS 1.7.5 Settings on D1L](docs/screenshots/device-1.7.5/settings.png) |
-
-The screenshots contain no private messages, passwords, keys, or precise
-location data. Collection transmitted no public RF traffic and never formatted
-the SD card.
-
-### Repeater management in 1.7.5
-
-Managed repeaters and rooms now open directly from their **Login** button.
-After authentication, each server gets a focused command dashboard instead of
-mixing administration into the contact page. Slow mesh requests remain visible
-until they succeed, fail, time out, or are cancelled.
-
-| Login | Working |
-|---|---|
-| ![DeskOS 1.7.5 repeater login preview](docs/screenshots/simulator-1.7.5/repeater_login.png) | ![DeskOS 1.7.5 repeater request progress preview](docs/screenshots/simulator-1.7.5/repeater_login_pending.png) |
-
-| Manager | Status |
-|---|---|
-| ![DeskOS 1.7.5 repeater manager preview](docs/screenshots/simulator-1.7.5/repeater_manager.png) | ![DeskOS 1.7.5 named-neighbours preview](docs/screenshots/simulator-1.7.5/repeater_neighbours.png) |
-
-These are deterministic 480x480 simulator previews used for layout regression.
-They contain no real password or private radio material.
-
-The 1.7 simulator previews below show the refreshed production palette. They
-are visual previews, not substitutes for the physical D1L release check.
-
-| Home | Channels |
-|---|---|
-| ![DeskOS 1.7 Home preview](docs/screenshots/simulator-1.7/home.png) | ![DeskOS 1.7 Channels preview](docs/screenshots/simulator-1.7/messages.png) |
-
-| Contacts | Settings |
-|---|---|
-| ![DeskOS 1.7 Contacts preview](docs/screenshots/simulator-1.7/nodes.png) | ![DeskOS 1.7 Settings preview](docs/screenshots/simulator-1.7/settings.png) |
-
-### Physical 1.2 reference captures
-
-| Home | Channels |
-|---|---|
-| ![DeskOS Home](docs/screenshots/device-1.2-home.png) | ![DeskOS Channels](docs/screenshots/device-1.2-channels.png) |
-
-| Contacts | Settings |
-|---|---|
-| ![DeskOS Contacts](docs/screenshots/device-1.2-contacts.png) | ![DeskOS Settings](docs/screenshots/device-1.2-settings.png) |
-
-![DeskOS Map](docs/screenshots/device-1.2-map-local-tiles.png)
-
-Locations and public node labels may be visible. Private messages, passwords,
-private keys, and admin credentials must never be included in screenshots.
+DeskOS **1.8.0-rc.1** is the release candidate for the SenseCAP Indicator D1L.
+It uses the production `full_feature` profile with conditional SD-primary retained history
+(`conditional` storage mode).
+
+[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.1)
+· [Browser flasher](https://flasher.canadaverse.org/)
+· [User guide](docs/USER_GUIDE_D1L.md)
+· [Product page](https://canadaverse.org/deskos/)
+
+The previous stable release is
+[1.7.12](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
+
+## What the candidate improves
+
+- Slow LoRa profiles get a transmit deadline that covers their actual frame
+  airtime; normal fast profiles retain the existing recovery deadline.
+- Local SNR uses the correct units, and phone diagnostics show signal,
+  direct/flood packet counts, receive errors, and calculated airtime.
+- Wi-Fi signal updates without requiring a scan.
+- A loading bar advances while saved history is restored.
+- Map labels fit their space, avoid controls, preserve UTF-8 names, and open
+  node details when tapped.
+- The browser recognizes DeskOS JSON, waits for startup, verifies radio and
+  identity readiness, and reads the correct SD status.
+- An ordinary update can finish without optional SD storage. Fresh clean
+  installations retain the complete three-stage verification.
+
+See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.1.md) for the full
+change and validation record. Earlier releases remain documented in the
+[roadmap](docs/ROADMAP.md) and their release notes.
+
+## Everyday use
+
+The dark 480×480 touch interface has **Home**, **Channels**, **Contacts**,
+**Map**, and **Settings**. It supports public and hashtag channels, direct
+messages with acknowledgement state, contact search and sorting, discovery,
+Ping and Trace, and authenticated repeater/room management.
+
+Secure Bluetooth connects the official MeshCore phone app. Wi-Fi supports maps
+and the opt-in Observer/MQTT uplink. Wi-Fi and Bluetooth are explicit exclusive
+modes; cached maps and mesh messaging remain available in Bluetooth mode.
+
+DeskOS is a non-forwarding client. Prepared FAT32 storage and the paired RP2040
+bridge provide retained history and map caching. Missing storage is reported
+as live-only operation, without silently moving history into default NVS.
 
 ## Install
 
-Use the [browser flasher](https://flasher.canadaverse.org/) for the guided
-ESP32, RP2040 bridge, and SD-card workflow, or extract the complete release
-package and begin with `START_HERE.md`.
+Download the complete release ZIP, extract it, and open **START_HERE.md**, or use
+the [guided browser flasher](https://flasher.canadaverse.org/).
 
-- **Update an existing DeskOS install:** use the app update path. It preserves
-  unrelated retained flash regions.
-- **Fresh clean install or recovery:** use the full 8 MB image at `0x0`.
-- **RP2040 bridge:** hold BOOTSEL while connecting its USB side, then use the
-  browser flasher to identify the drive and copy the verified production UF2.
-- **SD card:** select an already-formatted FAT32 card in the browser flasher.
-  It adds and reads back only the missing DeskOS payload; it never formats the
-  card or replaces a different file.
-- **On-device signed update:** place the exact manifest, signature, and app BIN
-  from one release under `updates/` on the prepared SD card, then use
-  **Settings -> Signed Update**.
+- **Existing DeskOS:** choose the preserving update. The installer verifies the
+  application before selecting its boot slot and preserves identity, contacts,
+  settings, and SD data.
+- **Fresh clean installation:** the full 8 MB image replaces ESP32 identity and
+  settings. Complete the ESP32, RP2040 bridge, and prepared-card stages.
+- **RP2040 bridge:** hold BOOTSEL while connecting its USB side and install the
+  complete production UF2. The same UF2 serves update and fresh-install paths.
+- **SD preparation:** use an already-formatted FAT32 card. Preparation adds only
+  missing, verified files; it never formats the card or replaces different files.
+- **Signed local update:** copy the matching manifest, signature, and app image
+  under `updates/` on the prepared card, then use **Settings → Signed Update**.
 
-On Linux, only the stable D1L identity is supported for flashing:
+The D1L can take tens of seconds to restore a populated card. Keep power and
+USB connected while its loading/readiness screens finish.
+
+Linux hardware operations use the stable D1L identity:
 
 ```text
 /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
 VID:PID 1a86:7523
 ```
 
-Never substitute a guessed `/dev/ttyUSB*` path. The firmware never formats an
-SD card.
+Do not substitute a guessed `/dev/ttyUSB*` path. See the
+[guided installation notes](docs/D1L_SD_CARD_GUIDED_INSTALL.md).
+
+## Interface and support
+
+The [physical 1.7.5 reference gallery](docs/screenshots/device-1.7.5/README.md)
+records the earlier on-device interface. Historical and simulated images are
+labelled with their own versions; they are not current-candidate test evidence.
+
+The [user guide](docs/USER_GUIDE_D1L.md) covers the current controls, USB support
+commands, settings, and recovery. The [feature matrix](docs/DESKOS_MESHCORE_FEATURE_PARITY.md)
+and [known limitations](docs/KNOWN_LIMITATIONS.md) explain the D1L adaptations.
+
+## Security and recovery
+
+Bluetooth requires authenticated, encrypted, bonded communication. It cannot
+export/import private keys, factory-reset the D1L, or reboot it remotely.
+Sharing is an explicit owner action. Signed SD updates verify the release and
+require local confirmation before writing the inactive slot; an unhealthy
+pending image rolls back. USB remains the recovery path.
+
+The D1L has no onboard GPS or battery sensor. The UI is English-only. Remote
+administration remains capability-gated, with local confirmation for changes.
+See the [companion notes](docs/COMPANION_3BYTE_COMPATIBILITY.md).
+
+## Build and release
+
+Builds and checks run locally on the Pi 5 when requested by the maintainer.
+Use the pinned ESP-IDF image, RP2040 core, exact source commit, production
+profile, and existing update signer. The public package contains ESP32 update
+and clean images, a complete RP2040 UF2, a signed update, checksums, source
+provenance, an SBOM, and end-user instructions.
+
+See [build provenance](docs/BUILD_PROVENANCE_D1L.md) and the
+[release checklist](docs/RELEASE_CHECKLIST.md). Device backups, credentials,
+private messages, and internal test material never belong in release assets.

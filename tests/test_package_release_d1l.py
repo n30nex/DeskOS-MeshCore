@@ -39,6 +39,7 @@ def create_exact_bsp_patch_fixture(root: Path) -> Path:
         "touch.c": (b"touch base\n", b"touch patched\n"),
         "compat.c": (b"compat base\n", b"compat patched\n"),
         "origin.c": (b"origin base\n", b"origin patched\n"),
+        "airtime.c": (b"airtime base\n", b"airtime patched\n"),
     }
     for name, (base, _patched) in tracked.items():
         (submodule / name).write_bytes(base)
@@ -50,6 +51,7 @@ def create_exact_bsp_patch_fixture(root: Path) -> Path:
     for relative_patch, (name, (base, patched)) in zip(
         package_release_d1l.EXPECTED_BSP_PATCHES,
         tracked.items(),
+        strict=True,
     ):
         (submodule / name).write_bytes(patched)
         patch_text = run_git(
@@ -149,6 +151,7 @@ def write_fake_notices(root: Path) -> None:
         "patches/sensecap_indicator_idf55_compat.patch": "compat patch\n",
         "patches/sensecap_indicator_touch_fix.patch": "touch patch\n",
         "patches/sensecap_indicator_tx_origin.patch": "origin patch\n",
+        "patches/sensecap_indicator_airtime.patch": "airtime patch\n",
         "scripts/compare_release_reproducibility_d1l.py": "# comparator fixture\n",
         "scripts/meshcore_conformance_d1l.py": "# conformance fixture\n",
         "scripts/meshcore_signed_advert_runtime_d1l.py": "# signed runtime fixture\n",
@@ -1320,6 +1323,7 @@ def test_git_info_treats_expected_bsp_patches_as_clean(monkeypatch, tmp_path):
         "patches/sensecap_indicator_touch_fix.patch",
         "patches/sensecap_indicator_idf55_compat.patch",
         "patches/sensecap_indicator_tx_origin.patch",
+        "patches/sensecap_indicator_airtime.patch",
     ]
 
 

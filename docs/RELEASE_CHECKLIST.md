@@ -9,6 +9,34 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
+## 1.8.0-rc.1 local release candidate
+
+The maintainer requested local Pi 5 builds for this candidate. Do not dispatch
+GitHub Actions. The Actions requirements below describe historical releases.
+
+- Run the complete host suite and the focused native radio, companion, storage,
+  update, connectivity, map, and startup checks on the Pi.
+- Build the exact clean source with the pinned ESP-IDF SDK, `full_feature`,
+  `conditional`, and all four reviewed BSP patches. Record local provenance.
+- Package and verify both ESP32 install paths, the complete production RP2040
+  UF2, and the signed SD update using the existing production signer.
+- Use only the stable D1L USB identity. Preserve identity, settings and SD data;
+  verify application bytes before changing the boot selector.
+- Check the candidate's version, health, radio, connectivity, retained storage,
+  normal UI screens, and direct-message/repeater behavior on the attached D1L.
+  Record phone-app results with the version actually tested; earlier results
+  are not new-candidate phone acceptance.
+- Exercise the actual flasher console against the D1L and verify its normal
+  update, clean-install, failure and storage readiness paths locally.
+- Publish `v1.8.0-rc.1` as a prerelease tied to the tested source. Freshly
+  download and compare every public asset, update the product page and flasher,
+  and verify public downloads and desktop/mobile layouts.
+- Retain the signed release, a device recovery copy and deployment rollback;
+  remove obsolete task build outputs after publication.
+
+The release notes and GitHub release record the observed results. A checklist
+item or an older screenshot is not proof of a new device run.
+
 ## 1.0 / RC1 record
 
 - [x] `v1.0.0-rc.1`, `v1.0.0`, and the `v1.0.1` packaging correction are

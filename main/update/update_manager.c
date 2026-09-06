@@ -55,7 +55,6 @@ typedef struct {
     char signer_key_id[32];
 } d1l_update_manifest_t;
 
-static const char *TAG = "d1l_update";
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_update_status_t s_status = {
     .state = D1L_UPDATE_STATE_IDLE,

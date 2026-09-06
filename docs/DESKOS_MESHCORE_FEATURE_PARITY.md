@@ -1,13 +1,24 @@
 # DeskOS MeshCore mobile parity
 
-This is the 1.5/RC3 product ledger for the SenseCAP Indicator D1L. The mobile
-baseline was reviewed on 2026-08-08 against the official
+This is the current product capability ledger for DeskOS 1.8.0-rc.1 on the
+SenseCAP Indicator D1L. The original mobile baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).
 It covers the user-facing capabilities and primary actions described by those
 apps, including the recent channel search/settings, message search, contact
 sorting/filtering/actions, repeater management, maps/path viewing, and sharing
 work.
+
+The official Android app **1.49.0** was also exercised with DeskOS **1.7.12**:
+secure pairing/reconnect, contact synchronization, channel add/remove, incoming
+DM, acknowledged outgoing DM, and repeater status/Unicode CLI replies passed.
+Those are baseline interoperability results; candidate-specific results belong
+in the 1.8.0-rc.1 release record. No newer iOS device run is claimed.
+
+The candidate corrects radio airtime deadlines, SNR units and companion
+statistics, Wi-Fi signal refresh, early loading progress, map-label interaction,
+and browser USB/storage verification. “Complete” below means implemented, not
+that every phone, radio profile and physical recovery path has been tested.
 
 State meanings:
 

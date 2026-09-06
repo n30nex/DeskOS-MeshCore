@@ -180,6 +180,7 @@ void app_main(void)
         ESP_LOGW(TAG, "crash/reset log init failed: %s", esp_err_to_name(crash_log_ret));
     }
 
+    (void)d1l_board_display_boot_progress(15U);
     esp_err_t settings_ret = d1l_settings_load();
     if (settings_ret != ESP_OK) {
         ESP_LOGW(TAG, "settings load failed: %s", esp_err_to_name(settings_ret));
@@ -189,10 +190,12 @@ void app_main(void)
         ESP_LOGW(TAG, "display preferences load failed: %s",
                  esp_err_to_name(display_preferences_ret));
     }
+    (void)d1l_board_display_boot_progress(25U);
     esp_err_t channel_store_ret = d1l_channel_store_init();
     if (channel_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "channel store load failed: %s", esp_err_to_name(channel_store_ret));
     }
+    (void)d1l_board_display_boot_progress(35U);
     esp_err_t message_store_ret = d1l_message_store_init();
     if (message_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "message store load failed: %s", esp_err_to_name(message_store_ret));
@@ -204,18 +207,22 @@ void app_main(void)
                      esp_err_to_name(channel_message_ret));
         }
     }
+    (void)d1l_board_display_boot_progress(50U);
     esp_err_t dm_store_ret = d1l_dm_store_init();
     if (dm_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "DM store load failed: %s", esp_err_to_name(dm_store_ret));
     }
+    (void)d1l_board_display_boot_progress(60U);
     esp_err_t node_store_ret = d1l_node_store_init();
     if (node_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "node store load failed: %s", esp_err_to_name(node_store_ret));
     }
+    (void)d1l_board_display_boot_progress(70U);
     esp_err_t contact_store_ret = d1l_contact_store_init();
     if (contact_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "contact store load failed: %s", esp_err_to_name(contact_store_ret));
     }
+    (void)d1l_board_display_boot_progress(80U);
     esp_err_t read_state_ret = d1l_read_state_init();
     if (read_state_ret != ESP_OK) {
         ESP_LOGW(TAG, "read state load failed: %s", esp_err_to_name(read_state_ret));
@@ -228,6 +235,7 @@ void app_main(void)
     if (packet_log_ret != ESP_OK) {
         ESP_LOGW(TAG, "packet log load failed: %s", esp_err_to_name(packet_log_ret));
     }
+    (void)d1l_board_display_boot_progress(90U);
     esp_err_t route_worker_ret = d1l_route_store_worker_start();
     if (route_worker_ret != ESP_OK) {
         ESP_LOGW(TAG, "retained persistence worker start failed: %s",
@@ -311,6 +319,7 @@ void app_main(void)
     esp_err_t ui_ret = ESP_ERR_INVALID_STATE;
     if (board_ret == ESP_OK) {
         ESP_LOGI(TAG, "D1L full UI starting");
+        (void)d1l_board_display_boot_progress(100U);
         ui_ret = d1l_ui_phase1_start();
         if (ui_ret != ESP_OK) {
             ESP_LOGE(TAG, "D1L UI startup failed: %s",
@@ -327,7 +336,8 @@ void app_main(void)
 
     const esp_err_t update_boot_health =
         nvs_ret == ESP_OK && settings_ret == ESP_OK &&
-                board_ret == ESP_OK && ui_ret == ESP_OK ?
+                identity_ret == ESP_OK && board_ret == ESP_OK &&
+                ui_ret == ESP_OK ?
             ESP_OK : ESP_FAIL;
     esp_err_t update_confirm_ret =
         d1l_update_boot_confirm(update_boot_health);

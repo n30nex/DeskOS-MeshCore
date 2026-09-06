@@ -1102,7 +1102,7 @@ static void build_stats(uint8_t type)
     case STATS_TYPE_CORE: {
         const uint32_t queue_depth = mesh.runtime_command_queue_depth +
             mesh.runtime_priority_queue_depth + mesh.runtime_event_queue_depth;
-        write_u16_le(&s_pending_payload[2], 0U);
+        write_u16_le(&s_pending_payload[2], D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS);
         write_u32_le(&s_pending_payload[4],
                      (uint32_t)(esp_timer_get_time() / 1000000ULL));
         write_u16_le(&s_pending_payload[8],
@@ -1112,14 +1112,27 @@ static void build_stats(uint8_t type)
         return;
     }
     case STATS_TYPE_RADIO:
-        /* DeskOS does not retain airtime or noise-floor counters yet. */
+        write_u16_le(&s_pending_payload[2],
+                     (uint16_t)mesh.radio_noise_floor_dbm);
+        s_pending_payload[4] = (uint8_t)(int8_t)(
+            mesh.radio_last_rssi_dbm < INT8_MIN ? INT8_MIN :
+            mesh.radio_last_rssi_dbm > INT8_MAX ? INT8_MAX :
+            mesh.radio_last_rssi_dbm);
+        s_pending_payload[5] = (uint8_t)mesh.radio_last_snr_quarter_db;
+        write_u32_le(&s_pending_payload[6],
+                     (uint32_t)(mesh.radio_tx_airtime_ms / 1000U));
+        write_u32_le(&s_pending_payload[10],
+                     (uint32_t)(mesh.radio_rx_airtime_ms / 1000U));
         s_pending_len = 14U;
         return;
     case STATS_TYPE_PACKETS:
-        write_u32_le(&s_pending_payload[2], mesh.rx_packets);
+        write_u32_le(&s_pending_payload[2], mesh.radio_rx_packets);
         write_u32_le(&s_pending_payload[6], mesh.tx_packets);
-        write_u32_le(&s_pending_payload[10], mesh.tx_packets);
-        write_u32_le(&s_pending_payload[18], mesh.rx_packets);
+        write_u32_le(&s_pending_payload[10], mesh.radio_flood_tx);
+        write_u32_le(&s_pending_payload[14], mesh.radio_direct_tx);
+        write_u32_le(&s_pending_payload[18], mesh.radio_flood_rx);
+        write_u32_le(&s_pending_payload[22], mesh.radio_direct_rx);
+        write_u32_le(&s_pending_payload[26], mesh.radio_rx_errors);
         s_pending_len = 30U;
         return;
     default:
@@ -1901,7 +1914,8 @@ static void send_admin_cli_command(
     set_admin_sent_response(true, 0U);
 }
 
-static void set_dm_sent_response(const d1l_dm_entry_t *entry, bool flood)
+static void set_dm_sent_response(const d1l_dm_entry_t *entry, bool flood,
+                                  uint32_t radio_timeout_ms)
 {
     s_phone_dm_session = entry->delivery_session_id;
     s_phone_dm_ack = entry->ack_hash;
@@ -1910,8 +1924,12 @@ static void set_dm_sent_response(const d1l_dm_entry_t *entry, bool flood)
     write_u32_le(&response[2], s_phone_dm_ack);
     /* The radio owner may retry a direct attempt by flood. Give that one
      * delivery session time to finish before the phone offers another send. */
-    write_u32_le(&response[6], D1L_MESHCORE_DIRECT_ACK_TIMEOUT_MS +
-                 D1L_MESHCORE_FLOOD_ACK_TIMEOUT_MS + 10000U);
+    const uint64_t tx_budget_ms = radio_timeout_ms > 5000U ?
+        radio_timeout_ms : 5000U;
+    const uint64_t timeout_ms = D1L_MESHCORE_DIRECT_ACK_TIMEOUT_MS +
+        D1L_MESHCORE_FLOOD_ACK_TIMEOUT_MS + 2U * tx_budget_ms;
+    write_u32_le(&response[6], timeout_ms > UINT32_MAX ? UINT32_MAX :
+                 (uint32_t)timeout_ms);
     (void)set_pending(response, sizeof(response));
 }
 
@@ -1989,7 +2007,8 @@ static void send_dm_command(const uint8_t *payload, size_t length)
         return;
     }
     set_dm_sent_response(&s_dms[0], mesh.dm_route_last_reason !=
-                         D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN);
+                         D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN,
+                         mesh.radio_tx_timeout_ms);
 }
 
 static void get_advert_path_command(const uint8_t *payload, size_t length)

@@ -218,6 +218,15 @@ def test_wifi_status_uses_event_cached_signal_without_live_driver_poll():
     ]
     assert "wifi_signal_snapshot" in fill_status
     assert "esp_wifi_sta_get_ap_info" not in fill_status
+    worker = source.split("static void wifi_retry_worker", 1)[1].split(
+        "static esp_err_t ensure_wifi_retry_worker", 1
+    )[0]
+    connected = worker.split("snapshot.state == D1L_WIFI_RUNTIME_CONNECTED", 1)[1]
+    assert connected.index("take_wifi_control()") < connected.index("esp_wifi_sta_get_ap_info")
+    assert connected.index("esp_wifi_sta_get_ap_info") < connected.index("give_wifi_control()")
+    assert "s_wifi_initialized && s_wifi_started" in connected
+    assert "wifi_signal_update_from_scan(&ap)" in connected
+    assert "pdMS_TO_TICKS(D1L_WIFI_SIGNAL_POLL_MS)" in connected
     assert "esp_wifi_sta_get_rssi" not in fill_status
 
     event_handler = source[

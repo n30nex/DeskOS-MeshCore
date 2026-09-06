@@ -1,4 +1,41 @@
-# DeskOS D1L 1.0 production release
+# DeskOS D1L release execution
+
+## Current local release procedure: 1.8.0-rc.1
+
+The maintainer requested local builds on the Pi 5. The 1.0 procedure below is
+historical and must not trigger Actions for the current candidate.
+
+1. Freeze a clean source commit and its pinned submodules in an isolated Pi
+   checkout. Run the complete host suite and the checks required by the changed
+   firmware and installation paths.
+2. Use the pinned ESP-IDF SDK from `.github/d1l-build-inputs.json` and configure
+   `D1L_RELEASE_PROFILE=full_feature`, `D1L_SD_HISTORY_MODE=conditional`.
+   The normal CMake build applies the four reviewed BSP patches. Keep the build
+   and Python temporary directories inside the task workspace.
+3. Run the existing `scripts/package_release_d1l.py` local-release path. Include
+   the complete production bridge UF2, preserving app update and boot selector,
+   clean 8 MB image, signed update, provenance, SBOM, instructions and checksums.
+   An unchanged bridge may be reused only with verified source/tool inputs and
+   matching artifact hashes. Keep its original build provenance accurate.
+4. Verify the package using its own `scripts/verify_package.py`. Resolve the
+   attached D1L's stable by-id path and `1a86:7523`, retain a private recovery
+   copy, and use the preserving installer at its declared offsets. Verify the
+   new application before writing its boot selector. Never format SD.
+5. Verify the exact running version/commit, identity, display, radio and
+   retained storage. Exercise the changed behavior using production firmware.
+   Record any physical update/phone paths that were not exercised explicitly.
+6. Merge the tested source, tag `v1.8.0-rc.1`, and publish it as a prerelease.
+   Freshly download every asset and compare its bytes with staging. Update the
+   existing flasher catalog and Canadaverse DeskOS page, then verify their
+   public content and downloads. Remove obsolete build outputs only after
+   retaining release and recovery files.
+
+Use [build provenance](BUILD_PROVENANCE_D1L.md) for the existing package options
+and [the release checklist](RELEASE_CHECKLIST.md) for candidate acceptance.
+Signing credentials stay in the local credential store, never in the source or
+public package. Local test results must not be represented as Actions results.
+
+## Historical 1.0 production release
 
 This procedure turns one successful `main` build into the public DeskOS 1.0.1
 downloads. It does not require a controlled peer, Wi-Fi credential, admin

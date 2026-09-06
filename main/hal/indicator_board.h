@@ -47,6 +47,8 @@ typedef struct {
 
 esp_err_t d1l_board_init(void);
 esp_err_t d1l_board_display_boot_splash(void);
+/* Startup only: call before the LVGL task takes ownership of the display. */
+esp_err_t d1l_board_display_boot_progress(uint8_t percent);
 const d1l_board_status_t *d1l_board_status(void);
 esp_err_t d1l_board_i2c_scan(d1l_board_status_t *out_status);
 #if D1L_ENABLE_QUALIFICATION_HOOKS

@@ -5,17 +5,32 @@
   "status": "implemented",
   "coverage_boundary": "production_remaining_wp05_fuzz_targets",
   "targets": [
-    {"id": "decrypt_auth_path", "status": "implemented"},
-    {"id": "dm_session_transition_input", "status": "implemented"},
-    {"id": "retained_envelope_decoder", "status": "implemented"},
-    {"id": "route_path_parser", "status": "implemented"}
+    {
+      "id": "decrypt_auth_path",
+      "status": "implemented"
+    },
+    {
+      "id": "dm_session_transition_input",
+      "status": "implemented"
+    },
+    {
+      "id": "retained_envelope_decoder",
+      "status": "implemented"
+    },
+    {
+      "id": "route_path_parser",
+      "status": "implemented"
+    }
   ],
   "engine": "libFuzzer",
   "runs_per_target": 100000,
   "total_runs": 400000,
   "seed": 13746277,
   "max_input_bytes": 256,
-  "sanitizers": ["address", "undefined"],
+  "sanitizers": [
+    "address",
+    "undefined"
+  ],
   "required_host": "ubuntu_clang_18_actions",
   "native_preflight_targets": [
     "production_decrypt_auth_fixed_vector_and_bounds",
@@ -53,7 +68,7 @@
     "main/mesh/meshcore_path_state.c": "a6a5f42bc95f511115f1b9da12e4853fb868646ebc34ffaaeae85eb15cb72a58",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "e4c797a99f23ea8a005651a584333aaafadbffb974024130b4cdf672502636ac",
-    "main/mesh/meshcore_service.c": "41b03af1a15fed812f2dfae6ee066e0f4bb18a7897c1c4e4f337fca9b31229c3",
+    "main/mesh/meshcore_service.c": "f409dc81deaac67094021fca929a8e6a5538eb6782c882f7d3497361efe2faac",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "fe42a573ec801a7bef1ce7bf3a4e3243b2382d0a816ed6f93c91b1f4992542e8",
     "scripts/meshcore_conformance_d1l.py": "829207de020aa6fc63b2c466923cef69741d426b54b1c5cad11e62a38dbb5a8f",
@@ -73,7 +88,7 @@
     "tests/native/meshcore_crypto_test.c": "a397b7a7d28053984993cc146fea05849544af5f315c9644eca2214c16db769e",
     "tests/native/meshcore_route_selection_test.c": "c68a3db67e1b65c020a070b668a8806b1ca6c1b174384ac12d802637009e2d24",
     "tests/native/settings_envelope_test.c": "158353ab42c51142e05bb3b0f180aafdc12167ece20372a4a50cc2ae6924cd7a",
-    "tests/test_meshcore_conformance_contract.py": "66b549629e1ec7a7afa32531ed3b324000cec1a4fce8e9983aee8c20c0c9caed",
+    "tests/test_meshcore_conformance_contract.py": "c5e088ae872663fe94ffac882a7957f17243fc50ed194224bb94e4b5d0028af9",
     "tests/test_meshcore_public_rf_contract.py": "1c0d15eef833337bbbe03c4c5631811ec79ba990954691442ece1d16d03f22cb",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"

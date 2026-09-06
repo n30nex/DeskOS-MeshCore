@@ -69,6 +69,7 @@
 #define D1L_MESHCORE_BW_INDEX_62K5 3U
 #define D1L_MESHCORE_PREAMBLE_LOW_SF 32U
 #define D1L_MESHCORE_TX_TIMEOUT_MS 5000U
+#define D1L_MESHCORE_TX_AIRTIME_MARGIN_MS 1000U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 0x01U
 #define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
 #define D1L_MESHCORE_TXT_TYPE_PLAIN 0U
@@ -153,6 +154,14 @@ static QueueHandle_t s_radio_event_queue;
 static TaskHandle_t s_service_task;
 static bool s_service_initialized;
 static bool s_radio_started;
+static uint32_t s_radio_tx_timeout_ms = D1L_MESHCORE_TX_TIMEOUT_MS;
+static uint32_t s_active_tx_airtime_ms;
+static uint8_t s_active_tx_route;
+static bool s_active_tx_route_valid;
+static int16_t s_radio_noise_samples[8];
+static uint8_t s_radio_noise_sample_count;
+static uint8_t s_radio_noise_sample_next;
+static uint64_t s_radio_noise_sample_due_us;
 static volatile bool s_tx_busy;
 static volatile bool s_active_tx_ack_response;
 static bool s_active_advert_boot;
@@ -845,7 +854,7 @@ static bool meshcore_radio_tx_operation_begin(
     }
     s_active_radio_tx = identity;
     const uint64_t watchdog_timeout_us =
-        (uint64_t)(D1L_MESHCORE_TX_TIMEOUT_MS +
+        (uint64_t)(s_radio_tx_timeout_ms +
                    D1L_MESHCORE_TX_WATCHDOG_GRACE_MS) * 1000ULL;
     if (!d1l_mesh_tx_watchdog_arm(
             &s_radio_tx_watchdog, &identity,
@@ -862,6 +871,8 @@ static void meshcore_radio_tx_operation_clear(void)
 {
     d1l_mesh_tx_watchdog_reset(&s_radio_tx_watchdog);
     memset(&s_active_radio_tx, 0, sizeof(s_active_radio_tx));
+    s_active_tx_airtime_ms = 0U;
+    s_active_tx_route_valid = false;
 }
 
 static bool meshcore_radio_terminal_matches(
@@ -1147,6 +1158,14 @@ static void mark_radio_apply_result(const d1l_radio_profile_t *profile, esp_err_
     status_lock();
     s_status.radio_apply_error = ret;
     if (ret == ESP_OK && profile) {
+        if (!s_radio_profile_applied ||
+            !radio_profiles_match(&s_applied_radio_profile, profile)) {
+            s_radio_noise_sample_count = 0U;
+            s_radio_noise_sample_next = 0U;
+            s_radio_noise_sample_due_us = 0U;
+            s_status.radio_noise_valid = false;
+            s_status.radio_noise_floor_dbm = 0;
+        }
         s_applied_radio_profile = *profile;
         s_radio_profile_applied = true;
         s_status.radio_applied = true;
@@ -2638,6 +2657,62 @@ static bool coding_rate_to_driver_value(uint8_t coding_rate, uint8_t *out_cr)
     }
     *out_cr = (uint8_t)(coding_rate - 4U);
     return true;
+}
+
+static uint32_t radio_packet_airtime_ms(uint16_t size)
+{
+    uint32_t bw_index = 0U;
+    RadioLoRaBandwidths_t bandwidth = LORA_BW_125;
+    uint8_t coding_rate = 0U;
+    if (size == 0U || size > D1L_MESHCORE_MAX_RAW_PACKET ||
+        !s_radio_profile_applied ||
+        !bandwidth_to_driver_index(s_applied_radio_profile.bandwidth_khz,
+                                   &bw_index, &bandwidth) ||
+        !coding_rate_to_driver_value(s_applied_radio_profile.coding_rate,
+                                     &coding_rate)) {
+        return 0U;
+    }
+    return Radio.TimeOnAir(MODEM_LORA, bw_index,
+        s_applied_radio_profile.spreading_factor, coding_rate,
+        D1L_MESHCORE_PREAMBLE_LOW_SF, false, (uint8_t)size, true);
+}
+
+static void prepare_tx_radio_metrics(const uint8_t *raw, uint8_t size)
+{
+    d1l_meshcore_wire_packet_t packet = {0};
+    s_active_tx_route_valid = d1l_meshcore_wire_decode_v1(raw, size, &packet);
+    s_active_tx_route = packet.route;
+    s_active_tx_airtime_ms = radio_packet_airtime_ms(size);
+}
+
+static void sample_radio_noise_floor(uint64_t now_us)
+{
+    if (now_us < s_radio_noise_sample_due_us || !s_status.radio_ready ||
+        !s_radio_started || s_tx_busy || Radio.GetStatus() != RF_RX_RUNNING) {
+        return;
+    }
+    s_radio_noise_sample_due_us = now_us + 5000000ULL;
+    const int16_t rssi = Radio.Rssi(MODEM_LORA);
+    if (rssi >= 0 || rssi < -200) {
+        return;
+    }
+    s_radio_noise_samples[s_radio_noise_sample_next] = rssi;
+    s_radio_noise_sample_next = (s_radio_noise_sample_next + 1U) % 8U;
+    if (s_radio_noise_sample_count < 8U) {
+        s_radio_noise_sample_count++;
+    }
+    /* A recent minimum rejects brief received-packet spikes without keeping
+     * an obsolete noise floor forever. All SPI work stays on the radio owner. */
+    int16_t floor = s_radio_noise_samples[0];
+    for (uint8_t i = 1U; i < s_radio_noise_sample_count; ++i) {
+        if (s_radio_noise_samples[i] < floor) {
+            floor = s_radio_noise_samples[i];
+        }
+    }
+    status_lock();
+    s_status.radio_noise_floor_dbm = floor;
+    s_status.radio_noise_valid = true;
+    status_unlock();
 }
 
 static uint32_t lora_bw_hz(RadioLoRaBandwidths_t bw)
@@ -5117,13 +5192,27 @@ static void meshcore_service_handle_radio_tx_done(
     const bool boot_advert_tx = advert_tx && s_active_advert_boot;
     const uint32_t advert_request_id =
         advert_tx ? s_active_advert_request_id : 0U;
+    const uint32_t airtime_ms = s_active_tx_airtime_ms;
+    const uint8_t route = s_active_tx_route;
+    const bool route_valid = s_active_tx_route_valid;
 
     /* Re-arm RX before any retained-store work so a prompt peer ACK can be
      * copied into the radio event queue while the sole owner persists state. */
     meshcore_radio_tx_operation_clear();
     s_active_tx_ack_response = false;
     s_tx_busy = false;
+    status_lock();
     s_status.tx_packets++;
+    s_status.radio_tx_airtime_ms += airtime_ms;
+    if (route_valid) {
+        if (route == D1L_MESHCORE_ROUTE_FLOOD ||
+            route == D1L_MESHCORE_ROUTE_TRANSPORT_FLOOD) {
+            s_status.radio_flood_tx++;
+        } else {
+            s_status.radio_direct_tx++;
+        }
+    }
+    status_unlock();
     if (advert_tx) {
         s_status.advert_tx_done++;
         if (advert_request_id != 0U) {
@@ -5341,6 +5430,7 @@ static void meshcore_service_run_owner_maintenance(void)
         }
         return;
     }
+    sample_radio_noise_floor(now_us);
     meshcore_service_terminalize_idle_dm_orphan();
     if (maintain_pending_channel_history(now_ms)) {
         /* Never enter synchronous reconciliation on the same owner pass that
@@ -5403,7 +5493,23 @@ static void meshcore_service_handle_radio_rx_done(
     d1l_meshcore_packet_semantic_view_t packet = {0};
     bool ack_queued = false;
     (void)d1l_observer_enqueue_packet(payload, size, rssi, snr);
+    const uint32_t airtime_ms = radio_packet_airtime_ms(size);
+    status_lock();
+    s_status.radio_rx_packets++;
+    s_status.radio_rx_airtime_ms += airtime_ms;
+    s_status.radio_last_rssi_dbm = rssi;
+    s_status.radio_last_snr_quarter_db = snr;
+    s_status.radio_signal_valid = true;
+    status_unlock();
     if (d1l_meshcore_packet_semantic_parse(payload, size, &packet)) {
+        status_lock();
+        if (packet.wire.route == D1L_MESHCORE_ROUTE_FLOOD ||
+            packet.wire.route == D1L_MESHCORE_ROUTE_TRANSPORT_FLOOD) {
+            s_status.radio_flood_rx++;
+        } else {
+            s_status.radio_direct_rx++;
+        }
+        status_unlock();
         switch (packet.kind) {
         case D1L_MESHCORE_PACKET_SEMANTIC_ADMIN_RESPONSE:
             (void)parse_rx_admin_response_packet(payload, size);
@@ -5434,6 +5540,10 @@ static void meshcore_service_handle_radio_rx_done(
         default:
             break;
         }
+    } else {
+        status_lock();
+        s_status.radio_rx_errors++;
+        status_unlock();
     }
     if (!ack_queued) {
         d1l_meshcore_start_rx();
@@ -5447,6 +5557,9 @@ static void meshcore_service_handle_radio_rx_timeout(void)
 
 static void meshcore_service_handle_radio_rx_error(void)
 {
+    status_lock();
+    s_status.radio_rx_errors++;
+    status_unlock();
     d1l_meshcore_start_rx();
 }
 
@@ -5527,8 +5640,12 @@ static void on_tx_timeout(uint32_t origin)
 
 static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
+    /* The Seeed driver reports rounded whole dB; MeshCore uses quarter-dB. */
+    const int16_t scaled_snr = (int16_t)snr * 4;
+    const int8_t snr_quarter_db = scaled_snr > INT8_MAX ? INT8_MAX :
+        scaled_snr < INT8_MIN ? INT8_MIN : (int8_t)scaled_snr;
     enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_DONE, payload, size,
-                        rssi, snr, NULL);
+                        rssi, snr_quarter_db, NULL);
 }
 
 static void on_rx_timeout(void)
@@ -5557,11 +5674,24 @@ static esp_err_t configure_radio_profile(const d1l_radio_profile_t *profile)
     RadioLoRaBandwidths_t sx_bw = LORA_BW_125;
     uint8_t cr_value = 0;
     if (!bandwidth_to_driver_index(profile->bandwidth_khz, &bw_index, &sx_bw) ||
-        !coding_rate_to_driver_value(profile->coding_rate, &cr_value)) {
+        !coding_rate_to_driver_value(profile->coding_rate, &cr_value) ||
+        profile->spreading_factor < 5U || profile->spreading_factor > 12U) {
         s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
         return ESP_ERR_NOT_SUPPORTED;
     }
 
+    /* A valid long-range frame can exceed five seconds. Size both hardware
+     * and owner recovery deadlines from the longest supported frame on the
+     * selected profile; ordinary fast profiles retain the existing floor. */
+    const uint32_t longest_airtime_ms = Radio.TimeOnAir(
+        MODEM_LORA, bw_index, profile->spreading_factor, cr_value,
+        D1L_MESHCORE_PREAMBLE_LOW_SF, false, D1L_MESHCORE_MAX_RAW_PACKET, true);
+    const uint32_t airtime_timeout_ms = longest_airtime_ms +
+        D1L_MESHCORE_TX_AIRTIME_MARGIN_MS;
+    status_lock();
+    s_radio_tx_timeout_ms = airtime_timeout_ms > D1L_MESHCORE_TX_TIMEOUT_MS ?
+        airtime_timeout_ms : D1L_MESHCORE_TX_TIMEOUT_MS;
+    status_unlock();
     const uint32_t wrapper_bw_index = bw_index == D1L_MESHCORE_BW_INDEX_62K5 ? 0 : bw_index;
     Radio.SetChannel(profile->frequency_hz);
     Radio.SetPublicNetwork(false);
@@ -5569,7 +5699,7 @@ static esp_err_t configure_radio_profile(const d1l_radio_profile_t *profile)
                       D1L_MESHCORE_PREAMBLE_LOW_SF, 0, false, 0, true, false, 0, false, true);
     Radio.SetTxConfig(MODEM_LORA, profile->tx_power_dbm, 0, wrapper_bw_index, profile->spreading_factor,
                       cr_value, D1L_MESHCORE_PREAMBLE_LOW_SF, false, true, false, 0, false,
-                      D1L_MESHCORE_TX_TIMEOUT_MS);
+                      s_radio_tx_timeout_ms);
     apply_sx1262_lora_params(profile, sx_bw, cr_value);
     return ESP_OK;
 }
@@ -5694,6 +5824,7 @@ static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd
     s_active_tx_ack_response = cmd->ack_response;
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    prepare_tx_radio_metrics(cmd->raw, cmd->raw_len);
     Radio.SendWithOrigin(
         cmd->raw, cmd->raw_len,
         (uint32_t)s_active_radio_tx.operation_id);
@@ -6035,6 +6166,7 @@ static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)
     s_active_tx_ack_response = false;
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    prepare_tx_radio_metrics(s_pending_dm_tx.raw, s_pending_dm_tx.raw_len);
     d1l_route_store_worker_quiesce_end();
     Radio.SendWithOrigin(
         s_pending_dm_tx.raw, s_pending_dm_tx.raw_len,
@@ -6270,6 +6402,7 @@ static esp_err_t meshcore_service_handle_send_dm(
     s_active_tx_ack_response = false;
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    prepare_tx_radio_metrics(s_pending_dm_tx.raw, s_pending_dm_tx.raw_len);
     d1l_route_store_worker_quiesce_end();
     Radio.SendWithOrigin(
         s_pending_dm_tx.raw, s_pending_dm_tx.raw_len,
@@ -8087,6 +8220,7 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
     bool applied_valid = false;
     status_lock();
     d1l_meshcore_service_status_t snapshot = s_status;
+    snapshot.radio_tx_timeout_ms = s_radio_tx_timeout_ms;
     applied_profile = s_applied_radio_profile;
     applied_valid = s_radio_profile_applied;
     status_unlock();

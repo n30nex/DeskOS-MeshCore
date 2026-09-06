@@ -57,10 +57,12 @@ set(SEEED_BSP_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/sensecap_indicator_esp3
 set(SEEED_BSP_TOUCH_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/sensecap_indicator_touch_fix.patch")
 set(SEEED_BSP_IDF55_COMPAT_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/sensecap_indicator_idf55_compat.patch")
 set(SEEED_BSP_TX_ORIGIN_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/sensecap_indicator_tx_origin.patch")
+set(SEEED_BSP_AIRTIME_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/sensecap_indicator_airtime.patch")
 set(SEEED_BSP_PATCHES
     "${SEEED_BSP_TOUCH_PATCH}"
     "${SEEED_BSP_IDF55_COMPAT_PATCH}"
     "${SEEED_BSP_TX_ORIGIN_PATCH}"
+    "${SEEED_BSP_AIRTIME_PATCH}"
 )
 
 foreach(SEEED_BSP_PATCH IN LISTS SEEED_BSP_PATCHES)

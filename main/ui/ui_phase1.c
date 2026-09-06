@@ -328,8 +328,6 @@ static bool show_contact_detail_sheet(void);
 static bool show_contact_options_sheet(void);
 static void open_public_history_event_cb(lv_event_t *event);
 static void open_public_search_event_cb(lv_event_t *event);
-static void open_home_dm_preview_event_cb(lv_event_t *event);
-static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_map_node_detail(const char *fingerprint);
 static void open_route_trace_event_cb(lv_event_t *event);
 static void render_route_trace_sheet(void);
@@ -960,7 +958,6 @@ static void process_pending_content_refresh(void);
 #if D1L_ENABLE_QUALIFICATION_HOOKS
 static void process_pending_scroll_probe(void);
 #endif
-static const char *dm_row_state(const d1l_dm_entry_t *entry, bool unread);
 #if D1L_ENABLE_QUALIFICATION_HOOKS
 static void process_pending_compose_probe(void);
 static bool object_is_visible(lv_obj_t *obj);
@@ -3836,12 +3833,6 @@ static void show_contact_detail_for(const d1l_contact_entry_t *entry)
     }
 }
 
-static void open_contact_detail_event_cb(lv_event_t *event)
-{
-    const void *user_data = event ? lv_event_get_user_data(event) : NULL;
-    show_contact_detail_for((const d1l_contact_entry_t *)user_data);
-}
-
 static void handle_node_detail_action(
     const d1l_ui_node_detail_action_event_t *event,
     void *context)
@@ -5389,17 +5380,6 @@ static void show_dm_thread_for(const char *fingerprint, const char *alias)
         return;
     }
     show_modal(d1l_ui_messages_thread_sheet(&s_messages_controller));
-}
-
-static void open_home_dm_preview_event_cb(lv_event_t *event)
-{
-    const d1l_home_message_preview_t *entry =
-        (const d1l_home_message_preview_t *)lv_event_get_user_data(event);
-    if (!entry || !entry->is_dm) {
-        show_toast("DM", ESP_ERR_INVALID_STATE);
-        return;
-    }
-    show_dm_thread_for(entry->target_fingerprint, entry->sender);
 }
 
 static void set_messages_mode(d1l_ui_messages_mode_t mode)

@@ -1,11 +1,11 @@
-# MeshCore DeskOS D1L 1.7.12 User Guide
+# MeshCore DeskOS D1L 1.8.0-rc.1 User Guide
 
 This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.7.12 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.8.0-rc.1 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -13,6 +13,10 @@ D1L adaptations are in
 [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md).
 
 ## First start
+
+The initial loading bar advances while DeskOS restores saved settings and
+history. A populated SD card can take tens of seconds to load. Keep power
+connected until the readiness screen appears.
 
 Every boot begins with a full-screen readiness check. It shows live progress
 for **Display**, **Identity**, **Radio**, **Storage & maps**, and **UI** and
@@ -298,6 +302,13 @@ traffic on RF, and private keys and saved contacts are never published.
 
 ## Useful USB diagnostics
 
+Phone diagnostics now report separate direct/flood packet counts, local radio
+signal, a recent sampled noise floor, and airtime calculated from frame length
+and radio settings. The board reports local SNR in whole dB. The D1L has no
+battery sensor; the phone protocol uses a full-battery equivalent for this
+externally powered device. Wi-Fi signal strength refreshes while connected
+without requiring a scan.
+
 The console emits bounded JSON. Start with:
 
 ```text
@@ -346,8 +357,14 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.7.12 download and
+Use the guided browser flasher or the published DeskOS D1L 1.8.0-rc.1 download and
 follow its `START_HERE.md`.
+
+The browser waits for DeskOS to finish startup and verifies its exact build,
+radio, display, and storage report. An existing installation can finish a
+preserving update without an SD card; retained history and cached maps need
+prepared storage. A fresh clean installation still requires the complete
+ESP32, RP2040 bridge, and prepared-card setup.
 On Linux, select the D1L only through the stable by-id path:
 
 ```text

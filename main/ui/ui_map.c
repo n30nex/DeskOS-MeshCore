@@ -42,7 +42,6 @@
 #define MAP_MARKER_LABEL_WIDTH 112
 #define MAP_MARKER_LABEL_HEIGHT 38
 #define MAP_MARKER_LABEL_GAP 3
-#define MAP_MARKER_NAME_MAX_CHARS 14U
 
 _Static_assert(sizeof(d1l_ui_map_sheets_controller_t) <=
                    D1L_UI_MAP_SHEETS_CONTROLLER_MAX_BYTES,
@@ -60,6 +59,8 @@ typedef struct {
 typedef struct {
     int16_t screen_x;
     int16_t screen_y;
+    bool label_visible;
+    d1l_ui_map_marker_rect_t label_bounds;
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
 } d1l_ui_map_marker_hit_t;
 
@@ -641,6 +642,9 @@ static void map_copy_bounded_text(char *dest, size_t dest_len, const char *sourc
         dest[copied] = source[copied];
         ++copied;
     }
+    while (copied > 0U && ((uint8_t)source[copied] & 0xC0U) == 0x80U) {
+        --copied;
+    }
     dest[copied] = '\0';
 }
 
@@ -655,13 +659,7 @@ static void map_marker_display_name(const d1l_node_marker_t *marker,
         return;
     }
     const char *source = marker->name[0] ? marker->name : "Mesh node";
-    const size_t source_len = strlen(source);
-    if (source_len <= MAP_MARKER_NAME_MAX_CHARS) {
-        map_copy_bounded_text(dest, dest_len, source);
-        return;
-    }
-    const size_t prefix_len = MAP_MARKER_NAME_MAX_CHARS - 3U;
-    snprintf(dest, dest_len, "%.*s...", (int)prefix_len, source);
+    map_copy_bounded_text(dest, dest_len, source);
 }
 
 static int32_t map_e7_to_e6(int32_t value_e7)
@@ -681,9 +679,9 @@ static bool map_marker_placement_allowed(const d1l_ui_map_marker_rect_t *bounds)
         {0, 0, 112, 64},       /* Options. */
         {108, 10, 412, 64},    /* Status/progress overlay. */
         {412, 0, 478, 152},    /* Zoom controls and badge. */
-        {0, 270, 112, 360},    /* Center and explicit source. */
-        {108, 294, 232, 360},  /* Pin provenance, age, and accuracy. */
-        {220, 326, 478, 360},  /* Attribution. */
+        {0, MAP_VIEWPORT_HEIGHT - 98, 112, MAP_VIEWPORT_HEIGHT},
+        {108, MAP_VIEWPORT_HEIGHT - 78, 232, MAP_VIEWPORT_HEIGHT},
+        {220, MAP_VIEWPORT_HEIGHT - 40, MAP_VIEWPORT_WIDTH, MAP_VIEWPORT_HEIGHT},
     };
     for (size_t i = 0; i < sizeof(exclusions) / sizeof(exclusions[0]); ++i) {
         if (map_marker_rects_intersect(bounds, &exclusions[i])) {
@@ -726,6 +724,7 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
     memset(s_viewport_marker_hits, 0, sizeof(s_viewport_marker_hits));
     memset(s_viewport_marker_bounds, 0, sizeof(s_viewport_marker_bounds));
 
+    lv_obj_t *label_cards[MAP_MARKER_LABEL_LIMIT] = {0};
     const size_t candidate_count = d1l_node_store_copy_markers(
         s_viewport_marker_candidates, MAP_MARKER_QUERY_LIMIT);
     const d1l_map_projection_view_t projection = {
@@ -790,31 +789,54 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
             continue;
         }
 
-        char display_name[MAP_MARKER_NAME_MAX_CHARS + 1U];
+        char display_name[D1L_NODE_NAME_LEN];
         map_marker_display_name(&s_viewport_marker_candidates[i], display_name,
                                 sizeof(display_name));
         char age[12];
         d1l_map_marker_format_age(truth.age_sec, age, sizeof(age));
-        char marker_label[64];
-        snprintf(marker_label, sizeof(marker_label), "%s\n%s %s", display_name,
+        char marker_label[32];
+        snprintf(marker_label, sizeof(marker_label), "%s %s",
                  d1l_map_marker_role_label(truth.role), age);
-        lv_obj_t *name = map_label(s_viewport_marker_layer, marker_label,
-                                   MAP_COLOR_TEXT);
-        if (!name) {
+        lv_obj_t *card = lv_obj_create(s_viewport_marker_layer);
+        if (!card) {
             continue;
         }
-        lv_label_set_long_mode(name, LV_LABEL_LONG_WRAP);
-        lv_obj_set_size(name, MAP_MARKER_LABEL_WIDTH, MAP_MARKER_LABEL_HEIGHT);
-        lv_obj_set_pos(name, label_x, label_y);
+        lv_obj_set_size(card, MAP_MARKER_LABEL_WIDTH, MAP_MARKER_LABEL_HEIGHT);
+        lv_obj_set_pos(card, label_x, label_y);
+        lv_obj_set_style_bg_color(card, lv_color_hex(MAP_COLOR_BG), 0);
+        lv_obj_set_style_bg_opa(card, LV_OPA_90, 0);
+        lv_obj_set_style_radius(card, 4, 0);
+        lv_obj_set_style_border_width(card, 0, 0);
+        lv_obj_set_style_pad_all(card, 2, 0);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *name = map_label(card, display_name, MAP_COLOR_TEXT);
+        lv_obj_t *detail = map_label(card, marker_label, MAP_COLOR_DETAIL);
+        if (!name || !detail) {
+            lv_obj_del(card);
+            continue;
+        }
+        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_obj_set_size(name, MAP_MARKER_LABEL_WIDTH - 4, 17);
+        lv_obj_set_pos(name, 0, 0);
         lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_bg_color(name, lv_color_hex(MAP_COLOR_BG), 0);
-        lv_obj_set_style_bg_opa(name, LV_OPA_90, 0);
-        lv_obj_set_style_radius(name, 4, 0);
-        lv_obj_set_style_pad_hor(name, 2, 0);
-        lv_obj_set_style_pad_ver(name, 1, 0);
         lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_text_font(detail, &lv_font_montserrat_12, 0);
+        lv_label_set_long_mode(detail, LV_LABEL_LONG_DOT);
+        lv_obj_set_size(detail, MAP_MARKER_LABEL_WIDTH - 4, 16);
+        lv_obj_set_pos(detail, 0, 18);
+        lv_obj_set_style_text_align(detail, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_clear_flag(detail, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        s_viewport_marker_hits[shown].label_visible = true;
+        s_viewport_marker_hits[shown].label_bounds =
+            (d1l_ui_map_marker_rect_t){label_x, label_y,
+                label_x + MAP_MARKER_LABEL_WIDTH, label_y + MAP_MARKER_LABEL_HEIGHT};
 
+        label_cards[s_viewport_marker_label_count] = card;
         s_viewport_marker_bounds[s_viewport_marker_label_count++] = bounds;
+    }
+    for (size_t i = 0; i < s_viewport_marker_label_count; ++i) {
+        lv_obj_move_foreground(label_cards[i]);
     }
 
     s_viewport_marker_store_generation = marker_generation;
@@ -861,6 +883,14 @@ static bool map_viewport_try_marker_tap(void)
     size_t nearest = 0U;
     int32_t nearest_distance_sq = INT32_MAX;
     for (size_t i = 0; i < s_viewport_marker_count; ++i) {
+        const d1l_ui_map_marker_rect_t *label = &s_viewport_marker_hits[i].label_bounds;
+        if (s_viewport_marker_hits[i].label_visible &&
+            local_x >= label->x1 && local_x < label->x2 &&
+            local_y >= label->y1 && local_y < label->y2) {
+            nearest = i;
+            nearest_distance_sq = 0;
+            break;
+        }
         const int32_t dx = local_x - s_viewport_marker_hits[i].screen_x;
         const int32_t dy = local_y - s_viewport_marker_hits[i].screen_y;
         const int32_t distance_sq = dx * dx + dy * dy;
@@ -1666,6 +1696,7 @@ void d1l_ui_map_render(lv_obj_t *parent,
         s_viewport_pin_truth_label = map_label(
             viewport, "", MAP_COLOR_WARN);
         if (s_viewport_pin_truth_label) {
+            lv_obj_set_style_text_font(s_viewport_pin_truth_label, &lv_font_montserrat_12, 0);
             lv_label_set_long_mode(
                 s_viewport_pin_truth_label, LV_LABEL_LONG_WRAP);
             lv_obj_set_size(s_viewport_pin_truth_label, 112, 58);
@@ -1686,7 +1717,9 @@ void d1l_ui_map_render(lv_obj_t *parent,
         s_viewport_center_source_label = map_label(
             viewport, center_source, MAP_COLOR_GOOD);
         if (s_viewport_center_source_label) {
+            lv_obj_set_style_text_font(s_viewport_center_source_label, &lv_font_montserrat_12, 0);
             map_label_dot(s_viewport_center_source_label, 96);
+            lv_obj_set_height(s_viewport_center_source_label, 18);
             lv_obj_set_style_text_align(s_viewport_center_source_label,
                                         LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_set_pos(s_viewport_center_source_label, 8,

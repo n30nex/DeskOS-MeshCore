@@ -17,7 +17,8 @@
 | **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Historical (`v1.7.9`) |
 | **1.7.10** | Faster Contacts, retained maps, editable Observer region, hashtag channels, and reliable flood adverts | Historical (`v1.7.10`) |
 | **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Included in `v1.7.12` |
-| **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Current (`v1.7.12`) |
+| **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Stable (`v1.7.12`) |
+| **1.8.0-rc.1** | Radio timing and diagnostics audit, clearer startup/maps, and verified browser installation | Candidate in validation |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -174,3 +175,18 @@ Login and unproven/stale routes retain flood delivery. The local production
 package now includes the same preserving update and SD preparation helpers as
 the standard production package, with explicit local provenance and the
 existing signed-update identity.
+
+## 1.8.0-rc.1: end-to-end release audit
+
+This candidate corrects slow-profile transmit deadlines, local SNR units,
+phone statistics, connected Wi-Fi signal refresh, map labels and label taps,
+and the early loading display. Signed-update boot acceptance also requires a
+working identity. The browser installation path recognizes DeskOS JSON,
+waits for stored history to load, verifies radio readiness, reads the nested
+SD status correctly, and treats SD setup as optional for preserving updates.
+Fresh clean installation retains its three-stage verification.
+
+Builds, protocol checks, hardware work, and packaging run locally at the
+maintainer's request. Publication uses the exact validated source, signed
+update bundle, public checksums, current documentation, product page, and
+flasher catalog.

@@ -1,4 +1,4 @@
-# DeskOS D1L 1.7.12 limitations
+# DeskOS D1L 1.8.0-rc.1 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -24,11 +24,15 @@ SD-primary storage.
 - Signed update is local-SD only. It does not download firmware or accept an
   RF-triggered update. USB app/full-clean flashing remains the recovery path.
 - The current UI is English-only. Additional localization remains future work.
+- The D1L is externally powered and has no battery sensor. The phone protocol
+  uses a full-battery equivalent because it has no wired-power indicator.
+  Local SNR has the board driver's whole-dB resolution; airtime is calculated
+  from received/completed frame lengths and the active radio settings.
 - Observer/MQTT is opt-in and is never enabled silently.
 - New messages use a plausible sender timestamp or the trusted local arrival
   time. Older retained rows without either remain labelled `time unknown`.
 - Optional Indicator temperature, humidity, and CO2 sensor integration remains
-  future work and is not represented as live data in 1.7.12.
+  future work and is not represented as live data in 1.8.0-rc.1.
 
 See [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md)
 for the complete mobile-to-D1L outcome matrix.

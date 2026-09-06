@@ -20,6 +20,7 @@ def test_admin_credential_store_native(tmp_path: pathlib.Path) -> None:
         [
             compiler,
             "-std=c11",
+            "-D_POSIX_C_SOURCE=200809L",
             "-Wall",
             "-Wextra",
             "-Werror",

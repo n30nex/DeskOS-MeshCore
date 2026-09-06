@@ -27,6 +27,7 @@
 
 #define D1L_WIFI_RETRY_TASK_STACK_BYTES 3072U
 #define D1L_WIFI_RETRY_TASK_PRIORITY 5U
+#define D1L_WIFI_SIGNAL_POLL_MS 5000U
 #define D1L_WIFI_CONTROL_LOCK_TIMEOUT_MS 10000U
 #define D1L_WIFI_NETWORK_QUIESCE_TIMEOUT_MS 20000U
 #define D1L_CONNECTIVITY_GUARD_LOCK_TIMEOUT_MS 10000U
@@ -709,6 +710,29 @@ static void wifi_retry_worker(void *context)
             continue;
         }
         const d1l_wifi_retry_policy_t snapshot = wifi_policy_snapshot();
+        if (snapshot.state == D1L_WIFI_RUNTIME_CONNECTED) {
+            /* Refresh the associated AP without a scan. Keep driver calls on
+             * this worker and serialize them with stop/deinit; UI snapshots
+             * continue to read only the small BSSID-bound cache. */
+            if (take_wifi_control()) {
+                wifi_ap_record_t ap = {0};
+                if (s_wifi_initialized && s_wifi_started &&
+                    esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+                    (void)wifi_signal_update_from_scan(&ap);
+                }
+                give_wifi_control();
+            }
+            TickType_t wait_ticks = pdMS_TO_TICKS(D1L_WIFI_SIGNAL_POLL_MS);
+            if (stable_ack_due_ms > now_ms) {
+                const TickType_t stable_wait =
+                    retry_wait_ticks(stable_ack_due_ms, now_ms);
+                if (stable_wait < wait_ticks) {
+                    wait_ticks = stable_wait;
+                }
+            }
+            (void)ulTaskNotifyTake(pdTRUE, wait_ticks);
+            continue;
+        }
         if (!snapshot.retry_scheduled ||
             snapshot.state == D1L_WIFI_RUNTIME_SCANNING) {
             const TickType_t wait_ticks = stable_ack_due_ms > now_ms ?

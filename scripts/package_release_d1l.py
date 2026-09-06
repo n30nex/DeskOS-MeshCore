@@ -109,6 +109,7 @@ EXPECTED_BSP_PATCHES = (
     Path("patches/sensecap_indicator_touch_fix.patch"),
     Path("patches/sensecap_indicator_idf55_compat.patch"),
     Path("patches/sensecap_indicator_tx_origin.patch"),
+    Path("patches/sensecap_indicator_airtime.patch"),
 )
 EXPECTED_BSP_SUBMODULE = Path("third_party/sensecap_indicator_esp32")
 RELEASE_DOC_SPECS = [
