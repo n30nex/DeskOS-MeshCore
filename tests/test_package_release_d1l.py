@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -8,7 +9,7 @@ import pytest
 
 from scripts import meshcore_signed_advert_runtime_d1l as signed_runtime
 from scripts import package_release_d1l
-from scripts.verify_checksums import verify_sha256_manifest
+from scripts.verify_checksums import verify_checksum_tree, verify_sha256_manifest
 from tests.meshcore_conformance_fixture import completed_report
 
 
@@ -382,8 +383,9 @@ def write_meshcore_signed_advert_runtime(
     return path
 
 
+@pytest.mark.parametrize("local_build", [False, True])
 def test_full_feature_package_requires_signing_key_at_callable_boundary(
-    tmp_path,
+    tmp_path, local_build,
 ) -> None:
     with pytest.raises(ValueError, match="requires an update signing key"):
         package_release_d1l.create_release_package(
@@ -393,6 +395,60 @@ def test_full_feature_package_requires_signing_key_at_callable_boundary(
             package_name="unsigned-full-feature",
             full_size=0x20000,
             release_profile=package_release_d1l.FULL_FEATURE_RELEASE_PROFILE,
+            local_build=local_build,
+        )
+
+
+def test_local_full_feature_package_has_no_actions_claim(tmp_path, monkeypatch):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    write_fake_config(tmp_path)
+    rp2040 = write_fake_rp2040_artifacts(tmp_path)
+    bridge_dir = rp2040 / "rp2040-sd-bridge-firmware"
+    (bridge_dir / "rp2040-sd-bridge-firmware.uf2").rename(
+        bridge_dir / "deskos_sd_bridge.ino.uf2"
+    )
+    package_release_d1l.write_sha256sums(bridge_dir)
+    # A production package needs only the production bridge, not lab firmware.
+    for name in package_release_d1l.RP2040_ARTIFACT_NAMES[1:]:
+        shutil.rmtree(rp2040 / name)
+    commit = "a" * 40
+    install_fake_source_identity(monkeypatch, commit)
+    for name in ("GITHUB_ACTIONS", "GITHUB_SHA", "GITHUB_RUN_ID",
+                 "GITHUB_RUN_ATTEMPT", "GITHUB_REPOSITORY", "GITHUB_REF"):
+        monkeypatch.delenv(name, raising=False)
+    # Signing is a separate cryptographic boundary; this test exercises the
+    # package origin, contents, checksums, and provenance after that boundary.
+    monkeypatch.setattr(package_release_d1l, "write_signed_update_bundle",
+                        lambda *args: {"signed": True, "signer_key_id": "fixture-signer",
+                                       "security_sequence": 1783965716})
+    manifest = package_release_d1l.create_release_package(
+        root=tmp_path, build_dir=build, out_dir=tmp_path / "release",
+        package_name="local-full", full_size=0x20000,
+        rp2040_artifact_root=rp2040, update_signing_key=tmp_path / "test-key",
+        local_build=True,
+    )
+    package = tmp_path / "release/local-full"
+    assert manifest["firmware_commit"] == commit
+    assert manifest["actions_run"] is None
+    assert manifest["actions_run_attempt"] is None
+    assert manifest["workflow"]["provider"] == "local"
+    assert manifest["workflow"]["run_url"] is None
+    provenance = json.loads((package / manifest["provenance"]["path"]).read_text())
+    assert provenance["predicate"]["runDetails"]["builder"]["id"].endswith(
+        "#local-builder-v1"
+    )
+    readme = (package / "README_RELEASE.md").read_text()
+    assert "Build origin: local" in readme
+    assert "GitHub Actions run:" not in readme
+    assert verify_checksum_tree(package)
+    monkeypatch.setenv("GITHUB_RUN_ID", "12345")
+    with pytest.raises(ValueError, match="cannot claim a GitHub Actions"):
+        package_release_d1l.create_release_package(
+            root=tmp_path, build_dir=build, out_dir=tmp_path / "release",
+            package_name="mixed-origin", full_size=0x20000, local_build=True,
+            update_signing_key=tmp_path / "test-key",
         )
 
 

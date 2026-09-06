@@ -48,6 +48,15 @@ python scripts/provenance_d1l.py --root . --source-sha <sha> \
 
 ## Local builder v1
 
+When the maintainer requests local builds, compile the exact clean source with
+the pinned ESP-IDF image for the host architecture and the pinned RP2040 core.
+Use `full_feature` and `conditional`, then pass `--local-build` to
+`scripts/package_release_d1l.py` along with the existing update-signing key.
+This mode records the local builder and exact source commit, leaves Actions
+run fields null, and rejects an Actions invocation. It retains checksum,
+source, firmware-profile, and signed-update validation. It does not create
+physical test evidence or claim that the package is ready for release.
+
 Builder URI:
 `https://github.com/n30nex/DeskOS-MeshCore/blob/main/docs/BUILD_PROVENANCE_D1L.md#local-builder-v1`
 

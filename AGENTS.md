@@ -15,7 +15,9 @@ The following rules are non-negotiable:
   the production RP2040 UF2, checksums, and end-user instructions.
 - Internal CI and developer checks do not create public release requirements and
   are never shipped in the production package.
-- Run only focused local checks for changed code. GitHub Actions builds firmware.
+- Run focused checks for changed code. GitHub Actions builds firmware unless
+  the maintainer requests local builds; local releases use the pinned tools,
+  exact clean source, signed updates, and explicit local build provenance.
 - Never format an SD card.
 - Never probe arbitrary serial ports. Final hardware work uses only the stable,
   authorized D1L identity and its required VID/PID.

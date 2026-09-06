@@ -1922,19 +1922,22 @@ def copy_rp2040_artifacts(
     if not artifact_root.is_dir():
         raise FileNotFoundError(f"Missing RP2040 artifact root {artifact_root}")
 
-    missing = [name for name in RP2040_ARTIFACT_NAMES if not (artifact_root / name).is_dir()]
-    if missing:
-        raise FileNotFoundError("Missing RP2040 release artifacts: " + ", ".join(missing))
     selected = set(RP2040_ARTIFACT_NAMES if include_names is None else include_names)
     unknown = selected.difference(RP2040_ARTIFACT_NAMES)
     if unknown:
         raise ValueError(
             "Unknown RP2040 release artifacts requested: " + ", ".join(sorted(unknown))
         )
+    missing = [name for name in RP2040_ARTIFACT_NAMES
+               if name in selected and not (artifact_root / name).is_dir()]
+    if missing:
+        raise FileNotFoundError("Missing RP2040 release artifacts: " + ", ".join(missing))
 
     copied = []
     rp2040_dir = package_dir / "rp2040"
     for artifact_name in RP2040_ARTIFACT_NAMES:
+        if artifact_name not in selected:
+            continue
         source_dir = artifact_root / artifact_name
         try:
             source_resolved = source_dir.resolve(strict=True)
@@ -1960,8 +1963,6 @@ def copy_rp2040_artifacts(
             raise ValueError(
                 f"{artifact_name} must contain exactly one valid root SHA256SUMS.txt"
             )
-        if artifact_name not in selected:
-            continue
         dest_dir = rp2040_dir / artifact_name
         if production_only:
             source_uf2_files = sorted(source_dir.glob("*.uf2"))
@@ -3349,6 +3350,14 @@ App SHA256: `{app['sha256']}`
             for capability in manifest["supported_capabilities"]
         )
         signed_update = manifest["signed_update"]
+        build_identity = (
+            "Build origin: local (see checksum-bound provenance)."
+            if manifest.get("workflow", {}).get("provider") == "local"
+            else (
+                f"GitHub Actions run: `{manifest['actions_run']}`\n\n"
+                f"GitHub Actions run attempt: `{manifest['actions_run_attempt']}`"
+            )
+        )
         readme.write_text(
             f"""# {PROJECT} Full Feature Release Package
 
@@ -3358,16 +3367,12 @@ Release profile: `{manifest['release_profile']}`
 
 Firmware commit: `{manifest['firmware_commit']}`
 
-GitHub Actions run: `{manifest['actions_run']}`
-
-GitHub Actions run attempt: `{manifest['actions_run_attempt']}`
+{build_identity}
 
 SD history mode: `{manifest['sd_history_mode']}`
 
 This package contains the production Full Feature firmware and a verified
-Ed25519-signed local update bundle. `full_feature_release_ready` remains
-`false` until the exact package is flashed and its physical release gates are
-recorded; packaging never manufactures that evidence.
+Ed25519-signed local update bundle.
 
 ## Supported capabilities
 
@@ -3385,7 +3390,7 @@ missing user features. RF-triggered firmware update is also impossible.
   `update/d1l-update.sig` are one exact signed update set.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is the destructive
   factory/recovery image.
-- `docs/`, `notices/`, `evidence/`, the SBOM, provenance, and package metadata
+- `docs/`, `notices/`, the SBOM, provenance, and package metadata
   are bound by `SHA256SUMS.txt`.
 
 Update signer: `{signed_update['signer_key_id']}`
@@ -3436,8 +3441,8 @@ and otherwise retains ESP-IDF rollback behavior. Never format the SD card.
 
 Verify `SHA256SUMS.txt` before flashing. Report defects at
 https://github.com/n30nex/DeskOS-MeshCore/issues/new with firmware commit
-`{manifest['firmware_commit']}`, Actions run `{manifest['actions_run']}`,
-attempt `{manifest['actions_run_attempt']}`, and the relevant device receipt.
+`{manifest['firmware_commit']}`, the build origin recorded in `manifest.json`,
+and the observed device behavior.
 
 App image: `{app['path']}`
 
@@ -3527,10 +3532,17 @@ def create_release_package(
     release_profile: str = "full_feature",
     sd_history_mode: str = "conditional",
     update_signing_key: Path | None = None,
+    local_build: bool = False,
 ) -> dict:
     release_profile, sd_history_mode = validate_release_settings(
         release_profile, sd_history_mode
     )
+    if local_build and release_profile != FULL_FEATURE_RELEASE_PROFILE:
+        raise ValueError("Local release packaging requires the full_feature profile")
+    if local_build and any(os.environ.get(name) for name in (
+        "GITHUB_ACTIONS", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+    )):
+        raise ValueError("Local packaging cannot claim a GitHub Actions invocation")
     if (
         release_profile == FULL_FEATURE_RELEASE_PROFILE
         and update_signing_key is None
@@ -3559,7 +3571,15 @@ def create_release_package(
     source_git["commit"] = expected_commit
     source_git["short_commit"] = expected_commit[:7]
     workflow = workflow_info()
-    if release_profile in PRODUCTION_RELEASE_PROFILES:
+    if local_build:
+        workflow.update({
+            "provider": "local",
+            "sha": expected_commit,
+            "repository": CANONICAL_REPOSITORY,
+            "ref": None,
+            "workflow": None,
+        })
+    if release_profile in PRODUCTION_RELEASE_PROFILES and not local_build:
         profile_label = (
             "Core"
             if release_profile == CORE_RELEASE_PROFILE
@@ -3863,8 +3883,8 @@ def create_release_package(
             {
                 "release_profile": release_profile,
                 "firmware_commit": expected_commit,
-                "actions_run": str(workflow["run_id"]),
-                "actions_run_attempt": str(workflow["run_attempt"]),
+                "actions_run": workflow["run_id"],
+                "actions_run_attempt": workflow["run_attempt"],
                 "supported_capabilities": capability_truth[
                     "supported_capabilities"
                 ],
@@ -3939,6 +3959,8 @@ def main() -> int:
     parser.add_argument("--release-profile", choices=sorted(RELEASE_PROFILES))
     parser.add_argument("--sd-history-mode", choices=sorted(SD_HISTORY_MODES))
     parser.add_argument("--update-signing-key", default=None)
+    parser.add_argument("--local-build", action="store_true",
+                        help="Package a local full_feature build with local provenance")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -4007,6 +4029,7 @@ def main() -> int:
         release_profile=release_profile,
         sd_history_mode=sd_history_mode,
         update_signing_key=update_signing_key,
+        local_build=args.local_build,
     )
     print(json.dumps(manifest))
     return 0
