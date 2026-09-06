@@ -7,6 +7,7 @@
 #include "app/release_profile.h"
 #include "comms/ble_companion.h"
 #include "comms/connectivity_boot_guard.h"
+#include "comms/observer_manager.h"
 #include "comms/wifi_retry_policy.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -624,8 +625,15 @@ static esp_err_t wifi_shutdown_begin(bool *out_control_taken)
         }
         *out_control_taken = true;
     }
-    const esp_err_t ret = wifi_network_quiesce_begin(
+    esp_err_t ret = wifi_network_quiesce_begin(
         D1L_WIFI_NETWORK_QUIESCE_TIMEOUT_MS);
+    if (ret == ESP_OK) {
+        /* MQTT owns asynchronous TLS receive buffers outside the leased HTTP
+         * path. Drain them before Wi-Fi/netif destruction, while the global
+         * cancellation guard also prevents new observer clients. */
+        ret = d1l_observer_prepare_network_shutdown();
+        if (ret != ESP_OK) wifi_network_quiesce_end();
+    }
     if (ret != ESP_OK && *out_control_taken) {
         give_wifi_control();
         *out_control_taken = false;

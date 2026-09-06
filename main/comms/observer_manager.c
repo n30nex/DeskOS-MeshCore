@@ -707,18 +707,27 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     }
 }
 
-static void stop_endpoint_locked(d1l_observer_endpoint_t *endpoint)
+static esp_err_t stop_endpoint_locked(d1l_observer_endpoint_t *endpoint)
 {
-    if (!endpoint || !endpoint->client) return;
+    if (!endpoint || !endpoint->client) return ESP_OK;
     (void)esp_mqtt_client_stop(endpoint->client);
-    (void)esp_mqtt_client_destroy(endpoint->client);
+    const esp_err_t result = esp_mqtt_client_destroy(endpoint->client);
+    if (result != ESP_OK) {
+        portENTER_CRITICAL(&s_lock);
+        endpoint->last_error = result;
+        portEXIT_CRITICAL(&s_lock);
+        return result;
+    }
     endpoint->client = NULL;
+    portENTER_CRITICAL(&s_lock);
     endpoint->connected = false;
     endpoint->token_issued_at = 0U;
     endpoint->inflight_sequence = 0U;
     endpoint->inflight_message_id = 0;
+    portEXIT_CRITICAL(&s_lock);
     secure_zero(endpoint->username, sizeof(endpoint->username));
     secure_zero(endpoint->password, sizeof(endpoint->password));
+    return ESP_OK;
 }
 
 static void stop_endpoint(uint8_t index)
@@ -728,13 +737,36 @@ static void stop_endpoint(uint8_t index)
     give_client_lock();
 }
 
-static void stop_all_clients(void)
+esp_err_t d1l_observer_prepare_network_shutdown(void)
 {
-    if (!take_client_lock()) return;
+    if (!s_client_lock) return ESP_OK;
+    if (!take_client_lock()) return ESP_ERR_TIMEOUT;
+    esp_err_t result = ESP_OK;
     for (size_t i = 0U; i < D1L_OBSERVER_BROKER_COUNT; ++i) {
-        stop_endpoint_locked(&s_endpoints[i]);
+        const esp_err_t stopped = stop_endpoint_locked(&s_endpoints[i]);
+        if (stopped != ESP_OK && result == ESP_OK) result = stopped;
     }
     give_client_lock();
+    return result;
+}
+
+static void stop_all_clients(void)
+{
+    (void)d1l_observer_prepare_network_shutdown();
+}
+
+static bool observer_network_continue(void *context);
+
+static bool take_network_client_lock(void)
+{
+    if (!take_client_lock()) return false;
+    /* Recheck after acquiring ownership: a worker snapshot can predate a
+     * mode switch, including a switch whose shutdown barrier already ended. */
+    if (!observer_network_continue(NULL)) {
+        give_client_lock();
+        return false;
+    }
+    return true;
 }
 
 static bool endpoint_client_exists(uint8_t index)
@@ -749,7 +781,7 @@ static bool endpoint_client_exists(uint8_t index)
 
 static esp_err_t start_endpoint(uint8_t index, uint32_t now_ms)
 {
-    if (index >= D1L_OBSERVER_BROKER_COUNT || !take_client_lock()) {
+    if (index >= D1L_OBSERVER_BROKER_COUNT || !take_network_client_lock()) {
         return ESP_ERR_TIMEOUT;
     }
     d1l_observer_endpoint_t *endpoint = &s_endpoints[index];
@@ -838,7 +870,7 @@ static int publish_to_endpoint(uint8_t index, const char *topic,
                                const char *payload, bool retain)
 {
     if (index >= D1L_OBSERVER_BROKER_COUNT || !topic || !payload ||
-        !take_client_lock()) {
+        !take_network_client_lock()) {
         return -1;
     }
     d1l_observer_endpoint_t *endpoint = &s_endpoints[index];
@@ -862,7 +894,8 @@ static bool observer_network_continue(void *context)
     (void)context;
     d1l_connectivity_status_t connectivity = {0};
     d1l_connectivity_status(&connectivity);
-    return observer_enabled() && connectivity.wifi_connected;
+    return observer_enabled() && connectivity.wifi_connected &&
+           !d1l_connectivity_network_cancel_requested();
 }
 
 static void note_endpoint_error(esp_err_t error, uint32_t retry_at_ms)

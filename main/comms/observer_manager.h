@@ -75,6 +75,9 @@ esp_err_t d1l_observer_configure(const char *mqtts_uri,
 esp_err_t d1l_observer_clear_configuration(void);
 esp_err_t d1l_observer_set_enabled(bool enabled);
 esp_err_t d1l_observer_set_region(const char *iata);
+/* Called outside MQTT callbacks while connectivity holds its network-quiesce
+ * guard. Returns only after the owned clients release their network buffers. */
+esp_err_t d1l_observer_prepare_network_shutdown(void);
 esp_err_t d1l_observer_enqueue_packet(const uint8_t *raw, size_t raw_len,
                                       int16_t rssi_dbm,
                                       int8_t snr_quarter_db);

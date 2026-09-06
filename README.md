@@ -28,6 +28,8 @@ The previous stable release is
   pages through every matching entry. Home and Contacts agree on heard totals.
 - **Profile** exposes the node name, public identity, location and advert entry.
 - Six editable **Quick replies** insert at the cursor for review before Send.
+- Switching to Bluetooth closes Observer connections before releasing Wi-Fi,
+  preventing a crash during an active MQTT connection attempt.
 - Settings leads with device controls; keyboards use the dark palette. Display
   timeout offers 30 seconds through 10 minutes, and clock offsets use 15-minute steps.
 

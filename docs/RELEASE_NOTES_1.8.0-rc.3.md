@@ -26,6 +26,13 @@ boundaries. It includes the earlier signed-update and phone-telemetry fixes.
 
 ## Parity and validation
 
+Hardware acceptance also exposed an Observer shutdown race: an MQTT TLS
+connection could still own receive buffers when Wi-Fi was deinitialized during
+a switch to Bluetooth. The network shutdown now waits for all owned MQTT
+clients to close, and client startup/publication rechecks the live network
+under its ownership lock. A failed drain keeps the driver alive and reports
+the failure. Observer settings and queued data remain intact.
+
 The [parity record](DESKOS_MESHCORE_FEATURE_PARITY.md) pins WadaMesh source
 `8e94e250366632ee2e7a7198551e551aaa8b8024`, covers its primary UI areas and lists
 the remaining differences. Complete WadaMesh feature parity is not claimed.
