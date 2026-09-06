@@ -26,6 +26,9 @@ installation path. It uses the production `full_feature` profile with
   remain valid, labels stay clear of the current viewport controls, and labels
   themselves can be tapped to open node details.
 - Map provenance and center-source labels fit their allocated space.
+- Map attribution wraps at a readable size and remains inside the viewport.
+- Home describes offline map mode instead of incorrectly requiring Wi-Fi.
+  The map still checks actual saved tiles for the selected area.
 - Unused legacy UI callbacks and an unused update logging declaration were
   removed.
 - Signed-update boot acceptance requires the retained identity to be usable.
@@ -43,6 +46,8 @@ installation path. It uses the production `full_feature` profile with
   storage; a fresh installation still requires all three setup stages.
 - Selecting another device/build or starting another flash invalidates prior
   verification, and the D1L requires its expected USB identifiers.
+- Hardware, build and install choices stay locked during flashing. Clean-install
+  instructions distinguish replaced ESP32 data from SD files that remain on the card.
 
 ## Verification
 
@@ -57,6 +62,14 @@ The [tagged release record](https://github.com/n30nex/DeskOS-MeshCore/releases/t
 records the exact image hashes and physical candidate acceptance. The official
 Android app 1.49.0 interoperability run used 1.7.12; it is a baseline result,
 not a claim of a new phone run on this candidate.
+
+Physical candidate checks cover the preserving USB installer, retained identity
+and SD storage, acknowledged DM to a local node, authenticated repeater status,
+Wi-Fi signal refresh and return to BLE mode without a reboot, and all five main
+screens. The current map view rendered all nine saved tiles with no network
+requests. A new phone-app run, RP2040 reflash and physical signed-SD rollback
+cycle are not claimed. The Pi's onboard Bluetooth central did not establish
+its link, so it did not provide a replacement phone-interoperability result.
 
 ## Install
 

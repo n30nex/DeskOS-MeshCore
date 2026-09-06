@@ -50,5 +50,5 @@ def test_home_view_preserves_truthful_storage_and_map_states():
     ):
         assert f'"{state}"' in view
     assert 'return "needs FAT32";' in view
-    assert 'map_status = "Needs Wi-Fi";' in view
+    assert 'map_status = "Offline mode";' in view
     assert 'map_status = "Set a location";' in view

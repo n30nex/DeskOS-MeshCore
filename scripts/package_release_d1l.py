@@ -2849,7 +2849,7 @@ def write_flash_scripts(
             'if ([string]::IsNullOrWhiteSpace($Port)) { throw "Pass the operator-confirmed D1L COM port with -Port." }',
             "$ValidatedPort = $Port.Trim().ToUpperInvariant()",
             'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
-            'Write-Warning "FRESH CLEAN INSTALL: this replaces the complete ESP32 flash and all retained data."',
+            'Write-Warning "FRESH CLEAN INSTALL: this replaces all ESP32 flash data, including identity and settings. SD files remain on the card."',
             "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
             *powershell_checksum_guard_lines(),
             "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --validate-only",

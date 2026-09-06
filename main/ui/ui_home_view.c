@@ -226,8 +226,8 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
         map_status = map_storage_state(input);
         out_view->map_status_color = 0xFBBF24U;
     } else if (!input->wifi_connected) {
-        map_status = "Needs Wi-Fi";
-        out_view->map_status_color = 0xFBBF24U;
+        /* The map checks actual tile availability for the selected area. */
+        map_status = "Offline mode";
     }
     snprintf(out_view->map_status, sizeof(out_view->map_status), "%s", map_status);
 

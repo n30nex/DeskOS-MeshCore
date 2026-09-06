@@ -1686,9 +1686,10 @@ void d1l_ui_map_render(lv_obj_t *parent,
             viewport, "(c) OpenStreetMap contributors", MAP_COLOR_DETAIL);
         s_viewport_attribution_label = attribution;
         if (attribution) {
-            map_label_dot(attribution, 240);
+            lv_obj_set_style_text_font(attribution, &lv_font_montserrat_12, 0);
+            map_label_wrap(attribution, 240);
             lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_RIGHT, 0);
-            lv_obj_set_pos(attribution, 228, (int)MAP_VIEWPORT_HEIGHT - 36);
+            lv_obj_align(attribution, LV_ALIGN_BOTTOM_RIGHT, -8, -4);
             lv_obj_set_style_bg_color(attribution, lv_color_hex(0x17191A), 0);
             lv_obj_set_style_bg_opa(attribution, LV_OPA_80, 0);
             lv_obj_set_style_pad_all(attribution, 2, 0);
@@ -1947,7 +1948,8 @@ static void map_render_cache_status(lv_obj_t *parent,
             view_status.attribution : "(c) OpenStreetMap contributors",
         MAP_COLOR_DETAIL);
     if (attribution) {
-        map_label_dot(attribution, 420);
+        lv_obj_set_style_text_font(attribution, &lv_font_montserrat_12, 0);
+        map_label_wrap(attribution, 420);
         lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(attribution, 12, 298);
     }

@@ -710,7 +710,7 @@ def test_home_map_status_reports_setup_requirements_not_sd_as_saved_content():
         "d1l_ui_home_sd_state(input)"
     )
     assert "storage_needs_attention(input)" in helper
-    assert 'map_status = "Needs Wi-Fi";' in source
+    assert 'map_status = "Offline mode";' in source
     assert '"Map cache ready"' not in source
     assert '"Map setup needed"' not in source
     assert source.index("if (!input->map_location_set)") < source.index(

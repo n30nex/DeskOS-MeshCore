@@ -18,7 +18,7 @@
 | **1.7.10** | Faster Contacts, retained maps, editable Observer region, hashtag channels, and reliable flood adverts | Historical (`v1.7.10`) |
 | **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Included in `v1.7.12` |
 | **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Stable (`v1.7.12`) |
-| **1.8.0-rc.1** | Radio timing and diagnostics audit, clearer startup/maps, and verified browser installation | Candidate in validation |
+| **1.8.0-rc.1** | Radio timing and diagnostics audit, clearer startup/maps, and verified browser installation | Release candidate; exact acceptance in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation

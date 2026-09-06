@@ -69,6 +69,10 @@ static void test_ready_view_owns_all_rendered_strings(void)
     assert(strcmp(view.sd_compact_value, "Ready") == 0);
     assert(strcmp(view.attention_value, "OK") == 0);
     assert(view.sd_value_color == 0x20D9EDU);
+    input.wifi_connected = false;
+    d1l_ui_home_view(&input, &view);
+    assert(strcmp(view.map_status, "Offline mode") == 0);
+    assert(view.map_status_color == 0x20D9EDU);
 }
 
 static void test_storage_and_map_fail_closed_states(void)
