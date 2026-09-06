@@ -480,20 +480,23 @@ static esp_err_t flush_pending(void)
     return result;
 }
 
-static bool channel_at_index(uint8_t index, d1l_channel_info_t *out_channel)
+static esp_err_t channel_at_index(uint8_t index, d1l_channel_info_t *out_channel)
 {
     size_t count = 0U;
     uint64_t active_id = 0U;
-    if (d1l_app_model_copy_channels(
+    const esp_err_t result = d1l_app_model_copy_channels(
             s_channels, D1L_CHANNEL_STORE_CAPACITY, &count, &active_id,
-            &s_channel_stats) != ESP_OK ||
-        index >= count) {
-        return false;
+            &s_channel_stats);
+    if (result != ESP_OK) {
+        return result;
+    }
+    if (index >= count) {
+        return ESP_ERR_NOT_FOUND;
     }
     if (out_channel) {
         *out_channel = s_channels[index];
     }
-    return true;
+    return ESP_OK;
 }
 
 static bool channel_index_for_id(uint64_t channel_id, uint8_t *out_index)
@@ -1027,9 +1030,23 @@ static void build_current_time(void)
 
 static void build_channel_info(uint8_t index)
 {
+    if (index >= D1L_BLE_PROTOCOL_MAX_CHANNELS) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
     d1l_channel_info_t channel = {0};
-    if (!channel_at_index(index, &channel)) {
-        set_error_response(ERR_CODE_NOT_FOUND);
+    const esp_err_t result = channel_at_index(index, &channel);
+    if (result != ESP_OK && result != ESP_ERR_NOT_FOUND) {
+        set_error_response(ERR_CODE_BAD_STATE);
+        return;
+    }
+    memset(s_pending_payload, 0, 50U);
+    s_pending_payload[0] = RESP_CODE_CHANNEL_INFO;
+    s_pending_payload[1] = index;
+    s_pending_len = 50U;
+    /* Phone clients find free slots by reading an empty channel record.
+     * NOT_FOUND makes every unused slot appear unavailable for creation. */
+    if (result == ESP_ERR_NOT_FOUND) {
         return;
     }
     d1l_channel_protocol_key_t key = {0};
@@ -1040,9 +1057,6 @@ static void build_channel_info(uint8_t index)
         memset(&key, 0, sizeof(key));
         return;
     }
-    memset(s_pending_payload, 0, 50U);
-    s_pending_payload[0] = RESP_CODE_CHANNEL_INFO;
-    s_pending_payload[1] = index;
     copy_fixed_text(&s_pending_payload[2], 32U, channel.name);
     memcpy(&s_pending_payload[34], key.secret,
            D1L_CHANNEL_SECRET_128_LEN);
@@ -1965,7 +1979,7 @@ static void send_channel_command(const uint8_t *payload, size_t length)
         return;
     }
     d1l_channel_info_t channel = {0};
-    if (!channel_at_index(payload[2], &channel)) {
+    if (channel_at_index(payload[2], &channel) != ESP_OK) {
         set_error_response(ERR_CODE_NOT_FOUND);
         return;
     }
@@ -1998,7 +2012,12 @@ static void set_channel_command(const uint8_t *payload, size_t length)
     const bool delete_requested =
         bytes_all_zero(&payload[2], D1L_CHANNEL_NAME_LEN - 1U) &&
         bytes_all_zero(&payload[34], D1L_CHANNEL_SECRET_128_LEN);
-    if (channel_at_index(payload[1], &existing)) {
+    const esp_err_t lookup = channel_at_index(payload[1], &existing);
+    if (lookup != ESP_OK && lookup != ESP_ERR_NOT_FOUND) {
+        set_error_response(ERR_CODE_BAD_STATE);
+        return;
+    }
+    if (lookup == ESP_OK) {
         if (delete_requested) {
             result = d1l_app_model_remove_channel(
                 existing.channel_id, true, &mutation, &result_channel);
