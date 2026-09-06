@@ -21,6 +21,8 @@
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
 #include "mesh/meshcore_service.h"
+#include "mesh/meshcore_dm_retry.h"
+#include "mesh/meshcore_route_selection.h"
 #include "mesh/meshcore_wire.h"
 #include "mesh/node_store.h"
 #include "platform/time_service.h"
@@ -126,6 +128,7 @@ enum {
     RESP_CODE_ALLOWED_REPEAT_FREQ = 26,
     PUSH_CODE_ADVERT = 0x80,
     PUSH_CODE_PATH_UPDATED = 0x81,
+    PUSH_CODE_SEND_CONFIRMED = 0x82,
     PUSH_CODE_MSG_WAITING = 0x83,
     PUSH_CODE_LOGIN_SUCCESS = 0x85,
     PUSH_CODE_LOGIN_FAIL = 0x86,
@@ -219,6 +222,9 @@ static uint32_t s_seen_dm_revision;
 static uint32_t s_seen_message_revision;
 static bool s_force_message_notification_check;
 static uint32_t s_seen_connect_count;
+static uint64_t s_phone_dm_session;
+static uint32_t s_phone_dm_ack;
+static uint32_t s_phone_dm_started_ms;
 static d1l_meshcore_admin_snapshot_t s_admin_snapshot EXT_RAM_BSS_ATTR;
 static d1l_ble_admin_request_kind_t s_admin_request_kind;
 static uint32_t s_admin_request_generation;
@@ -1043,10 +1049,10 @@ static void build_channel_info(uint8_t index)
     memset(s_pending_payload, 0, 50U);
     s_pending_payload[0] = RESP_CODE_CHANNEL_INFO;
     s_pending_payload[1] = index;
-    s_pending_len = 50U;
     /* Phone clients find free slots by reading an empty channel record.
      * NOT_FOUND makes every unused slot appear unavailable for creation. */
     if (result == ESP_ERR_NOT_FOUND) {
+        s_pending_len = 50U;
         return;
     }
     d1l_channel_protocol_key_t key = {0};
@@ -1895,6 +1901,45 @@ static void send_admin_cli_command(
     set_admin_sent_response(true, 0U);
 }
 
+static void set_dm_sent_response(const d1l_dm_entry_t *entry, bool flood)
+{
+    s_phone_dm_session = entry->delivery_session_id;
+    s_phone_dm_ack = entry->ack_hash;
+    s_phone_dm_started_ms = (uint32_t)(esp_timer_get_time() / 1000LL);
+    uint8_t response[10] = {RESP_CODE_SENT, flood ? 1U : 0U};
+    write_u32_le(&response[2], s_phone_dm_ack);
+    /* The radio owner may retry a direct attempt by flood. Give that one
+     * delivery session time to finish before the phone offers another send. */
+    write_u32_le(&response[6], D1L_MESHCORE_DIRECT_ACK_TIMEOUT_MS +
+                 D1L_MESHCORE_FLOOD_ACK_TIMEOUT_MS + 10000U);
+    (void)set_pending(response, sizeof(response));
+}
+
+static void maybe_queue_dm_confirmation(void)
+{
+    if (s_pending_len != 0U || s_phone_dm_session == 0U) {
+        return;
+    }
+    if (!d1l_dm_store_find_delivery_session(s_phone_dm_session, &s_dms[0])) {
+        s_phone_dm_session = 0U;
+        return;
+    }
+    const d1l_dm_entry_t *entry = &s_dms[0];
+    if (entry->acked && entry->delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED) {
+        uint8_t response[9] = {PUSH_CODE_SEND_CONFIRMED};
+        /* Retry ACKs can change; the phone correlates the original SENT hash
+         * with this exact delivery session, not a later message or attempt. */
+        write_u32_le(&response[1], s_phone_dm_ack);
+        write_u32_le(&response[5],
+                     (uint32_t)(esp_timer_get_time() / 1000LL) -
+                         s_phone_dm_started_ms);
+        (void)set_pending(response, sizeof(response));
+        s_phone_dm_session = 0U;
+    } else if (d1l_dm_delivery_state_terminal(entry->delivery_state)) {
+        s_phone_dm_session = 0U;
+    }
+}
+
 static void send_dm_command(const uint8_t *payload, size_t length)
 {
     if (length >= 2U) {
@@ -1926,14 +1971,25 @@ static void send_dm_command(const uint8_t *payload, size_t length)
     text[text_len] = '\0';
     const esp_err_t result =
         d1l_app_model_send_dm_text(contact.fingerprint, text);
-    memset(text, 0, sizeof(text));
     if (result != ESP_OK) {
+        memset(text, 0, sizeof(text));
         set_error_response(protocol_error(result));
         note_error(result, false);
         return;
     }
-    uint8_t response[10] = {RESP_CODE_SENT, 1U};
-    (void)set_pending(response, sizeof(response));
+    const d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
+    const bool found = d1l_dm_store_find_delivery_session(
+        mesh.dm_delivery_session_id, &s_dms[0]);
+    const bool matches = found &&
+        strcmp(s_dms[0].contact_fingerprint, contact.fingerprint) == 0 &&
+        strcmp(s_dms[0].text, text) == 0;
+    memset(text, 0, sizeof(text));
+    if (!matches) {
+        set_error_response(ERR_CODE_BAD_STATE);
+        return;
+    }
+    set_dm_sent_response(&s_dms[0], mesh.dm_route_last_reason !=
+                         D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN);
 }
 
 static void get_advert_path_command(const uint8_t *payload, size_t length)
@@ -2552,6 +2608,7 @@ static void dispatch_command(const uint8_t *payload, size_t length)
 static void reset_session_state(void)
 {
     s_pending_len = 0U;
+    s_phone_dm_session = 0U;
     s_contact_count = 0U;
     s_contact_index = 0U;
     s_contact_iterator_active = false;
@@ -2665,6 +2722,10 @@ static void protocol_task(void *context)
             s_pending_len = 0U;
         }
         maybe_queue_admin_response();
+        if (s_pending_len != 0U) {
+            continue;
+        }
+        maybe_queue_dm_confirmation();
         if (s_pending_len != 0U) {
             continue;
         }

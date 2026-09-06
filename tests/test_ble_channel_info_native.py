@@ -26,14 +26,15 @@ def test_phone_finds_free_channel_slots_without_hiding_storage_errors(tmp_path):
 #include "mesh/channel_store.h"
 #define D1L_BLE_PROTOCOL_MAX_CHANNELS 8U
 #define RESP_CODE_CHANNEL_INFO 18U
-#define ERR_CODE_ILLEGAL_ARG 1U
+#define ERR_CODE_ILLEGAL_ARG 6U
 #define ERR_CODE_BAD_STATE 4U
-#define ERR_CODE_UNSUPPORTED_CMD 6U
+#define ERR_CODE_UNSUPPORTED_CMD 1U
 static d1l_channel_info_t s_channels[D1L_CHANNEL_STORE_CAPACITY];
 static d1l_channel_store_stats_t s_channel_stats;
 static uint8_t s_pending_payload[512];
 static size_t s_pending_len;
 static esp_err_t store_result = ESP_OK;
+static uint8_t key_length = 16;
 static void set_error_response(uint8_t error) {
     s_pending_payload[0] = 1;
     s_pending_payload[1] = error;
@@ -59,7 +60,7 @@ esp_err_t d1l_channel_store_copy_protocol_key(
     uint64_t id, d1l_channel_protocol_key_t *key) {
     assert(id == 1);
     memset(key, 0, sizeof(*key));
-    key->secret_len = 16;
+    key->secret_len = key_length;
     memset(key->secret, 0xA5, 16);
     return ESP_OK;
 }
@@ -83,6 +84,11 @@ int main(void) {
     store_result = ESP_FAIL;
     build_channel_info(1);
     assert(s_pending_len == 2 && s_pending_payload[1] == ERR_CODE_BAD_STATE);
+    store_result = ESP_OK;
+    key_length = 32;
+    s_pending_len = 0;
+    build_channel_info(0);
+    assert(s_pending_len == 2 && s_pending_payload[1] == ERR_CODE_UNSUPPORTED_CMD);
     puts("channel records: ok");
 }
 '''
