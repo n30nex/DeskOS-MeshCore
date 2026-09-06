@@ -264,8 +264,8 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert runner_text.index("verify_complete_package(root)") < runner_text.index(
         "runner(command, cwd=root)"
     )
-    assert "--validate-only" in update
-    assert "meshcore_deskos_d1l.bin" in update
+    assert "--app-update" in update
+    assert "python -m esptool" not in update
     assert recovery.index("--validate-only") < recovery.index(
         "python -m esptool"
     )

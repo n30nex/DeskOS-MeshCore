@@ -1799,6 +1799,10 @@ a raw `/dev/ttyUSB` path.
 
 ### Existing DeskOS: preserving update BIN
 
+Use these installers when updating an existing device. They verify and write
+the app before selecting the updated boot slot, including after a signed SD
+update. Settings, identity, retained data, and the SD card are preserved.
+
 Windows:
 
 ```powershell
@@ -2590,6 +2594,7 @@ def run_flash(
     resolver_module: Any | None = None,
     resolver_hooks: dict[str, Any] | None = None,
     validate_only: bool = False,
+    app_update: bool = False,
 ) -> dict[str, Any]:
     raw_root = (
         Path(__file__).parent
@@ -2629,7 +2634,20 @@ def run_flash(
     if validate_only:
         return {"target": snapshot, "command": None}
 
-    command = [
+    phases = [FLASH_PLAN]
+    if app_update:
+        app = [row for row in FLASH_PLAN if Path(row[1]).name == "meshcore_deskos_d1l.bin"]
+        selector = [row for row in FLASH_PLAN if Path(row[1]).name == "ota_data_initial.bin"]
+        if len(app) != 1 or len(selector) > 1:
+            raise ValueError("Invalid app update flash plan")
+        # Write and verify the app before selecting ota_0. A prior signed SD
+        # update may have selected ota_1; writing ota_0 alone would not update
+        # the firmware that boots. Neither phase touches settings or history.
+        phases = [app] + ([selector] if selector else [])
+    commands = []
+    runner = command_runner or subprocess.run
+    for index, phase in enumerate(phases):
+        command = [
         sys.executable,
         "-m",
         "esptool",
@@ -2642,7 +2660,7 @@ def run_flash(
         "--before",
         "default-reset",
         "--after",
-        "hard-reset",
+        "hard-reset" if index == len(phases) - 1 else "no-reset",
         "write-flash",
         "--flash-mode",
         FLASH_MODE,
@@ -2650,26 +2668,31 @@ def run_flash(
         FLASH_SIZE,
         "--flash-freq",
         FLASH_FREQ,
-    ]
-    for offset, relative in FLASH_PLAN:
-        command.extend((offset, str(root / relative)))
-    runner = command_runner or subprocess.run
-    result = runner(command, cwd=root)
-    returncode = getattr(result, "returncode", result if type(result) is int else None)
-    if returncode != 0:
-        raise RuntimeError(f"Project flash failed with exit code {returncode!r}")
-    return {"target": snapshot, "command": command}
+        ]
+        for offset, relative in phase:
+            command.extend((offset, str(root / relative)))
+        result = runner(command, cwd=root)
+        returncode = getattr(result, "returncode", result if type(result) is int else None)
+        if returncode != 0:
+            raise RuntimeError(f"Project flash failed with exit code {returncode!r}")
+        commands.append(command)
+    result = {"target": snapshot, "command": commands[0]}
+    if app_update:
+        result["commands"] = commands
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", default=os.environ.get("D1L_PORT"))
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--app-update", action="store_true")
     args = parser.parse_args(argv)
     if not isinstance(args.port, str) or not args.port.strip():
         parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
     try:
-        run_flash(args.port, validate_only=args.validate_only)
+        run_flash(args.port, validate_only=args.validate_only,
+                  app_update=args.app_update)
     except (OSError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
     return 0
@@ -2789,12 +2812,7 @@ def write_flash_scripts(
                     'if ($ValidatedPort -notmatch "^COM[1-9][0-9]*$") { throw "Pass one explicit canonical COM port; automatic port selection is forbidden." }',
                     'Write-Host "Updating an existing DeskOS device while preserving retained data."',
                     "$Root = Split-Path -Parent $MyInvocation.MyCommand.Path",
-                    "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --validate-only",
-                    'if ($LASTEXITCODE -ne 0) { throw "D1L identity validation failed with exit code $LASTEXITCODE" }',
-                    "python -m esptool --chip esp32s3 --port $ValidatedPort --baud "
-                    f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
-                    f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
-                    f"{app['offset']} (Join-Path $Root '{app['path']}')",
+                    "python (Join-Path $Root 'flash_project.py') --port $ValidatedPort --app-update",
                     'if ($LASTEXITCODE -ne 0) { throw "DeskOS update BIN flash failed with exit code $LASTEXITCODE" }',
                     "",
                 )
@@ -2815,11 +2833,7 @@ def write_flash_scripts(
                     "fi",
                     'ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
                     'PYTHON_BIN="${D1L_PYTHON:-python3}"',
-                    '"$PYTHON_BIN" "$ROOT/flash_project.py" --port "$D1L_PORT" --validate-only',
-                    '"$PYTHON_BIN" -m esptool --chip esp32s3 --port "$D1L_PORT" --baud '
-                    f"{FLASH_BAUD} --before default-reset --after hard-reset write-flash "
-                    f"--flash-mode {flash_mode} --flash-size {flash_size} --flash-freq {flash_freq} "
-                    f'{app["offset"]} "$ROOT/{app["path"]}"',
+                    '"$PYTHON_BIN" "$ROOT/flash_project.py" --port "$D1L_PORT" --app-update',
                     "",
                 )
             ),

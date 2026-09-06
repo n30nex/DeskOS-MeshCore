@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -402,6 +403,10 @@ def test_full_feature_package_requires_signing_key_at_callable_boundary(
 def test_local_full_feature_package_has_no_actions_claim(tmp_path, monkeypatch):
     build = tmp_path / "build"
     write_fake_build(build)
+    (build / "ota_data_initial.bin").write_bytes(b"OTA-DATA")
+    flasher_args = json.loads((build / "flasher_args.json").read_text())
+    flasher_args["flash_files"]["0xf000"] = "ota_data_initial.bin"
+    (build / "flasher_args.json").write_text(json.dumps(flasher_args))
     write_fake_notices(tmp_path)
     write_fake_config(tmp_path)
     shutil.copy2(ROOT / "scripts/prepare_deskos_sd.py",
@@ -455,6 +460,25 @@ def test_local_full_feature_package_has_no_actions_claim(tmp_path, monkeypatch):
     assert "Build origin: local" in readme
     assert "GitHub Actions run:" not in readme
     assert verify_checksum_tree(package)
+    runner = types.ModuleType("local_update_runner")
+    runner.__file__ = str(package / "flash_project.py")
+    exec(compile(Path(runner.__file__).read_text(), runner.__file__, "exec"), runner.__dict__)
+    calls = []
+    options = dict(
+        package_root=package, platform_name="nt", app_update=True,
+        port_lister=lambda: [{"device": "COM37", "vid": 0x1A86, "pid": 0x7523,
+                              "hwid": "USB VID:PID=1A86:7523"}],
+    )
+    runner.run_flash("COM37", command_runner=lambda command, **kw: calls.append(command) or 0, **options)
+    app = next(entry for entry in manifest["flash_files"] if entry["role"] == "app")
+    assert len(calls) == 2
+    assert calls[0][-2:] == [app["offset"], str(package / app["path"])]
+    assert calls[0][calls[0].index("--after") + 1] == "no-reset"
+    assert calls[1][-2:] == ["0xf000", str(package / "firmware/ota_data_initial.bin")]
+    calls.clear()
+    with pytest.raises(RuntimeError, match="Project flash failed"):
+        runner.run_flash("COM37", command_runner=lambda command, **kw: calls.append(command) or 1, **options)
+    assert len(calls) == 1, "Do not change boot selection after a failed app write"
     monkeypatch.setenv("GITHUB_RUN_ID", "12345")
     with pytest.raises(ValueError, match="cannot claim a GitHub Actions"):
         package_release_d1l.create_release_package(
