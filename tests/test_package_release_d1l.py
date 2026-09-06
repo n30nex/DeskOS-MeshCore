@@ -404,6 +404,11 @@ def test_local_full_feature_package_has_no_actions_claim(tmp_path, monkeypatch):
     write_fake_build(build)
     write_fake_notices(tmp_path)
     write_fake_config(tmp_path)
+    shutil.copy2(ROOT / "scripts/prepare_deskos_sd.py",
+                 tmp_path / "scripts/prepare_deskos_sd.py")
+    sd_manifest = tmp_path / "sdcard/deskos/manifest.json"
+    sd_manifest.parent.mkdir(parents=True)
+    sd_manifest.write_text('{"schema":1}\n')
     rp2040 = write_fake_rp2040_artifacts(tmp_path)
     bridge_dir = rp2040 / "rp2040-sd-bridge-firmware"
     (bridge_dir / "rp2040-sd-bridge-firmware.uf2").rename(
@@ -435,6 +440,13 @@ def test_local_full_feature_package_has_no_actions_claim(tmp_path, monkeypatch):
     assert manifest["actions_run_attempt"] is None
     assert manifest["workflow"]["provider"] == "local"
     assert manifest["workflow"]["run_url"] is None
+    assert manifest["user_install"]["guide"] == "START_HERE.md"
+    guide = (package / "START_HERE.md").read_text()
+    assert "release profile: `full_feature`" in guide
+    assert "Existing DeskOS: preserving update BIN" in guide
+    assert "No DeskOS: full clean 8 MB BIN" in guide
+    assert (package / "flash_update_bin.sh").is_file()
+    assert (package / "flash_update_bin.ps1").is_file()
     provenance = json.loads((package / manifest["provenance"]["path"]).read_text())
     assert provenance["predicate"]["runDetails"]["builder"]["id"].endswith(
         "#local-builder-v1"

@@ -33,6 +33,11 @@ d1l_user_text_info_t d1l_user_text_validate_span(const uint8_t *text,
                                                  size_t byte_count,
                                                  bool allow_empty);
 
+/* Validates a caller-bounded display span, including UTF-8 and layout
+ * whitespace (tab/CR/LF). NUL, other controls, and malformed UTF-8 stay invalid. */
+d1l_user_text_info_t d1l_user_text_validate_display_span(
+    const uint8_t *text, size_t byte_count);
+
 /* Validates a fixed retained field and requires a terminator inside capacity. */
 d1l_user_text_info_t d1l_user_text_validate_bounded(const char *text,
                                                     size_t capacity,

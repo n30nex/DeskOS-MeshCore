@@ -16,7 +16,7 @@
 | **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Historical (`v1.7.8`) |
 | **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Historical (`v1.7.9`) |
 | **1.7.10** | Faster Contacts, retained maps, editable Observer region, hashtag channels, and reliable flood adverts | Historical (`v1.7.10`) |
-| **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Historical (`v1.7.11`) |
+| **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Included in `v1.7.12` |
 | **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Current (`v1.7.12`) |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
@@ -165,3 +165,12 @@ an **Add** entry, Connections names **MQTT / Observer** explicitly, and the
 editable IATA field is labelled in place. Repeated verified adverts now update
 boot-local recency and refresh Contacts without mutating retained identity or
 location history.
+
+The final 1.7.12 correction also exposes empty channel slots to phone clients,
+reports actual DM acknowledgement references and delivery events, admits
+authenticated repeater console replies, preserves valid UTF-8 responses, and
+uses a fresh authenticated PATH response for subsequent server requests.
+Login and unproven/stale routes retain flood delivery. The local production
+package now includes the same preserving update and SD preparation helpers as
+the standard production package, with explicit local provenance and the
+existing signed-update identity.

@@ -1,4 +1,5 @@
 #include "meshcore_admin_dispatch.h"
+#include "user_text.h"
 
 #include <limits.h>
 #include <stdarg.h>
@@ -1236,12 +1237,6 @@ bool d1l_meshcore_admin_cancel_cli_command(
     return true;
 }
 
-static bool cli_reply_byte_valid(uint8_t value)
-{
-    return value == '\n' || value == '\r' || value == '\t' ||
-           (value >= 0x20U && value <= 0x7EU);
-}
-
 static bool cli_reply_prefix(
     const uint8_t *text, size_t text_len, size_t offset,
     const char *prefix)
@@ -1411,10 +1406,9 @@ d1l_meshcore_admin_accept_cli_response(
         response_timestamp <= session->server_timestamp) {
         return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
-    for (size_t i = 0U; i < text_len; ++i) {
-        if (!cli_reply_byte_valid(text[i])) {
-            return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
-        }
+    if (d1l_user_text_validate_display_span(text, text_len).result !=
+        D1L_USER_TEXT_OK) {
+        return D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED;
     }
 
     const bool rejected = cli_reply_is_error(

@@ -76,7 +76,7 @@ else:
 
 PROJECT = "MeshCore DeskOS D1L"
 DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
-FLASH_BAUD = 460800
+FLASH_BAUD = 230400
 PACKAGE_METADATA_SCHEMA = 1
 UPDATE_MANIFEST_HEADER = "D1L-UPDATE-MANIFEST-V1"
 UPDATE_PRODUCT = "MeshCore DeskOS D1L"
@@ -1520,6 +1520,7 @@ def write_production_user_install_bundle(
     source_commit: str,
     app_version: str,
     sd_history_mode: str,
+    release_profile: str = CORE_RELEASE_PROFILE,
 ) -> dict:
     """Write checksum-bound Windows/Linux production install helpers."""
 
@@ -1680,8 +1681,8 @@ def write_production_user_install_bundle(
 This is the DeskOS D1L {app_version} production package:
 
 - firmware commit: `{source_commit}`
-- GitHub Actions run and attempt: see `manifest.json` and `README_RELEASE.md`
-- release profile: `{CORE_RELEASE_PROFILE}`
+- build origin: see `manifest.json` and `README_RELEASE.md`
+- release profile: `{release_profile}`
 - SD history mode: `{sd_history_mode}`
 
 Do not mix files from another download or run these tools from inside an
@@ -1845,9 +1846,9 @@ to:
 3. optionally save Wi-Fi, or continue offline;
 4. confirm the Canadian 910.525 MHz / 62.5 kHz / SF7 / CR5 preset;
 5. verify the prepared FAT32 card and included NRCan provider; and
-6. review Public, #bot, and #test before finishing.
+6. review Public and add any channels you use before finishing.
 
-The normal dock is Home, Channels, Contacts, Map, and Settings. DeskOS does not
+Use the dock to reach Home, messages, contacts, maps, and settings. DeskOS does not
 ship a local identity, position, nearby-node list, or sample mesh data; those
 are established only from your setup and real MeshCore traffic.
 
@@ -2723,7 +2724,7 @@ def write_flash_scripts(
     flash_freq = flash_settings.get("flash_freq", "80m")
     project_args = command_flash_files(entries)
 
-    if release_profile == CORE_RELEASE_PROFILE:
+    if release_profile in PRODUCTION_RELEASE_PROFILES:
         app = app_entry(entries)
         resolver = copy_core_serial_target_resolver(root, package_dir)
         py_project = package_dir / "flash_project.py"
@@ -3696,12 +3697,12 @@ def create_release_package(
             production_only=release_profile in PRODUCTION_RELEASE_PROFILES,
         )
     if (
-        release_profile == CORE_RELEASE_PROFILE
+        release_profile in PRODUCTION_RELEASE_PROFILES
         and sd_history_mode != "disabled"
         and not rp2040_artifacts
     ):
         raise ValueError(
-            "Core SD support requires the exact paired RP2040 artifacts"
+            "Production SD support requires the exact paired RP2040 artifacts"
         )
     scripts = write_flash_scripts(
         root,
@@ -3725,7 +3726,7 @@ def create_release_package(
 
     sd_preparation = (
         copy_sd_preparation_bundle(root, package_dir)
-        if release_profile == CORE_RELEASE_PROFILE
+        if release_profile in PRODUCTION_RELEASE_PROFILES
         and sd_history_mode != "disabled"
         else None
     )
@@ -3736,8 +3737,9 @@ def create_release_package(
             source_commit=expected_commit,
             app_version=app_version,
             sd_history_mode=sd_history_mode,
+            release_profile=release_profile,
         )
-        if release_profile == CORE_RELEASE_PROFILE
+        if release_profile in PRODUCTION_RELEASE_PROFILES
         and sd_history_mode != "disabled"
         else None
     )

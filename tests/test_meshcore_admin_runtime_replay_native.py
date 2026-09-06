@@ -37,6 +37,7 @@ def test_meshcore_admin_runtime_replay_native(tmp_path: pathlib.Path) -> None:
             str(ROOT / "tests/native/esp_nvs_stubs.c"),
             str(ROOT / "main/mesh/meshcore_admin_runtime.c"),
             str(ROOT / "main/mesh/meshcore_admin_dispatch.c"),
+            str(ROOT / "main/mesh/user_text.c"),
             str(ROOT / "main/mesh/meshcore_wire.c"),
             "-Wl,--gc-sections",
             "-o",

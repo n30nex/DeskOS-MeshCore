@@ -640,7 +640,7 @@ def test_core_conditional_package_is_production_only(
 
     guide = (package / "START_HERE.md").read_text(encoding="ascii")
     assert commit in guide
-    assert "GitHub Actions run and attempt: see `manifest.json`" in guide
+    assert "build origin: see `manifest.json`" in guide
     assert "## 1. Prepare the microSD card" in guide
     assert "## 2. Flash the RP2040 SD-bridge side" in guide
     assert "## 4. Flash the ESP32 main GUI side" in guide

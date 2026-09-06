@@ -20,6 +20,7 @@ def test_meshcore_admin_dispatch_native(tmp_path: pathlib.Path) -> None:
             str(ROOT / "main"),
             str(ROOT / "tests/native/meshcore_admin_dispatch_test.c"),
             str(ROOT / "main/mesh/meshcore_admin_dispatch.c"),
+            str(ROOT / "main/mesh/user_text.c"),
             "-o",
             str(executable),
         ],

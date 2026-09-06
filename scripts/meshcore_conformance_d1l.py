@@ -3047,6 +3047,7 @@ def production_semantic_suite_specs(
             "sources": [
                 native / "meshcore_admin_dispatch_test.c",
                 ROOT / "main" / "mesh" / "meshcore_admin_dispatch.c",
+                ROOT / "main" / "mesh" / "user_text.c",
             ],
         },
         {

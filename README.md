@@ -9,11 +9,11 @@
 DeskOS **1.7.12** is the current full-feature production firmware for the
 SenseCAP Indicator D1L. Download `v1.7.12` from the
 [GitHub release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
-The Actions release is compiled with the immutable `full_feature` profile and
+The release is compiled with the immutable `full_feature` profile and
 `conditional` SD history mode.
 
-DeskOS is a standalone, dark, touch-first MeshCore client. Firmware is built
-and packaged by GitHub Actions. The release provides the ESP32 update and
+DeskOS is a standalone, dark, touch-first MeshCore client. This release was built
+and packaged locally on the Pi 5 with the pinned toolchains. It provides ESP32 update and
 full-clean images, the complete RP2040 SD-bridge UF2, checksums, a signed local
 update bundle, and end-user instructions.
 
@@ -21,6 +21,16 @@ update bundle, and end-user instructions.
 
 DeskOS 1.7.12 completes the phone-companion and radio-to-screen repair:
 
+- unused channel slots are reported correctly, so the official app can add and
+  synchronize channels instead of reporting a full radio after Public;
+- direct messages carry their real acknowledgement reference and delivery
+  confirmation, so the phone shows **Delivered** when the radio receives an ACK;
+- repeater requests reuse a fresh authenticated return path, while login still
+  floods and stale or unproven routes fall back to flood;
+- authenticated repeater console replies reach the phone, including valid
+  Unicode names and multiline responses;
+- the full-feature download includes the preserving update installers,
+  complete SD-bridge UF2, signed update bundle, and `START_HERE.md`;
 - BLE frame scratch space now lives in PSRAM instead of consuming a quarter of
   the small NimBLE host-task stack during the phone's initial channel sync;
 - **Add** is always visible beside **Direct** on Channels, so hashtag channels
@@ -238,7 +248,7 @@ See the [user guide](docs/USER_GUIDE_D1L.md),
 | **1.7.8** | Dual MQTT uplink, Wi-Fi/BLE coexistence, live recency, map progress, and message time | Historical (`v1.7.8`) |
 | **1.7.9** | Stable Wi-Fi/BLE memory ownership and fresh MQTT authentication time | Historical (`v1.7.9`) |
 | **1.7.10** | Faster Contacts, retained maps, editable Observer region, hashtag channels, and reliable flood adverts | Historical (`v1.7.10`) |
-| **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Historical (`v1.7.11`) |
+| **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Included in `v1.7.12` |
 | **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Current (`v1.7.12`) |
 
 ## Device UI

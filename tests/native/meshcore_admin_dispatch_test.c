@@ -655,7 +655,7 @@ static int test_bounded_cli_session_and_redaction(void)
     CHECK(d1l_meshcore_admin_begin_cli_command(
         &session, tag, false, true,
         D1L_MESHCORE_ADMIN_CLI_REPLY_DEFAULT, 120U, 200U));
-    static const uint8_t reply[] = "2 neighbors\nA1B2";
+    static const uint8_t reply[] = "2 neighbors\nHespeler \xf0\x9f\x92\x8e";
     CHECK(d1l_meshcore_admin_accept_cli_response(
               &session, PEER, 0x55667789U, reply, sizeof(reply) - 1U,
               130U) == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED);

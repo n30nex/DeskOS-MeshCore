@@ -88,6 +88,14 @@ int main(void)
                                           false).result ==
            D1L_USER_TEXT_NOT_TERMINATED);
 
+    const uint8_t display[] = "Hespeler \xf0\x9f\x92\x8e\r\n\tready";
+    assert(d1l_user_text_validate_display_span(display, sizeof(display)-1U).result == D1L_USER_TEXT_OK);
+    assert(d1l_user_text_validate_display_span(truncated, sizeof(truncated)).result == D1L_USER_TEXT_INVALID_UTF8);
+    assert(d1l_user_text_validate_display_span(embedded_nul, sizeof(embedded_nul)).result == D1L_USER_TEXT_CONTROL_CHARACTER);
+    assert(d1l_user_text_validate_display_span(c1_control, sizeof(c1_control)).result == D1L_USER_TEXT_CONTROL_CHARACTER);
+    uint8_t long_display[160];
+    memset(long_display, 'a', sizeof(long_display));
+    assert(d1l_user_text_validate_display_span(long_display, sizeof(long_display)).result == D1L_USER_TEXT_OK);
     puts("native user text: ok");
     return 0;
 }

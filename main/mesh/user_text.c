@@ -25,9 +25,9 @@ static bool forbidden_control(uint32_t scalar)
            (scalar >= 0x7fU && scalar <= 0x9fU);
 }
 
-d1l_user_text_info_t d1l_user_text_validate_span(const uint8_t *text,
-                                                 size_t byte_count,
-                                                 bool allow_empty)
+static d1l_user_text_info_t validate_span(const uint8_t *text,
+                                        size_t byte_count, bool allow_empty,
+                                        size_t maximum, bool multiline)
 {
     if (!text) {
         return result(D1L_USER_TEXT_INVALID_UTF8, 0U, 0U);
@@ -36,7 +36,7 @@ d1l_user_text_info_t d1l_user_text_validate_span(const uint8_t *text,
         return result(allow_empty ? D1L_USER_TEXT_OK : D1L_USER_TEXT_EMPTY,
                       0U, 0U);
     }
-    if (byte_count > D1L_USER_TEXT_MAX_BYTES) {
+    if (byte_count > maximum) {
         return result(D1L_USER_TEXT_TOO_LONG, byte_count, 0U);
     }
 
@@ -87,13 +87,28 @@ d1l_user_text_info_t d1l_user_text_validate_span(const uint8_t *text,
             return result(D1L_USER_TEXT_INVALID_UTF8, byte_count, characters);
         }
 
-        if (forbidden_control(scalar)) {
+        if (forbidden_control(scalar) &&
+            !(multiline && (scalar == '\n' || scalar == '\r' || scalar == '\t'))) {
             return result(D1L_USER_TEXT_CONTROL_CHARACTER, byte_count, characters);
         }
         index += width;
         characters++;
     }
     return result(D1L_USER_TEXT_OK, byte_count, characters);
+}
+
+d1l_user_text_info_t d1l_user_text_validate_span(const uint8_t *text,
+                                              size_t byte_count,
+                                              bool allow_empty)
+{
+    return validate_span(text, byte_count, allow_empty,
+                         D1L_USER_TEXT_MAX_BYTES, false);
+}
+
+d1l_user_text_info_t d1l_user_text_validate_display_span(
+    const uint8_t *text, size_t byte_count)
+{
+    return validate_span(text, byte_count, false, SIZE_MAX, true);
 }
 
 d1l_user_text_info_t d1l_user_text_validate(const char *text)
