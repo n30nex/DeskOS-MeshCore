@@ -1,6 +1,6 @@
-# DeskOS MeshCore mobile parity
+# DeskOS interface and MeshCore parity
 
-This is the current product capability ledger for DeskOS 1.8.0-rc.2 on the
+This is the current product capability ledger for DeskOS 1.8.0-rc.3 on the
 SenseCAP Indicator D1L. The original mobile baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).
@@ -20,6 +20,49 @@ statistics, Wi-Fi signal refresh, early loading progress, map-label interaction,
 and browser USB/storage verification. “Complete” below means implemented, not
 that every phone, radio profile and physical recovery path has been tested.
 
+## WadaMesh interface target — reviewed 2026-09-06
+
+The maintainer selected [WadaMesh](https://github.com/ALLFATHER-BV/wadamesh/tree/8e94e250366632ee2e7a7198551e551aaa8b8024)
+as the standalone interface parity target. This comparison uses exact source
+`8e94e250366632ee2e7a7198551e551aaa8b8024`, its `doc-shots` screens, the
+settings categories and chat/contact actions in `src/ui-touch/UITask.cpp`, and
+the board/app documentation. DeskOS uses its own implementation and artwork;
+no WadaMesh source, fonts or assets were copied into the firmware.
+
+The target is a useful touch workflow on the 480×480 D1L. Existing phone
+interoperability remains required. **This candidate does not claim complete
+WadaMesh feature parity.** The older mobile-completion states below do not
+close the additional differences in this table.
+
+| WadaMesh area | DeskOS outcome | Current status |
+|---|---|---|
+| Chats landing with channels and DMs | Chats shows configured channels and recent DM conversations, unread counts, previews and delivery state; DMs pages through all conversations in the bounded retained store | Added in 1.8.0-rc.3; grouping is by conversation type |
+| Conversation search, delivery, reply | Existing channel/DM history, search, explicit Send, ACK/retry status and message detail | Implemented; no inline quoted replies or mention picker yet |
+| Quick-reply picker and editable macros | Six persistent replies, editable from Settings or the composer; insert at the cursor without replacing text or sending automatically; enforce the 138-byte UTF-8 message limit | Added in 1.8.0-rc.3 |
+| Saved versus discovered contacts | Separate Saved/Discovered views; discovered excludes saved identities; accurate total/range and Previous/Next pages | Added in 1.8.0-rc.3; 12 rendered entries per page, up to the existing 64 saved / 512 heard limits |
+| Role/favourite filter, sort, search | All, Chat, Repeaters, Rooms, Sensors and Favorites filters; Recent/Favorites/A-Z/Role/Signal sort; existing identity/name search | Added filters in 1.8.0-rc.3; discovery and filtering are navigation only |
+| Contact detail, favourite, mute, share | Existing detail, alias, favourite/mute, remove confirmation, contact URI/QR and selected-contact messaging | Implemented |
+| Auto-add policy controls | Existing verified-advert admission and bounded stores | Different policy; no user-selectable WadaMesh auto-add matrix yet |
+| Profile | Name edit after onboarding, public identity, configured location and explicit advert entry from Settings | Added in 1.8.0-rc.3; no private-key import/export |
+| Radio, Wi-Fi, Bluetooth, MQTT | Existing radio presets/custom controls, saved Wi-Fi profiles, encrypted/bonded phone companion, opt-in MQTT | Implemented; Wi-Fi and BLE are exclusive modes on DeskOS |
+| Display and clock | Brightness, contrast/night, 30s/1m/2m/5m/10m/off display timeout and quarter-hour UTC offsets | Expanded in 1.8.0-rc.3; no automatic DST or global font-size picker |
+| Settings navigation | Profile, Radio and Display & clock first; Connections, Storage & maps, Messaging, Tools and Support follow; About opens diagnostics | Updated in 1.8.0-rc.3; flat touch sections instead of WadaMesh's category grid |
+| Map and offline cache | Existing pan/zoom/center, signed node locations, tile cache and attribution | Implemented; location is manual or authenticated companion data, not onboard GPS |
+| Repeater/room management | Existing authenticated dashboard, status, telemetry, neighbours, ACL, room posts and console with explicit mutation confirmation | Implemented; radio reply/timeout limitations remain in the release record |
+| Notifications and lock | Existing unread state, display pulse/quiet hours, touch lock and top-button wake | D1L adaptation; no audio playback or battery chart is claimed |
+| Backups and updates | Preserving USB installer, explicit full-clean recovery image, signed local-SD inactive-slot update and rollback | D1L adaptation; physical signed-SD install/rollback still requires its own observation |
+| Clipboard, inline quote, mention picker, per-thread drafts | Existing explicit composer and message detail | Remaining UI work; closing/reopening a composer does not promise retained drafts |
+| Language, emoji and keyboard options | English UI, bounded UTF-8 text and current bundled symbol coverage | Partial; no WadaMesh language/layout collection or full emoji artwork |
+| GPS, battery, environmental sensors, audio | No onboard GPS or battery sensor; optional Indicator sensors are not integrated | Hardware/implementation differences; never substitute fabricated values |
+| Lua app store/permissions, Reader, games, VNC and web remote UI | Existing USB console, browser installation and physical framebuffer export | Separate application/platform capabilities, not implemented WadaMesh parity |
+| Spectrum/airtime applications | Existing packet log, signal and radio statistics, diagnostics and map | Partial; no continuous spectrum-scanner app |
+
+Sources: [reference screens](https://github.com/ALLFATHER-BV/wadamesh/tree/8e94e250366632ee2e7a7198551e551aaa8b8024/doc-shots),
+[UI actions and settings](https://github.com/ALLFATHER-BV/wadamesh/blob/8e94e250366632ee2e7a7198551e551aaa8b8024/src/ui-touch/UITask.cpp),
+[supported boards](https://github.com/ALLFATHER-BV/wadamesh/blob/8e94e250366632ee2e7a7198551e551aaa8b8024/DEVICES.md).
+
+## Official phone compatibility baseline
+
 State meanings:
 
 - **Complete** — normal DeskOS product workflow is implemented.
@@ -33,7 +76,7 @@ State meanings:
 | Mobile capability / action | DeskOS location and outcome | RC2 state |
 |---|---|---|
 | App connection/onboarding | First-start on the D1L creates the local identity, optional location/Wi-Fi, radio preset, storage, and initial channels; no phone pairing is required | Accepted D1L adaptation |
-| Dark primary navigation | Persistent dark Home, Channels, Contacts, Map, and Settings dock with scrollable touch pages | Complete |
+| Dark primary navigation | Persistent dark Home, Chats, Contacts, Map, and Settings dock with scrollable touch pages | Complete |
 | Home/status | Home summarizes identity, radio, storage, unread activity, connectivity, and shortcuts | Complete |
 | Channel list and selection | Channels lists configured channels; tapping an enabled channel selects it and immediately opens its conversation | Complete (#320) |
 | Public/channel conversation | Read retained history, send/receive messages, show sender and delivery state, and maintain unread state | Complete |
@@ -51,7 +94,7 @@ State meanings:
 |---|---|---|
 | Contacts list | Contacts shows the complete bounded saved-contact list with role, recency, and signal context | Complete |
 | Contact search | Search name, role, fingerprint, or public key from Contacts | Complete (#321) |
-| Contact sort/filter | Cycle Recent, A-Z, Role, and Signal ordering; search narrows the visible list | Complete (#321) |
+| Contact sort/filter | Cycle Recent, Favorites, A-Z, Role, and Signal ordering; role/favourite filters and search narrow the paged list | Complete (#321) |
 | Selected contact actions | Obvious **Message** and **Login** actions open the DM or managed-server workflow | Complete (#321, #336) |
 | Contact detail/edit | Inspect canonical identity and role; rename, favorite, mute, or remove a saved contact with confirmation | Complete |
 | Companion DM | A verified Chat/Companion contact opens the existing DM compose/thread path | Complete (#321) |

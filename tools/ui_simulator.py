@@ -21,26 +21,28 @@ HOME_TOP_BAR_H = 44
 DOCK_Y = 432
 DOCK_H = 48
 MIN_TOUCH_TARGET = 44
-D1L_NODE_STORE_CAPACITY = 64
+D1L_NODE_STORE_CAPACITY = 512
 FULL_FEATURE_RELEASE_PROFILE = "full_feature"
 CORE_RELEASE_PROFILE = "core_1_0"
 RELEASE_PROFILES = (FULL_FEATURE_RELEASE_PROFILE, CORE_RELEASE_PROFILE)
 DOCK_TABS = (
     ("Home", "Home", "home", "LV_SYMBOL_HOME"),
-    ("Messages", "Channels", "messages", "LV_SYMBOL_ENVELOPE"),
+    ("Messages", "Chats", "messages", "LV_SYMBOL_ENVELOPE"),
     ("Nodes", "Contacts", "nodes", "LV_SYMBOL_LIST"),
     ("Map", "Map", "map", "LV_SYMBOL_IMAGE"),
     ("Settings", "Settings", "settings", "LV_SYMBOL_SETTINGS"),
 )
 CORE_DOCK_TABS = (
     ("Home", "Home", "home", "LV_SYMBOL_HOME"),
-    ("Messages", "Channels", "messages", "LV_SYMBOL_ENVELOPE"),
+    ("Messages", "Chats", "messages", "LV_SYMBOL_ENVELOPE"),
     ("Nodes", "Contacts", "nodes", "LV_SYMBOL_LIST"),
     ("Map", "Map", "map", "LV_SYMBOL_IMAGE"),
     ("Settings", "Settings", "settings", "LV_SYMBOL_SETTINGS"),
 )
 CORE_ROOT_VIEWS = ("home", "messages", "nodes", "map", "settings")
 CORE_EXCLUDED_DESTINATION_FEATURES = (
+    ("profile_sheet", "advanced_qr_emoji"),
+    ("quick_replies_sheet", "advanced_qr_emoji"),
     ("ble_setup_sheet", "ble"),
     ("signed_update", "signed_sd_update_ota"),
     ("ota_update", "signed_sd_update_ota"),
@@ -73,6 +75,8 @@ DOCKED_VIEWS = frozenset(
         "messages_dm_retry",
         "messages_dm_failure",
         "nodes",
+        "nodes_discovered",
+        "nodes_repeaters",
         "map",
         "packets",
         "settings",
@@ -108,6 +112,8 @@ TOP_BAR_FREE_VIEWS = (
     | CONTACT_HIERARCHY_VIEWS
     | frozenset(
         {
+            "profile_sheet",
+            "quick_replies_sheet",
             "contact_incomplete_detail_sheet",
             "contact_noncanonical_detail_sheet",
             "node_detail_sheet",
@@ -2394,7 +2400,7 @@ def draw_home_body(s: Surface, snap: Snapshot):
         (
             (12, 52, 234, 188),
             "chat",
-            "Channels",
+            "Chats",
             "Public, channels, and DMs",
             messages_status,
             AMBER if audible_unread else (MUTED if snap.muted_unread_dm else ACCENT),
@@ -2406,7 +2412,7 @@ def draw_home_body(s: Surface, snap: Snapshot):
             "signal",
             "Contacts",
             "Saved, nearby, and routes",
-            f"{len(snap.contacts)} saved | {len(snap.heard)} nearby",
+            f"{len(snap.contacts)} saved | {len(snap.heard)} heard",
             GREEN if snap.contacts else MUTED,
             "open_nodes",
             "nodes",
@@ -2577,8 +2583,8 @@ def draw_messages_notice(
 
 
 def render_messages(s: Surface, snap: Snapshot):
-    s.text("Channels", (18, 10, 220, 40), 24, TEXT, True)
-    s.text("Group conversations", (18, 40, 300, 60), 12, MUTED)
+    s.text("Chats", (18, 10, 220, 40), 24, TEXT, True)
+    s.text("Channels and direct messages", (18, 40, 300, 60), 12, MUTED)
     draw_button(
         s,
         (262, 6, 334, 50),
@@ -2595,7 +2601,7 @@ def render_messages(s: Surface, snap: Snapshot):
         action="open_messages_dm",
         destination="messages_dm",
     )
-    body = (18, 66, 442, 354)
+    body = (18, 66, 442, 424)
     s.round_rect(body, (7, 16, 24), BORDER, 8)
     channels = snap.channels[:8]
     y = 74
@@ -2658,6 +2664,21 @@ def render_messages(s: Surface, snap: Snapshot):
             enabled=channel.enabled,
         )
         y += 68
+    dm_rendered = 0
+    if y + 34 < 416:
+        s.text("Direct messages", (30, y + 8, 426, y + 28), 12, MUTED)
+        y += 34
+    for message in dm_conversation_summaries(snap.dm_messages):
+        if y + 72 > 416:
+            break
+        s.round_rect((26, y, 434, y + 72), SURFACE, BORDER, 8)
+        s.text(message.source, (38, y + 10, 270, y + 30), 12, TEXT, True)
+        s.text(dm_list_delivery_label(message), (274, y + 10, 422, y + 30), 10, AMBER, True, "right")
+        s.text(message.text, (38, y + 38, 422, y + 60), 12, TEXT, True)
+        s.touch_target("DM row " + message.source, (26, y, 434, y + 72), kind="row",
+                       action="open_dm_thread", destination="dm_thread_sheet", marks_read=True)
+        y += 80
+        dm_rendered += 1
     s.metrics.update(
         {
             "messages_mode": "root",
@@ -2668,7 +2689,7 @@ def render_messages(s: Surface, snap: Snapshot):
             "public_rendered_count": 0,
             "dm_source_count": len(snap.dm_messages),
             "dm_conversation_count": len(dm_conversation_summaries(snap.dm_messages)),
-            "dm_rendered_count": 0,
+            "dm_rendered_count": dm_rendered,
             "messages_root_channel_list_first": True,
             "messages_root_channel_count": len(channels),
             "messages_navigation_rf_silent": True,
@@ -3106,6 +3127,14 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
         }
     )
 
+    total = len(summaries)
+    s.text(f"{1 if total else 0}-{min(5, total)} of {total}",
+           (120, 380, 336, 404), 13, MUTED, False, "center")
+    draw_button(s, (18, 366, 112, 410), "Previous", BLUE,
+                action="previous_dm_page", enabled=False)
+    draw_button(s, (344, 366, 442, 410), "Next", BLUE,
+                action="next_dm_page", enabled=total > 5)
+
 
 def render_messages_dm(s: Surface, snap: Snapshot):
     draw_button(s, (18, 8, 90, 52), "Back", MUTED, action="open_messages_root", destination="messages")
@@ -3355,140 +3384,89 @@ def draw_contacts_node_row(
         s.text(">", (438, y + 17, 454, y + 41), 16, MUTED, True, "center")
 
 
-def render_nodes(s: Surface, snap: Snapshot):
+def render_nodes(s: Surface, snap: Snapshot, *, discovered_view: bool = False,
+                 role_filter: str | None = None):
     counts = node_role_counts(snap.heard)
-    heard_query = snap.heard[:D1L_NODE_STORE_CAPACITY]
-    heard_query_count = len(heard_query)
-    nearby = tuple(
-        node
-        for node in heard_query
-        if not node_is_saved_contact(node, snap.contacts)
-    )
-
-    s.text("Contacts", (16, 8, 290, 34), 22, TEXT, True)
-    s.text(
-        f"{len(snap.contacts)} saved | {len(nearby)} nearby",
-        (16, 34, 290, 52),
-        11,
-        MUTED,
-    )
-    draw_button(
-        s,
-        (282, 4, 352, 48),
-        "Find",
-        GREEN,
-        action="find_nearby",
-        destination=None,
-    )
-    draw_button(
-        s,
-        (360, 4, 464, 48),
-        "Clear nearby",
-        RED,
-        action="clear_heard",
-        destructive=heard_query_count > 0,
-        enabled=heard_query_count > 0,
-    )
-    draw_button(
-        s,
-        (16, 54, 294, 98),
-        "Search contacts",
-        BLUE,
-        action="open_nodes_search",
-    )
-    draw_button(
-        s,
-        (302, 54, 452, 98),
-        "Sort: Recent",
-        VIOLET,
-        action="cycle_nodes_sort",
-    )
-
-    contacts_rendered = 0
-    nearby_rendered = 0
-    duplicate_nodes_hidden = heard_query_count - len(nearby)
-    if not snap.contacts and not nearby:
-        s.round_rect((16, 112, 464, 330))
-        s.round_rect((212, 130, 260, 178), (16, 32, 42), ACCENT, 24)
-        s.text("+", (216, 136, 256, 172), 24, ACCENT, True, "center")
-        s.text("No contacts yet", (40, 194, 440, 224), 20, TEXT, True, "center")
-        s.text(
-            "Nearby nodes appear here after a signed advert.",
-            (54, 232, 426, 260),
-            12,
-            MUTED,
-            False,
-            "center",
-        )
-        draw_button(
-            s,
-            (142, 274, 338, 322),
-            "Find nearby",
-            GREEN,
-            action="find_nearby",
-            destination=None,
-        )
-    else:
-        s.text("Saved contacts", (20, 112, 220, 132), 12, MUTED, True)
-        y = 136
-        for node in snap.contacts[:2]:
-            draw_contacts_node_row(s, snap, node, y, saved_contact=True)
-            y += 62
-            contacts_rendered += 1
-        if contacts_rendered == 0:
-            draw_row(
-                s,
-                (16, y, 464, y + 58),
-                "No saved contacts yet",
-                "Tap a nearby node to view its identity.",
-            )
-            y += 62
-
-        y += 8
-        s.text("Nearby", (20, y, 220, y + 20), 12, MUTED, True)
-        y += 24
-        for node in nearby:
-            if y + 58 > 420:
-                break
-            draw_contacts_node_row(s, snap, node, y, saved_contact=False)
-            y += 62
-            nearby_rendered += 1
-        if nearby_rendered == 0:
-            draw_row(
-                s,
-                (16, y, 464, y + 58),
-                "No other nearby nodes",
-                "Listening for signed adverts.",
-            )
-
-    s.metrics.update(
-        {
-            "contacts_source_count": len(snap.contacts),
-            "contacts_rendered_count": contacts_rendered,
-            "heard_source_count": len(snap.heard),
-            "heard_query_count": heard_query_count,
-            "node_role_query_capacity": D1L_NODE_STORE_CAPACITY,
-            "heard_rendered_count": nearby_rendered,
-            "nearby_source_count": len(nearby),
-            "duplicate_contact_nodes_hidden": duplicate_nodes_hidden,
-            "node_role_counts": counts,
-            "node_role_count_sum": sum(counts.values()),
-            "node_role_counts_match_query": sum(counts.values()) == heard_query_count,
-            "node_role_source": "exact_render_query_role",
-            "nodes_navigation_rf_silent": True,
-            "nodes_formats_sd": False,
-            "nodes_destructive_actions": 1 if heard_query_count > 0 else 0,
-            "nodes_clear_confirmation_required": True,
-            "nodes_primary_rows_show_fingerprint": False,
-            "nodes_test_copy_present": False,
-            "nodes_sort": "recent",
-            "nodes_sort_cycle": ["recent", "favorites", "name", "role", "signal"],
-            "contact_dm_shortcut_min_height": 44,
-            "node_dm_shortcut_min_height": 44,
-            "nodes_row_height": 58,
-        }
-    )
+    discovered = tuple(node for node in snap.heard if not node_is_saved_contact(node, snap.contacts))
+    s.text("Contacts", (16, 8, 268, 34), 22, TEXT, True)
+    s.text(f"{len(snap.contacts)} saved | {len(snap.heard)} heard",
+           (16, 34, 268, 52), 11, MUTED)
+    draw_button(s, (282, 4, 352, 48), "Find", GREEN, action="find_nearby")
+    draw_button(s, (360, 4, 464, 48), "Clear heard", RED, action="clear_heard",
+                destructive=bool(snap.heard), enabled=bool(snap.heard))
+    draw_button(s, (16, 54, 234, 98), "Saved", MUTED if discovered_view else GREEN, action="show_saved", destination="nodes")
+    draw_button(s, (242, 54, 464, 98), "Discovered", GREEN if discovered_view else MUTED, action="show_discovered", destination="nodes_discovered")
+    draw_button(s, (16, 106, 196, 150), "Search contacts", BLUE, action="open_nodes_search")
+    draw_button(s, (204, 106, 320, 150), "Repeaters" if role_filter else "All roles",
+                GREEN, action="cycle_nodes_filter")
+    draw_button(s, (328, 106, 464, 150), "Sort: Recent", VIOLET, action="cycle_nodes_sort")
+    rows = discovered if discovered_view else snap.contacts
+    if role_filter:
+        rows = tuple(node for node in rows if node.role == role_filter)
+    total = len(rows)
+    s.text(f"{1 if total else 0}-{min(12, total)} of {total}",
+           (112, 170, 364, 194), 13, MUTED, False, "center")
+    draw_button(s, (16, 158, 104, 202), "Previous", GREEN, action="nodes_previous", enabled=False)
+    draw_button(s, (376, 158, 464, 202), "Next", GREEN, action="nodes_next", enabled=total > 12)
+    if not rows:
+        draw_row(s, (16, 212, 464, 330), "No matches" if role_filter else
+                 "No new nodes" if discovered_view else "No saved contacts yet",
+                 "Try another search or role filter." if role_filter else
+                 "Listening for signed adverts." if discovered_view else "Open Discovered to browse heard nodes.")
+    for i, node in enumerate(rows[:3]):
+        draw_contacts_node_row(s, snap, node, 212 + i * 62, saved_contact=not discovered_view)
+    s.metrics.update({
+        "contacts_source_count": len(snap.contacts), "contacts_rendered_count": 0 if discovered_view else min(3, total),
+        "heard_source_count": len(snap.heard), "heard_query_count": len(snap.heard),
+        "node_role_query_capacity": 512, "heard_rendered_count": min(3, total) if discovered_view else 0,
+        "nearby_source_count": len(discovered),
+        "duplicate_contact_nodes_hidden": len(snap.heard) - len(discovered),
+        "node_role_counts": counts, "node_role_count_sum": sum(counts.values()),
+        "node_role_counts_match_query": sum(counts.values()) == len(snap.heard),
+        "node_role_source": "exact_render_query_role", "nodes_navigation_rf_silent": True,
+        "nodes_formats_sd": False, "nodes_destructive_actions": int(bool(snap.heard)),
+        "nodes_clear_confirmation_required": True, "nodes_primary_rows_show_fingerprint": False,
+        "nodes_test_copy_present": False, "nodes_sort": "recent",
+        "nodes_sort_cycle": ["recent", "favorites", "name", "role", "signal"],
+        "nodes_page_size": 12, "nodes_filter": "all", "nodes_view": "discovered" if discovered_view else "saved",
+        "contact_dm_shortcut_min_height": 44, "node_dm_shortcut_min_height": 44,
+        "nodes_row_height": 58,
+    })
     draw_dock(s, "Nodes")
+
+
+
+def render_nodes_discovered(s: Surface, snap: Snapshot):
+    render_nodes(s, snap, discovered_view=True)
+
+
+def render_nodes_repeaters(s: Surface, snap: Snapshot):
+    render_nodes(s, snap, role_filter="repeater")
+
+
+def render_profile(s: Surface, snap: Snapshot):
+    s.text("Profile", (16, 12, 250, 42), 24, TEXT, True)
+    draw_button(s, (376, 6, 464, 50), "Back", MUTED, action="close_profile", destination="settings")
+    s.text("Node name", (16, 62, 250, 82), 14, MUTED)
+    s.round_rect((16, 86, 464, 134), SURFACE_2, BORDER, 8)
+    s.text("My Desk", (28, 99, 450, 123), 14, TEXT)
+    draw_button(s, (16, 144, 156, 188), "Save name", GREEN, action="save_profile_name")
+    draw_button(s, (168, 144, 308, 188), "Location", BLUE, action="open_map_location", destination="map_location")
+    draw_button(s, (320, 144, 464, 188), "Advertise", GREEN, action="open_advert_sheet", destination="advert_sheet")
+    s.text("Public identity", (16, 214, 400, 236), 14, MUTED)
+    s.wrapped_text("AB" * 32, (16, 240, 464, 290), 14, GREEN)
+    s.wrapped_text("Changing the name keeps your identity and saved contacts.", (16, 324, 464, 364), 14, MUTED)
+
+
+def render_quick_replies(s: Surface, snap: Snapshot):
+    s.text("Quick replies", (16, 12, 340, 42), 24, TEXT, True)
+    draw_button(s, (376, 6, 464, 50), "Back", MUTED, action="close_quick_replies", destination="settings")
+    replies = ("Received, thank you.", "Yes", "No", "Please repeat that.", "I am on my way.", "I will reply shortly.")
+    for i, reply in enumerate(replies):
+        y = 66 + 54 * i
+        draw_button(s, (16, y, 366, y+48), reply, TEXT, action="choose_quick_reply")
+        draw_button(s, (376, y, 464, y+48), "Edit", BLUE, action="edit_quick_reply")
+    s.wrapped_text("Replies fill your draft. Review the message, then tap Send.", (16, 406, 464, 450), 14, MUTED)
 
 
 def draw_map_page_header(
@@ -4239,57 +4217,22 @@ def more_category_specs(
             ("Signed update", "Idle", TEXT, "open_signed_update", None, False)
         )
     device_leaves = [
-        (
-            "Display",
-            "Brightness & theme",
-            GREEN,
-            "open_display_settings",
-            "display_settings_sheet",
-            False,
-        ),
-        (
-            "Identity",
-            "Ready" if snap.identity_ready else "Not set",
-            TEXT,
-            None,
-            None,
-            False,
-        ),
+        ("Profile", "Name & location", GREEN, "open_profile", "profile_sheet", False),
+        ("Radio", radio_status, GREEN if snap.radio_ready else TEXT,
+         "open_radio_settings", "radio_settings_sheet", False),
+        ("Display & clock", "Brightness & time", GREEN, "open_display_settings",
+         "display_settings_sheet", False),
     ]
-    if not core:
-        device_leaves.insert(
-            1,
-            ("Notifications", "Unread settings", AMBER, "open_notifications", None, False),
-        )
     advanced_leaves = [
-        (
-            "Radio",
-            radio_status,
-            GREEN if snap.radio_ready else TEXT,
-            "open_radio_settings",
-            "radio_settings_sheet",
-            False,
-        ),
-        (
-            "Server admin",
-            "Idle",
-            AMBER,
-            "open_admin",
-            None,
-            False,
-        ),
+        ("Quick replies", "Six editable messages", GREEN, "open_quick_replies", "quick_replies_sheet", False),
+        ("Server admin", "Idle", AMBER, "open_admin", None, False),
     ]
-    if not core:
+    if core:
+        device_leaves = device_leaves[1:]
+        advanced_leaves = advanced_leaves[1:]
+    else:
         advanced_leaves.append(
-            (
-                "Share this node",
-                "Let nearby devices find you",
-                AMBER,
-                "open_advert_sheet",
-                "advert_sheet",
-                False,
-            )
-        )
+            ("Notifications", "Unread settings", AMBER, "open_notifications", None, False))
     return (
         {
             "key": "tools",
@@ -4342,7 +4285,7 @@ def more_category_specs(
         {
             "key": "device",
             "title": "Device",
-            "summary": "Display, notifications, identity",
+            "summary": "Profile, radio, display and clock",
             "color": BLUE,
             "warning": False,
             "action": None,
@@ -4360,16 +4303,16 @@ def more_category_specs(
                     "About",
                     f"Version {snap.firmware_version}",
                     TEXT,
-                    None,
-                    None,
+                    "open_diagnostics",
+                    "diagnostics_sheet",
                     False,
                 ),
             ),
         },
         {
             "key": "advanced",
-            "title": "Advanced",
-            "summary": "Radio and authenticated server tools",
+            "title": "Messaging",
+            "summary": "Quick replies, servers and notifications",
             "color": AMBER,
             "warning": False,
             "action": None,
@@ -4377,197 +4320,6 @@ def more_category_specs(
         },
     )
 
-    packet_status = f"{len(snap.packets)} saved"
-    storage_status = storage_card_menu_status(snap)
-    storage_warning = storage_needs_attention(snap)
-    sd_warning = storage_sd_needs_attention(snap)
-    map_status = settings_map_status(snap)
-    wifi_status = (
-        "Unavailable"
-        if not snap.wifi_build_enabled
-        else (
-            "Connected"
-            if snap.wifi_connected
-            else (
-                "Connecting"
-                if snap.wifi_connecting
-                else ("On" if snap.wifi_enabled else "Off")
-            )
-        )
-    )
-    ble_status = (
-        "Unavailable"
-        if not snap.ble_build_enabled or not snap.ble_transport_supported
-        else ("On" if snap.ble_companion_enabled else "Off")
-    )
-    radio_status = (
-        "Applying"
-        if snap.radio_apply_pending
-        else ("Ready" if snap.radio_ready or snap.radio_applied else "Needs setup")
-    )
-    if release_profile == CORE_RELEASE_PROFILE:
-        return (
-            {
-                "key": "tools",
-                "title": "Tools",
-                "summary": "Packets and diagnostics",
-                "color": ACCENT,
-                "warning": False,
-                "action": "toggle_more_tools",
-                "leaves": (
-                    ("Packets", packet_status, BLUE, "open_packets", "packets", False),
-                    ("Diagnostics", "Health & reports", VIOLET, "open_diagnostics", "diagnostics_sheet", False),
-                ),
-            },
-            {
-                "key": "connections",
-                "title": "Connections",
-                "summary": "Radio profile",
-                "color": GREEN,
-                "warning": False,
-                "action": "toggle_more_connections",
-                "leaves": (
-                    ("Radio", radio_status, GREEN if snap.radio_ready else TEXT, "open_radio_settings", "radio_settings_sheet", False),
-                ),
-            },
-            {
-                "key": "storage_maps",
-                "title": "Storage",
-                "summary": "Built-in storage",
-                "color": AMBER,
-                "warning": snap.storage_retained_backup_degraded,
-                "action": "toggle_more_storage_maps",
-                "leaves": (
-                    (
-                        "Storage",
-                        "Built-in storage issue"
-                        if snap.storage_retained_backup_degraded
-                        else "Built-in storage",
-                        RED if snap.storage_retained_backup_degraded else TEXT,
-                        "open_storage_setup",
-                        "storage_setup_sheet",
-                        snap.storage_retained_backup_degraded,
-                    ),
-                ),
-            },
-            {
-                "key": "device",
-                "title": "Device",
-                "summary": "Display and identity",
-                "color": BLUE,
-                "warning": False,
-                "action": "toggle_more_device",
-                "leaves": (
-                    ("Display", "Brightness & theme", GREEN, "open_display_settings", "display_settings_sheet", False),
-                    ("Identity", "Ready" if snap.identity_ready else "Not set", TEXT, None, None, False),
-                ),
-            },
-            {
-                "key": "support",
-                "title": "Support",
-                "summary": "About this device",
-                "color": VIOLET,
-                "warning": False,
-                "action": "toggle_more_support",
-                "leaves": (
-                    ("About", f"Version {snap.firmware_version}", TEXT, None, None, False),
-                ),
-            },
-        )
-    if release_profile != FULL_FEATURE_RELEASE_PROFILE:
-        raise ValueError(f"unknown release profile: {release_profile}")
-    return (
-        {
-            "key": "tools",
-            "title": "Tools",
-            "summary": "Packets and diagnostics",
-            "color": ACCENT,
-            "warning": False,
-            "action": "toggle_more_tools",
-            "leaves": (
-                ("Packets", packet_status, BLUE, "open_packets", "packets", False),
-                ("Diagnostics", "Health & reports", VIOLET, "open_diagnostics", "diagnostics_sheet", False),
-            ),
-        },
-        {
-            "key": "connections",
-            "title": "Connections",
-            "summary": "Wi-Fi, Bluetooth, and radio",
-            "color": GREEN,
-            "warning": False,
-            "action": "toggle_more_connections",
-            "leaves": (
-                ("Wi-Fi", wifi_status, GREEN if snap.wifi_connected else TEXT, "open_wifi_settings", "wifi_setup_sheet", False),
-                ("Bluetooth", ble_status, GREEN if snap.ble_companion_enabled else TEXT, "open_ble_settings", "ble_setup_sheet", False),
-                ("Radio", radio_status, GREEN if snap.radio_ready else TEXT, "open_radio_settings", "radio_settings_sheet", False),
-            ),
-        },
-        {
-            "key": "storage_maps",
-            "title": "Storage & maps",
-            "summary": (
-                "Storage needs attention"
-                if snap.storage_retained_backup_degraded and sd_warning
-                else (
-                "Backup needs attention"
-                if snap.storage_retained_backup_degraded
-                else (
-                "SD needs attention"
-                if sd_warning
-                else (
-                    "SD reconnecting"
-                    if snap.storage_setup_action == "wait_for_storage_reconnect"
-                    else "SD card and map cache"
-                )
-                )
-                )
-            ),
-            "color": WARNING_TEXT if storage_warning else AMBER,
-            "warning": storage_warning,
-            "action": "toggle_more_storage_maps",
-            "leaves": (
-                (
-                    "SD Card",
-                    storage_status,
-                    RED if sd_warning else (GREEN if storage_status == "Ready" else TEXT),
-                    "open_storage_setup",
-                    "storage_setup_sheet",
-                    sd_warning,
-                ),
-                ("Map options", map_status, GREEN if map_status == "Ready" else TEXT, "open_map_options", "map_options", False),
-            ),
-        },
-        {
-            "key": "device",
-            "title": "Device",
-            "summary": "Display and identity",
-            "color": BLUE,
-            "warning": False,
-            "action": "toggle_more_device",
-            "leaves": (
-                ("Display", "Brightness & theme", GREEN, "open_display_settings", "display_settings_sheet", False),
-                ("Identity", "Ready" if snap.identity_ready else "Not set", TEXT, None, None, False),
-            ),
-        },
-        {
-            "key": "support",
-            "title": "Support",
-            "summary": "About this device",
-            "color": VIOLET,
-            "warning": False,
-            "action": "toggle_more_support",
-            "leaves": (("About", f"Version {snap.firmware_version}", TEXT, None, None, False),),
-        },
-        {
-            "key": "advanced",
-            "title": "Advanced",
-            "summary": "Developer options",
-            "color": AMBER,
-            "warning": False,
-            "action": "toggle_more_advanced",
-            "leaves": (("Share this node", "Let nearby devices find you", AMBER, "open_advert_sheet", "advert_sheet", False),),
-        },
-    )
 
 
 def draw_more_header(s: Surface, snap: Snapshot):
@@ -4587,7 +4339,11 @@ def render_settings_flat(
     anchor_key: str | None = None,
 ):
     draw_more_header(s, snap)
-    categories = more_category_specs(snap, s.release_profile)
+    draw_button(s, (376, 6, 464, 50), "Tools", GREEN,
+                action="show_settings_tools", destination="settings_tools_expanded")
+    order = ("device", "connections", "storage_maps", "advanced", "tools", "support")
+    categories = sorted(more_category_specs(snap, s.release_profile),
+                        key=lambda category: order.index(category["key"]))
     if anchor_key is not None:
         anchor_index = next(
             index
@@ -6165,8 +5921,8 @@ def render_display_settings_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (208, 220, 320, 264), "Night Off", BLUE, action="display_night")
     draw_button(s, (332, 220, 448, 264), "Contrast Off", BLUE, action="display_contrast")
     draw_button(s, (44, 274, 196, 318), "Timeout 10 min", BLUE, action="display_timeout")
-    draw_button(s, (208, 274, 320, 318), "Time -1h", BLUE, action="display_timezone_minus")
-    draw_button(s, (332, 274, 448, 318), "Time +1h", BLUE, action="display_timezone_plus")
+    draw_button(s, (208, 274, 320, 318), "Time -15m", BLUE, action="display_timezone_minus")
+    draw_button(s, (332, 274, 448, 318), "Time +15m", BLUE, action="display_timezone_plus")
     s.wrapped_text(
         "Use Time -1h/+1h to set the local clock. Daylight saving changes are manual; radio and security timestamps stay UTC.",
         (44, 340, 436, 400),
@@ -7432,6 +7188,10 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "messages_dm_retry": render_messages_dm_retry,
     "messages_dm_failure": render_messages_dm_failure,
     "nodes": render_nodes,
+    "nodes_discovered": render_nodes_discovered,
+    "nodes_repeaters": render_nodes_repeaters,
+    "profile_sheet": render_profile,
+    "quick_replies_sheet": render_quick_replies,
     "map": render_map,
     "map_options": render_map_options,
     "map_location": render_map_location,
@@ -7528,7 +7288,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "DeskOS",
         "Lock",
-        "Channels",
+        "Chats",
         "Contacts",
         "Map",
         "Settings",
@@ -7539,8 +7299,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Attention",
     ),
     "messages": (
-        "Channels",
-        "Group conversations",
+        "Chats",
+        "Channels and direct messages",
         "Add",
         "DMs",
         "#Public",
@@ -7551,8 +7311,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "channel_selector_private_sheet": ("Channels", "Public", "Ops Café 東京", "Disabled Lab", "Close"),
     "messages_dm": ("Direct messages", "Back"),
     "messages_loading": (
-        "Channels",
-        "Group conversations",
+        "Chats",
+        "Channels and direct messages",
         "Add",
         "DMs",
         "#Public",
@@ -7585,7 +7345,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "nodes": (
         "Contacts",
         "Find",
-        "Clear nearby",
+        "Clear heard",
         "Search contacts",
         "Sort: Recent",
     ),
@@ -7619,16 +7379,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "(c) OpenStreetMap contributors",
     ),
     "packets": ("Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Packet Feed", "Routes"),
-    "settings": (
-        "Settings",
-        "Device, radio, network and support",
-        "Tools",
-        "Packets",
-        "Diagnostics",
-        "Terminal",
-        "Connections",
-        "Wi-Fi",
-    ),
+    "settings": ("Settings", "Device", "Profile", "Radio", "Display & clock", "Connections", "Wi-Fi"),
     "settings_tools_expanded": (
         "Settings",
         "Device, radio, network and support",
@@ -7653,14 +7404,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Map options",
         "Signed update",
     ),
-    "settings_device_expanded": (
-        "Settings",
-        "Device, radio, network and support",
-        "Device",
-        "Display",
-        "Notifications",
-        "Identity",
-    ),
+    "settings_device_expanded": ("Settings", "Device", "Profile", "Radio", "Display & clock"),
     "settings_support_expanded": (
         "Settings",
         "Device, radio, network and support",
@@ -7668,14 +7412,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "About",
         "Version 1.0.0",
     ),
-    "settings_advanced_expanded": (
-        "Settings",
-        "Device, radio, network and support",
-        "Advanced",
-        "Radio",
-        "Server admin",
-        "Share this node",
-    ),
+    "settings_advanced_expanded": ("Settings", "Messaging", "Quick replies", "Server admin", "Notifications"),
     "compose_sheet": ("Message Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"),
     "compose_utf8_sheet": ("Message Public", "Café 東京", "7 chars | 12/138 B", "Send"),
     "compose_byte_limit_sheet": ("Message Public", "46 chars | 138/138 B", "Send"),
@@ -7752,8 +7489,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Night Off",
         "Contrast Off",
         "Timeout 10 min",
-        "Time -1h",
-        "Time +1h",
+        "Time -15m",
+        "Time +15m",
         "Close",
     ),
     "diagnostics_sheet": (
@@ -8054,7 +7791,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
 CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "DeskOS",
-        "Channels",
+        "Chats",
         "Contacts",
         "Map",
         "Settings",
@@ -8064,8 +7801,8 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Attention",
     ),
     "messages": (
-        "Channels",
-        "Group conversations",
+        "Chats",
+        "Channels and direct messages",
         "Add",
         "DMs",
         "#Public",
@@ -8083,16 +7820,7 @@ CORE_REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Packet Feed",
         "Routes",
     ),
-    "settings": (
-        "Settings",
-        "Device, radio, network and support",
-        "Tools",
-        "Packets",
-        "Diagnostics",
-        "Terminal",
-        "Connections",
-        "Wi-Fi",
-    ),
+    "settings": ("Settings", "Device", "Radio", "Display & clock", "Connections", "Wi-Fi"),
     "contact_options_page": (
         "Contact Options",
         "Back",
@@ -8258,8 +7986,8 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "flat_settings_tools_navigation",
         "steps": (
-            {"view": "settings", "action": "open_packets", "destination": "packets"},
-            {"view": "settings", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+            {"view": "settings_tools_expanded", "action": "open_packets", "destination": "packets"},
+            {"view": "settings_tools_expanded", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
         ),
     },
     {
@@ -8288,8 +8016,8 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "flat_settings_advanced_navigation",
         "steps": (
-            {"view": "settings_advanced_expanded", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
-            {"view": "settings_advanced_expanded", "action": "open_advert_sheet", "destination": "advert_sheet"},
+            {"view": "settings_device_expanded", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
+            {"view": "profile_sheet", "action": "open_advert_sheet", "destination": "advert_sheet"},
         ),
     },
     {
@@ -8455,14 +8183,15 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "node_detail_inspection",
         "steps": (
-            {"view": "nodes", "action": "open_node_detail", "destination": "node_detail_sheet"},
+            {"view": "nodes", "action": "show_discovered", "destination": "nodes_discovered"},
+            {"view": "nodes_discovered", "action": "open_node_detail", "destination": "node_detail_sheet"},
             {"view": "node_detail_sheet", "action": "close_node_detail", "destination": "nodes"},
         ),
     },
     {
         "name": "repeater_login_and_management",
         "steps": (
-            {"view": "nodes", "action": "open_repeater_login", "destination": "repeater_login"},
+            {"view": "managed_node_detail_sheet", "action": "open_repeater_login", "destination": "repeater_login"},
             {"view": "repeater_login", "action": "edit_repeater_password"},
             {"view": "repeater_login", "action": "toggle_save_password"},
             {"view": "repeater_login", "action": "submit_repeater_login", "destination": "repeater_login_pending"},
@@ -8670,7 +8399,7 @@ CORE_EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "core_nodes_navigation",
         "steps": (
             {"view": "nodes", "action": "open_contact_detail", "destination": "contact_detail_sheet"},
-            {"view": "nodes", "action": "open_node_detail", "destination": "node_detail_sheet"},
+            {"view": "nodes_discovered", "action": "open_node_detail", "destination": "node_detail_sheet"},
             {"view": "nodes", "action": "open_dm_compose", "destination": "compose_dm_sheet"},
         ),
     },
@@ -8690,8 +8419,8 @@ CORE_EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "core_flat_settings_navigation",
         "steps": (
-            {"view": "settings", "action": "open_packets", "destination": "packets"},
-            {"view": "settings", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+            {"view": "settings_tools_expanded", "action": "open_packets", "destination": "packets"},
+            {"view": "settings_tools_expanded", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
             {"view": "settings", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
         ),
     },
@@ -8787,7 +8516,8 @@ CORE_LIFECYCLE_TRANSITION_CYCLE: tuple[tuple[str, str], ...] = (
     ("map_cache", "close_map_cache"),
     ("map_options", "close_map_options"),
     ("map", "open_settings"),
-    ("settings", "open_packets"),
+    ("settings", "show_settings_tools"),
+    ("settings_tools_expanded", "open_packets"),
     ("packets", "open_packet_detail"),
     ("packet_detail_sheet", "close_packet_detail"),
     ("packets", "open_packet_search"),
@@ -8865,7 +8595,7 @@ def lifecycle_active_tab(
         return None
     if view.startswith("messages"):
         return "messages"
-    if view == "nodes":
+    if view in ("nodes", "nodes_discovered", "nodes_repeaters"):
         return "nodes"
     if view == "map":
         return "map"

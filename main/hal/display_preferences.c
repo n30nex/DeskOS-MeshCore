@@ -23,7 +23,19 @@ static bool brightness_valid(uint8_t percent)
 
 bool d1l_display_timeout_valid(uint16_t seconds)
 {
-    return seconds == 0U || seconds == D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS;
+    return seconds == 0U || seconds == 30U || seconds == 60U ||
+           seconds == 120U || seconds == 300U ||
+           seconds == D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS;
+}
+
+uint16_t d1l_display_timeout_next(uint16_t seconds)
+{
+    const uint16_t choices[] = {0U, 30U, 60U, 120U, 300U,
+                               D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS};
+    for (size_t i = 0U; i < sizeof(choices) / sizeof(choices[0]) - 1U; ++i) {
+        if (seconds == choices[i]) return choices[i + 1U];
+    }
+    return 0U;
 }
 
 static bool notification_mode_valid(d1l_notification_mode_t mode)

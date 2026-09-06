@@ -748,8 +748,24 @@ static void test_corrupt_and_newer_journals_fail_closed(void)
     assert(status.next_domain_index == 0U);
 }
 
+static void test_prior_completed_reset_does_not_erase_new_preferences(void)
+{
+    mock_reset();
+    seed_inventory(true);
+    /* Exact schema-2 completion with 18 domains, from before quick replies. */
+    const uint8_t previous[48] = {0x44, 0x46, 0x52, 0x31, 0x02, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x12, 0x00, 0x00, 0x00, 0x12, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6d, 0x1c, 0x71, 0xf0};
+    assert(mock_seed("nvs", "d1l_reset", "factory_v1", previous, sizeof(previous)));
+    d1l_factory_reset_status_t status = {0};
+    assert(d1l_factory_reset_resume(&status) == ESP_OK);
+    assert(status.reset_complete && !status.reset_pending);
+    assert(status.completed_journal_cleaned);
+    assert(mock_copy("nvs", "d1l_settings", "settings", NULL, 0U) > 0U);
+    assert(mock_copy("nvs", "d1l_ui", "quick_replies", NULL, 0U) > 0U);
+}
+
 int main(void)
 {
+    test_prior_completed_reset_does_not_erase_new_preferences();
     test_inventory_and_complete_reset();
     test_request_commit_fail_after_apply_is_read_back_and_restarted();
     test_sd_media_marker_card_swap_and_clear_power_cuts();

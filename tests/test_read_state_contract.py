@@ -96,7 +96,7 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "d1l_read_state_mark_public_read()" in app_source
     assert "d1l_read_state_mark_all_read()" not in app_source
     assert "d1l_read_state_dm_entry_is_unread(" in app_source
-    assert "d1l_dm_conversation_list_project(" in app_source
+    assert "d1l_dm_conversation_list_project_page(" in app_source
     assert "snapshot->recent_dm_unread_count[i] > 0U" in app_source
     assert "d1l_read_state_mark_dm_thread_read(fingerprint)" in app_source
 

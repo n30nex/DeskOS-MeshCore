@@ -338,17 +338,17 @@ bool d1l_ui_device_sheets_render_display(
         BINDING_TIMEOUT,
         D1L_UI_DEVICE_SHEETS_ACTION_TIMEOUT) != NULL && complete;
     complete = create_button(
-        controller, sheet, "Time -1h", 172, 196, 116, 44,
+        controller, sheet, "Time -15m", 172, 196, 116, 44,
         BINDING_TIMEZONE_MINUS,
         D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_MINUS) != NULL && complete;
     complete = create_button(
-        controller, sheet, "Time +1h", 298, 196, 118, 44,
+        controller, sheet, "Time +15m", 298, 196, 118, 44,
         BINDING_TIMEZONE_PLUS,
         D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_PLUS) != NULL && complete;
 
     lv_obj_t *note = create_label(
         sheet,
-        "Use Time -1h/+1h to set the local clock. Daylight saving changes are "
+        "Adjust local time in 15-minute steps. Daylight saving changes are "
         "manual; radio and security timestamps stay UTC.",
         0xFBBF24);
     configure_wrapped_label(note, 8, 252);

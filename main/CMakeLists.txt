@@ -113,6 +113,7 @@ idf_component_register(
         "ui/ui_nodes_summary.c"
         "ui/ui_packets.c"
         "ui/ui_phase1.c"
+        "ui/quick_replies.c"
         "ui/ui_radio_settings.c"
         "ui/ui_screen.c"
         "ui/ui_service_sheets.c"

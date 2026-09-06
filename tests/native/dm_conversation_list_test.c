@@ -111,6 +111,24 @@ int main(void)
     assert(total == D1L_DM_CONVERSATION_SOURCE_CAPACITY);
     assert(summaries[0].latest.seq ==
            D1L_DM_CONVERSATION_SOURCE_CAPACITY + 2U);
+    size_t page_total = 0U;
+    size_t all_copied = 0U;
+    uint32_t previous_seq = UINT32_MAX;
+    for (size_t offset = 0U; offset < D1L_DM_CONVERSATION_SOURCE_CAPACITY; offset += 5U) {
+        copied = d1l_dm_conversation_list_project_page(
+            bounded, bounded_unread, sizeof(bounded) / sizeof(bounded[0]),
+            summaries, 5U, offset, &page_total);
+        assert(page_total == D1L_DM_CONVERSATION_SOURCE_CAPACITY);
+        for (size_t i = 0U; i < copied; ++i) {
+            assert(summaries[i].latest.seq < previous_seq);
+            previous_seq = summaries[i].latest.seq;
+        }
+        all_copied += copied;
+    }
+    assert(all_copied == D1L_DM_CONVERSATION_SOURCE_CAPACITY);
+    assert(d1l_dm_conversation_list_project_page(bounded, bounded_unread,
+        sizeof(bounded) / sizeof(bounded[0]), summaries, 5U, SIZE_MAX, &page_total) == 0U);
+    assert(page_total == D1L_DM_CONVERSATION_SOURCE_CAPACITY);
     assert(!d1l_dm_conversation_list_has_retained_failure(NULL, 1U));
 
     puts("native DM conversation list: ok");

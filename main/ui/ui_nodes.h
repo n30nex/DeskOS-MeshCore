@@ -10,10 +10,16 @@
 typedef struct _lv_obj_t lv_obj_t;
 
 #define D1L_UI_NODES_ROW_CAPACITY 32U
+#define D1L_UI_NODES_PAGE_SIZE 12U
 
 typedef struct {
     d1l_ui_node_role_counts_t role_counts;
     size_t contact_count;
+    size_t heard_count;
+    size_t total_matches;
+    size_t page_offset;
+    bool discovered;
+    d1l_node_filter_t filter;
     d1l_contact_entry_t contact_rows[D1L_CONTACT_STORE_CAPACITY];
     bool contact_can_dm[D1L_CONTACT_STORE_CAPACITY];
     size_t contact_row_count;
@@ -36,6 +42,11 @@ typedef enum {
     D1L_UI_NODES_ACTION_CYCLE_SORT,
     D1L_UI_NODES_ACTION_FIND_NEARBY,
     D1L_UI_NODES_ACTION_CLEAR_HEARD,
+    D1L_UI_NODES_ACTION_SHOW_SAVED,
+    D1L_UI_NODES_ACTION_SHOW_DISCOVERED,
+    D1L_UI_NODES_ACTION_CYCLE_FILTER,
+    D1L_UI_NODES_ACTION_PREVIOUS_PAGE,
+    D1L_UI_NODES_ACTION_NEXT_PAGE,
 } d1l_ui_nodes_action_t;
 
 typedef struct {
@@ -65,6 +76,11 @@ typedef struct d1l_ui_nodes_controller {
     d1l_ui_nodes_action_binding_t cycle_sort;
     d1l_ui_nodes_action_binding_t find_nearby;
     d1l_ui_nodes_action_binding_t clear_heard;
+    d1l_ui_nodes_action_binding_t show_saved;
+    d1l_ui_nodes_action_binding_t show_discovered;
+    d1l_ui_nodes_action_binding_t cycle_filter;
+    d1l_ui_nodes_action_binding_t previous_page;
+    d1l_ui_nodes_action_binding_t next_page;
 } d1l_ui_nodes_controller_t;
 
 void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,

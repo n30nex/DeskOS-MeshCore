@@ -47,6 +47,7 @@
 #include "ui_home.h"
 #include "ui_font_symbols_14.h"
 #include "ui_keyboard.h"
+#include "quick_replies.h"
 #include "ui_map.h"
 #include "ui_messages.h"
 #include "ui_more_view.h"
@@ -116,6 +117,20 @@ static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_counter;
 static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_compose_send_button;
+static lv_obj_t *s_profile_sheet;
+static lv_obj_t *s_profile_name;
+static lv_obj_t *s_profile_keyboard;
+static lv_obj_t *s_profile_key_label;
+static lv_obj_t *s_quick_reply_sheet;
+static lv_obj_t *s_quick_reply_labels[D1L_QUICK_REPLY_COUNT];
+static lv_obj_t *s_quick_edit_sheet;
+static lv_obj_t *s_quick_edit_text;
+static d1l_quick_replies_t s_quick_replies;
+static bool s_quick_from_compose;
+static size_t s_quick_edit_index;
+static const uint8_t s_quick_reply_indices[D1L_QUICK_REPLY_COUNT] = {0, 1, 2, 3, 4, 5};
+static bool s_profile_ready;
+static bool s_quick_replies_ready;
 static lv_obj_t *s_public_history_sheet;
 static lv_obj_t *s_public_search_sheet;
 static lv_obj_t *s_public_search_title;
@@ -155,6 +170,9 @@ static bool s_onboarding_probe_suppressed;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot EXT_RAM_BSS_ATTR;
 static bool s_compose_dm;
+static size_t s_dm_list_offset;
+static d1l_dm_conversation_summary_t
+    s_dm_page_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS] EXT_RAM_BSS_ATTR;
 #if D1L_ENABLE_QUALIFICATION_HOOKS
 static bool s_compose_probe_send_suppressed;
 #endif
@@ -268,6 +286,9 @@ static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
 static char s_nodes_search_text[D1L_NODE_PUBLIC_KEY_HEX_LEN];
 static d1l_node_sort_t s_nodes_sort = D1L_NODE_SORT_LAST_HEARD;
+static d1l_node_filter_t s_nodes_filter;
+static bool s_nodes_discovered;
+static size_t s_nodes_page_offset;
 static uint64_t s_public_history_channel_id;
 static char s_public_history_channel_name[D1L_CHANNEL_NAME_LEN];
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
@@ -347,6 +368,8 @@ static void open_storage_sheet_event_cb(lv_event_t *event);
 static void open_wifi_sheet_event_cb(lv_event_t *event);
 static void open_ble_sheet_event_cb(lv_event_t *event);
 static void open_display_sheet_event_cb(lv_event_t *event);
+static void open_profile_sheet_event_cb(lv_event_t *event);
+static void open_quick_replies_event_cb(lv_event_t *event);
 static void open_diagnostics_sheet_event_cb(lv_event_t *event);
 static void open_terminal_sheet_event_cb(lv_event_t *event);
 static void open_observer_sheet_event_cb(lv_event_t *event);
@@ -373,7 +396,7 @@ typedef struct {
 
 static const d1l_ui_dock_item_t k_dock_items[] = {
     {D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME},
-    {D1L_UI_TAB_MESSAGES, "Channels", LV_SYMBOL_ENVELOPE},
+    {D1L_UI_TAB_MESSAGES, "Chats", LV_SYMBOL_ENVELOPE},
     {D1L_UI_TAB_NODES, "Contacts", LV_SYMBOL_LIST},
     {D1L_UI_TAB_MAP, "Map", LV_SYMBOL_IMAGE},
     {D1L_UI_TAB_SETTINGS, "Settings", LV_SYMBOL_SETTINGS},
@@ -381,7 +404,7 @@ static const d1l_ui_dock_item_t k_dock_items[] = {
 
 static const d1l_ui_dock_item_t k_core_dock_items[] = {
     {D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME},
-    {D1L_UI_TAB_MESSAGES, "Channels", LV_SYMBOL_ENVELOPE},
+    {D1L_UI_TAB_MESSAGES, "Chats", LV_SYMBOL_ENVELOPE},
     {D1L_UI_TAB_NODES, "Contacts", LV_SYMBOL_LIST},
     {D1L_UI_TAB_MAP, "Map", LV_SYMBOL_IMAGE},
     {D1L_UI_TAB_SETTINGS, "Settings", LV_SYMBOL_SETTINGS},
@@ -1665,6 +1688,9 @@ static void hide_sheet(void)
 static void hide_compose_sheet(void)
 {
     d1l_ui_modal_hide(s_compose_sheet);
+    d1l_ui_modal_hide(s_quick_reply_sheet);
+    d1l_ui_modal_hide(s_quick_edit_sheet);
+    s_quick_from_compose = false;
 #if D1L_ENABLE_QUALIFICATION_HOOKS
     s_onboarding_probe_suppressed = false;
     s_compose_probe_send_suppressed = false;
@@ -1745,6 +1771,7 @@ static void hide_ble_sheet(void)
 
 static void hide_display_sheet(void)
 {
+    d1l_ui_modal_hide(s_profile_sheet);
     d1l_ui_device_sheets_hide_display(&s_device_sheets_controller);
     restore_dock_for_active_tab();
 }
@@ -2555,6 +2582,13 @@ static void handle_settings_action(d1l_ui_settings_action_t action, void *contex
     case D1L_UI_SETTINGS_ACTION_MAP_TILES:
         open_map_options_sheet_event_cb(NULL);
         break;
+    case D1L_UI_SETTINGS_ACTION_PROFILE:
+        open_profile_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_SETTINGS_ACTION_QUICK_REPLIES:
+        s_quick_from_compose = false;
+        open_quick_replies_event_cb(NULL);
+        break;
     case D1L_UI_SETTINGS_ACTION_DISPLAY:
         open_display_sheet_event_cb(NULL);
         break;
@@ -2878,18 +2912,18 @@ static void layout_compose_sheet_controls(void)
         lv_obj_scroll_to_y(s_compose_sheet, 0, LV_ANIM_OFF);
     }
     if (s_compose_textarea) {
-        lv_obj_set_size(s_compose_textarea, 448, 78);
+        lv_obj_set_size(s_compose_textarea, 448, 62);
         lv_obj_set_pos(s_compose_textarea, 16, 58);
     }
     if (s_compose_counter) {
         lv_obj_set_width(s_compose_counter, 248);
-        lv_obj_set_pos(s_compose_counter, 216, 140);
+        lv_obj_set_pos(s_compose_counter, 216, 134);
         lv_obj_set_style_text_align(s_compose_counter, LV_TEXT_ALIGN_RIGHT, 0);
     }
     if (s_compose_keyboard) {
-        lv_obj_set_size(s_compose_keyboard, 448, 258);
+        lv_obj_set_size(s_compose_keyboard, 448, 242);
         lv_obj_set_align(s_compose_keyboard, LV_ALIGN_TOP_LEFT);
-        lv_obj_set_pos(s_compose_keyboard, 16, 158);
+        lv_obj_set_pos(s_compose_keyboard, 16, 174);
     }
 }
 
@@ -5472,6 +5506,26 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
                sizeof(view_model->dm_row_unread_count[0]));
     memcpy(view_model->dm_row_muted, snapshot->recent_dm_muted,
            view_model->dm_row_count * sizeof(view_model->dm_row_muted[0]));
+    if (s_messages_mode == D1L_UI_MESSAGES_MODE_DIRECT) {
+        view_model->dm_row_count = d1l_app_model_query_dm_conversations(
+            s_dm_list_offset, s_dm_page_rows, D1L_UI_MESSAGES_DM_PREVIEW_ROWS,
+            &view_model->dm_total, NULL);
+        if (s_dm_list_offset >= view_model->dm_total && s_dm_list_offset != 0U) {
+            s_dm_list_offset = view_model->dm_total ?
+                (view_model->dm_total - 1U) / D1L_UI_MESSAGES_DM_PREVIEW_ROWS *
+                    D1L_UI_MESSAGES_DM_PREVIEW_ROWS : 0U;
+            view_model->dm_row_count = d1l_app_model_query_dm_conversations(
+                s_dm_list_offset, s_dm_page_rows, D1L_UI_MESSAGES_DM_PREVIEW_ROWS,
+                &view_model->dm_total, NULL);
+        }
+        view_model->dm_offset = s_dm_list_offset;
+        for (size_t i = 0U; i < view_model->dm_row_count; ++i) {
+            view_model->dm_rows[i] = s_dm_page_rows[i].latest;
+            view_model->dm_row_unread_count[i] = s_dm_page_rows[i].unread_count;
+            view_model->dm_row_unread[i] = s_dm_page_rows[i].unread_count > 0U;
+            view_model->dm_row_muted[i] = s_dm_page_rows[i].muted;
+        }
+    }
     view_model->dm_retry_active = snapshot->dm_retry_active;
     view_model->dm_failure_latched = snapshot->dm_failure_latched;
 }
@@ -5820,7 +5874,20 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
         set_messages_mode(D1L_UI_MESSAGES_MODE_PUBLIC);
         break;
     case D1L_UI_MESSAGES_ACTION_SHOW_DIRECT:
+        s_dm_list_offset = 0U;
         set_messages_mode(D1L_UI_MESSAGES_MODE_DIRECT);
+        break;
+    case D1L_UI_MESSAGES_ACTION_PREVIOUS_DM_PAGE:
+        s_dm_list_offset = s_dm_list_offset >= D1L_UI_MESSAGES_DM_PREVIEW_ROWS ?
+            s_dm_list_offset - D1L_UI_MESSAGES_DM_PREVIEW_ROWS : 0U;
+        request_content_refresh();
+        break;
+    case D1L_UI_MESSAGES_ACTION_NEXT_DM_PAGE:
+        if (s_dm_list_offset + D1L_UI_MESSAGES_DM_PREVIEW_ROWS <
+            s_messages_controller.rendered.dm_total) {
+            s_dm_list_offset += D1L_UI_MESSAGES_DM_PREVIEW_ROWS;
+            request_content_refresh();
+        }
         break;
     case D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE:
         show_message_detail_for(event->public_message);
@@ -5954,6 +6021,9 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
     memset(view_model, 0, sizeof(*view_model));
     view_model->contact_count = snapshot->contact_count;
     view_model->sort = s_nodes_sort;
+    view_model->filter = s_nodes_filter;
+    view_model->discovered = s_nodes_discovered;
+    view_model->heard_count = snapshot->node_count;
     snprintf(view_model->search_text, sizeof(view_model->search_text), "%s",
              s_nodes_search_text);
 
@@ -5962,7 +6032,9 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
             D1L_CONTACT_STORE_CAPACITY : snapshot->recent_contact_count;
     for (size_t i = 0; i < source_contact_count; ++i) {
         if (!d1l_ui_nodes_contact_matches_search(
-                &snapshot->recent_contacts[i], s_nodes_search_text)) {
+                &snapshot->recent_contacts[i], s_nodes_search_text) ||
+            !d1l_ui_nodes_contact_matches_filter(
+                &snapshot->recent_contacts[i], s_nodes_filter)) {
             continue;
         }
         view_model->contact_rows[view_model->contact_row_count++] =
@@ -5976,17 +6048,27 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
     }
 
     const d1l_node_query_t node_query = {
-        .filter = D1L_NODE_FILTER_ALL,
+        .filter = s_nodes_filter,
         .sort = s_nodes_sort,
         .text = s_nodes_search_text[0] ? s_nodes_search_text : NULL,
-        .keyed_only = false,
-        .reachable_only = false,
+        .unsaved_only = true,
     };
-    view_model->node_row_count = d1l_app_model_query_nodes(
-        &node_query, view_model->node_rows, D1L_UI_NODES_ROW_CAPACITY);
-    if (view_model->node_row_count > D1L_UI_NODES_ROW_CAPACITY) {
-        view_model->node_row_count = D1L_UI_NODES_ROW_CAPACITY;
+    view_model->total_matches = view_model->contact_row_count;
+    if (s_nodes_discovered) {
+        view_model->node_row_count = d1l_app_model_query_nodes_page(
+            &node_query, view_model->node_rows, D1L_UI_NODES_PAGE_SIZE,
+            s_nodes_page_offset, &view_model->total_matches);
     }
+    const size_t offset = d1l_ui_nodes_page_offset(
+        s_nodes_page_offset, view_model->total_matches, D1L_UI_NODES_PAGE_SIZE);
+    if (s_nodes_discovered && offset != s_nodes_page_offset) {
+        view_model->node_row_count = d1l_app_model_query_nodes_page(
+            &node_query, view_model->node_rows, D1L_UI_NODES_PAGE_SIZE,
+            offset, &view_model->total_matches);
+    }
+    s_nodes_page_offset = offset;
+    view_model->page_offset = offset;
+
     const char *node_roles[D1L_UI_NODES_ROW_CAPACITY] = {0};
     for (size_t i = 0; i < view_model->node_row_count; ++i) {
         node_roles[i] = view_model->node_rows[i].role;
@@ -6182,6 +6264,7 @@ static void close_nodes_search_event_cb(lv_event_t *event)
 
 static void apply_nodes_search_event_cb(lv_event_t *event)
 {
+    s_nodes_page_offset = 0U;
     (void)event;
     s_nodes_search_text[0] = '\0';
     if (s_nodes_search_textarea) {
@@ -6196,6 +6279,7 @@ static void apply_nodes_search_event_cb(lv_event_t *event)
 
 static void clear_nodes_search_event_cb(lv_event_t *event)
 {
+    s_nodes_page_offset = 0U;
     (void)event;
     s_nodes_search_text[0] = '\0';
     if (s_nodes_search_textarea) {
@@ -6230,6 +6314,7 @@ static void open_nodes_search_sheet(void)
 static void cycle_nodes_sort(void)
 {
     s_nodes_sort = d1l_ui_nodes_next_sort(s_nodes_sort);
+    s_nodes_page_offset = 0U;
     request_content_refresh();
 }
 
@@ -6283,6 +6368,9 @@ static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
     if (!event) {
         return;
     }
+    if (event->action != D1L_UI_NODES_ACTION_CLEAR_HEARD) {
+        s_nodes_clear_armed = false;
+    }
     switch (event->action) {
     case D1L_UI_NODES_ACTION_OPEN_CONTACT:
         if (!open_managed_contact(event->contact)) {
@@ -6329,6 +6417,30 @@ static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
     case D1L_UI_NODES_ACTION_CYCLE_SORT:
         cycle_nodes_sort();
         break;
+    case D1L_UI_NODES_ACTION_SHOW_SAVED:
+    case D1L_UI_NODES_ACTION_SHOW_DISCOVERED:
+        s_nodes_discovered = event->action == D1L_UI_NODES_ACTION_SHOW_DISCOVERED;
+        s_nodes_page_offset = 0U;
+        s_nodes_clear_armed = false;
+        request_content_refresh();
+        break;
+    case D1L_UI_NODES_ACTION_CYCLE_FILTER:
+        s_nodes_filter = d1l_ui_nodes_next_filter(s_nodes_filter);
+        s_nodes_page_offset = 0U;
+        request_content_refresh();
+        break;
+    case D1L_UI_NODES_ACTION_PREVIOUS_PAGE:
+        s_nodes_page_offset = s_nodes_page_offset >= D1L_UI_NODES_PAGE_SIZE ?
+            s_nodes_page_offset - D1L_UI_NODES_PAGE_SIZE : 0U;
+        request_content_refresh();
+        break;
+    case D1L_UI_NODES_ACTION_NEXT_PAGE:
+        if (s_nodes_page_offset + D1L_UI_NODES_PAGE_SIZE <
+            s_nodes_controller.rendered.total_matches) {
+            s_nodes_page_offset += D1L_UI_NODES_PAGE_SIZE;
+            request_content_refresh();
+        }
+        break;
     case D1L_UI_NODES_ACTION_FIND_NEARBY: {
         const esp_err_t ret = d1l_app_model_discover_nearby();
         if (ret == ESP_OK) {
@@ -6346,11 +6458,11 @@ static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
             s_nodes_clear_armed = true;
             s_nodes_clear_deadline = lv_tick_get() + 5000U;
             show_toast_text(
-                "Tap Clear nearby again to erase heard nodes", true);
+                "Tap Clear heard again to erase heard nodes", true);
         } else {
             s_nodes_clear_armed = false;
             const esp_err_t ret = d1l_app_model_clear_nodes(true);
-            show_toast("Clear nearby", ret);
+            show_toast("Clear heard", ret);
             if (ret == ESP_OK) {
                 request_content_refresh();
             }
@@ -7442,8 +7554,7 @@ static void device_sheets_action_handler(
     }
     case D1L_UI_DEVICE_SHEETS_ACTION_TIMEOUT: {
         d1l_display_preferences_get(&preferences);
-        const uint16_t next = preferences.timeout_seconds == 0U ?
-            D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS : 0U;
+        const uint16_t next = d1l_display_timeout_next(preferences.timeout_seconds);
         const esp_err_t ret = d1l_display_preferences_set_timeout(next);
         show_toast("Display timeout", ret);
         d1l_app_model_snapshot(&s_snapshot);
@@ -7457,7 +7568,7 @@ static void device_sheets_action_handler(
             offset = 0;
         }
         const int16_t step =
-            action == D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_MINUS ? -60 : 60;
+            action == D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_MINUS ? -15 : 15;
         int16_t next = (int16_t)(offset + step);
         if (next < D1L_TIMEZONE_OFFSET_MINUTES_MIN) {
             next = D1L_TIMEZONE_OFFSET_MINUTES_MAX;
@@ -10243,6 +10354,274 @@ static void create_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_sheet);
 }
 
+
+static void close_profile_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_ui_modal_hide(s_profile_sheet);
+    restore_dock_for_active_tab();
+}
+
+static void save_profile_name_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const char *name = lv_textarea_get_text(s_profile_name);
+    if (!d1l_settings_node_name_valid(name)) {
+        show_toast_text("Use a name of 1-31 bytes", false);
+        return;
+    }
+    d1l_settings_t update = {0};
+    snprintf(update.node_name, sizeof(update.node_name), "%s", name);
+    const esp_err_t result = d1l_settings_update_fields(
+        &update, D1L_SETTINGS_UPDATE_NODE_NAME);
+    show_toast("Node name", result);
+    if (result == ESP_OK) {
+        lv_obj_add_flag(s_profile_keyboard, LV_OBJ_FLAG_HIDDEN);
+        request_content_refresh();
+    }
+}
+
+static void profile_keyboard_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) == LV_EVENT_READY) {
+        save_profile_name_event_cb(event);
+    } else if (lv_event_get_code(event) == LV_EVENT_CANCEL) {
+        lv_obj_add_flag(s_profile_keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void profile_name_focus_event_cb(lv_event_t *event)
+{
+    (void)event;
+    lv_obj_clear_flag(s_profile_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_profile_keyboard);
+}
+
+static void open_profile_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!s_profile_ready) {
+        show_toast("Profile", ESP_ERR_NO_MEM);
+        return;
+    }
+    d1l_settings_t settings = {0};
+    const esp_err_t result = d1l_settings_public_snapshot(&settings);
+    if (result != ESP_OK) {
+        show_toast("Profile", result);
+        return;
+    }
+    char key[65] = {0};
+    for (size_t i = 0U; i < sizeof(settings.identity_public_key); ++i) {
+        snprintf(key + i * 2U, sizeof(key) - i * 2U, "%02X",
+                 settings.identity_public_key[i]);
+    }
+    lv_textarea_set_text(s_profile_name, settings.node_name);
+    lv_label_set_text(s_profile_key_label, settings.identity_ready ? key :
+                      "Identity not ready");
+    lv_obj_add_flag(s_profile_keyboard, LV_OBJ_FLAG_HIDDEN);
+    show_modal(s_profile_sheet);
+}
+
+static void close_quick_replies_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_ui_modal_hide(s_quick_reply_sheet);
+    d1l_ui_modal_hide(s_quick_edit_sheet);
+    if (s_quick_from_compose) {
+        show_modal(s_compose_sheet);
+        update_compose_counter();
+    } else {
+        restore_dock_for_active_tab();
+    }
+}
+
+static void open_quick_replies_event_cb(lv_event_t *event)
+{
+    if (event) s_quick_from_compose = true;
+    if (!s_quick_replies_ready) {
+        show_toast("Quick replies", ESP_ERR_NO_MEM);
+        return;
+    }
+    const esp_err_t result = d1l_quick_replies_load(s_quick_replies);
+    if (result != ESP_OK) {
+        show_toast("Quick replies", result);
+        return;
+    }
+    for (size_t i = 0U; i < D1L_QUICK_REPLY_COUNT; ++i) {
+        lv_label_set_text(s_quick_reply_labels[i], s_quick_replies[i][0] ?
+                          s_quick_replies[i] : "Empty reply");
+    }
+    show_modal(s_quick_reply_sheet);
+}
+
+static void edit_quick_reply_event_cb(lv_event_t *event)
+{
+    const uint8_t *slot = event ? lv_event_get_user_data(event) : NULL;
+    if (!slot) return;
+    const size_t index = *slot;
+    if (index >= D1L_QUICK_REPLY_COUNT || !s_quick_edit_sheet) return;
+    s_quick_edit_index = index;
+    lv_textarea_set_text(s_quick_edit_text, s_quick_replies[index]);
+    show_modal(s_quick_edit_sheet);
+}
+
+static void choose_quick_reply_event_cb(lv_event_t *event)
+{
+    const uint8_t *slot = event ? lv_event_get_user_data(event) : NULL;
+    if (!slot) return;
+    const size_t index = *slot;
+    if (index >= D1L_QUICK_REPLY_COUNT) return;
+    if (!s_quick_from_compose) {
+        edit_quick_reply_event_cb(event);
+        return;
+    }
+    const char *draft = lv_textarea_get_text(s_compose_textarea);
+    if (!d1l_quick_reply_fits(draft, s_quick_replies[index])) {
+        show_toast_text("Reply will not fit. Shorten the draft first.", false);
+        return;
+    }
+    /* Insert at the cursor, preserve typed text, and never transmit here. */
+    lv_textarea_add_text(s_compose_textarea, s_quick_replies[index]);
+    close_quick_replies_event_cb(NULL);
+}
+
+static void save_quick_reply_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const esp_err_t result = d1l_quick_reply_save(
+        s_quick_edit_index, lv_textarea_get_text(s_quick_edit_text));
+    if (result == ESP_ERR_INVALID_ARG) {
+        show_toast_text("Use up to 80 bytes of text", false);
+    } else {
+        show_toast("Quick reply", result);
+    }
+    if (result == ESP_OK) open_quick_replies_event_cb(NULL);
+}
+
+static void back_quick_reply_event_cb(lv_event_t *event)
+{
+    (void)event;
+    open_quick_replies_event_cb(NULL);
+}
+
+static void quick_reply_keyboard_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) == LV_EVENT_READY) {
+        save_quick_reply_event_cb(event);
+    } else if (lv_event_get_code(event) == LV_EVENT_CANCEL) {
+        back_quick_reply_event_cb(event);
+    }
+}
+
+static lv_obj_t *create_personal_sheet(lv_obj_t *screen, const char *title,
+                                      lv_event_cb_t close_cb)
+{
+    lv_obj_t *sheet = create_object(screen, title);
+    if (!sheet) return NULL;
+    lv_obj_set_size(sheet, 480, 480);
+    lv_obj_set_pos(sheet, 0, 0);
+    lv_obj_set_style_pad_all(sheet, 0, 0);
+    lv_obj_set_style_radius(sheet, 0, 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_hex(0x101819), 0);
+    lv_obj_set_style_border_width(sheet, 0, 0);
+    lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *label = create_label(sheet, title, 0xF4F7FB);
+    if (label) {
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
+        lv_obj_set_pos(label, 16, 12);
+    }
+    if (!label || !create_button(sheet, "Back", 376, 6, 88, 44, close_cb, NULL)) {
+        lv_obj_del(sheet);
+        return NULL;
+    }
+    d1l_ui_modal_hide(sheet);
+    return sheet;
+}
+
+static void create_personal_sheets(lv_obj_t *screen)
+{
+    s_profile_ready = false;
+    s_quick_replies_ready = false;
+    if (!d1l_ui_settings_action_available(D1L_UI_SETTINGS_ACTION_PROFILE)) return;
+    s_profile_sheet = create_personal_sheet(screen, "Profile", close_profile_event_cb);
+    if (!s_profile_sheet) return;
+    lv_obj_t *label = create_label(s_profile_sheet, "Node name", 0xA6B0B7);
+    if (label) lv_obj_set_pos(label, 16, 62);
+    s_profile_name = create_textarea(s_profile_sheet, "profile name");
+    s_profile_keyboard = create_keyboard(s_profile_sheet, "profile keyboard");
+    if (!s_profile_name || !s_profile_keyboard) return;
+    lv_obj_set_size(s_profile_name, 448, 48);
+    lv_obj_set_pos(s_profile_name, 16, 86);
+    lv_textarea_set_one_line(s_profile_name, true);
+    lv_textarea_set_max_length(s_profile_name, D1L_NODE_NAME_LEN - 1U);
+    if (!create_button(s_profile_sheet, "Save name", 16, 144, 140, 44,
+                       save_profile_name_event_cb, NULL) ||
+        !create_button(s_profile_sheet, "Location", 168, 144, 140, 44,
+                       open_map_location_sheet_event_cb, NULL) ||
+        !create_button(s_profile_sheet, "Advertise", 320, 144, 144, 44,
+                       open_sheet_event_cb, NULL)) return;
+    label = create_label(s_profile_sheet, "Public identity", 0xA6B0B7);
+    if (label) lv_obj_set_pos(label, 16, 214);
+    s_profile_key_label = create_label(s_profile_sheet, "", 0x20D9ED);
+    if (!s_profile_key_label) return;
+    if (s_profile_key_label) {
+        lv_obj_set_width(s_profile_key_label, 448);
+        lv_label_set_long_mode(s_profile_key_label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_pos(s_profile_key_label, 16, 240);
+    }
+    label = create_label(s_profile_sheet,
+        "Changing the name keeps your identity and saved contacts.\n"
+        "Location is configured manually or by your paired phone.", 0xA6B0B7);
+    if (label) {
+        lv_obj_set_width(label, 448);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_pos(label, 16, 324);
+    }
+    d1l_ui_keyboard_configure_input(s_profile_keyboard, s_profile_name, 16, 208, 448, 264);
+    lv_obj_add_flag(s_profile_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_profile_name, profile_name_focus_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_profile_keyboard, profile_keyboard_event_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_profile_keyboard, profile_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
+    s_profile_ready = true;
+
+    s_quick_reply_sheet = create_personal_sheet(screen, "Quick replies", close_quick_replies_event_cb);
+    s_quick_edit_sheet = create_personal_sheet(screen, "Edit reply", back_quick_reply_event_cb);
+    if (!s_quick_reply_sheet || !s_quick_edit_sheet) return;
+    for (size_t i = 0U; i < D1L_QUICK_REPLY_COUNT; ++i) {
+        lv_obj_t *button = create_button(s_quick_reply_sheet, "", 16, 66 + i * 54,
+            350, 48, choose_quick_reply_event_cb, (void *)&s_quick_reply_indices[i]);
+        if (!button) return;
+        s_quick_reply_labels[i] = create_label(button, "", 0xF4F7FB);
+        if (!s_quick_reply_labels[i]) return;
+        lv_obj_set_width(s_quick_reply_labels[i], 320);
+        lv_label_set_long_mode(s_quick_reply_labels[i], LV_LABEL_LONG_DOT);
+        lv_obj_center(s_quick_reply_labels[i]);
+        if (!create_button(s_quick_reply_sheet, "Edit", 376, 66 + i * 54, 88, 48,
+                           edit_quick_reply_event_cb, (void *)&s_quick_reply_indices[i])) return;
+    }
+    label = create_label(s_quick_reply_sheet,
+        "Replies fill your draft. Review the message, then tap Send.", 0xA6B0B7);
+    if (label) {
+        lv_obj_set_width(label, 448);
+        lv_obj_set_pos(label, 16, 406);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    }
+    s_quick_edit_text = create_textarea(s_quick_edit_sheet, "quick reply text");
+    lv_obj_t *keyboard = create_keyboard(s_quick_edit_sheet, "quick reply keyboard");
+    if (!s_quick_edit_text || !keyboard) return;
+    lv_obj_set_size(s_quick_edit_text, 448, 96);
+    lv_obj_set_pos(s_quick_edit_text, 16, 62);
+    lv_textarea_set_max_length(s_quick_edit_text, D1L_QUICK_REPLY_BYTES - 1U);
+    if (!create_button(s_quick_edit_sheet, "Save", 268, 6, 96, 44,
+                       save_quick_reply_event_cb, NULL)) return;
+    label = create_label(s_quick_edit_sheet, "Up to 80 bytes; an empty reply clears this slot.", 0xA6B0B7);
+    if (label) lv_obj_set_pos(label, 16, 176);
+    d1l_ui_keyboard_configure_input(keyboard, s_quick_edit_text, 16, 208, 448, 264);
+    lv_obj_add_event_cb(keyboard, quick_reply_keyboard_event_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(keyboard, quick_reply_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
+    s_quick_replies_ready = true;
+}
+
 static void create_compose_sheet(lv_obj_t *screen)
 {
     s_compose_sheet = create_object(screen, "compose sheet");
@@ -10288,6 +10667,10 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_add_event_cb(s_compose_textarea, compose_textarea_event_cb,
                         LV_EVENT_VALUE_CHANGED, NULL);
 
+    if (d1l_ui_settings_action_available(D1L_UI_SETTINGS_ACTION_QUICK_REPLIES)) {
+        create_button(s_compose_sheet, "Quick replies", 16, 124, 144, 44,
+                      open_quick_replies_event_cb, NULL);
+    }
     s_compose_counter = create_label(s_compose_sheet, "0/138", 0xA6B0B7);
     lv_label_set_long_mode(s_compose_counter, LV_LABEL_LONG_DOT);
 
@@ -10888,6 +11271,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
             D1L_UI_SETTINGS_ACTION_ADVANCED)) {
         create_sheet(s_screen);
     }
+    create_personal_sheets(s_screen);
     create_compose_sheet(s_screen);
     create_public_history_sheet(s_screen);
     create_public_search_sheet(s_screen);

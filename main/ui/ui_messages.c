@@ -30,6 +30,8 @@ bool d1l_ui_messages_action_available(d1l_ui_messages_action_t action)
     case D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE:
         return d1l_release_feature_available(
             D1L_RELEASE_FEATURE_PUBLIC_MESSAGES);
+    case D1L_UI_MESSAGES_ACTION_PREVIOUS_DM_PAGE:
+    case D1L_UI_MESSAGES_ACTION_NEXT_DM_PAGE:
     case D1L_UI_MESSAGES_ACTION_SHOW_DIRECT:
     case D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD:
     case D1L_UI_MESSAGES_ACTION_CLOSE_DM_THREAD:
@@ -697,7 +699,7 @@ static int messages_render_store_notice(
 static void messages_render_root(d1l_ui_messages_controller_t *controller,
                                  lv_obj_t *parent)
 {
-    lv_obj_t *title = messages_create_label(parent, "Channels", 0xF4F7FB);
+    lv_obj_t *title = messages_create_label(parent, "Chats", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
         lv_obj_set_pos(title, 18, 10);
@@ -715,29 +717,42 @@ static void messages_render_root(d1l_ui_messages_controller_t *controller,
                 D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR));
     }
     lv_obj_t *subtitle = messages_create_label(
-        parent, "Group conversations", 0xA6B0B7);
+        parent, "Channels and direct messages", 0xA6B0B7);
     if (subtitle) {
         lv_obj_set_pos(subtitle, 18, 40);
     }
-    lv_obj_t *body = messages_create_scroll_body(parent, 18, 66, 424, 288);
+    lv_obj_t *body = messages_create_scroll_body(parent, 18, 66, 424, 358);
     if (!body) {
         return;
     }
     int row_y = messages_render_store_notice(
         body, 8, controller->rendered.public_store_state);
     if (!controller->rendered.channel_store_loaded) {
-        (void)messages_render_notice(
+        row_y = messages_render_notice(
             body, row_y, "Loading channels...", 0x4D7FFF);
-        return;
-    }
-    if (controller->rendered.channel_count == 0U) {
-        (void)messages_render_notice(
+    } else if (controller->rendered.channel_count == 0U) {
+        row_y = messages_render_notice(
             body, row_y, "No channels yet. Add or import a channel.",
             0xA6B0B7);
-        return;
+    } else {
+        for (size_t i = 0U; i < controller->rendered.channel_count; ++i) {
+            messages_render_channel_row(controller, body, row_y, i);
+            row_y += 68;
+        }
     }
-    for (size_t i = 0U; i < controller->rendered.channel_count; ++i) {
-        messages_render_channel_row(controller, body, row_y + (int)i * 68, i);
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_DIRECT_MESSAGES)) {
+        lv_obj_t *heading = messages_create_label(body, "Direct messages", 0xA6B0B7);
+        if (heading) lv_obj_set_pos(heading, 12, row_y + 8);
+        row_y += 34;
+        row_y = messages_render_store_notice(body, row_y, controller->rendered.dm_store_state);
+        for (size_t i = 0U; i < controller->rendered.dm_row_count; ++i) {
+            messages_render_dm_row(controller, body, row_y, i);
+            row_y += 80;
+        }
+        if (controller->rendered.dm_row_count == 0U) {
+            (void)messages_render_notice(body, row_y,
+                "Choose a saved Chat contact to start a DM.", 0xA6B0B7);
+        }
     }
 }
 
@@ -924,6 +939,25 @@ static void messages_render_direct(d1l_ui_messages_controller_t *controller,
             lv_obj_set_pos(empty, 16, row_y + 8);
         }
     }
+    const size_t offset = controller->rendered.dm_offset;
+    const size_t total = controller->rendered.dm_total;
+    const size_t end = offset + controller->rendered.dm_row_count;
+    char range_text[40];
+    snprintf(range_text, sizeof(range_text), "%u-%u of %u",
+        (unsigned)(total ? offset + 1U : 0U), (unsigned)end, (unsigned)total);
+    lv_obj_t *range = messages_create_label(parent, range_text, 0xA6B0B7);
+    if (range) {
+        lv_obj_set_size(range, 216, 24);
+        lv_obj_set_style_text_align(range, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(range, 120, 380);
+    }
+    lv_obj_t *previous = messages_create_button(parent, "Previous", 18, 366, 94, 44,
+        messages_bind_control(controller, 6U, D1L_UI_MESSAGES_ACTION_PREVIOUS_DM_PAGE));
+    lv_obj_t *next = messages_create_button(parent, "Next", 344, 366, 98, 44,
+        messages_bind_control(controller, 7U, D1L_UI_MESSAGES_ACTION_NEXT_DM_PAGE));
+    if (previous && offset == 0U) lv_obj_add_state(previous, LV_STATE_DISABLED);
+    if (next && end >= total) lv_obj_add_state(next, LV_STATE_DISABLED);
+
 }
 
 void d1l_ui_messages_render(d1l_ui_messages_controller_t *controller,

@@ -405,7 +405,7 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
         "Public and direct conversations";
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MESSAGES,
-                            LV_SYMBOL_ENVELOPE, "Channels",
+                            LV_SYMBOL_ENVELOPE, "Chats",
                             messages_detail,
                             controller->rendered.messages_status,
                             controller->rendered.messages_status_color,

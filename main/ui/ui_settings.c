@@ -51,6 +51,9 @@ bool d1l_ui_settings_action_available(d1l_ui_settings_action_t action)
                    D1L_RELEASE_FEATURE_MUTABLE_TERMINAL) ||
                d1l_release_feature_available(
                    D1L_RELEASE_FEATURE_USER_TRACE);
+    case D1L_UI_SETTINGS_ACTION_PROFILE:
+    case D1L_UI_SETTINGS_ACTION_QUICK_REPLIES:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
     case D1L_UI_SETTINGS_ACTION_DISPLAY:
         return true;
     case D1L_UI_SETTINGS_ACTION_NONE:
@@ -254,6 +257,18 @@ static lv_obj_t *render_menu_item(lv_obj_t *parent,
     return row;
 }
 
+static void settings_tools_event_cb(lv_event_t *event)
+{
+    d1l_ui_settings_category_binding_t *binding = lv_event_get_user_data(event);
+    d1l_ui_settings_controller_t *controller = binding ? binding->controller : NULL;
+    if (!controller || !controller->active || !controller->menu ||
+        binding->generation != controller->generation) return;
+    lv_obj_t *children = controller->category_children[D1L_UI_MORE_CATEGORY_TOOLS];
+    if (children && lv_obj_is_valid(children)) {
+        lv_obj_scroll_to_view_recursive(lv_obj_get_parent(children), LV_ANIM_OFF);
+    }
+}
+
 static bool render_category(d1l_ui_settings_controller_t *controller,
                             size_t category_index)
 {
@@ -358,9 +373,26 @@ bool d1l_ui_settings_render(d1l_ui_settings_controller_t *controller,
     }
     lv_obj_t *subtitle = settings_create_label(
         parent, "Device, radio, network and support", 0xA6B0B7);
-    settings_set_dot_width(subtitle, 400);
+    settings_set_dot_width(subtitle, 344);
     if (subtitle) {
         lv_obj_set_pos(subtitle, 18, 36);
+    }
+    lv_obj_t *tools = lv_btn_create(parent);
+    if (tools) {
+        lv_obj_set_size(tools, 88, 44);
+        lv_obj_set_pos(tools, 376, 6);
+        lv_obj_set_style_bg_color(tools, lv_color_hex(0x252D33), 0);
+        lv_obj_set_style_radius(tools, 8, 0);
+        lv_obj_set_style_shadow_width(tools, 0, 0);
+        lv_obj_t *label = settings_create_label(tools, "Tools", 0x20D9ED);
+        if (label) lv_obj_center(label);
+        d1l_ui_settings_category_binding_t *binding =
+            &controller->category_bindings[D1L_UI_MORE_CATEGORY_TOOLS];
+        *binding = (d1l_ui_settings_category_binding_t){
+            .controller = controller, .generation = generation,
+            .category = D1L_UI_MORE_CATEGORY_TOOLS,
+        };
+        lv_obj_add_event_cb(tools, settings_tools_event_cb, LV_EVENT_CLICKED, binding);
     }
 
     controller->menu = settings_create_container(parent, 444);
@@ -374,9 +406,13 @@ bool d1l_ui_settings_render(d1l_ui_settings_controller_t *controller,
                           LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(controller->menu, 4, 0);
 
-    for (size_t category_index = 0U;
-         category_index < controller->rendered.category_count; ++category_index) {
-        if (!render_category(controller, category_index)) {
+    const d1l_ui_more_category_t order[] = {
+        D1L_UI_MORE_CATEGORY_DEVICE, D1L_UI_MORE_CATEGORY_CONNECTIONS,
+        D1L_UI_MORE_CATEGORY_STORAGE_MAPS, D1L_UI_MORE_CATEGORY_ADVANCED,
+        D1L_UI_MORE_CATEGORY_TOOLS, D1L_UI_MORE_CATEGORY_SUPPORT,
+    };
+    for (size_t i = 0U; i < sizeof(order) / sizeof(order[0]); ++i) {
+        if (!render_category(controller, (size_t)order[i])) {
             d1l_ui_settings_deactivate(controller);
             return false;
         }

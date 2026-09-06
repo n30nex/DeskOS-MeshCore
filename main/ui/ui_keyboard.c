@@ -67,11 +67,24 @@ static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_spec[] = {
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2
 };
 
+static void style_keyboard(lv_obj_t *keyboard)
+{
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x101819), 0);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x252D33), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x33404A), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(keyboard, lv_color_hex(0x34566A), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(keyboard, lv_color_hex(0xF4F7FB), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(keyboard, lv_color_hex(0x20D9ED), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_border_width(keyboard, 0, LV_PART_ITEMS);
+    lv_obj_set_style_radius(keyboard, 6, LV_PART_ITEMS);
+}
+
 void d1l_ui_keyboard_configure_compose(lv_obj_t *keyboard)
 {
     if (!keyboard) {
         return;
     }
+    style_keyboard(keyboard);
     lv_keyboard_set_popovers(keyboard, false);
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER,
                         d1l_compose_kb_map_lc, d1l_compose_kb_ctrl_lc);
@@ -99,10 +112,15 @@ void d1l_ui_keyboard_configure_input(lv_obj_t *keyboard,
     if (!keyboard) {
         return;
     }
+    style_keyboard(keyboard);
     lv_obj_set_size(keyboard, (lv_coord_t)width, (lv_coord_t)height);
     lv_obj_set_align(keyboard, LV_ALIGN_TOP_LEFT);
     lv_obj_set_pos(keyboard, (lv_coord_t)x, (lv_coord_t)y);
     if (textarea) {
+        lv_obj_set_style_bg_color(textarea, lv_color_hex(0x17191A), 0);
+        lv_obj_set_style_text_color(textarea, lv_color_hex(0xF4F7FB), 0);
+        lv_obj_set_style_border_color(textarea, lv_color_hex(0x33404A), 0);
+        lv_obj_set_style_text_font(textarea, &d1l_ui_font_symbols_14, 0);
         lv_keyboard_set_textarea(keyboard, textarea);
     }
 }

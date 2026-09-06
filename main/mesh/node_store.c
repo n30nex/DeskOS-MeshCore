@@ -820,6 +820,7 @@ static void build_node_view(size_t index, const d1l_node_entry_t *node,
 
     const d1l_contact_entry_t *contact =
         query_contact_for_node(node, contact_count);
+    view->saved = contact != NULL;
     view->favorite = contact && contact->favorite;
     view->muted = contact && contact->muted;
     view->keyed = node_has_key(node, contact);
@@ -866,6 +867,9 @@ static bool node_view_matches_query(const d1l_node_view_t *view, const d1l_node_
         return false;
     }
     if (query) {
+        if (query->unsaved_only && view->saved) {
+            return false;
+        }
         if (!node_view_matches_filter(view, query->filter)) {
             return false;
         }
@@ -1553,6 +1557,16 @@ size_t d1l_node_store_copy_recent(d1l_node_entry_t *out_entries, size_t max_entr
 size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
                             size_t max_entries)
 {
+    return d1l_node_store_query_page(query, out_entries, max_entries, 0U, NULL);
+}
+
+size_t d1l_node_store_query_page(const d1l_node_query_t *query,
+    d1l_node_view_t *out_entries, size_t max_entries, size_t offset,
+    size_t *total_matches)
+{
+    if (total_matches) {
+        *total_matches = 0U;
+    }
     if (!out_entries || max_entries == 0) {
         return 0;
     }
@@ -1578,9 +1592,13 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
     s_query_sort = sort;
     qsort(s_query_order, matched, sizeof(s_query_order[0]),
           node_view_index_compare);
-    const size_t copied = matched < max_entries ? matched : max_entries;
+    if (total_matches) {
+        *total_matches = matched;
+    }
+    const size_t remaining = offset < matched ? matched - offset : 0U;
+    const size_t copied = remaining < max_entries ? remaining : max_entries;
     for (size_t i = 0U; i < copied; ++i) {
-        out_entries[i] = s_query_scratch[s_query_order[i]];
+        out_entries[i] = s_query_scratch[s_query_order[offset + i]];
     }
     d1l_store_lock_give(&s_store_lock);
     return copied;

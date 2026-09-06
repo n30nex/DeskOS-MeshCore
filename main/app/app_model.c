@@ -229,37 +229,41 @@ static void populate_home_messages(d1l_app_snapshot_t *snapshot)
     }
 }
 
-static void populate_dm_conversation_summaries(d1l_app_snapshot_t *snapshot)
+size_t d1l_app_model_query_dm_conversations(size_t offset,
+    d1l_dm_conversation_summary_t *rows, size_t capacity,
+    size_t *total, bool *has_failure)
 {
-    if (!snapshot) {
-        return;
-    }
-    memset(s_dm_conversation_source, 0, sizeof(s_dm_conversation_source));
-    memset(s_dm_conversation_source_unread, 0,
-           sizeof(s_dm_conversation_source_unread));
-    memset(s_dm_conversation_summaries, 0,
-           sizeof(s_dm_conversation_summaries));
+    if (total) *total = 0U;
+    if (has_failure) *has_failure = false;
+    if (!rows || capacity == 0U) return 0U;
     const size_t source_count = d1l_dm_store_copy_recent(
         s_dm_conversation_source, D1L_DM_CONVERSATION_SOURCE_CAPACITY);
-    snapshot->dm_failure_latched =
-        d1l_dm_conversation_list_has_retained_failure(
+    if (has_failure) {
+        *has_failure = d1l_dm_conversation_list_has_retained_failure(
             s_dm_conversation_source, source_count);
-    for (size_t i = 0U; i < source_count; ++i) {
-        s_dm_conversation_source_unread[i] =
-            d1l_read_state_dm_entry_is_unread(
-                &s_dm_conversation_source[i]);
     }
-    snapshot->recent_dm_count = d1l_dm_conversation_list_project(
-        s_dm_conversation_source, s_dm_conversation_source_unread,
-        source_count,
-        s_dm_conversation_summaries, D1L_APP_SNAPSHOT_DM_PREVIEW,
-        &snapshot->dm_conversation_count);
-    for (size_t i = 0U; i < snapshot->recent_dm_count; ++i) {
+    for (size_t i = 0U; i < source_count; ++i) {
+        s_dm_conversation_source_unread[i] = d1l_read_state_dm_entry_is_unread(
+            &s_dm_conversation_source[i]);
+    }
+    const size_t copied = d1l_dm_conversation_list_project_page(
+        s_dm_conversation_source, s_dm_conversation_source_unread, source_count,
+        rows, capacity, offset, total);
+    for (size_t i = 0U; i < copied; ++i) {
         d1l_contact_entry_t contact = {0};
-        s_dm_conversation_summaries[i].muted =
-            d1l_contact_store_find_by_fingerprint(
-                s_dm_conversation_summaries[i].latest.contact_fingerprint,
-                &contact) && contact.muted;
+        rows[i].muted = d1l_contact_store_find_by_fingerprint(
+            rows[i].latest.contact_fingerprint, &contact) && contact.muted;
+    }
+    return copied;
+}
+
+static void populate_dm_conversation_summaries(d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) return;
+    snapshot->recent_dm_count = d1l_app_model_query_dm_conversations(0U,
+        s_dm_conversation_summaries, D1L_APP_SNAPSHOT_DM_PREVIEW,
+        &snapshot->dm_conversation_count, &snapshot->dm_failure_latched);
+    for (size_t i = 0U; i < snapshot->recent_dm_count; ++i) {
         snapshot->recent_dms[i] = s_dm_conversation_summaries[i].latest;
         snapshot->recent_dm_unread_count[i] =
             s_dm_conversation_summaries[i].unread_count;
@@ -1092,6 +1096,14 @@ size_t d1l_app_model_query_nodes(const d1l_node_query_t *query, d1l_node_view_t 
                                  size_t max_entries)
 {
     return d1l_node_store_query(query, out_entries, max_entries);
+}
+
+size_t d1l_app_model_query_nodes_page(const d1l_node_query_t *query,
+    d1l_node_view_t *out_entries, size_t max_entries, size_t offset,
+    size_t *total_matches)
+{
+    return d1l_node_store_query_page(query, out_entries, max_entries, offset,
+                                   total_matches);
 }
 
 esp_err_t d1l_app_model_mark_public_read(void)

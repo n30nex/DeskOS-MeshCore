@@ -158,6 +158,10 @@ static const d1l_factory_reset_inventory_entry_t s_inventory[] = {
      true, "device-local repeater and room login passwords",
      D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
 
+    {"quick_replies", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
+     "d1l_ui", "quick_replies", D1L_FACTORY_RESET_DISPOSITION_CLEAR, true,
+     "device-local user reply text", D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+
     {"legacy_protocol_timestamp", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
      "d1l_settings", "mesh_ts",
      D1L_FACTORY_RESET_DISPOSITION_PRESERVE_MIGRATION_EVIDENCE, false,
@@ -771,8 +775,10 @@ static bool journal_structurally_valid(
         return false;
     }
     return journal->phase != D1L_FACTORY_RESET_JOURNAL_COMPLETE ||
-        (journal->completed_domains == D1L_FACTORY_RESET_CLEAR_DOMAIN_COUNT &&
-         journal->next_domain == D1L_FACTORY_RESET_CLEAR_DOMAIN_COUNT &&
+        /* A completed reset from before quick replies were introduced is
+         * still complete. Never replay it against subsequently saved data. */
+        ((journal->completed_domains == D1L_FACTORY_RESET_CLEAR_DOMAIN_COUNT ||
+          journal->completed_domains == 18U) &&
          journal->last_error == ESP_OK);
 }
 

@@ -32,6 +32,7 @@ esp_err_t d1l_display_preferences_set_notification_mode(
     d1l_notification_mode_t mode);
 const char *d1l_notification_mode_name(d1l_notification_mode_t mode);
 bool d1l_display_timeout_valid(uint16_t seconds);
+uint16_t d1l_display_timeout_next(uint16_t seconds);
 
 #ifdef __cplusplus
 }

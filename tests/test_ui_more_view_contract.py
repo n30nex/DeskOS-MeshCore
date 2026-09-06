@@ -53,7 +53,7 @@ def test_more_view_models_all_bounded_categories_and_truth_states():
         "Storage & maps",
         "Device",
         "Support",
-        "Advanced",
+        "Messaging",
     ):
         assert f'"{category}"' in view
     for state in (
@@ -64,7 +64,7 @@ def test_more_view_models_all_bounded_categories_and_truth_states():
         "Needs setup",
         "Needs attention",
         "Reconnecting",
-        "Needs Wi-Fi",
+        "Offline cache",
         "Loading",
         "Time setting unavailable",
     ):

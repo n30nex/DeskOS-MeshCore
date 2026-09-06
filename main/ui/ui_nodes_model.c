@@ -3,6 +3,50 @@
 #include <ctype.h>
 #include <string.h>
 
+const char *d1l_ui_nodes_filter_label(d1l_node_filter_t filter)
+{
+    switch (filter) {
+    case D1L_NODE_FILTER_COMPANION: return "Chat";
+    case D1L_NODE_FILTER_REPEATER: return "Repeaters";
+    case D1L_NODE_FILTER_ROOM: return "Rooms";
+    case D1L_NODE_FILTER_SENSOR: return "Sensors";
+    case D1L_NODE_FILTER_FAVORITE: return "Favorites";
+    default: return "All roles";
+    }
+}
+
+d1l_node_filter_t d1l_ui_nodes_next_filter(d1l_node_filter_t filter)
+{
+    return filter >= D1L_NODE_FILTER_ALL && filter < D1L_NODE_FILTER_FAVORITE ?
+        (d1l_node_filter_t)(filter + 1) : D1L_NODE_FILTER_ALL;
+}
+
+bool d1l_ui_nodes_contact_matches_filter(const d1l_contact_entry_t *entry,
+                                         d1l_node_filter_t filter)
+{
+    if (!entry) {
+        return false;
+    }
+    switch (filter) {
+    case D1L_NODE_FILTER_COMPANION:
+        return strcmp(entry->type, "chat") == 0 ||
+               strcmp(entry->type, "companion") == 0;
+    case D1L_NODE_FILTER_REPEATER: return strcmp(entry->type, "repeater") == 0;
+    case D1L_NODE_FILTER_ROOM: return strcmp(entry->type, "room") == 0;
+    case D1L_NODE_FILTER_SENSOR: return strcmp(entry->type, "sensor") == 0;
+    case D1L_NODE_FILTER_FAVORITE: return entry->favorite;
+    default: return true;
+    }
+}
+
+size_t d1l_ui_nodes_page_offset(size_t requested, size_t total, size_t page_size)
+{
+    if (total == 0U || page_size == 0U) {
+        return 0U;
+    }
+    return (requested < total ? requested : total - 1U) / page_size * page_size;
+}
+
 static bool contains_casefold(const char *haystack, const char *needle)
 {
     if (!needle || needle[0] == '\0') {

@@ -97,9 +97,9 @@ def test_display_render_is_truthful_disabled_and_fails_closed():
         assert f"D1L_UI_DEVICE_SHEETS_ACTION_{action}" in render
     assert "const d1l_app_snapshot_t *snapshot" in render
     assert '"Local display time"' in render
-    assert '"Use Time -1h/+1h to set the local clock.' in render
-    assert '"Time -1h"' in render
-    assert '"Time +1h"' in render
+    assert '"Adjust local time in 15-minute steps.' in render
+    assert '"Time -15m"' in render
+    assert '"Time +15m"' in render
     assert "snapshot->timezone_settings_ready" in render
     assert "snapshot->time_available" in render
     assert "if (!complete)" in render
@@ -125,7 +125,7 @@ def test_display_locks_after_ten_minutes_and_top_button_wakes_safely():
         "case D1L_UI_DEVICE_SHEETS_ACTION_TIMEOUT:",
         "case D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DIAGNOSTICS:",
     )
-    assert "D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS : 0U" in timeout_action
+    assert "d1l_display_timeout_next(preferences.timeout_seconds)" in timeout_action
 
     timezone_action = body(
         phase1,

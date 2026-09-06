@@ -58,6 +58,15 @@ size_t d1l_dm_conversation_list_project(
     d1l_dm_conversation_summary_t *out_summaries, size_t max_summaries,
     size_t *out_total_conversations)
 {
+    return d1l_dm_conversation_list_project_page(rows, row_unread, row_count,
+        out_summaries, max_summaries, 0U, out_total_conversations);
+}
+
+size_t d1l_dm_conversation_list_project_page(
+    const d1l_dm_entry_t *rows, const bool *row_unread, size_t row_count,
+    d1l_dm_conversation_summary_t *out_summaries, size_t max_summaries,
+    size_t offset, size_t *out_total_conversations)
+{
     if (out_total_conversations) {
         *out_total_conversations = 0U;
     }
@@ -92,7 +101,7 @@ size_t d1l_dm_conversation_list_project(
         seen[seen_count][sizeof(seen[seen_count]) - 1U] = '\0';
         seen_count++;
 
-        if (copied < max_summaries) {
+        if (seen_count > offset && copied < max_summaries) {
             d1l_dm_conversation_summary_t summary = {
                 .latest = *entry,
                 .unread_count = conversation_unread_count(

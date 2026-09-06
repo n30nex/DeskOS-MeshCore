@@ -6,11 +6,11 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.8.0-rc.2** is the release candidate for the SenseCAP Indicator D1L.
+DeskOS **1.8.0-rc.3** is the release candidate for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.2)
+[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.3)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
@@ -19,6 +19,17 @@ The previous stable release is
 [1.7.12](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
 
 ## What the candidate improves
+
+- WadaMesh is the interface parity target, with its exact reviewed revision and
+  remaining differences in the [feature matrix](docs/DESKOS_MESHCORE_FEATURE_PARITY.md).
+- **Chats** brings channels and recent direct messages onto the same page;
+  the DMs list pages through every conversation in the retained message store.
+- **Contacts** separates Saved and Discovered, adds role/favourite filters, and
+  pages through every matching entry. Home and Contacts agree on heard totals.
+- **Profile** exposes the node name, public identity, location and advert entry.
+- Six editable **Quick replies** insert at the cursor for review before Send.
+- Settings leads with device controls; keyboards use the dark palette. Display
+  timeout offers 30 seconds through 10 minutes, and clock offsets use 15-minute steps.
 
 - Signed SD updates verify the written flash image, honour cancellation before
   writing, and use the correct `deskos/updates` folder with clearer progress.
@@ -36,13 +47,13 @@ The previous stable release is
 - An ordinary update can finish without optional SD storage. Fresh clean
   installations retain the complete three-stage verification.
 
-See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.2.md) for the full
+See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.3.md) for the full
 change and validation record. Earlier releases remain documented in the
 [roadmap](docs/ROADMAP.md) and their release notes.
 
 ## Everyday use
 
-The dark 480×480 touch interface has **Home**, **Channels**, **Contacts**,
+The dark 480×480 touch interface has **Home**, **Chats**, **Contacts**,
 **Map**, and **Settings**. It supports public and hashtag channels, direct
 messages with acknowledgement state, contact search and sorting, discovery,
 Ping and Trace, and authenticated repeater/room management.
@@ -70,7 +81,7 @@ the [guided browser flasher](https://flasher.canadaverse.org/).
 - **SD preparation:** use an already-formatted FAT32 card. Preparation adds only
   missing, verified files; it never formats the card or replaces different files.
 - **Signed local update:** copy the matching manifest, signature, and app image
-  under `updates/` on the prepared card, then use **Settings → Signed Update**.
+  under `deskos/updates/` on the prepared card, then use **Settings → Signed Update**.
 
 The D1L can take tens of seconds to restore a populated card. Keep power and
 USB connected while its loading/readiness screens finish.

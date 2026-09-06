@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dm_conversation_list.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -383,6 +385,13 @@ size_t d1l_app_model_copy_route_trace(const char *fingerprint, d1l_route_entry_t
                                       size_t max_entries);
 size_t d1l_app_model_query_nodes(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
                                  size_t max_entries);
+size_t d1l_app_model_query_nodes_page(const d1l_node_query_t *query,
+    d1l_node_view_t *out_entries, size_t max_entries, size_t offset,
+    size_t *total_matches);
+/* UI task only, like snapshot publication. Does not mark conversations read. */
+size_t d1l_app_model_query_dm_conversations(size_t offset,
+    d1l_dm_conversation_summary_t *rows, size_t capacity,
+    size_t *total, bool *has_failure);
 esp_err_t d1l_app_model_mark_public_read(void);
 esp_err_t d1l_app_model_mark_channel_read(uint64_t channel_id);
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);

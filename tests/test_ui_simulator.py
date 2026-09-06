@@ -150,7 +150,7 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert messages["public_rendered_count"] == 0
     assert messages["dm_source_count"] == 32
     assert messages["dm_conversation_count"] == 32
-    assert messages["dm_rendered_count"] == 0
+    assert messages["dm_rendered_count"] == 1
     messages_public = views["messages_public"]["metrics"]
     assert messages_public["messages_mode"] == "public"
     assert messages_public["public_source_count"] == 48
@@ -179,10 +179,10 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
         assert metrics["incoming_event_advanced_dm_cursor"] is False
     nodes = views["nodes"]["metrics"]
     assert nodes["contacts_source_count"] == 18
-    assert nodes["contacts_rendered_count"] <= 2
+    assert nodes["contacts_rendered_count"] <= 3
     assert nodes["heard_source_count"] == 96
-    assert nodes["heard_query_count"] == 64
-    assert nodes["node_role_query_capacity"] == 64
+    assert nodes["heard_query_count"] == 96
+    assert nodes["node_role_query_capacity"] == 512
     assert nodes["heard_rendered_count"] <= 4
 
     packets = views["packets"]["metrics"]
@@ -293,9 +293,9 @@ def test_nodes_role_summary_uses_exact_render_query_roles(tmp_path):
             "unknown": 1,
         },
         "large-mesh": {
-            "chat_companion": 38,
-            "repeater": 13,
-            "room_server": 13,
+            "chat_companion": 57,
+            "repeater": 19,
+            "room_server": 20,
             "sensor": 0,
             "unknown": 0,
         },
@@ -331,7 +331,7 @@ def test_nodes_role_summary_uses_exact_render_query_roles(tmp_path):
         ]
         assert len(destructive_targets) == metrics["nodes_destructive_actions"], scenario
         if destructive_targets:
-            assert destructive_targets[0]["label"] == "Clear nearby", scenario
+            assert destructive_targets[0]["label"] == "Clear heard", scenario
 
 
 def test_node_role_counts_reject_noncanonical_case_spacing_and_aliases() -> None:
@@ -467,6 +467,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
                 "messages_dm_retry",
                 "messages_dm_failure",
             "nodes",
+            "nodes_discovered",
+            "nodes_repeaters",
             "map",
             "packets",
             "settings",
@@ -481,7 +483,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert ui_simulator.DOCKED_VIEWS == expected_docked_views
 
     assert {
-        "Channels",
+        "Chats",
         "Contacts",
         "Map",
         "Settings",
@@ -519,7 +521,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "settings_advanced_expanded",
     ):
         assert any(target["kind"] == "dock_tab" for target in views_by_name[view_name]["touch_targets"])
-    assert {"Channels", "Group conversations", "Add", "DMs", "#Public"} <= labels_by_view["messages"]
+    assert {"Chats", "Channels and direct messages", "Add", "DMs", "#Public"} <= labels_by_view["messages"]
     assert {"Public", "Back", "Read", "...", "Message this channel"} <= labels_by_view["messages_public"]
     assert {"Direct messages", "Back"} <= labels_by_view["messages_dm"]
     public_metrics = views_by_name["messages_public"]["metrics"]
@@ -531,11 +533,11 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {
         "Contacts",
         "Find",
-        "Clear nearby",
+        "Clear heard",
         "Search contacts",
         "Sort: Recent",
-        "Saved contacts",
-        "Nearby",
+        "Saved",
+        "Discovered",
         "Chat",
     } <= labels_by_view["nodes"]
     assert {"Map", "Set up"} <= labels_by_view["map"]
@@ -571,10 +573,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {
         "Settings",
         "Device, radio, network and support",
-        "Tools",
-        "Packets",
-        "Diagnostics",
-        "Terminal",
+        "Device",
+        "Profile",
+        "Radio",
+        "Display & clock",
         "Connections",
         "Wi-Fi",
     } <= labels_by_view["settings"]
@@ -587,9 +589,9 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "MQTT / Observer",
     } <= labels_by_view["settings_connections_expanded"]
     assert {"Settings", "Storage & maps", "SD Card", "Map options", "Signed update"} <= labels_by_view["settings_storage_maps_expanded"]
-    assert {"Settings", "Device", "Display", "Notifications", "Identity"} <= labels_by_view["settings_device_expanded"]
+    assert {"Settings", "Device", "Profile", "Radio", "Display & clock"} <= labels_by_view["settings_device_expanded"]
     assert {"Settings", "Support", "About", "Version 1.0.0"} <= labels_by_view["settings_support_expanded"]
-    assert {"Settings", "Advanced", "Radio", "Server admin", "Share this node"} <= labels_by_view["settings_advanced_expanded"]
+    assert {"Settings", "Messaging", "Quick replies", "Server admin", "Notifications"} <= labels_by_view["settings_advanced_expanded"]
     assert {
         "Wi-Fi",
         "Connection and saved network",
@@ -624,8 +626,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Night Off",
         "Contrast Off",
         "Timeout 10 min",
-        "Time -1h",
-        "Time +1h",
+        "Time -15m",
+        "Time +15m",
     } <= labels_by_view["display_settings_sheet"]
     assert {"Diagnostics", "Health", "Crashlog  Events  Serial", "Open Terminal"} <= labels_by_view["diagnostics_sheet"]
     assert {"Message Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
@@ -1048,7 +1050,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         dock_targets = [target for target in views[docked_view]["touch_targets"] if target["kind"] == "dock_tab"]
         assert [target["label"] for target in dock_targets] == [
             "Home tab",
-            "Channels tab",
+            "Chats tab",
             "Contacts tab",
             "Map tab",
             "Settings tab",
@@ -1057,7 +1059,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         assert all(target["height"] == 44 for target in dock_targets), docked_view
         assert [target["semantic_label"] for target in dock_targets] == [
             "Home",
-            "Channels",
+            "Chats",
             "Contacts",
             "Map",
             "Settings",
@@ -1098,7 +1100,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["map_location"]["edit_map_latitude"]["kind"] == "text_field"
     assert actions_by_view["map_location"]["edit_map_longitude"]["kind"] == "text_field"
     assert actions_by_view["map_location"]["close_map_location"]["destination"] == "map_options"
-    assert actions_by_view["nodes"]["open_node_detail"]["destination"] == "node_detail_sheet"
+    assert actions_by_view["nodes_discovered"]["open_node_detail"]["destination"] == "node_detail_sheet"
     assert actions_by_view["nodes"]["open_dm_compose"]["destination"] == "compose_dm_sheet"
     assert "open_node_dm" not in actions_by_view["nodes"]
     assert views["nodes"]["metrics"]["duplicate_contact_nodes_hidden"] >= 1
@@ -1159,7 +1161,19 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         {
             "view": "nodes",
             "action": "clear_heard",
-            "label": "Clear nearby",
+            "label": "Clear heard",
+            "destination": None,
+        },
+        {
+            "view": "nodes_discovered",
+            "action": "clear_heard",
+            "label": "Clear heard",
+            "destination": None,
+        },
+        {
+            "view": "nodes_repeaters",
+            "action": "clear_heard",
+            "label": "Clear heard",
             "destination": None,
         },
         {
@@ -1250,35 +1264,35 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
             )
             assert target["visual_box"][3] - target["visual_box"][1] >= 44
     assert {
-        "open_packets",
-        "open_diagnostics",
-        "open_terminal",
+        "open_profile",
+        "open_radio_settings",
+        "open_display_settings",
         "open_wifi_settings",
         "open_ble_settings",
     } <= set(actions_by_view["settings"])
     assert all(
         actions_by_view["settings"][action]["kind"] == "menu_leaf"
         for action in (
-            "open_packets",
-            "open_diagnostics",
-            "open_terminal",
+            "open_profile",
+            "open_radio_settings",
+            "open_display_settings",
             "open_wifi_settings",
             "open_ble_settings",
         )
     )
-    assert actions_by_view["settings"]["open_packets"]["visual_box"] == [18, 92, 462, 146]
+    assert actions_by_view["settings_tools_expanded"]["open_packets"]["visual_box"] == [18, 92, 462, 146]
     assert actions_by_view["settings"]["open_wifi_settings"]["visual_box"] == [18, 304, 462, 358]
-    assert actions_by_view["settings"]["open_packets"]["destination"] == "packets"
-    assert actions_by_view["settings"]["open_diagnostics"]["destination"] == "diagnostics_sheet"
+    assert actions_by_view["settings_tools_expanded"]["open_packets"]["destination"] == "packets"
+    assert actions_by_view["settings_tools_expanded"]["open_diagnostics"]["destination"] == "diagnostics_sheet"
     assert actions_by_view["settings_connections_expanded"]["open_wifi_settings"]["destination"] == "wifi_setup_sheet"
     assert actions_by_view["settings_connections_expanded"]["open_ble_settings"]["destination"] == "ble_setup_sheet"
     assert actions_by_view["settings_storage_maps_expanded"]["open_storage_setup"]["destination"] == "storage_setup_sheet"
     assert actions_by_view["settings_storage_maps_expanded"]["open_map_options"]["destination"] == "map_options"
     assert actions_by_view["settings_device_expanded"]["open_display_settings"]["destination"] == "display_settings_sheet"
-    assert actions_by_view["settings_advanced_expanded"]["open_radio_settings"]["destination"] == "radio_settings_sheet"
-    assert actions_by_view["settings_advanced_expanded"]["open_advert_sheet"]["destination"] == "advert_sheet"
+    assert actions_by_view["settings_device_expanded"]["open_radio_settings"]["destination"] == "radio_settings_sheet"
+    assert actions_by_view["profile_sheet"]["open_advert_sheet"]["destination"] == "advert_sheet"
     assert not any(target["label"] == "Identity" for target in views["settings_device_expanded"]["touch_targets"])
-    assert not any(target["label"] == "About" for target in views["settings_support_expanded"]["touch_targets"])
+    assert any(target["label"] == "About" for target in views["settings_support_expanded"]["touch_targets"])
     for key in (
         "tools",
         "connections",

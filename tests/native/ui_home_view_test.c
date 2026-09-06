@@ -16,7 +16,7 @@ static void test_default_view_is_bounded_and_truthful(void)
     d1l_ui_home_view(&input, &view);
 
     assert(strcmp(view.messages_status, "All caught up") == 0);
-    assert(strcmp(view.network_status, "0 saved | 0 nearby") == 0);
+    assert(strcmp(view.network_status, "0 saved | 0 heard") == 0);
     assert(strcmp(view.map_status, "Set a location") == 0);
     assert(strcmp(view.more_status, "0 packets captured") == 0);
     assert(strcmp(view.mesh_value, "Starting") == 0);
@@ -58,7 +58,7 @@ static void test_ready_view_owns_all_rendered_strings(void)
     d1l_ui_home_view(&input, &view);
 
     assert(strcmp(view.messages_status, "5 unread") == 0);
-    assert(strcmp(view.network_status, "4 saved | 5 nearby") == 0);
+    assert(strcmp(view.network_status, "4 saved | 5 heard") == 0);
     assert(strcmp(view.map_status, "Ready to open") == 0);
     assert(strcmp(view.more_status, "1 packet captured") == 0);
     assert(strcmp(view.mesh_value, "Ready") == 0);
@@ -117,7 +117,7 @@ static void test_missing_sd_reports_live_only_restrictions(void)
     d1l_ui_home_view_model_t view;
     d1l_ui_home_view(&input, &view);
 
-    assert(strcmp(view.network_status, "3 nearby | history not saved") == 0);
+    assert(strcmp(view.network_status, "3 heard | history not saved") == 0);
     assert(strcmp(view.sd_value, "live only") == 0);
     assert(strcmp(view.sd_compact_value, "Live only") == 0);
     assert(strcmp(view.attention_value, "Limited") == 0);

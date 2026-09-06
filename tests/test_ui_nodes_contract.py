@@ -68,15 +68,15 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
     for label in (
         '"Contacts"',
         '"Find"',
-        '"Clear nearby"',
+        '"Clear heard"',
         '"Search contacts"',
         '"Sort: Recent"',
-        '"Saved contacts"',
-        '"Nearby"',
-        '"No contacts yet"',
-        '"Find nearby"',
+        '"Saved"',
+        '"Discovered"',
+        '"No new nodes"',
+        '"Previous"',
         '"No saved contacts yet"',
-        '"No other nearby nodes"',
+        '"Next"',
         '"Login"',
         '"Chat"',
         '"Repeater"',
@@ -89,17 +89,17 @@ def test_nodes_root_module_matches_mobile_contacts_sections_and_boundaries():
     assert "nodes_render_contact_row" in source
     assert "nodes_render_node_row" in source
     assert "nodes_render_role_avatar" in source
-    assert "nodes_node_matches_contact" in source
-    assert "nodes_nearby_count" in source
+    assert "controller->rendered.discovered" in source
+    assert "view->heard_count" in source
     assert "nodes_render_empty_state" in source
     assert "static const char *nodes_role_badge_text" in source
     assert "static uint32_t nodes_role_color" in source
     assert "NODES_ROW_HEIGHT 58" in source
     assert "NODES_MIN_TOUCH_HEIGHT 44" in source
-    assert "NODES_MAX_RENDERED_ROWS 12U" in source
-    assert "rendered_total < NODES_MAX_RENDERED_ROWS" in source
-    assert '"Showing %u of %u %s. Use Search to find more."' in source
-    assert "rendered_nearby == 0U && nearby_count == 0U" in source
+    assert "NODES_MAX_RENDERED_ROWS D1L_UI_NODES_PAGE_SIZE" in source
+    assert "i - start < NODES_MAX_RENDERED_ROWS" in source
+    assert '"%u-%u of %u"' in source
+    assert "controller->rendered.total_matches == 0U" in source
     assert 'nodes_create_button(row, "Chat", 340, 7, 84, 44' in source
     assert 'nodes_create_button(row, "Login", 340, 7, 84, 44' in source
     assert "entry->public_key_hex" not in source

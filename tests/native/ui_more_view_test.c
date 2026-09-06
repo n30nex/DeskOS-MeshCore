@@ -47,17 +47,17 @@ static void test_default_view_is_owned_bounded_and_truthful(void)
                   "Internal storage") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 1)->status,
                   "Set location") == 0);
-    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 0)->status,
-                  "Time setting unavailable") == 0);
-    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
-                  "0 unread") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 2)->status,
-                  "Not set") == 0);
-    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_ADVANCED, 0)->status,
+                  "Time setting unavailable") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_ADVANCED, 2)->status,
+                  "0 unread") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 0)->status,
+                  "Name & location") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
                   "Needs setup") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_SUPPORT, 0)->status,
                   "Version 1.2.3") == 0);
-    assert(!item(&view, D1L_UI_MORE_CATEGORY_SUPPORT, 0)->actionable);
+    assert(item(&view, D1L_UI_MORE_CATEGORY_SUPPORT, 0)->actionable);
 }
 
 static void test_connectivity_and_ready_storage_states(void)
@@ -101,13 +101,13 @@ static void test_connectivity_and_ready_storage_states(void)
                   "Ready") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 1)->status,
                   "Ready") == 0);
-    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 0)->status,
-                  "UTC-04:00 / ~08:42") == 0);
-    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
-                  "4 unread") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 2)->status,
-                  "Ready") == 0);
-    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_ADVANCED, 0)->status,
+                  "UTC-04:00 / ~08:42") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_ADVANCED, 2)->status,
+                  "4 unread") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 0)->status,
+                  "Name & location") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
                   "Ready") == 0);
 
     input.wifi_connected = false;
@@ -117,10 +117,10 @@ static void test_connectivity_and_ready_storage_states(void)
     assert(d1l_ui_more_view(&input, &view));
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_CONNECTIONS, 0)->status,
                   "Connecting") == 0);
-    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_ADVANCED, 0)->status,
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
                   "Applying") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 1)->status,
-                  "Needs Wi-Fi") == 0);
+                  "Offline cache") == 0);
 }
 
 static void test_storage_faults_override_stale_ready_flags(void)

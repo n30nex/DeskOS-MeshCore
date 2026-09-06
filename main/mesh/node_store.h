@@ -78,6 +78,7 @@ typedef struct {
     const char *text;
     bool keyed_only;
     bool reachable_only;
+    bool unsaved_only;
 } d1l_node_query_t;
 
 typedef struct {
@@ -88,6 +89,7 @@ typedef struct {
     bool muted;
     bool keyed;
     bool reachable;
+    bool saved;
 } d1l_node_view_t;
 
 typedef struct {
@@ -129,6 +131,9 @@ bool d1l_node_store_find_by_fingerprint(const char *fingerprint, d1l_node_entry_
 size_t d1l_node_store_copy_recent(d1l_node_entry_t *out_entries, size_t max_entries);
 size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
                             size_t max_entries);
+size_t d1l_node_store_query_page(const d1l_node_query_t *query,
+    d1l_node_view_t *out_entries, size_t max_entries, size_t offset,
+    size_t *total_matches);
 /* Changes only for marker membership, identity/name/type, or coordinate changes. */
 uint32_t d1l_node_store_marker_generation(void);
 /* Passive, bounded snapshot of located nodes, newest local location receipt first.

@@ -91,6 +91,21 @@ static void test_sort_cycle(void)
 
 int main(void)
 {
+    d1l_contact_entry_t chat = contact("01", "Alpha", "chat", -40, 10U, true);
+    assert(d1l_ui_nodes_contact_matches_filter(&chat, D1L_NODE_FILTER_COMPANION));
+    assert(d1l_ui_nodes_contact_matches_filter(&chat, D1L_NODE_FILTER_FAVORITE));
+    assert(!d1l_ui_nodes_contact_matches_filter(&chat, D1L_NODE_FILTER_REPEATER));
+    snprintf(chat.type, sizeof(chat.type), "sensor");
+    assert(d1l_ui_nodes_contact_matches_filter(&chat, D1L_NODE_FILTER_SENSOR));
+    assert(!d1l_ui_nodes_contact_matches_filter(&chat, D1L_NODE_FILTER_COMPANION));
+    assert(d1l_ui_nodes_next_filter(D1L_NODE_FILTER_FAVORITE) == D1L_NODE_FILTER_ALL);
+    assert(d1l_ui_nodes_page_offset(0U, 37U, 12U) == 0U);
+    assert(d1l_ui_nodes_page_offset(12U, 37U, 12U) == 12U);
+    assert(d1l_ui_nodes_page_offset(36U, 37U, 12U) == 36U);
+    assert(d1l_ui_nodes_page_offset(48U, 37U, 12U) == 36U);
+    assert(d1l_ui_nodes_page_offset(36U, 5U, 12U) == 0U);
+    assert(d1l_ui_nodes_page_offset(36U, 0U, 12U) == 0U);
+    assert(d1l_ui_nodes_page_offset(SIZE_MAX, 512U, 12U) == 504U);
     test_names_and_search();
     test_contact_sorts();
     test_sort_cycle();

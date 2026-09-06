@@ -61,10 +61,10 @@ def test_messages_hierarchy_is_simple_bounded_and_navigation_is_rf_silent():
     assert "D1L_UI_MESSAGES_MODE_DIRECT" in header
     assert "D1L_UI_MESSAGES_ACTION_SHOW_ROOT" in header
     assert '"Channels"' in source
-    assert '"Group conversations"' in source
+    assert '"Channels and direct messages"' in source
     assert '"DMs"' in source
     assert "messages_render_channel_row(" in source
-    assert "messages_create_scroll_body(parent, 18, 66, 424, 288)" in source
+    assert "messages_create_scroll_body(parent, 18, 66, 424, 358)" in source
     assert "D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL" in source
     assert "messages_create_scroll_body(parent, 18, 68, 424, 286)" in source
     assert '"Message this channel                         >"' in source
@@ -106,7 +106,7 @@ def test_direct_list_projects_unique_conversations_with_thread_cursor_truth():
     assert "row_unread[index]" in projector
     assert "d1l_dm_store_copy_recent(" in app_source
     assert "d1l_read_state_dm_entry_is_unread(" in app_source
-    assert "d1l_dm_conversation_list_project(" in app_source
+    assert "d1l_dm_conversation_list_project_page(" in app_source
     assert "d1l_contact_store_find_by_fingerprint(" in app_source
     assert "contact.muted" in app_source
     assert "dm_conversation_count" in app_header

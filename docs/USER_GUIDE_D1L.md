@@ -1,11 +1,42 @@
-# MeshCore DeskOS D1L 1.8.0-rc.2 User Guide
+# MeshCore DeskOS D1L 1.8.0-rc.3 User Guide
+
+## Interface changes in 1.8.0-rc.3
+
+- **Chats** opens channels and recent direct messages together. Tap a channel
+  or DM to open it; **Add** manages channels and **DMs** opens the dedicated list.
+  Its **Previous / Next** buttons browse five conversations at a time. Paging
+  does not mark messages read or send anything; opening a thread marks it read.
+- **Contacts → Saved / Discovered** switches between your saved contacts and
+  other heard nodes. Use **Search contacts**, the role filter, and **Sort**;
+  **Previous / Next** reaches all matching entries in pages of 12. The heading's
+  heard total includes saved nodes and agrees with Home; the range counts only
+  the current filtered view. **Clear heard** still needs a second deliberate tap.
+- **Settings → Profile** edits the node name while preserving its identity.
+  **Location** opens the existing location control; **Advertise** opens the
+  explicit Nearby/Wide Area choice. Merely opening Profile sends nothing.
+- **Quick replies** appears in the composer and under Messaging in Settings.
+  Six replies can be edited and saved locally, with up to 80 UTF-8 bytes each.
+  An empty reply clears that slot. Choosing a reply in the composer inserts at
+  the cursor; review it and tap **Send**. If it would exceed the message's
+  138-byte limit, the draft stays unchanged. Quick replies survive a preserving
+  update and are cleared by an explicit factory reset.
+- **Display & clock** offers 30 seconds, 1, 2, 5 or 10 minutes, or Off for the
+  display timeout. Time controls adjust the fixed UTC offset by 15 minutes;
+  daylight-saving changes remain manual.
+
+Settings starts with Profile, Radio and Display & clock. Scroll to Connections,
+Storage & maps, Messaging, Tools and Support for the other controls. **About**
+opens diagnostics. The **Tools** shortcut jumps to packets, diagnostics and the
+terminal; page controls also appear below long Contacts lists. References to the older Channels navigation below describe
+the channel part of the current Chats page.
+
 
 This guide covers the production `full_feature` firmware with `conditional` SD
 history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.8.0-rc.2 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.8.0-rc.3 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -45,7 +76,7 @@ settings. A factory-fresh device opens the first-start wizard:
 Wi-Fi remains optional for offline MeshCore use. The prepared FAT32 card and
 NRCan provider manifest are required for the complete 1.5 setup.
 
-The dock is **Home**, **Channels**, **Contacts**, **Map**, and **Settings**.
+The dock is **Home**, **Chats**, **Contacts**, **Map**, and **Settings**.
 Home uses those same four destination names, so the card you open matches the
 selected dock tab. Lists and long pages scroll vertically.
 
@@ -61,7 +92,7 @@ reseeded.
 
 ## Messages, channels and direct messages
 
-The Public channel is always configured. Open **Channels** and tap Public or
+The Public channel is always configured. Open **Chats** and tap Public or
 any other enabled channel to select it and immediately open its conversation.
 Choose **DMs** for private conversations with verified contacts.
 Use the channel controls to create or import, select, enable, rename, make
@@ -108,7 +139,7 @@ The same Contacts area provides:
 - **Ping** on a repeater sends a direct zero-hop TRACE.
 - **PATH/TRACE** on a verified contact displays pending, timeout, reply, RTT,
   RSSI and hop SNR state.
-- **Clear nearby** requires confirmation and removes the retained heard-node
+- **Clear heard** requires confirmation and removes the retained heard-node
   list without deleting saved contacts.
 
 Ordinary inspection, scrolling, filtering and refresh are RF-silent.
@@ -169,8 +200,8 @@ tiles remain usable and RF chat continues.
 
 ## Local clock
 
-Open **Settings -> Display** and use **Time -1h** or **Time +1h** to adjust the
-displayed local clock in one-hour steps. The selected fixed UTC offset is saved
+Open **Settings -> Display & clock** and use **Time -15m** or **Time +15m** to adjust the
+displayed local clock in 15-minute steps. The selected fixed UTC offset is saved
 across restarts. Mountain Time uses UTC-7 in standard time and UTC-6 in
 daylight time.
 
@@ -361,7 +392,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.8.0-rc.2 download and
+Use the guided browser flasher or the published DeskOS D1L 1.8.0-rc.3 download and
 follow its `START_HERE.md`.
 
 The browser waits for DeskOS to finish startup and verifies its exact build,

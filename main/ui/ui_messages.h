@@ -30,6 +30,7 @@ typedef struct {
     d1l_ui_messages_mode_t mode;
     size_t public_total;
     size_t dm_total;
+    size_t dm_offset;
     uint32_t public_unread;
     uint32_t dm_unread;
     uint32_t muted_dm_unread;
@@ -63,6 +64,8 @@ typedef enum {
     D1L_UI_MESSAGES_ACTION_SHOW_ROOT,
     D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC,
     D1L_UI_MESSAGES_ACTION_SHOW_DIRECT,
+    D1L_UI_MESSAGES_ACTION_PREVIOUS_DM_PAGE,
+    D1L_UI_MESSAGES_ACTION_NEXT_DM_PAGE,
     D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE,
     D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD,
     D1L_UI_MESSAGES_ACTION_CLOSE_DM_THREAD,
@@ -98,7 +101,7 @@ typedef struct {
     uint32_t generation;
 } d1l_ui_messages_action_binding_t;
 
-#define D1L_UI_MESSAGES_CONTROL_BINDING_COUNT 6U
+#define D1L_UI_MESSAGES_CONTROL_BINDING_COUNT 8U
 #define D1L_UI_MESSAGES_THREAD_CONTROL_BINDING_COUNT 4U
 #define D1L_UI_MESSAGES_CHANNEL_CONTROL_BINDING_COUNT 3U
 #define D1L_UI_MESSAGES_THREAD_INITIAL_ROWS 5U

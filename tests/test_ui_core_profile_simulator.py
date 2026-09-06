@@ -94,9 +94,9 @@ def test_core_profile_exposes_production_root_affordances(tmp_path: Path):
     settings_labels = set(views["settings"]["labels"])
     assert {
         "Settings",
-        "Tools",
-        "Packets",
-        "Diagnostics",
+        "Device",
+        "Radio",
+        "Display & clock",
         "Connections",
         "Wi-Fi",
     } <= settings_labels

@@ -242,7 +242,7 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "set_object_hidden(s_status_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_identity_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_lock_button, !layout.header_detail_visible)" in source
-    assert '"Channels"' in home_module
+    assert '"Chats"' in home_module
     assert '"Contacts"' in home_module
     assert '"Map"' in home_module
     assert '"Settings"' in home_module
@@ -354,9 +354,9 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "lv_obj_set_style_pad_all(s_compose_sheet, 0, 0)" in layout
     assert "lv_obj_set_scroll_dir(s_compose_sheet, LV_DIR_NONE)" in layout
     assert "lv_obj_scroll_to_y(s_compose_sheet, 0, LV_ANIM_OFF)" in layout
-    assert "lv_obj_set_size(s_compose_keyboard, 448, 258)" in layout
+    assert "lv_obj_set_size(s_compose_keyboard, 448, 242)" in layout
     assert "lv_obj_set_align(s_compose_keyboard, LV_ALIGN_TOP_LEFT)" in layout
-    assert "lv_obj_set_pos(s_compose_keyboard, 16, 158)" in layout
+    assert "lv_obj_set_pos(s_compose_keyboard, 16, 174)" in layout
     assert "d1l_ui_keyboard_configure_compose(s_compose_keyboard)" in compose
     assert "layout_compose_sheet_controls()" in compose
     probe = source.split("static void open_compose_probe_on_ui_task", 1)[1].split(
@@ -1203,19 +1203,19 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "nodes_dispatch_node_open_event_cb" in nodes_source
     assert "recent_contact_count" in source
     assert "recent_contacts" in source
-    assert "No contacts yet" in nodes_source
-    assert "No other nearby nodes" in nodes_source
+    assert "No saved contacts yet" in nodes_source
+    assert "No new nodes" in nodes_source
     assert "node_total_written" in source
     assert "contact_total_written" in source
     assert "#define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "#define D1L_APP_SNAPSHOT_CONTACT_PREVIEW D1L_CONTACT_STORE_CAPACITY" in header
-    assert "i < controller->rendered.contact_row_count" in nodes_source
+    assert "i < count" in nodes_source
     assert "d1l_app_model_query_nodes(" in source
     assert "D1L_NODE_STORE_CAPACITY" in source
-    assert '"Saved contacts"' in nodes_source
-    assert '"Nearby"' in nodes_source
-    assert "nodes_node_matches_contact" in nodes_source
-    assert "i < controller->rendered.node_row_count" in nodes_source
+    assert '"Saved"' in nodes_source
+    assert '"Discovered"' in nodes_source
+    assert "controller->rendered.discovered" in nodes_source
+    assert "i < count" in nodes_source
 
 
 def test_node_detail_sheet_opens_from_heard_node_rows():
@@ -1390,7 +1390,7 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert "map_location_save_event_cb" in source
     assert "map_format_coordinate" in map_source
     assert '{D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME}' in source
-    assert '{D1L_UI_TAB_MESSAGES, "Channels", LV_SYMBOL_ENVELOPE}' in source
+    assert '{D1L_UI_TAB_MESSAGES, "Chats", LV_SYMBOL_ENVELOPE}' in source
     assert '{D1L_UI_TAB_NODES, "Contacts", LV_SYMBOL_LIST}' in source
     assert '{D1L_UI_TAB_MAP, "Map", LV_SYMBOL_IMAGE}' in source
     assert '{D1L_UI_TAB_SETTINGS, "Settings", LV_SYMBOL_SETTINGS}' in source
@@ -1438,7 +1438,7 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert "set_messages_mode(D1L_UI_MESSAGES_MODE_ROOT)" in source
     assert "set_messages_mode(D1L_UI_MESSAGES_MODE_PUBLIC)" in source
     assert "set_messages_mode(D1L_UI_MESSAGES_MODE_DIRECT)" in source
-    assert '"Group conversations"' in messages_source
+    assert '"Channels and direct messages"' in messages_source
     assert "messages_render_channel_row(" in messages_source
     assert '"Direct messages"' in messages_source
     assert "for (size_t i = 0; i < controller->rendered.public_row_count; ++i)" in messages_source
@@ -1696,7 +1696,7 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
         ("D1L_UI_SETTINGS_ACTION_MAP_TILES", "open_map_options_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_DISPLAY", "open_display_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_DIAGNOSTICS", "open_diagnostics_sheet_event_cb(NULL);"),
-        ("D1L_UI_SETTINGS_ACTION_ADVANCED", "open_sheet_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_PROFILE", "open_profile_sheet_event_cb(NULL);"),
     )
     for action, route in action_routes:
         assert action in more_header
@@ -1720,7 +1720,7 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
     assert "settings_apply_category_state" not in settings_module
     assert "binding->generation != controller->generation" in settings_module
     assert "LV_OBJ_FLAG_HIDDEN" not in settings_module
-    for category in ("Tools", "Connections", "Storage & maps", "Device", "Support", "Advanced"):
+    for category in ("Tools", "Connections", "Storage & maps", "Device", "Support", "Messaging"):
         assert f'"{category}"' in more_module
 
 
@@ -1754,8 +1754,8 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"SD Card"' in more_module
     assert '"Map options"' in more_module
     assert '"Offline Maps"' not in more_module
-    assert '"Identity"' in more_module
-    assert '"Advanced"' in more_module
+    assert '"Profile"' in more_module
+    assert '"Messaging"' in more_module
     assert '"About"' in more_module
     assert '"Packets"' in more_module
     assert '"Bluetooth"' in more_module
@@ -1813,7 +1813,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
-    assert '"Use Time -1h/+1h to set the local clock.' in device_sheets
+    assert '"Adjust local time in 15-minute steps.' in device_sheets
     assert '"Terminal shows recent events and the current log level."' in device_sheets
     assert '"reset %s  uptime %lus  mesh %s"' in device_sheets
 

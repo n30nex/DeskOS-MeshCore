@@ -244,7 +244,7 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
            (input->storage_sd_present ? "Detected" : "Internal storage"))));
     const char *map_status = !input->map_location_set ? "Set location" :
         (!input->map_tile_cache_ready ? map_storage_state(input) :
-         (!input->wifi_connected ? "Needs Wi-Fi" :
+         (!input->wifi_connected ? "Offline cache" :
           (input->map_tile_render_supported ? "Ready" : "Loading")));
     const char *storage_summary = input->storage_retained_backup_degraded &&
         sd_attention ? "Storage needs attention" :
@@ -298,37 +298,36 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
              D1L_UI_SETTINGS_ACTION_UPDATE, false);
 
     category = set_category(out_view, D1L_UI_MORE_CATEGORY_DEVICE,
-                            "Device", "Display, notifications, identity",
+                            "Device", "Profile, radio, display and clock",
                             COLOR_BLUE, false, 3U);
-    set_item(&category->items[0], "Display", display_status, COLOR_DISPLAY,
+    set_item(&category->items[0], "Profile", "Name & location", COLOR_GREEN,
+             D1L_UI_SETTINGS_ACTION_PROFILE, false);
+    set_item(&category->items[1], "Radio", radio_status,
+             input->radio_ready ? COLOR_GREEN : COLOR_TEXT,
+             D1L_UI_SETTINGS_ACTION_RADIO, false);
+    set_item(&category->items[2], "Display & clock", display_status, COLOR_DISPLAY,
              D1L_UI_SETTINGS_ACTION_DISPLAY, false);
-    set_item(&category->items[1], "Notifications", notification_status,
-             input->notification_unread_count ? COLOR_AMBER : COLOR_GREEN,
-             D1L_UI_SETTINGS_ACTION_NOTIFICATIONS, false);
-    set_item(&category->items[2], "Identity",
-             input->identity_ready ? "Ready" : "Not set", COLOR_TEXT,
-             D1L_UI_SETTINGS_ACTION_NONE, false);
 
     category = set_category(out_view, D1L_UI_MORE_CATEGORY_SUPPORT,
                             "Support", "About this device", COLOR_VIOLET,
                             false, 1U);
     set_item(&category->items[0], "About", about_status, COLOR_TEXT,
-             D1L_UI_SETTINGS_ACTION_NONE, false);
+             D1L_UI_SETTINGS_ACTION_DIAGNOSTICS, false);
 
     category = set_category(out_view, D1L_UI_MORE_CATEGORY_ADVANCED,
-                            "Advanced", "Radio and authenticated server tools",
+                            "Messaging", "Quick replies, servers and notifications",
                             COLOR_WARNING_TEXT, false, 3U);
-    set_item(&category->items[0], "Radio", radio_status,
-             input->radio_ready ? COLOR_GREEN : COLOR_TEXT,
-             D1L_UI_SETTINGS_ACTION_RADIO, false);
+    set_item(&category->items[0], "Quick replies", "Six editable messages",
+             COLOR_GREEN, D1L_UI_SETTINGS_ACTION_QUICK_REPLIES, false);
     set_item(&category->items[1], "Server admin",
              input->admin_state && input->admin_state[0] ?
                  input->admin_state : "Idle",
              text_equals(input->admin_state, "authenticated") ?
                  COLOR_GREEN : COLOR_TEXT,
              D1L_UI_SETTINGS_ACTION_ADMIN, false);
-    set_item(&category->items[2], "Share this node", "Let nearby devices find you",
-             COLOR_WARNING_TEXT, D1L_UI_SETTINGS_ACTION_ADVANCED, false);
+    set_item(&category->items[2], "Notifications", notification_status,
+             input->notification_unread_count ? COLOR_AMBER : COLOR_GREEN,
+             D1L_UI_SETTINGS_ACTION_NOTIFICATIONS, false);
 
     return d1l_ui_more_view_model_is_valid(out_view);
 }

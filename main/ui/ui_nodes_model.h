@@ -14,3 +14,8 @@ void d1l_ui_nodes_sort_contacts(
     size_t count,
     d1l_node_sort_t sort);
 d1l_node_sort_t d1l_ui_nodes_next_sort(d1l_node_sort_t sort);
+bool d1l_ui_nodes_contact_matches_filter(const d1l_contact_entry_t *entry,
+                                         d1l_node_filter_t filter);
+d1l_node_filter_t d1l_ui_nodes_next_filter(d1l_node_filter_t filter);
+const char *d1l_ui_nodes_filter_label(d1l_node_filter_t filter);
+size_t d1l_ui_nodes_page_offset(size_t requested, size_t total, size_t page_size);

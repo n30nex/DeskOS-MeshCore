@@ -23,6 +23,10 @@ size_t d1l_dm_conversation_list_project(
     const d1l_dm_entry_t *rows, const bool *row_unread, size_t row_count,
     d1l_dm_conversation_summary_t *out_summaries, size_t max_summaries,
     size_t *out_total_conversations);
+size_t d1l_dm_conversation_list_project_page(
+    const d1l_dm_entry_t *rows, const bool *row_unread, size_t row_count,
+    d1l_dm_conversation_summary_t *out_summaries, size_t max_summaries,
+    size_t offset, size_t *out_total_conversations);
 
 /* Reports terminal delivery failures anywhere in the same bounded retained
  * source used by the conversation projection, including rows hidden by a

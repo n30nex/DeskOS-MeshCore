@@ -206,11 +206,11 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
         history_is_live_only(input->node_store_backend);
     if (node_history_unavailable) {
         snprintf(out_view->network_status, sizeof(out_view->network_status),
-                 "%llu nearby | history not saved",
+                 "%llu heard | history not saved",
                  (unsigned long long)input->node_count);
     } else {
         snprintf(out_view->network_status, sizeof(out_view->network_status),
-                 "%llu saved | %llu nearby",
+                 "%llu saved | %llu heard",
                  (unsigned long long)input->contact_count,
                  (unsigned long long)input->node_count);
     }

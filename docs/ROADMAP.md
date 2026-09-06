@@ -19,7 +19,8 @@
 | **1.7.11** | Crash-safe Wi-Fi/BLE mode switching and an automatic large phone-pairing PIN prompt | Included in `v1.7.12` |
 | **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Stable (`v1.7.12`) |
 | **1.8.0-rc.1** | Radio timing and diagnostics audit, clearer startup/maps, and verified browser installation | Previous candidate |
-| **1.8.0-rc.2** | Verify the written update image, reliable cancellation, and correct SD installation paths | Release candidate; exact acceptance in the tagged release |
+| **1.8.0-rc.2** | Verify the written update image, reliable cancellation, and correct SD installation paths | Previous candidate; exact acceptance in the tagged release |
+| **1.8.0-rc.3** | WadaMesh-guided Chats, paged Contacts and filters, Profile, quick replies, and clearer device controls | Interface candidate; acceptance recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -199,3 +200,19 @@ honours cancellation until writing begins, and blocks another install while
 waiting for reboot. Package destinations and instructions match the bridge's
 `deskos/updates` directory. The update screen uses clearer progress text and
 shows no install action while a write is active.
+
+## 1.8.0-rc.3: standalone interface parity
+
+WadaMesh is the maintainer-selected interface target. The existing
+[parity record](DESKOS_MESHCORE_FEATURE_PARITY.md) now pins the reviewed source,
+separates shipped workflows from remaining gaps, and documents D1L adaptations.
+This candidate fixes unreachable Contacts rows with independent Saved and
+Discovered pages, gives Chats a shared channel/DM landing, and adds editable
+Profile and six quick replies. Device settings lead the menu, keyboard colours
+are consistent, sleep intervals are selectable, and clock offsets support
+quarter-hour regions. No new RF traffic follows from browsing or picking text.
+
+Remaining target differences include quotes/mentions, clipboard/drafts,
+localization/font scaling, auto-add policy controls, and WadaMesh's separate
+Lua/web/remote applications. These remain explicit; earlier mobile parity
+completion does not imply they are present.
