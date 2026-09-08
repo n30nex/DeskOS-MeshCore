@@ -18,6 +18,7 @@
 #include "mesh/channel_store.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
+#include "mesh/draft_store.h"
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
@@ -236,6 +237,9 @@ void app_main(void)
         ESP_LOGW(TAG, "packet log load failed: %s", esp_err_to_name(packet_log_ret));
     }
     (void)d1l_board_display_boot_progress(90U);
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI)) {
+        d1l_draft_store_init();
+    }
     esp_err_t route_worker_ret = d1l_route_store_worker_start();
     if (route_worker_ret != ESP_OK) {
         ESP_LOGW(TAG, "retained persistence worker start failed: %s",

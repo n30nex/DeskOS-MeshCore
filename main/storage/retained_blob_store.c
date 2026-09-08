@@ -128,6 +128,14 @@ static const d1l_retained_blob_store_config_t s_store_configs[] = {
          */
         .nvs_fallback_allowed = true,
     },
+    {
+        .id = D1L_RETAINED_BLOB_STORE_DRAFTS,
+        .name = "drafts",
+        .nvs_namespace = NULL,
+        .sd_directory = "stores/drafts",
+        .legacy_retired_key = NULL,
+        .nvs_fallback_allowed = false,
+    },
 };
 
 _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_COUNT ==
@@ -145,6 +153,9 @@ _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_CONTACTS ==
 _Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_READ_STATE ==
                    (uint32_t)D1L_FACTORY_RESET_SD_STORE_READ_STATE,
                "retained and reset read-state identifiers must match");
+_Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_DRAFTS ==
+                   (uint32_t)D1L_FACTORY_RESET_SD_STORE_DRAFTS,
+               "retained and reset draft identifiers must match");
 
 static bool s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT];
 static bool s_store_sd_committed[D1L_RETAINED_BLOB_STORE_COUNT];
@@ -1770,6 +1781,8 @@ static bool sd_lineage_key_allowed(
         return strcmp(key, "contacts") == 0;
     case D1L_RETAINED_BLOB_STORE_READ_STATE:
         return strcmp(key, "state") == 0;
+    case D1L_RETAINED_BLOB_STORE_DRAFTS:
+        return strcmp(key, "drafts_v1") == 0;
     default:
         return false;
     }
@@ -1786,6 +1799,7 @@ static esp_err_t sd_purge_store_for_generation(
     static const char *const node_keys[] = {"nodes_v1"};
     static const char *const contact_keys[] = {"contacts"};
     static const char *const read_state_keys[] = {"state"};
+    static const char *const draft_keys[] = {"drafts_v1"};
     const char *const *keys = NULL;
     size_t key_count = 0U;
     if (!config) {
@@ -1819,6 +1833,10 @@ static esp_err_t sd_purge_store_for_generation(
     case D1L_RETAINED_BLOB_STORE_READ_STATE:
         keys = read_state_keys;
         key_count = sizeof(read_state_keys) / sizeof(read_state_keys[0]);
+        break;
+    case D1L_RETAINED_BLOB_STORE_DRAFTS:
+        keys = draft_keys;
+        key_count = sizeof(draft_keys) / sizeof(draft_keys[0]);
         break;
     default:
         return ESP_ERR_INVALID_ARG;

@@ -3114,6 +3114,9 @@ static void cmd_storage_status(void)
     printf(",\"read_state\":");
     print_retained_sd_store_json(
         &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_READ_STATE]);
+    printf(",\"drafts\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_DRAFTS]);
     printf("}}");
     printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
     print_json_string(status.message_store_backend ? status.message_store_backend : "volatile");

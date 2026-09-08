@@ -1,6 +1,6 @@
 # DeskOS interface and MeshCore parity
 
-This is the current product capability ledger for DeskOS 1.8.0-rc.3 on the
+This is the current product capability ledger for DeskOS 1.8.0-rc.4 on the
 SenseCAP Indicator D1L. The original mobile baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).
@@ -37,7 +37,7 @@ close the additional differences in this table.
 | WadaMesh area | DeskOS outcome | Current status |
 |---|---|---|
 | Chats landing with channels and DMs | Chats shows configured channels and recent DM conversations, unread counts, previews and delivery state; DMs pages through all conversations in the bounded retained store | Added in 1.8.0-rc.3; grouping is by conversation type |
-| Conversation search, delivery, reply | Existing channel/DM history, search, explicit Send, ACK/retry status and message detail | Implemented; no inline quoted replies or mention picker yet |
+| Conversation search, delivery, reply | Existing channel/DM history, search, explicit Send, ACK/retry status and message detail | Implemented, with editable plain-text quoted excerpts in 1.8.0-rc.4; mention picker remains future work |
 | Quick-reply picker and editable macros | Six persistent replies, editable from Settings or the composer; insert at the cursor without replacing text or sending automatically; enforce the 138-byte UTF-8 message limit | Added in 1.8.0-rc.3 |
 | Saved versus discovered contacts | Separate Saved/Discovered views; discovered excludes saved identities; accurate total/range and Previous/Next pages | Added in 1.8.0-rc.3; 12 rendered entries per page, up to the existing 64 saved / 512 heard limits |
 | Role/favourite filter, sort, search | All, Chat, Repeaters, Rooms, Sensors and Favorites filters; Recent/Favorites/A-Z/Role/Signal sort; existing identity/name search | Added filters in 1.8.0-rc.3; discovery and filtering are navigation only |
@@ -51,7 +51,7 @@ close the additional differences in this table.
 | Repeater/room management | Existing authenticated dashboard, status, telemetry, neighbours, ACL, room posts and console with explicit mutation confirmation | Implemented; radio reply/timeout limitations remain in the release record |
 | Notifications and lock | Existing unread state, display pulse/quiet hours, touch lock and top-button wake | D1L adaptation; no audio playback or battery chart is claimed |
 | Backups and updates | Preserving USB installer, explicit full-clean recovery image, signed local-SD inactive-slot update and rollback | D1L adaptation; physical signed-SD install/rollback still requires its own observation |
-| Clipboard, inline quote, mention picker, per-thread drafts | Existing explicit composer and message detail | Remaining UI work; closing/reopening a composer does not promise retained drafts |
+| Clipboard, inline quote, mention picker, per-thread drafts | On-device Copy/Paste, bounded plain-text Quote reply and exact-conversation SD drafts; clipboard clears on lock/restart | Added in 1.8.0-rc.4; no structured quote identifiers or mention picker |
 | Language, emoji and keyboard options | English UI, bounded UTF-8 text and current bundled symbol coverage | Partial; no WadaMesh language/layout collection or full emoji artwork |
 | GPS, battery, environmental sensors, audio | No onboard GPS or battery sensor; optional Indicator sensors are not integrated | Hardware/implementation differences; never substitute fabricated values |
 | Lua app store/permissions, Reader, games, VNC and web remote UI | Existing USB console, browser installation and physical framebuffer export | Separate application/platform capabilities, not implemented WadaMesh parity |

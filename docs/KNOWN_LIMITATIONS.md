@@ -1,4 +1,4 @@
-# DeskOS D1L 1.8.0-rc.3 limitations
+# DeskOS D1L 1.8.0-rc.4 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -32,15 +32,18 @@ SD-primary storage.
 - New messages use a plausible sender timestamp or the trusted local arrival
   time. Older retained rows without either remain labelled `time unknown`.
 - Optional Indicator temperature, humidity, and CO2 sensor integration remains
-  future work and is not represented as live data in 1.8.0-rc.3.
+  future work and is not represented as live data in 1.8.0-rc.4.
 
 See [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md)
 for the complete mobile-to-D1L outcome matrix.
 
 WadaMesh is the current interface comparison target, not a claim of complete
-feature parity. Quotes/mentions, clipboard and retained drafts, extra languages,
-global UI scaling, selectable auto-add policies and the Lua/web/remote app suite
-are not implemented. See the pinned WadaMesh section of the existing parity
+feature parity. The mention picker, extra languages, global UI scaling, selectable auto-add
+policies and the Lua/web/remote app suite are not implemented. Quotes are
+editable plain-text excerpts, without structured cross-client quote identifiers.
+Drafts use prepared SD and remain session-only without it; the 72-entry limit
+never silently evicts another draft. Clipboard text stays on this D1L and
+clears when locked or restarted. See the pinned WadaMesh section of the existing parity
 record for each area. This candidate retains the earlier physical acceptance
-limits: no new phone run is claimed while the phone is unavailable, and signed
+limits: candidate-specific phone results belong in the release record, and signed
 SD installation/rollback and an RP2040 reflash need separate physical tests.

@@ -90,6 +90,8 @@ static void refresh_retained_sd_health(d1l_storage_status_t *status)
     (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_READ_STATE,
                                            &status->retained_sd_stats[
                                                D1L_RETAINED_BLOB_STORE_READ_STATE]);
+    (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_DRAFTS,
+        &status->retained_sd_stats[D1L_RETAINED_BLOB_STORE_DRAFTS]);
     status->retained_sd_degraded = d1l_retained_blob_store_any_sd_degraded();
     /* RC1 retained history is SD-only. Internal NVS is not a history mirror,
      * so its ownership/legacy-import state must not be presented as a failed

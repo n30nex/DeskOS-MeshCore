@@ -6,11 +6,11 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.8.0-rc.3** is the release candidate for the SenseCAP Indicator D1L.
+DeskOS **1.8.0-rc.4** is the release candidate for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.3)
+[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.4)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
@@ -19,6 +19,15 @@ The previous stable release is
 [1.7.12](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
 
 ## What the candidate improves
+
+- **Conversation drafts** survive closing and reopening the composer, and save
+  to prepared SD storage after typing pauses. Each draft belongs to the exact
+  channel history or DM public key and this D1L's identity. Without SD, the UI
+  says the draft is kept only until restart.
+- **Quote reply** adds a short, editable plain-text excerpt before your draft.
+  **Copy / Paste** uses an on-device clipboard and inserts at the cursor. Neither
+  action transmits; the existing 138-byte Send checks still apply. The clipboard
+  clears on lock and restart.
 
 - WadaMesh is the interface parity target, with its exact reviewed revision and
   remaining differences in the [feature matrix](docs/DESKOS_MESHCORE_FEATURE_PARITY.md).
@@ -49,7 +58,7 @@ The previous stable release is
 - An ordinary update can finish without optional SD storage. Fresh clean
   installations retain the complete three-stage verification.
 
-See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.3.md) for the full
+See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.4.md) for the full
 change and validation record. Earlier releases remain documented in the
 [roadmap](docs/ROADMAP.md) and their release notes.
 

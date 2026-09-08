@@ -451,7 +451,7 @@ static void test_inventory_and_complete_reset(void)
     assert(status.keys_erased == D1L_FACTORY_RESET_CLEAR_DOMAIN_COUNT);
     assert(status.keys_already_absent == 0U);
     assert(status.sd_lineage_generation == 1U);
-    assert(status.sd_lineage_active_mask == 0x7fU);
+    assert(status.sd_lineage_active_mask == 0xffU);
     assert(!status.global_atomic);
     assert(!status.physical_flash_scrubbed);
     assert(!status.sd_touched);
@@ -694,14 +694,14 @@ static void test_interruption_windows_are_idempotent(void)
     assert(d1l_factory_reset_resume(&status) == ESP_OK);
     assert_clear_entries_absent();
 
-    /* Seven lineage commits shift the first erase/progress commits to 10/11.
-     * A cut at progress commit 11 leaves
+    /* Lineage commits precede the first erase/progress pair.
+     * A cut at that first progress commit leaves
      * the intent behind the data; replay must accept NOT_FOUND and continue. */
     mock_reset();
     seed_inventory(false);
     memset(&status, 0, sizeof(status));
     assert(d1l_factory_reset_request(&status) == ESP_OK);
-    s_fail_commit_call = 11U;
+    s_fail_commit_call = D1L_FACTORY_RESET_SD_STORE_COUNT + 4U;
     assert(d1l_factory_reset_resume(&status) == ESP_FAIL);
     assert(mock_copy(first.partition_label, first.nvs_namespace, first.key,
                      NULL, 0U) == 0U);

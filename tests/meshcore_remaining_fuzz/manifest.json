@@ -57,7 +57,7 @@
   },
   "source_pins": {
     ".github/workflows/d1l-ci.yml": "1cbcd0b401ee916292cd87a75a5ac9424c39620f3654b9ca0f08412504c63dad",
-    "main/CMakeLists.txt": "aac55dc92820d7332c23bcaf4705f670032424e27209965ccf2b328adfdedad0",
+    "main/CMakeLists.txt": "ed656dc2308efbf8b0d87b0366d9e7866a0006dbbaada5d3c915fc1e333b31a8",
     "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
     "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",
     "main/mesh/dm_delivery_state.c": "a3ff6903299b70ed68727284de8c2b6e81b2f9db69a80902db75983ee91aee94",
@@ -79,7 +79,7 @@
     "tests/fuzz/settings_envelope_fuzz.c": "ddcb8ce9b14005c1a746bcd215666cd01280115f01d7efce186dcf68c418c5cd",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "08ff77494e9998127d8f7a6319732bb2f86eb677d5d4b625831921dc94f274f7",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "6de43e78adfcb11c22ba89b3a8e588ec9865088ccbaae86c1d5fa32ae3c6c82d",
     "tests/meshcore_remaining_fuzz/crypto_host_adapter.cpp": "1fa19502918fa07f1e30610ec04cf7d394d14caa16e0c5f779ce148a790842f6",
     "tests/meshcore_remaining_fuzz/stubs/esp_err.h": "a32529585b01ed39217555a23159f8434fcbf8601947728a66156715c0c6d2e2",
     "tests/meshcore_remaining_fuzz/stubs/mbedtls/aes.h": "ea331364a1c181f34a09a38e825d5ddb781261738785b47e814a54e18d3fe53f",

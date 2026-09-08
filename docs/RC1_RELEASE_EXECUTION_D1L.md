@@ -1,6 +1,6 @@
 # DeskOS D1L release execution
 
-## Current local release procedure: 1.8.0-rc.3
+## Current local release procedure: 1.8.0-rc.4
 
 The maintainer requested local builds on the Pi 5. The 1.0 procedure below is
 historical and must not trigger Actions for the current candidate.
@@ -8,10 +8,15 @@ historical and must not trigger Actions for the current candidate.
 1. Freeze a clean source commit and its pinned submodules in an isolated Pi
    checkout. Run the complete host suite and the checks required by the changed
    firmware and installation paths.
-2. Use the pinned ESP-IDF SDK from `.github/d1l-build-inputs.json` and configure
+2. Use ESP-IDF v5.5.4, pinned by `.github/d1l-build-inputs.json`, and configure
    `D1L_RELEASE_PROFILE=full_feature`, `D1L_SD_HISTORY_MODE=conditional`.
    The normal CMake build applies the four reviewed BSP patches. Keep the build
    and Python temporary directories inside the task workspace.
+   A native Pi build may use the official v5.5.4 source at
+   `735507283d5b2f9fb363a1901172dbd9e847945d` and its checksum-verified
+   `install.sh esp32s3` tools in an isolated `IDF_TOOLS_PATH`. Record the
+   native SDK commit and actual tool versions; do not label it a container
+   or Actions build. This avoids installing SDK tools for unrelated targets.
 3. Run the existing `scripts/package_release_d1l.py` local-release path. Include
    the complete production bridge UF2, preserving app update and boot selector,
    clean 8 MB image, signed update, provenance, SBOM, instructions and checksums.
@@ -24,7 +29,7 @@ historical and must not trigger Actions for the current candidate.
 5. Verify the exact running version/commit, identity, display, radio and
    retained storage. Exercise the changed behavior using production firmware.
    Record any physical update/phone paths that were not exercised explicitly.
-6. Merge the tested source, tag `v1.8.0-rc.3`, and publish it as a prerelease.
+6. Merge the tested source, tag `v1.8.0-rc.4`, and publish it as a prerelease.
    Freshly download every asset and compare its bytes with staging. Update the
    existing flasher catalog and Canadaverse DeskOS page, then verify their
    public content and downloads. Remove obsolete build outputs only after

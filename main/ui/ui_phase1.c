@@ -48,6 +48,7 @@
 #include "ui_font_symbols_14.h"
 #include "ui_keyboard.h"
 #include "quick_replies.h"
+#include "compose_text.h"
 #include "ui_map.h"
 #include "ui_messages.h"
 #include "ui_more_view.h"
@@ -117,6 +118,11 @@ static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_counter;
 static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_compose_send_button;
+static lv_obj_t *s_compose_draft_status;
+static lv_obj_t *s_compose_paste_button;
+static d1l_draft_key_t s_compose_draft_key;
+static bool s_compose_draft_active;
+static bool s_compose_restoring;
 static lv_obj_t *s_profile_sheet;
 static lv_obj_t *s_profile_name;
 static lv_obj_t *s_profile_keyboard;
@@ -1687,6 +1693,11 @@ static void hide_sheet(void)
 
 static void hide_compose_sheet(void)
 {
+    s_compose_draft_active = false;
+    memset(&s_compose_draft_key, 0, sizeof(s_compose_draft_key));
+    s_compose_restoring = true;
+    if (s_compose_textarea) lv_textarea_set_text(s_compose_textarea, "");
+    s_compose_restoring = false;
     d1l_ui_modal_hide(s_compose_sheet);
     d1l_ui_modal_hide(s_quick_reply_sheet);
     d1l_ui_modal_hide(s_quick_edit_sheet);
@@ -2866,16 +2877,23 @@ static void update_compose_counter(void)
         compose_eligibility_for_text(&info);
     if (info.result == D1L_USER_TEXT_OK &&
         eligibility.reason == D1L_UI_COMPOSE_READY) {
-        label_set_fmt(s_compose_counter, "%u chars | %u/%u B",
-                      (unsigned)info.character_count, (unsigned)info.byte_count,
-                      (unsigned)D1L_MESSAGE_MAX_BYTES);
+        if (d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI)) {
+            label_set_fmt(s_compose_counter, "%u/%u bytes", (unsigned)info.byte_count,
+                          (unsigned)D1L_MESSAGE_MAX_BYTES);
+        } else {
+            label_set_fmt(s_compose_counter, "%u chars | %u/%u B",
+                          (unsigned)info.character_count, (unsigned)info.byte_count,
+                          (unsigned)D1L_MESSAGE_MAX_BYTES);
+        }
     } else if (info.result == D1L_USER_TEXT_OK) {
         label_set_fmt(s_compose_counter, "%s | %u/%u B",
                       eligibility.status,
                       (unsigned)info.byte_count,
                       (unsigned)D1L_MESSAGE_MAX_BYTES);
     } else if (info.result == D1L_USER_TEXT_EMPTY) {
-        label_set_fmt(s_compose_counter, "0 chars | 0/%u B",
+        label_set_fmt(s_compose_counter,
+                      d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI) ?
+                          "0/%u bytes" : "0 chars | 0/%u B",
                       (unsigned)D1L_MESSAGE_MAX_BYTES);
     } else if (info.result == D1L_USER_TEXT_TOO_LONG) {
         label_set_fmt(s_compose_counter, "Too long | %u/%u B",
@@ -2898,6 +2916,13 @@ static void update_compose_counter(void)
             lv_obj_add_state(s_compose_send_button, LV_STATE_DISABLED);
         }
     }
+    if (s_compose_draft_status && s_compose_draft_active) {
+        lv_label_set_text(s_compose_draft_status, d1l_draft_store_save_status());
+    }
+    if (s_compose_paste_button) {
+        if (d1l_compose_clipboard_text()[0]) lv_obj_clear_state(s_compose_paste_button, LV_STATE_DISABLED);
+        else lv_obj_add_state(s_compose_paste_button, LV_STATE_DISABLED);
+    }
 }
 
 static void layout_compose_sheet_controls(void)
@@ -2916,8 +2941,9 @@ static void layout_compose_sheet_controls(void)
         lv_obj_set_pos(s_compose_textarea, 16, 58);
     }
     if (s_compose_counter) {
-        lv_obj_set_width(s_compose_counter, 248);
-        lv_obj_set_pos(s_compose_counter, 216, 134);
+        const bool extras = d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
+        lv_obj_set_width(s_compose_counter, extras ? 140 : 248);
+        lv_obj_set_pos(s_compose_counter, extras ? 324 : 216, 134);
         lv_obj_set_style_text_align(s_compose_counter, LV_TEXT_ALIGN_RIGHT, 0);
     }
     if (s_compose_keyboard) {
@@ -2925,6 +2951,28 @@ static void layout_compose_sheet_controls(void)
         lv_obj_set_align(s_compose_keyboard, LV_ALIGN_TOP_LEFT);
         lv_obj_set_pos(s_compose_keyboard, 16, 174);
     }
+}
+
+static bool load_compose_draft(const d1l_draft_key_t *key, char *text)
+{
+    const esp_err_t ret = d1l_draft_store_get(key, text, D1L_DRAFT_TEXT_BYTES);
+    if (ret == ESP_OK) return true;
+    show_toast_text(ret == ESP_ERR_NOT_FINISHED ? "Loading saved drafts. Try again shortly." :
+                    "Could not load this draft. Check Storage before editing.", false);
+    return false;
+}
+
+static void compose_insert_text(const char *text, bool prepend_quote)
+{
+    if (!s_compose_textarea || !d1l_ui_modal_visible(s_compose_sheet)) return;
+    if (!d1l_compose_text_fits(lv_textarea_get_text(s_compose_textarea), text)) {
+        show_toast_text("Text will not fit. Shorten the draft first.", false);
+        return;
+    }
+    if (prepend_quote) lv_textarea_set_cursor_pos(s_compose_textarea, 0);
+    lv_textarea_add_text(s_compose_textarea, text);
+    if (prepend_quote) lv_textarea_set_cursor_pos(s_compose_textarea, LV_TEXTAREA_CURSOR_LAST);
+    update_compose_counter();
 }
 
 static bool show_channel_compose_sheet(uint64_t channel_id,
@@ -2946,6 +2994,12 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
         show_toast("Channel", ESP_ERR_INVALID_STATE);
         return false;
     }
+    d1l_draft_key_t draft_key = {0};
+    char draft[D1L_DRAFT_TEXT_BYTES] = {0};
+    const bool extras = d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
+    if (extras && (!d1l_draft_key_channel(&channel, &draft_key) ||
+                   !load_compose_draft(&draft_key, draft))) return false;
+    hide_compose_sheet();
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -2968,6 +3022,8 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
 #endif
     s_compose_dm = false;
     s_compose_channel_id = channel.channel_id;
+    s_compose_draft_key = draft_key;
+    s_compose_draft_active = extras;
     snprintf(s_compose_channel_name, sizeof(s_compose_channel_name), "%s",
              channel.name);
     s_compose_last_send_error = ESP_OK;
@@ -2983,7 +3039,10 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
         show_modal(s_compose_sheet);
     }
     if (s_compose_textarea && s_compose_keyboard) {
-        lv_textarea_set_text(s_compose_textarea, "");
+        s_compose_restoring = true;
+        lv_textarea_set_text(s_compose_textarea, draft);
+        lv_textarea_set_cursor_pos(s_compose_textarea, LV_TEXTAREA_CURSOR_LAST);
+        s_compose_restoring = false;
         lv_textarea_set_placeholder_text(s_compose_textarea,
                                          placeholder && placeholder[0] ?
                                              placeholder :
@@ -3028,6 +3087,12 @@ static void present_dm_compose_sheet(const d1l_contact_entry_t *selected,
     if (!selected) {
         return;
     }
+    d1l_draft_key_t draft_key = {0};
+    char draft[D1L_DRAFT_TEXT_BYTES] = {0};
+    const bool extras = !probe_only && d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
+    if (extras && (!d1l_draft_key_contact(selected, &draft_key) ||
+                   !load_compose_draft(&draft_key, draft))) return;
+    hide_compose_sheet();
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -3054,6 +3119,8 @@ static void present_dm_compose_sheet(const d1l_contact_entry_t *selected,
     s_compose_channel_name[0] = '\0';
     s_compose_last_send_error = ESP_OK;
     s_compose_contact = *selected;
+    s_compose_draft_key = draft_key;
+    s_compose_draft_active = extras;
     if (s_compose_title) {
         char title[48];
         snprintf(title, sizeof(title), "DM %.32s",
@@ -3064,7 +3131,10 @@ static void present_dm_compose_sheet(const d1l_contact_entry_t *selected,
         show_modal(s_compose_sheet);
     }
     if (s_compose_textarea && s_compose_keyboard) {
-        lv_textarea_set_text(s_compose_textarea, "");
+        s_compose_restoring = true;
+        lv_textarea_set_text(s_compose_textarea, draft);
+        lv_textarea_set_cursor_pos(s_compose_textarea, LV_TEXTAREA_CURSOR_LAST);
+        s_compose_restoring = false;
         lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
         layout_compose_sheet_controls();
@@ -4116,8 +4186,22 @@ static void reply_message_detail_event_cb(lv_event_t *event)
     }
     snprintf(title, sizeof(title), "Reply %.32s", entry.author);
     snprintf(placeholder, sizeof(placeholder), "Reply to %.48s", entry.author);
-    (void)show_channel_compose_sheet(
-        entry.channel_id, title, placeholder);
+    char quote[D1L_MESSAGE_TEXT_LEN] = {0};
+    const bool extras = d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
+    if (extras && !d1l_compose_quote(quote, sizeof(quote), entry.author, entry.text)) {
+        show_toast_text("This message cannot be quoted.", false);
+        return;
+    }
+    if (show_channel_compose_sheet(entry.channel_id, title, placeholder) && extras) {
+        compose_insert_text(quote, true);
+    }
+}
+
+static void copy_message_detail_event_cb(lv_event_t *event)
+{
+    (void)event;
+    show_toast_text(d1l_compose_clipboard_copy(s_message_detail_message.text) ?
+                    "Copied on this D1L" : "Nothing to copy", false);
 }
 
 static d1l_ui_dm_identity_eligibility_t public_sender_dm_eligibility(void)
@@ -4274,7 +4358,14 @@ static void render_message_detail_sheet(void)
         }
     }
 
-    if (entry->direction[0] != 't') {
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI)) {
+        create_button(s_message_detail_sheet, "Copy", 16, 360, 144, 52,
+                      copy_message_detail_event_cb, NULL);
+        create_button(s_message_detail_sheet, "Quote reply", 168, 360, 144, 52,
+                      reply_message_detail_event_cb, NULL);
+        if (entry->direction[0] != 't') create_button(s_message_detail_sheet,
+            "DM sender", 320, 360, 144, 52, explain_public_sender_dm_event_cb, NULL);
+    } else if (entry->direction[0] != 't') {
         create_button(s_message_detail_sheet, "Reply", 16, 360, 216, 52,
                       reply_message_detail_event_cb, NULL);
         create_button(s_message_detail_sheet, "DM sender", 248, 360, 216, 52,
@@ -4942,6 +5033,15 @@ static void compose_keyboard_event_cb(lv_event_t *event)
 static void compose_textarea_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_VALUE_CHANGED) {
+        bool keep_draft = s_compose_draft_active && !s_compose_restoring;
+#if D1L_ENABLE_QUALIFICATION_HOOKS
+        keep_draft = keep_draft && !s_compose_probe_send_suppressed;
+#endif
+        if (keep_draft) {
+            const esp_err_t ret = d1l_draft_store_set(&s_compose_draft_key,
+                lv_textarea_get_text(s_compose_textarea));
+            if (ret != ESP_OK) show_toast_text("Draft could not be kept. Copy it before closing.", false);
+        }
         if (d1l_ui_compose_error_clears_on_text_change(
                 s_compose_last_send_error)) {
             s_compose_last_send_error = ESP_OK;
@@ -5947,6 +6047,30 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
             }
         }
         break;
+    case D1L_UI_MESSAGES_ACTION_COPY_DM_MESSAGE:
+        if (event->dm_message) show_toast_text(
+            d1l_compose_clipboard_copy(event->dm_message->text) ?
+                "Copied on this D1L" : "Nothing to copy", false);
+        break;
+    case D1L_UI_MESSAGES_ACTION_QUOTE_DM_MESSAGE: {
+        if (!event->dm_message) break;
+        /* Opening the composer retires the thread rows and their bindings. */
+        const d1l_dm_entry_t entry = *event->dm_message;
+        d1l_contact_entry_t contact = {0};
+        const esp_err_t ret = d1l_app_model_find_contact(entry.contact_fingerprint, &contact);
+        if (ret != ESP_OK) { show_toast("DM", ret); break; }
+        char quote[D1L_MESSAGE_TEXT_LEN] = {0};
+        if (!d1l_compose_quote(quote, sizeof(quote), entry.direction[0] == 't' ?
+                "You" : (contact.alias[0] ? contact.alias : contact.fingerprint), entry.text)) {
+            show_toast_text("This message cannot be quoted.", false);
+            break;
+        }
+        open_dm_compose_for_contact(&contact);
+        if (s_compose_dm && strcasecmp(s_compose_contact.public_key_hex, contact.public_key_hex) == 0) {
+            compose_insert_text(quote, true);
+        }
+        break;
+    }
     case D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR:
         if (!show_channel_selector_sheet()) {
             show_toast("Channels", ESP_ERR_NO_MEM);
@@ -9991,6 +10115,7 @@ static void process_pending_compose_probe(void)
 static void lock_event_cb(lv_event_t *event)
 {
     (void)event;
+    d1l_compose_clipboard_clear();
     if (s_lock_overlay) {
         if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP) {
             d1l_ui_map_viewport_prepare_cover();
@@ -10622,6 +10747,20 @@ static void create_personal_sheets(lv_obj_t *screen)
     s_quick_replies_ready = true;
 }
 
+static void copy_compose_event_cb(lv_event_t *event)
+{
+    (void)event;
+    show_toast_text(d1l_compose_clipboard_copy(lv_textarea_get_text(s_compose_textarea)) ?
+                    "Copied on this D1L" : "Nothing to copy", false);
+    update_compose_counter();
+}
+
+static void paste_compose_event_cb(lv_event_t *event)
+{
+    (void)event;
+    compose_insert_text(d1l_compose_clipboard_text(), false);
+}
+
 static void create_compose_sheet(lv_obj_t *screen)
 {
     s_compose_sheet = create_object(screen, "compose sheet");
@@ -10670,6 +10809,16 @@ static void create_compose_sheet(lv_obj_t *screen)
     if (d1l_ui_settings_action_available(D1L_UI_SETTINGS_ACTION_QUICK_REPLIES)) {
         create_button(s_compose_sheet, "Quick replies", 16, 124, 144, 44,
                       open_quick_replies_event_cb, NULL);
+        s_compose_paste_button = create_button(s_compose_sheet, "Paste", 168, 124, 74, 44,
+                      paste_compose_event_cb, NULL);
+        create_button(s_compose_sheet, "Copy", 250, 124, 66, 44,
+                      copy_compose_event_cb, NULL);
+        s_compose_draft_status = create_label(s_compose_sheet, "", 0xA6B0B7);
+        if (s_compose_draft_status) {
+            lv_obj_set_pos(s_compose_draft_status, 16, 39);
+            lv_obj_set_width(s_compose_draft_status, 448);
+            lv_label_set_long_mode(s_compose_draft_status, LV_LABEL_LONG_DOT);
+        }
     }
     s_compose_counter = create_label(s_compose_sheet, "0/138", 0xA6B0B7);
     lv_label_set_long_mode(s_compose_counter, LV_LABEL_LONG_DOT);

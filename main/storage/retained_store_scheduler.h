@@ -6,7 +6,7 @@
 
 #include "esp_err.h"
 
-#define D1L_RETAINED_STORE_SCHEDULER_MAX_STORES 8U
+#define D1L_RETAINED_STORE_SCHEDULER_MAX_STORES 9U
 #define D1L_RETAINED_STORE_NAME_LEN 16U
 
 typedef enum {
@@ -18,6 +18,7 @@ typedef enum {
     D1L_RETAINED_STORE_READ_STATE,
     D1L_RETAINED_STORE_TIME_CHECKPOINT,
     D1L_RETAINED_STORE_NODES,
+    D1L_RETAINED_STORE_DRAFTS,
 } d1l_retained_store_kind_t;
 
 typedef enum {

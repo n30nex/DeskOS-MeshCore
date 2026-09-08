@@ -61,6 +61,7 @@ static const char *const s_sd_lineage_keys[D1L_FACTORY_RESET_SD_STORE_COUNT] = {
     "sd_nodes_v1",
     "sd_contacts_v1",
     "sd_read_v1",
+    "sd_drafts_v1",
 };
 
 typedef struct {
@@ -278,6 +279,11 @@ static const d1l_factory_reset_inventory_entry_t s_inventory[] = {
      D1L_FACTORY_RESET_JOURNAL_NAMESPACE, "sd_read_v1",
      D1L_FACTORY_RESET_DISPOSITION_INTERNAL_JOURNAL, false,
      "durable post-reset read-cursor removable-SD lineage fence",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"sd_draft_lineage", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
+     D1L_FACTORY_RESET_JOURNAL_NAMESPACE, "sd_drafts_v1",
+     D1L_FACTORY_RESET_DISPOSITION_INTERNAL_JOURNAL, false,
+     "durable post-reset private-draft removable-SD lineage fence",
      D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
 };
 

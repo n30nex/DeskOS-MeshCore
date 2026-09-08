@@ -23,6 +23,10 @@ uint64_t d1l_ui_messages_projected_channel_id(uint64_t active_channel_id)
 bool d1l_ui_messages_action_available(d1l_ui_messages_action_t action)
 {
     switch (action) {
+    case D1L_UI_MESSAGES_ACTION_COPY_DM_MESSAGE:
+    case D1L_UI_MESSAGES_ACTION_QUOTE_DM_MESSAGE:
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_DIRECT_MESSAGES) &&
+            d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
     case D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ:
     case D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC:
     case D1L_UI_MESSAGES_ACTION_OPEN_HISTORY:
@@ -247,7 +251,9 @@ static void messages_dispatch_event_cb(lv_event_t *event)
             return;
         }
         action_event.dm_message = &controller->rendered.dm_rows[binding->row_index];
-    } else if (binding->action == D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS) {
+    } else if (binding->action == D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS ||
+               binding->action == D1L_UI_MESSAGES_ACTION_COPY_DM_MESSAGE ||
+               binding->action == D1L_UI_MESSAGES_ACTION_QUOTE_DM_MESSAGE) {
         if (binding->row_index >= controller->thread_row_count) {
             return;
         }
@@ -1270,7 +1276,8 @@ static bool messages_delivery_failed_or_interrupted(
 static bool messages_render_thread_bubble(
     d1l_ui_messages_controller_t *controller,
     lv_obj_t *body,
-    size_t index)
+    size_t index,
+    bool reply_available)
 {
     if (!messages_object_is_valid(body) ||
         !d1l_ui_messages_thread_row_index_valid(controller, index)) {
@@ -1341,6 +1348,29 @@ static bool messages_render_thread_bubble(
     }
     if (!expanded) {
         return true;
+    }
+
+    if (d1l_ui_messages_action_available(D1L_UI_MESSAGES_ACTION_COPY_DM_MESSAGE)) {
+        lv_obj_t *actions = lv_obj_create(bubble);
+        if (!actions) return false;
+        lv_obj_set_size(actions, LV_PCT(100), 44);
+        lv_obj_set_style_bg_opa(actions, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(actions, 0, 0);
+        lv_obj_set_style_pad_all(actions, 0, 0);
+        lv_obj_clear_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
+        for (size_t action = 0U; action < 2U; ++action) {
+            d1l_ui_messages_action_binding_t *control = &controller->thread_message_actions[action];
+            *control = (d1l_ui_messages_action_binding_t) {
+                .controller = controller,
+                .action = action == 0U ? D1L_UI_MESSAGES_ACTION_COPY_DM_MESSAGE :
+                                        D1L_UI_MESSAGES_ACTION_QUOTE_DM_MESSAGE,
+                .row_index = index, .generation = controller->generation,
+            };
+            lv_obj_t *button = messages_create_button(actions, action == 0U ? "Copy" : "Quote reply",
+                action == 0U ? 0 : 152, 0, 144, 44, control);
+            if (!button) return false;
+            if (action == 1U && !reply_available) lv_obj_add_state(button, LV_STATE_DISABLED);
+        }
     }
 
     char snr[16];
@@ -1536,7 +1566,7 @@ bool d1l_ui_messages_render_thread(
                 0xA6B0B7) != NULL && complete;
         }
         for (size_t i = 0U; i < controller->thread_row_count; ++i) {
-            complete = messages_render_thread_bubble(controller, body, i) &&
+            complete = messages_render_thread_bubble(controller, body, i, reply_available) &&
                 complete;
         }
         if (controller->thread_row_count > 0U) {

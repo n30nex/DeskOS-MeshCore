@@ -73,6 +73,8 @@ typedef enum {
     D1L_UI_MESSAGES_ACTION_OPEN_DM_SEARCH,
     D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD,
     D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS,
+    D1L_UI_MESSAGES_ACTION_COPY_DM_MESSAGE,
+    D1L_UI_MESSAGES_ACTION_QUOTE_DM_MESSAGE,
     D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR,
     D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR,
     D1L_UI_MESSAGES_ACTION_CREATE_CHANNEL,
@@ -133,6 +135,7 @@ typedef struct d1l_ui_messages_controller {
         thread_controls[D1L_UI_MESSAGES_THREAD_CONTROL_BINDING_COUNT];
     d1l_ui_messages_action_binding_t
         thread_rows[D1L_UI_MESSAGES_THREAD_MAX_ROWS];
+    d1l_ui_messages_action_binding_t thread_message_actions[2];
     d1l_ui_messages_action_binding_t
         channel_controls[D1L_UI_MESSAGES_CHANNEL_CONTROL_BINDING_COUNT];
     d1l_ui_messages_action_binding_t

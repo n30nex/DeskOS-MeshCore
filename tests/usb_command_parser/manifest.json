@@ -24,8 +24,8 @@
   ],
   "source_pins": {
     ".github/workflows/d1l-ci.yml": "1cbcd0b401ee916292cd87a75a5ac9424c39620f3654b9ca0f08412504c63dad",
-    "main/CMakeLists.txt": "aac55dc92820d7332c23bcaf4705f670032424e27209965ccf2b328adfdedad0",
-    "main/comms/usb_console.c": "8bcf3fe0c7c90fd928e6af86345c4ab2fb3b3af50cd47ee507811dd13425af17",
+    "main/CMakeLists.txt": "ed656dc2308efbf8b0d87b0366d9e7866a0006dbbaada5d3c915fc1e333b31a8",
+    "main/comms/usb_console.c": "16ebb7a278a9cbba02d676b6b7b6def2411ff03fd05fdced3b17c8ee71ec515a",
     "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
     "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
     "scripts/usb_command_parser_fuzz_d1l.py": "0c138efd789d8e73ad126624f4491bfcd5924ec01c0fa18f1ff2c88197dfe85a",

@@ -20,7 +20,8 @@
 | **1.7.12** | Stable BLE channel sync, visible channel/IATA controls, and live advert recency | Stable (`v1.7.12`) |
 | **1.8.0-rc.1** | Radio timing and diagnostics audit, clearer startup/maps, and verified browser installation | Previous candidate |
 | **1.8.0-rc.2** | Verify the written update image, reliable cancellation, and correct SD installation paths | Previous candidate; exact acceptance in the tagged release |
-| **1.8.0-rc.3** | WadaMesh-guided Chats, paged Contacts and filters, Profile, quick replies, and clearer device controls | Interface candidate; acceptance recorded in the tagged release |
+| **1.8.0-rc.3** | WadaMesh-guided Chats, paged Contacts and filters, Profile, quick replies, and clearer device controls | Previous candidate |
+| **1.8.0-rc.4** | Conversation drafts, plain-text quoted replies and on-device clipboard | Messaging candidate; exact acceptance recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -212,7 +213,15 @@ Profile and six quick replies. Device settings lead the menu, keyboard colours
 are consistent, sleep intervals are selectable, and clock offsets support
 quarter-hour regions. No new RF traffic follows from browsing or picking text.
 
-Remaining target differences include quotes/mentions, clipboard/drafts,
-localization/font scaling, auto-add policy controls, and WadaMesh's separate
-Lua/web/remote applications. These remain explicit; earlier mobile parity
-completion does not imply they are present.
+## 1.8.0-rc.4: conversation continuity
+
+Channel and DM composers restore exact-conversation drafts. The existing SD
+worker coalesces saves without storage I/O on the UI task; unavailable or
+failed storage remains visible. Drafts bind to the D1L identity and channel
+history or full DM public key, including protection after older-image resets.
+Copy/Paste is local to the D1L and clears on lock/restart. Quote reply prepends
+a bounded plain-text excerpt without replacing the user's draft or sending.
+
+Remaining target differences include mentions, localization/font scaling,
+auto-add policy controls, and WadaMesh's separate Lua/web/remote applications.
+The release record distinguishes implementation from physical acceptance.

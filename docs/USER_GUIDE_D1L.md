@@ -1,4 +1,33 @@
-# MeshCore DeskOS D1L 1.8.0-rc.3 User Guide
+# MeshCore DeskOS D1L 1.8.0-rc.4 User Guide
+
+## Messaging changes in 1.8.0-rc.4
+
+- **Drafts:** closing a channel or DM composer keeps its text for that exact
+  conversation. Prepared SD saves drafts after typing pauses; the status line
+  says **Saving draft**, **Draft saved on SD**, or explains why saving is
+  unavailable. Without SD, drafts last only until restart. Wait for the saved
+  state before removing power. Unconfirmed SD writes can leave an older draft
+  on the card; always check the conversation before resending after recovery.
+- **Clear** removes the current draft. A successfully accepted Send clears it;
+  a failed Send keeps it for an explicit retry. Opening, restoring or clearing
+  a draft never sends a message. There is room for 72 drafts; a full store
+  reports the problem rather than silently evicting another draft.
+- **Quote reply:** open a channel message's detail or tap a DM bubble to expand
+  its actions. The quotation is ordinary MeshCore text, such as
+  `> Alice: Meet at noon? | `, placed before your existing draft. Long excerpts
+  are shortened at a UTF-8 boundary and marked `...`. Edit and review the whole
+  message, then press Send. A quotation that would exceed 138 bytes leaves the
+  draft unchanged. A removed DM contact remains copyable but cannot be quoted
+  into a new message until a valid contact is available.
+- **Copy / Paste:** copy a message from its actions, or copy the current draft
+  from the composer. Paste inserts at the cursor and preserves the surrounding
+  text. Oversized or invalid text is refused without truncating the draft.
+  This clipboard belongs only to the D1L; it is not shared with the phone and
+  is cleared on lock or restart.
+- Drafts are private SD data under `stores/drafts`. They are excluded from
+  support exports and bound to this device's public identity, so moving the
+  card to a different identity does not restore them. Factory reset fences old
+  drafts without formatting the card. The clipboard is never stored on SD.
 
 ## Interface changes in 1.8.0-rc.3
 
@@ -36,7 +65,7 @@ history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.8.0-rc.3 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.8.0-rc.4 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -392,7 +421,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.8.0-rc.3 download and
+Use the guided browser flasher or the published DeskOS D1L 1.8.0-rc.4 download and
 follow its `START_HERE.md`.
 
 The browser waits for DeskOS to finish startup and verifies its exact build,
