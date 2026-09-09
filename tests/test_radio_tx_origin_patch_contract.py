@@ -1,4 +1,5 @@
 from pathlib import Path
+from test_radio_busy_recovery_native import patched_driver, function as c_function
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ def added_patch_lines(patch: str) -> str:
     )
 
 
-def test_seeed_driver_latches_tx_origin_at_the_physical_irq_boundary():
+def test_seeed_driver_latches_tx_origin_at_the_physical_irq_boundary(tmp_path):
     patch = read("patches/sensecap_indicator_tx_origin.patch")
     added = added_patch_lines(patch)
 
@@ -47,7 +48,8 @@ def test_seeed_driver_latches_tx_origin_at_the_physical_irq_boundary():
     # A delayed queue element for A must return before it can read/clear B's
     # expander-backed DIO1 latch. The same atomic claim serializes watchdog
     # cleanup and the vendor DIO task across ESP32 cores.
-    dio = body(added, "void RadioOnDioIrq", "void RadioIrqProcess")
+    driver = (patched_driver(tmp_path) / "radio.c").read_text()
+    dio = c_function(driver, "RadioOnDioIrq")
     claim = dio.index("RadioTryClaimIrqRecovery( )")
     active = dio.index("activeOrigin")
     mismatch = dio.index("origin != activeOrigin")
@@ -69,14 +71,11 @@ def test_seeed_driver_latches_tx_origin_at_the_physical_irq_boundary():
     assert "(g_dioIrq) ((void *)(uintptr_t)event.tx_origin);" in board_added
 
 
-def test_exact_origin_watchdog_recovery_quiesces_irq_before_successor():
+def test_exact_origin_watchdog_recovery_quiesces_irq_before_successor(tmp_path):
     patch = read("patches/sensecap_indicator_tx_origin.patch")
     added = added_patch_lines(patch)
-    recover = body(
-        added,
-        "bool RadioRecoverTxWithOrigin",
-        "void RadioSleep",
-    )
+    driver = (patched_driver(tmp_path) / "radio.c").read_text()
+    recover = c_function(driver, "RadioRecoverTxWithOrigin")
 
     claim = recover.index("RadioTryClaimIrqRecovery( )")
     exact = recover.index("!= origin")

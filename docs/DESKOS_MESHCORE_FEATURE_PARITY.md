@@ -1,6 +1,6 @@
 # DeskOS interface and MeshCore parity
 
-This is the current product capability ledger for DeskOS 1.8.0-rc.4 on the
+This is the current product capability ledger for DeskOS 1.8.0-rc.5 on the
 SenseCAP Indicator D1L. The original mobile baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).
@@ -13,7 +13,7 @@ The official Android app **1.49.0** was also exercised with DeskOS **1.7.12**:
 secure pairing/reconnect, contact synchronization, channel add/remove, incoming
 DM, acknowledged outgoing DM, and repeater status/Unicode CLI replies passed.
 Those are baseline interoperability results; candidate-specific results belong
-in the 1.8.0-rc.2 release record. No newer iOS device run is claimed.
+in the corresponding tagged release record. No newer iOS device run is claimed.
 
 The candidate corrects radio airtime deadlines, SNR units and companion
 statistics, Wi-Fi signal refresh, early loading progress, map-label interaction,

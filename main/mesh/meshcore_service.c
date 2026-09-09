@@ -91,6 +91,7 @@
 #define D1L_MESHCORE_TX_WATCHDOG_GRACE_MS 250U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
 #define D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS 5000U
+#define D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS 5000U
 #define D1L_MESHCORE_ADMIN_RADIO_COMMAND_TIMEOUT_MS \
     (D1L_MESHCORE_TX_TIMEOUT_MS + \
      D1L_MESHCORE_TX_WATCHDOG_GRACE_MS + \
@@ -191,6 +192,10 @@ static uint32_t s_channel_send_admission;
 static uint32_t s_last_path_probe_ms;
 static char s_last_path_probe_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static bool s_radio_profile_applied;
+static bool s_radio_recovery_pending;
+static uint32_t s_radio_recovery_attempts;
+static uint32_t s_radio_recovery_successes;
+static uint64_t s_radio_recovery_not_before_us;
 static d1l_radio_profile_t s_applied_radio_profile;
 static d1l_meshcore_trace_tracker_t s_trace_tracker;
 static int s_trace_last_rssi_dbm;
@@ -454,6 +459,7 @@ static esp_err_t meshcore_service_queue_raw_response(
 static void finalize_pending_dm_radio_result(bool sent, esp_err_t error);
 static esp_err_t retry_pending_dm_as_flood(uint64_t now_us);
 static void fail_pending_dm_ack_timeout(esp_err_t error);
+static void meshcore_service_recover_radio_bus(void);
 static void record_pending_direct_path_result(bool success);
 static bool finalize_pending_dm_ack_completion(void);
 static void secure_zero_bytes(void *data, size_t size);
@@ -5288,7 +5294,11 @@ static void meshcore_service_handle_radio_tx_timeout(
     s_active_tx_ack_response = false;
     s_tx_busy = false;
     if (advert_tx) {
-        s_status.advert_tx_failed++;
+        const bool already_failed = advert_request_id != 0U &&
+            s_status.advert_request_failed_id == advert_request_id;
+        if (!already_failed) {
+            s_status.advert_tx_failed++;
+        }
         if (advert_request_id != 0U) {
             s_status.advert_request_failed_id = advert_request_id;
         }
@@ -5414,6 +5424,7 @@ static void meshcore_service_run_owner_maintenance(void)
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     (void)meshcore_service_expire_trace_if_due(
         (uint32_t)(now_us / 1000ULL));
+    meshcore_service_recover_radio_bus();
     meshcore_service_handle_radio_tx_watchdog();
     if (s_pending_ack_tx.active && !s_tx_busy) {
         /* RX admission already placed this ACK in the priority queue. Give it
@@ -5670,6 +5681,9 @@ static RadioEvents_t s_radio_events = {
 
 static esp_err_t configure_radio_profile(const d1l_radio_profile_t *profile)
 {
+    if (bsp_sx126x_fault_get() != 0U) {
+        return ESP_ERR_TIMEOUT;
+    }
     uint32_t bw_index = 0;
     RadioLoRaBandwidths_t sx_bw = LORA_BW_125;
     uint8_t cr_value = 0;
@@ -5701,7 +5715,7 @@ static esp_err_t configure_radio_profile(const d1l_radio_profile_t *profile)
                       cr_value, D1L_MESHCORE_PREAMBLE_LOW_SF, false, true, false, 0, false,
                       s_radio_tx_timeout_ms);
     apply_sx1262_lora_params(profile, sx_bw, cr_value);
-    return ESP_OK;
+    return bsp_sx126x_fault_get() == 0U ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 static esp_err_t ensure_radio_started(void)
@@ -5715,6 +5729,11 @@ static esp_err_t ensure_radio_started(void)
     if (!s_radio_started) {
         Radio.Init(&s_radio_events);
         s_radio_started = true;
+    }
+    if (bsp_sx126x_fault_get() != 0U || s_radio_recovery_pending) {
+        s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
+        s_status.radio_ready = false;
+        return ESP_ERR_INVALID_STATE;
     }
     d1l_radio_profile_t profile = d1l_settings_radio_profile(NULL);
     esp_err_t ret = configure_radio_profile(&profile);
@@ -5753,6 +5772,11 @@ static void d1l_meshcore_start_rx(void)
     } else {
         Radio.Rx(0);
     }
+    if (bsp_sx126x_fault_get() != 0U) {
+        s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
+        s_status.radio_ready = false;
+        return;
+    }
     if (!s_tx_busy) {
         s_status.state = D1L_MESHCORE_SERVICE_READY;
     }
@@ -5766,8 +5790,63 @@ static esp_err_t meshcore_service_handle_start_rx(void)
     esp_err_t ret = ensure_radio_started();
     if (ret == ESP_OK) {
         d1l_meshcore_start_rx();
+        if (!s_status.radio_ready) {
+            ret = ESP_ERR_INVALID_STATE;
+        }
     }
     return ret;
+}
+
+static void meshcore_service_recover_radio_bus(void)
+{
+    /* Startup owns callback/timer initialization even if its first hardware
+     * attempt fails. Recovery must never reuse uninitialized timer handles. */
+    if (!s_radio_started) {
+        return;
+    }
+    const uint32_t fault = bsp_sx126x_fault_get();
+    if (fault == 0U && !s_radio_recovery_pending) {
+        return;
+    }
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    s_status.radio_ready = false;
+    s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
+    s_radio_profile_applied = false;
+    if (!s_radio_recovery_pending) {
+        __atomic_store_n(&s_radio_recovery_pending, true, __ATOMIC_RELEASE);
+        /* Never replay an ambiguous transmission after resetting the radio.
+         * The existing exact-operation terminal path closes its delivery. */
+        if (d1l_mesh_tx_operation_identity_valid(&s_active_radio_tx)) {
+            const d1l_meshcore_service_cmd_t event = {
+                .type = D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT,
+                .monotonic_us = now_us,
+                .tx_operation = s_active_radio_tx,
+            };
+            meshcore_service_handle_radio_tx_timeout(&event);
+        }
+        ESP_LOGW(TAG, "radio bus fault %lu; queued sends will fail until recovery",
+                 (unsigned long)fault);
+    }
+    if (now_us < s_radio_recovery_not_before_us) {
+        return;
+    }
+    s_radio_recovery_not_before_us = now_us + UINT64_C(2000000);
+    (void)d1l_mesh_runtime_counter_increment_saturating(&s_radio_recovery_attempts);
+    if (!Radio.RecoverHardware()) {
+        return;
+    }
+    /* The driver's IRQ claim excludes the old interrupt path across reset.
+     * Restore the saved RF settings before admitting any new transmission. */
+    __atomic_store_n(&s_radio_recovery_pending, false, __ATOMIC_RELEASE);
+    const esp_err_t ret = meshcore_service_handle_start_rx();
+    if (ret != ESP_OK || bsp_sx126x_fault_get() != 0U) {
+        __atomic_store_n(&s_radio_recovery_pending, true, __ATOMIC_RELEASE);
+        s_status.radio_ready = false;
+        s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
+        return;
+    }
+    (void)d1l_mesh_runtime_counter_increment_saturating(&s_radio_recovery_successes);
+    ESP_LOGI(TAG, "radio recovered with saved RF settings");
 }
 
 static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd_t *cmd)
@@ -5828,7 +5907,7 @@ static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd
     Radio.SendWithOrigin(
         cmd->raw, cmd->raw_len,
         (uint32_t)s_active_radio_tx.operation_id);
-    return ESP_OK;
+    return bsp_sx126x_fault_get() == 0U ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 static esp_err_t meshcore_service_handle_send_advert(
@@ -6171,6 +6250,9 @@ static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)
     Radio.SendWithOrigin(
         s_pending_dm_tx.raw, s_pending_dm_tx.raw_len,
         (uint32_t)s_active_radio_tx.operation_id);
+    if (bsp_sx126x_fault_get() != 0U) {
+        return ESP_ERR_TIMEOUT;
+    }
     record_dm_route_selection(&retry_selection);
     return ESP_OK;
 
@@ -6407,6 +6489,9 @@ static esp_err_t meshcore_service_handle_send_dm(
     Radio.SendWithOrigin(
         s_pending_dm_tx.raw, s_pending_dm_tx.raw_len,
         (uint32_t)s_active_radio_tx.operation_id);
+    if (bsp_sx126x_fault_get() != 0U) {
+        return ESP_ERR_TIMEOUT;
+    }
     record_dm_route_selection(&selection);
     if (cmd->dm_path_probe) {
         snprintf(s_last_path_probe_fingerprint,
@@ -8264,6 +8349,19 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
         &s_runtime_owner_maintenance_runs, __ATOMIC_RELAXED);
     snapshot.runtime_terminal_recovery_dispatches = __atomic_load_n(
         &s_runtime_terminal_recovery_dispatches, __ATOMIC_RELAXED);
+    snapshot.radio_bus_fault = bsp_sx126x_fault_get();
+    snapshot.radio_bus_fault_count = bsp_sx126x_fault_count_get();
+    snapshot.radio_recovery_attempts = __atomic_load_n(
+        &s_radio_recovery_attempts, __ATOMIC_RELAXED);
+    snapshot.radio_recovery_successes = __atomic_load_n(
+        &s_radio_recovery_successes, __ATOMIC_RELAXED);
+    if (snapshot.radio_bus_fault != 0U ||
+        __atomic_load_n(&s_radio_recovery_pending, __ATOMIC_ACQUIRE)) {
+        snapshot.radio_ready = false;
+        snapshot.radio_applied = false;
+        snapshot.radio_apply_pending = true;
+        snapshot.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
+    }
     return snapshot;
 }
 
@@ -8685,7 +8783,8 @@ esp_err_t d1l_meshcore_service_request_boot_advert(bool flood)
 }
 
 static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
-                                                     const char *text)
+                                                     const char *text,
+                                                     bool confirm_radio)
 {
     if (channel_id == 0U) {
         return ESP_ERR_INVALID_ARG;
@@ -8776,7 +8875,10 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         s_status.rejected_commands++;
         return ret;
     }
-    ret = meshcore_service_queue_public_raw(raw, raw_len);
+    ret = confirm_radio ? meshcore_service_send_raw_kind(
+        raw, raw_len, D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS,
+        D1L_MESH_TX_OPERATION_PUBLIC) :
+        meshcore_service_queue_public_raw(raw, raw_len);
     if (ret != ESP_OK) {
         secure_zero_bytes(raw, sizeof(raw));
         s_status.rejected_commands++;
@@ -8786,8 +8888,9 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
     return ESP_OK;
 }
 
-esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
-                                            const char *text)
+static esp_err_t meshcore_service_send_channel_mode(uint64_t channel_id,
+                                                    const char *text,
+                                                    bool confirm_radio)
 {
     uint32_t expected = 0U;
     if (!__atomic_compare_exchange_n(
@@ -8797,12 +8900,26 @@ esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
         return ESP_ERR_INVALID_STATE;
     }
     const esp_err_t ret =
-        meshcore_service_send_channel_owned(channel_id, text);
+        meshcore_service_send_channel_owned(channel_id, text, confirm_radio);
     if (ret != ESP_OK) {
         reset_pending_channel_tx_state();
         __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
     }
     return ret;
+}
+
+esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
+                                            const char *text)
+{
+    return meshcore_service_send_channel_mode(channel_id, text, false);
+}
+
+esp_err_t d1l_meshcore_service_send_channel_confirmed(uint64_t channel_id,
+                                                      const char *text)
+{
+    /* BLE has its own worker. A cancelled request cannot be transmitted later
+     * and a success reply requires the radio owner to have started this TX. */
+    return meshcore_service_send_channel_mode(channel_id, text, true);
 }
 
 esp_err_t d1l_meshcore_service_send_active_channel(const char *text)

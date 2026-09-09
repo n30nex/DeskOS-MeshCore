@@ -117,8 +117,8 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "8704d3fdfb5d1168c2a741ae228c4cef2eb41f0608ac565caa75265e5726ed7b",
-    "main/app/app_model.h": "760ce9c9427eb0470f4fde6a7733b44c802d458720169dd752684d3fc2fee89c",
+    "main/app/app_model.c": "c81d49ab33c9d3bd7ad0caf39016fdf8025555ec6d0badb6133fd979d91aaa7a",
+    "main/app/app_model.h": "24e0a6c1cc444630f25ed0d2e610f8400715fdee865af32e6a2fb309f35d5e97",
     "main/app/settings_model.c": "fbf75f92086ad231832ae98669a6cb4800bb3368fa78d04f87bc0122a45eeba3",
     "main/app/settings_model.h": "f7fc9e0b5cb9b52e1c6c597f95cf8d48c2ae266d092031034d76b059372e83b6",
     "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
@@ -135,7 +135,7 @@
     "main/map/map_viewport_truth_transition.h": "4de9fd54634d0f3481a5069895e72357bee55593ead88d44db526c98f37bc66e",
     "main/mesh/advert_data.c": "e62c97af20f7e1b127fad0208825135da140feb6efbbf25cc246ebd87d630973",
     "main/mesh/meshcore_lifetime.h": "b480f554ac3979e3caefdd1d815a334e0de47bddc8f21c7ac8305d4643fba535",
-    "main/mesh/meshcore_service.c": "f409dc81deaac67094021fca929a8e6a5538eb6782c882f7d3497361efe2faac",
+    "main/mesh/meshcore_service.c": "0884551ef57b3e6af48eb64d63049a5e907af2dbafcf8b6d3cbfdd9c5a72385a",
     "main/mesh/node_store.c": "ac60049b2bd7a627febffd606a35e5305b2a750c762615fb11f93badff9cb161",
     "main/mesh/node_store.h": "5513cfbd602168c5d4f178ab625c9f82175627e5e7ad392ec93c13cd3cc06677",
     "main/platform/time_service.c": "54ed3f4a6441bfb9dea2c71b55538a381f8f246f3ef557a20af865dbd564297b",

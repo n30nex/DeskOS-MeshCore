@@ -1,4 +1,17 @@
-# MeshCore DeskOS D1L 1.8.0-rc.4 User Guide
+# MeshCore DeskOS D1L 1.8.0-rc.5 User Guide
+
+## Radio and phone sending in 1.8.0-rc.5
+
+DeskOS detects a radio that remains busy and attempts to recover it with the
+saved RF settings. Recovery does not restart the whole device or replay a
+transmission whose outcome is uncertain. Diagnostics show radio faults and
+recovery counts; a radio that cannot recover remains unavailable.
+
+Phone channel sends wait for the radio to accept the operation. A failed or
+expired request returns an error and leaves the text available in the phone
+app. Public channels do not acknowledge receipt from every listener; check
+the conversation before manually resending. The firmware limit is 138 UTF-8
+bytes, even if a phone client shows a larger allowance for a short node name.
 
 ## Messaging changes in 1.8.0-rc.4
 

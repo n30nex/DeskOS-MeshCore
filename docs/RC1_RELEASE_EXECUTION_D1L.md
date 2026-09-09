@@ -1,6 +1,6 @@
 # DeskOS D1L release execution
 
-## Current local release procedure: 1.8.0-rc.4
+## Current local release procedure: 1.8.0-rc.5
 
 The maintainer requested local builds on the Pi 5. The 1.0 procedure below is
 historical and must not trigger Actions for the current candidate.
@@ -29,7 +29,7 @@ historical and must not trigger Actions for the current candidate.
 5. Verify the exact running version/commit, identity, display, radio and
    retained storage. Exercise the changed behavior using production firmware.
    Record any physical update/phone paths that were not exercised explicitly.
-6. Merge the tested source, tag `v1.8.0-rc.4`, and publish it as a prerelease.
+6. Merge the tested source, tag `v1.8.0-rc.5`, and publish it as a prerelease.
    Freshly download every asset and compare its bytes with staging. Update the
    existing flasher catalog and Canadaverse DeskOS page, then verify their
    public content and downloads. Remove obsolete build outputs only after

@@ -6,11 +6,11 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.8.0-rc.4** is the release candidate for the SenseCAP Indicator D1L.
+DeskOS **1.8.0-rc.5** is the release candidate for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.4)
+[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.5)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
@@ -19,6 +19,13 @@ The previous stable release is
 [1.7.12](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
 
 ## What the candidate improves
+
+- **Radio recovery** bounds a stuck BUSY signal and resets the radio with its
+  saved RF settings. It does not restart the whole D1L or resend an uncertain
+  transmission. Hardware recovery state is visible in diagnostics.
+- **Phone channel sends** wait for the radio owner to accept the transmission.
+  A stalled or unavailable radio produces an error instead of an early success
+  reply, and expired requests cannot be sent later.
 
 - **Conversation drafts** survive closing and reopening the composer, and save
   to prepared SD storage after typing pauses. Each draft belongs to the exact
@@ -58,7 +65,7 @@ The previous stable release is
 - An ordinary update can finish without optional SD storage. Fresh clean
   installations retain the complete three-stage verification.
 
-See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.4.md) for the full
+See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.5.md) for the full
 change and validation record. Earlier releases remain documented in the
 [roadmap](docs/ROADMAP.md) and their release notes.
 

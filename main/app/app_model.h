@@ -286,6 +286,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot);
 esp_err_t d1l_app_model_send_public_text(const char *text);
 esp_err_t d1l_app_model_send_channel_text(uint64_t channel_id,
                                           const char *text);
+esp_err_t d1l_app_model_send_channel_text_confirmed(uint64_t channel_id,
+                                                    const char *text);
 esp_err_t d1l_app_model_send_active_channel_text(const char *text);
 esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
                                       size_t max_channels,

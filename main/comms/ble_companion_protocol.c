@@ -2068,6 +2068,9 @@ static void get_advert_path_command(const uint8_t *payload, size_t length)
 
 static void send_channel_command(const uint8_t *payload, size_t length)
 {
+    if (length >= 2U) {
+        note_text_command(payload[1], length > 7U ? length - 7U : 0U);
+    }
     if (length < 8U || payload[1] != 0U) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
@@ -2086,7 +2089,7 @@ static void send_channel_command(const uint8_t *payload, size_t length)
     memcpy(text, &payload[7], text_len);
     text[text_len] = '\0';
     const esp_err_t result =
-        d1l_app_model_send_channel_text(channel.channel_id, text);
+        d1l_app_model_send_channel_text_confirmed(channel.channel_id, text);
     memset(text, 0, sizeof(text));
     set_result_response(result);
 }

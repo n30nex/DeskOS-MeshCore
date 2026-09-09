@@ -1,4 +1,4 @@
-# DeskOS D1L 1.8.0-rc.4 limitations
+# DeskOS D1L 1.8.0-rc.5 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -23,6 +23,11 @@ SD-primary storage.
   material. It is not a general QR generator and never exports secrets.
 - Signed update is local-SD only. It does not download firmware or accept an
   RF-triggered update. USB app/full-clean flashing remains the recovery path.
+- Message text is limited to 138 UTF-8 bytes. A phone client may display a
+  larger allowance for a short node name; over-limit text is rejected without
+  truncation. Public/channel transmission does not acknowledge receipt at
+  every recipient. Check the conversation before manually resending an
+  uncertain transmission.
 - The current UI is English-only. Additional localization remains future work.
 - The D1L is externally powered and has no battery sensor. The phone protocol
   uses a full-battery equivalent because it has no wired-power indicator.
@@ -32,7 +37,7 @@ SD-primary storage.
 - New messages use a plausible sender timestamp or the trusted local arrival
   time. Older retained rows without either remain labelled `time unknown`.
 - Optional Indicator temperature, humidity, and CO2 sensor integration remains
-  future work and is not represented as live data in 1.8.0-rc.4.
+  future work and is not represented as live data in 1.8.0-rc.5.
 
 See [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md)
 for the complete mobile-to-D1L outcome matrix.

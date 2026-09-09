@@ -24,6 +24,10 @@ typedef struct {
     uint32_t rx_adverts;
     uint32_t tx_packets;
     uint32_t radio_tx_timeout_ms;
+    uint32_t radio_bus_fault;
+    uint32_t radio_bus_fault_count;
+    uint32_t radio_recovery_attempts;
+    uint32_t radio_recovery_successes;
     uint32_t radio_rx_packets;
     uint32_t radio_rx_errors;
     uint32_t radio_flood_tx;
@@ -256,6 +260,8 @@ esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_request_boot_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
                                             const char *text);
+esp_err_t d1l_meshcore_service_send_channel_confirmed(uint64_t channel_id,
+                                                      const char *text);
 esp_err_t d1l_meshcore_service_send_active_channel(const char *text);
 esp_err_t d1l_meshcore_service_send_public(const char *text);
 esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text);

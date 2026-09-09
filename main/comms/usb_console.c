@@ -2578,6 +2578,12 @@ static void cmd_mesh_status(void)
            (unsigned long)status.runtime_task_heartbeat,
            (unsigned long)status.runtime_task_stack_free_words,
            (unsigned long long)status.runtime_last_event_monotonic_us);
+    printf(",\"radio_recovery\":{\"fault_code\":%lu,\"faults\":%lu,"
+           "\"attempts\":%lu,\"successes\":%lu}",
+           (unsigned long)status.radio_bus_fault,
+           (unsigned long)status.radio_bus_fault_count,
+           (unsigned long)status.radio_recovery_attempts,
+           (unsigned long)status.radio_recovery_successes);
     printf(",\"trace\":{\"available\":%s,\"internal_dm_route_only\":%s,"
            "\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,"
            "\"pending_expired\":%lu,\"no_response\":%lu,"

@@ -640,6 +640,16 @@ esp_err_t d1l_app_model_send_active_channel_text(const char *text)
     return d1l_meshcore_service_send_active_channel(text);
 }
 
+esp_err_t d1l_app_model_send_channel_text_confirmed(uint64_t channel_id,
+                                                    const char *text)
+{
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return d1l_meshcore_service_send_channel_confirmed(channel_id, text);
+}
+
 esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
                                       size_t max_channels,
                                       size_t *out_count,

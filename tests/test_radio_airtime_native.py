@@ -57,6 +57,7 @@ static d1l_mesh_tx_operation_identity_t s_active_radio_tx;
 static d1l_mesh_tx_watchdog_t s_radio_tx_watchdog;
 static void status_lock(void) {}
 static void status_unlock(void) {}
+static uint32_t bsp_sx126x_fault_get(void) {return 0U;}
 static int64_t esp_timer_get_time(void) {return 1000000;}
 static void publish_callback_tx_operation(const d1l_mesh_tx_operation_identity_t *identity) {(void)identity;}
 static void channel(uint32_t hz) {(void)hz;}

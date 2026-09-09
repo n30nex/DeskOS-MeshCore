@@ -21,7 +21,8 @@
 | **1.8.0-rc.1** | Radio timing and diagnostics audit, clearer startup/maps, and verified browser installation | Previous candidate |
 | **1.8.0-rc.2** | Verify the written update image, reliable cancellation, and correct SD installation paths | Previous candidate; exact acceptance in the tagged release |
 | **1.8.0-rc.3** | WadaMesh-guided Chats, paged Contacts and filters, Profile, quick replies, and clearer device controls | Previous candidate |
-| **1.8.0-rc.4** | Conversation drafts, plain-text quoted replies and on-device clipboard | Messaging candidate; exact acceptance recorded in the tagged release |
+| **1.8.0-rc.4** | Conversation drafts, plain-text quoted replies and on-device clipboard | Previous candidate; radio BUSY stall reproduced after release |
+| **1.8.0-rc.5** | Bounded radio recovery and confirmed companion channel admission | Radio repair candidate; exact acceptance recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -225,3 +226,15 @@ a bounded plain-text excerpt without replacing the user's draft or sending.
 Remaining target differences include mentions, localization/font scaling,
 auto-add policy controls, and WadaMesh's separate Lua/web/remote applications.
 The release record distinguishes implementation from physical acceptance.
+
+## 1.8.0-rc.5: radio recovery and companion send errors
+
+A physical RC4 radio BUSY stall left one channel message queued while the
+phone displayed Sent; later attempts returned an error. The radio wait now
+has a deadline, later SPI operations fail closed after a fault, and the owner
+recovers the peripheral under the driver's IRQ claim before restoring its
+saved RF settings. Companion channel sends wait for radio-owner acceptance
+through the existing cancellable request path. Diagnostics expose recovery
+and channel-command outcomes. The physical touchscreen retains its
+asynchronous composer, and uncertain transmissions are not automatically
+replayed after a radio reset.
