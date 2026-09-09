@@ -264,3 +264,47 @@ int main(void) {
 }
 '''
     compile_run(tmp_path, code)
+
+
+def test_confirmed_channel_caller_never_owns_shared_send_cleanup(tmp_path):
+    service = (ROOT / "main/mesh/meshcore_service.c").read_text()
+    code = r'''
+#include <assert.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_ERR_INVALID_ARG 1
+#define ESP_ERR_TIMEOUT 2
+#define D1L_MESHCORE_SERVICE_CMD_SEND_CHANNEL 9
+#define D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS 5000U
+typedef struct {int type;uint64_t channel_id;char dm_text[139];} d1l_meshcore_service_cmd_t;
+static unsigned shared_send=41,submit_count,wipe_count;
+static int result=ESP_ERR_TIMEOUT;
+static d1l_meshcore_service_cmd_t submitted;
+static esp_err_t validate_user_text(const char *text) {return text && *text ? ESP_OK : ESP_ERR_INVALID_ARG;}
+static esp_err_t meshcore_service_send_command(d1l_meshcore_service_cmd_t *cmd,uint32_t timeout) {
+    assert(timeout==5000 && cmd->type==D1L_MESHCORE_SERVICE_CMD_SEND_CHANNEL);
+    submitted=*cmd;submit_count++;
+    /* The owner can finish A and admit B before the caller resumes. */
+    shared_send=99;return result;
+}
+static void meshcore_service_command_wipe(d1l_meshcore_service_cmd_t *cmd) {memset(cmd,0,sizeof(*cmd));wipe_count++;}
+'''
+    code += function(service, "d1l_meshcore_service_send_channel_confirmed")
+    code += r'''
+int main(void) {
+    assert(d1l_meshcore_service_send_channel_confirmed(7,"test")==ESP_ERR_TIMEOUT);
+    assert(submit_count==1 && wipe_count==1 && shared_send==99);
+    assert(submitted.channel_id==7 && strcmp(submitted.dm_text,"test")==0);
+    result=ESP_OK;
+    assert(d1l_meshcore_service_send_channel_confirmed(8,"next")==ESP_OK);
+    assert(shared_send==99 && submitted.channel_id==8 && submit_count==2);
+    assert(d1l_meshcore_service_send_channel_confirmed(0,"test")==ESP_ERR_INVALID_ARG);
+    assert(d1l_meshcore_service_send_channel_confirmed(8,"")==ESP_ERR_INVALID_ARG);
+    assert(submit_count==2);
+    return 0;
+}
+'''
+    compile_run(tmp_path, code)

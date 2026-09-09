@@ -392,6 +392,7 @@ typedef enum {
     D1L_MESHCORE_SERVICE_EVENT_RX_DONE,
     D1L_MESHCORE_SERVICE_EVENT_RX_TIMEOUT,
     D1L_MESHCORE_SERVICE_EVENT_RX_ERROR,
+    D1L_MESHCORE_SERVICE_CMD_SEND_CHANNEL,
 } d1l_meshcore_service_cmd_type_t;
 
 typedef struct {
@@ -409,6 +410,7 @@ typedef struct {
     uint8_t advert_path_hash_bytes;
     char dm_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char dm_text[D1L_MESSAGE_TEXT_LEN];
+    uint64_t channel_id;
     bool dm_path_probe;
     char trace_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     bool trace_zero_hop_ping;
@@ -460,6 +462,9 @@ static void finalize_pending_dm_radio_result(bool sent, esp_err_t error);
 static esp_err_t retry_pending_dm_as_flood(uint64_t now_us);
 static void fail_pending_dm_ack_timeout(esp_err_t error);
 static void meshcore_service_recover_radio_bus(void);
+static esp_err_t meshcore_service_send_channel_mode(uint64_t channel_id,
+                                                    const char *text,
+                                                    bool dispatch_now);
 static void record_pending_direct_path_result(bool success);
 static bool finalize_pending_dm_ack_completion(void);
 static void secure_zero_bytes(void *data, size_t size);
@@ -7446,6 +7451,7 @@ static bool meshcore_service_command_requires_idle_tx(
     case D1L_MESHCORE_SERVICE_CMD_SEND_RAW:
     case D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT:
     case D1L_MESHCORE_SERVICE_CMD_SEND_DM:
+    case D1L_MESHCORE_SERVICE_CMD_SEND_CHANNEL:
     case D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT:
     case D1L_MESHCORE_SERVICE_CMD_DISCOVER_NEARBY:
     case D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN:
@@ -7694,6 +7700,10 @@ static void meshcore_service_task(void *arg)
             if (ret != ESP_OK) {
                 s_status.rejected_commands++;
             }
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_SEND_CHANNEL:
+            ret = meshcore_service_send_channel_mode(
+                cmd.channel_id, cmd.dm_text, true);
             break;
         case D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT:
             ret = meshcore_service_handle_send_trace_contact(&cmd);
@@ -8784,7 +8794,7 @@ esp_err_t d1l_meshcore_service_request_boot_advert(bool flood)
 
 static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
                                                      const char *text,
-                                                     bool confirm_radio)
+                                                     bool dispatch_now)
 {
     if (channel_id == 0U) {
         return ESP_ERR_INVALID_ARG;
@@ -8875,10 +8885,18 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         s_status.rejected_commands++;
         return ret;
     }
-    ret = confirm_radio ? meshcore_service_send_raw_kind(
-        raw, raw_len, D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS,
-        D1L_MESH_TX_OPERATION_PUBLIC) :
-        meshcore_service_queue_public_raw(raw, raw_len);
+    if (dispatch_now) {
+        d1l_meshcore_service_cmd_t cmd = {
+            .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+            .requested_tx_kind = D1L_MESH_TX_OPERATION_PUBLIC,
+            .raw_len = raw_len,
+        };
+        memcpy(cmd.raw, raw, raw_len);
+        ret = meshcore_service_handle_send_raw(&cmd);
+        meshcore_service_command_wipe(&cmd);
+    } else {
+        ret = meshcore_service_queue_public_raw(raw, raw_len);
+    }
     if (ret != ESP_OK) {
         secure_zero_bytes(raw, sizeof(raw));
         s_status.rejected_commands++;
@@ -8890,8 +8908,11 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
 
 static esp_err_t meshcore_service_send_channel_mode(uint64_t channel_id,
                                                     const char *text,
-                                                    bool confirm_radio)
+                                                    bool dispatch_now)
 {
+    if (dispatch_now && !meshcore_service_called_from_owner()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     uint32_t expected = 0U;
     if (!__atomic_compare_exchange_n(
             &s_channel_send_admission, &expected, 1U, false,
@@ -8900,7 +8921,7 @@ static esp_err_t meshcore_service_send_channel_mode(uint64_t channel_id,
         return ESP_ERR_INVALID_STATE;
     }
     const esp_err_t ret =
-        meshcore_service_send_channel_owned(channel_id, text, confirm_radio);
+        meshcore_service_send_channel_owned(channel_id, text, dispatch_now);
     if (ret != ESP_OK) {
         reset_pending_channel_tx_state();
         __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
@@ -8917,9 +8938,25 @@ esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
 esp_err_t d1l_meshcore_service_send_channel_confirmed(uint64_t channel_id,
                                                       const char *text)
 {
-    /* BLE has its own worker. A cancelled request cannot be transmitted later
-     * and a success reply requires the radio owner to have started this TX. */
-    return meshcore_service_send_channel_mode(channel_id, text, true);
+    if (channel_id == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const esp_err_t ret = validate_user_text(text);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    /* Queue the text, not a partly prepared shared send. The owner acquires
+     * admission, builds the packet and performs any failure cleanup before
+     * replying. A late caller can therefore never clear a successor's send. */
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_CHANNEL,
+        .channel_id = channel_id,
+    };
+    memcpy(cmd.dm_text, text, strlen(text) + 1U);
+    const esp_err_t result = meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_CHANNEL_COMMAND_TIMEOUT_MS);
+    meshcore_service_command_wipe(&cmd);
+    return result;
 }
 
 esp_err_t d1l_meshcore_service_send_active_channel(const char *text)
