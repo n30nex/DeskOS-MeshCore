@@ -245,7 +245,7 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
     service = read("main/mesh/meshcore_service.c")
 
     admission = c_function(
-        service, "esp_err_t d1l_meshcore_service_send_channel("
+        service, "static esp_err_t meshcore_service_send_channel_mode("
     )
     assert "__atomic_compare_exchange_n" in admission
     assert "meshcore_service_send_channel_owned" in admission
@@ -253,6 +253,14 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
     assert admission.index("if (ret != ESP_OK)") < admission.index(
         "__atomic_store_n(&s_channel_send_admission, 0U"
     )
+    assert "dispatch_now && !meshcore_service_called_from_owner()" in admission
+    touchscreen = c_function(service, "esp_err_t d1l_meshcore_service_send_channel(")
+    assert "meshcore_service_send_channel_mode(channel_id, text, false)" in touchscreen
+    companion = c_function(service, "esp_err_t d1l_meshcore_service_send_channel_confirmed(")
+    assert ".type = D1L_MESHCORE_SERVICE_CMD_SEND_CHANNEL" in companion
+    assert "meshcore_service_send_command(" in companion
+    assert "s_channel_send_admission" not in companion
+    assert "reset_pending_channel_tx_state" not in companion
     clear = c_function(service, "static void clear_pending_channel_tx(")
     assert "reset_pending_channel_tx_state()" in clear
     assert "__atomic_store_n(&s_channel_send_admission, 0U" in clear
@@ -282,6 +290,8 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
     assert "meshcore_service_send_command" not in public_queue
     assert "meshcore_service_wake()" in public_queue
     task = c_function(service, "static void meshcore_service_task(")
+    assert "case D1L_MESHCORE_SERVICE_CMD_SEND_CHANNEL:" in task
+    assert "cmd.channel_id, cmd.dm_text, true" in task
     public_failure = task[
         task.index(
             "cmd.requested_tx_kind == D1L_MESH_TX_OPERATION_PUBLIC"
