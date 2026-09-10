@@ -27,7 +27,7 @@
     "main/mesh/meshcore_wire.h"
   ],
   "source_pins": {
-    ".github/workflows/d1l-ci.yml": "1cbcd0b401ee916292cd87a75a5ac9424c39620f3654b9ca0f08412504c63dad",
+    ".github/workflows/d1l-ci.yml": "9d8e102228991dd1ccd7482ab9e94ef0d4ce4af02a74ef9666d566764bfe29a5",
     "main/CMakeLists.txt": "ed656dc2308efbf8b0d87b0366d9e7866a0006dbbaada5d3c915fc1e333b31a8",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/meshcore_discovery.h": "2bb5c3b33eee808075a054bb9a23bfe7835317fab5256b93d92e8294a52a99cf",
