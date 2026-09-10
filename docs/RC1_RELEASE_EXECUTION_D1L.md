@@ -1,9 +1,20 @@
 # DeskOS D1L release execution
 
-## Current local release procedure: 1.8.0-rc.6
+## Current release procedure: 1.8.0-rc.6
 
-The maintainer requested local builds on the Pi 5. The 1.0 procedure below is
-historical and must not trigger Actions for the current candidate.
+The maintainer re-enabled GitHub Actions for RC6. Dispatch the existing
+`d1l-ci` workflow on the exact candidate ref with the SD bridge included.
+Require successful host checks, MeshCore conformance, RP2040 build and ESP32
+build/packaging jobs. Download that run's `d1l-release-package` artifact and
+verify its source commit, manifest, signed update and checksums. Use that
+exact package for preserving installation and physical acceptance on the Pi's
+D1L, then publish it and update the website/flasher. Record the actual run ID
+and source; do not label an Actions artifact as a local build.
+
+## Local build alternative
+
+The following pinned local procedure remains available when the maintainer
+requests it. The 1.0 procedure below is historical.
 
 1. Freeze a clean source commit and its pinned submodules in an isolated Pi
    checkout. Run the complete host suite and the checks required by the changed

@@ -9,10 +9,11 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
-## 1.8.0-rc.6 local release candidate
+## 1.8.0-rc.6 release candidate
 
-The maintainer requested local Pi 5 builds for this candidate. Do not dispatch
-GitHub Actions. The Actions requirements below describe historical releases.
+The maintainer re-enabled GitHub Actions for this candidate. Use the existing
+workflow's exact-source signed package; the attached D1L remains the physical
+acceptance target on the Pi 5.
 
 - Check actual legacy/current companion message frames for zero, one and
   multiple hops, including two/three-byte path hashes and retained rows.
@@ -24,9 +25,9 @@ GitHub Actions. The Actions requirements below describe historical releases.
   verify no SPI after a latched fault, exclusive reset, timer reuse, profile
   restoration and companion rejection before publishing.
 - Run the complete host suite and the focused native radio, companion, storage,
-  update, connectivity, map, and startup checks on the Pi.
+  update, connectivity, map, and startup checks in the existing Actions jobs.
 - Build the exact clean source with the pinned ESP-IDF SDK, `full_feature`,
-  `conditional`, and all four reviewed BSP patches. Record local provenance.
+  `conditional`, and all four reviewed BSP patches. Record the Actions run.
 - Package and verify both ESP32 install paths, the complete production RP2040
   UF2, and the signed SD update using the existing production signer.
 - Use only the stable D1L USB identity. Preserve identity, settings and SD data;

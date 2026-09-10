@@ -34,5 +34,6 @@ answer telemetry; absence of a response is not successful sensor validation.
 This remains a release candidate. The existing documented limits on advanced
 phone commands, WadaMesh parity, signed-SD physical install/rollback and bridge
 reflash acceptance remain in effect unless the tagged release records new
-evidence. Builds and packaging run locally on the Pi 5; no Actions build is
-used or implied.
+evidence. The maintainer re-enabled GitHub Actions for this candidate. The
+existing workflow builds and signs the exact release package; physical
+installation and radio checks use the Pi-attached D1L.
