@@ -22,7 +22,8 @@
 | **1.8.0-rc.2** | Verify the written update image, reliable cancellation, and correct SD installation paths | Previous candidate; exact acceptance in the tagged release |
 | **1.8.0-rc.3** | WadaMesh-guided Chats, paged Contacts and filters, Profile, quick replies, and clearer device controls | Previous candidate |
 | **1.8.0-rc.4** | Conversation drafts, plain-text quoted replies and on-device clipboard | Previous candidate; radio BUSY stall reproduced after release |
-| **1.8.0-rc.5** | Bounded radio recovery, confirmed companion sends, phone discovery/telemetry and reliable contact edits | Phone compatibility candidate; exact acceptance recorded in the tagged release |
+| **1.8.0-rc.5** | Bounded radio recovery, confirmed companion sends, phone discovery/telemetry and reliable contact edits | Previous candidate; received-path label and phone telemetry restart reproduced |
+| **1.8.0-rc.6** | Correct received hop counts and sufficient companion telemetry stack | Corrective candidate; exact acceptance recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -244,3 +245,13 @@ ordinary contacts/sensors to the BLE adapter. Contact edits now wait for
 foreground storage ownership, preserving the existing durable-write and media
 generation guarantees. Both new phone response formats have native byte-level
 checks; physical acceptance belongs to the exact candidate release record.
+
+## 1.8.0-rc.6: received paths and phone telemetry
+
+The official-phone check of the published RC5 binary reproduced channel
+messages showing 63 hops and a stack overflow when requesting an ordinary
+contact's telemetry. RC6 encodes retained receive-path metadata instead of a
+fixed marker, including multi-hop DMs, and gives the companion worker the same
+stack budget as the radio owner. USB diagnostics expose its minimum free
+stack so the physical test can verify the remaining margin. It preserves
+existing message stores and does not erase already-cached phone history.

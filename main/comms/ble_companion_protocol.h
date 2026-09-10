@@ -24,6 +24,7 @@ typedef struct {
     uint32_t unsupported_count;
     uint32_t malformed_count;
     uint32_t transport_error_count;
+    uint32_t task_stack_free_bytes;
     esp_err_t last_error;
 } d1l_ble_companion_protocol_status_t;
 

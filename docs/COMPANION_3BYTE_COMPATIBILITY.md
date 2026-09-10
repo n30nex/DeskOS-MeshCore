@@ -1,6 +1,6 @@
 # BLE and 3-Byte Companion Compatibility
 
-Updated for DeskOS 1.8.0-rc.5
+Updated for DeskOS 1.8.0-rc.6
 
 MeshCore DeskOS D1L must be compatible with MeshCore companion clients in both meanings used by current MeshCore references.
 
@@ -43,6 +43,12 @@ RC5 also connects zero-hop node discovery and ordinary-contact/sensor telemetry
 to the existing radio operations. Telemetry from repeaters and rooms uses the
 authenticated management session; the remote peer controls which fields it
 allows. A missing response or permission is not proof that a sensor exists.
+
+RC6 sends the retained hop count and hash width for channel messages and
+multi-hop received DMs. Zero-hop DMs keep the protocol's direct marker.
+Already-synced messages can retain the old label in the phone's local history;
+new incoming messages use the corrected metadata. Contact telemetry also has
+the worker stack required for identity validation and encryption.
 
 Public contact links and QR codes can be created by the app from synced contact
 data. Raw advert-packet import/export and retransmission over BLE are separate

@@ -6,11 +6,11 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.8.0-rc.5** is the release candidate for the SenseCAP Indicator D1L.
+DeskOS **1.8.0-rc.6** is the release candidate for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.5)
+[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.6)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
@@ -19,6 +19,11 @@ The previous stable release is
 [1.7.12](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
 
 ## What the candidate improves
+
+- **Received hop counts** use the saved packet path. A nearby Public message
+  no longer appears as 63 hops because of a fixed companion placeholder.
+- **Contact telemetry** has enough Bluetooth worker stack for identity checks
+  and encryption, fixing the restart reproduced with the official phone app.
 
 - **Radio recovery** bounds a stuck BUSY signal and resets the radio with its
   saved RF settings. It does not restart the whole D1L or resend an uncertain
@@ -65,7 +70,7 @@ The previous stable release is
 - An ordinary update can finish without optional SD storage. Fresh clean
   installations retain the complete three-stage verification.
 
-See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.5.md) for the full
+See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.6.md) for the full
 change and validation record. Earlier releases remain documented in the
 [roadmap](docs/ROADMAP.md) and their release notes.
 

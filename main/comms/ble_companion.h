@@ -57,6 +57,7 @@ typedef struct {
     uint8_t protocol_last_admin_cli_stage;
     uint16_t protocol_last_text_length;
     uint32_t protocol_response_error_count;
+    uint32_t protocol_task_stack_free_bytes;
     esp_err_t last_error;
     int last_nimble_error;
     const char *state;

@@ -1,6 +1,17 @@
-# MeshCore DeskOS D1L 1.8.0-rc.5 User Guide
+# MeshCore DeskOS D1L 1.8.0-rc.6 User Guide
 
-## Radio and phone sending in 1.8.0-rc.5
+## Phone receive paths and telemetry in 1.8.0-rc.6
+
+Incoming channel messages report the received packet's hop count, including
+zero hops when no repeater forwarded it. The radio path can differ from the
+sender's physical distance. Messages already cached by the phone can keep
+their old labels; the update does not erase phone chat history.
+
+Requesting an ordinary contact's telemetry no longer exhausts the Bluetooth
+worker stack and restarts the D1L. A remote peer must still permit and answer
+the request for telemetry to appear.
+
+## Radio and phone sending
 
 DeskOS detects a radio that remains busy and attempts to recover it with the
 saved RF settings. Recovery does not restart the whole device or replay a

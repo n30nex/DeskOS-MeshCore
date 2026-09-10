@@ -868,6 +868,7 @@ void d1l_ble_companion_status(d1l_ble_companion_status_t *out_status)
     out_status->protocol_last_response_error_code =
         protocol.last_response_error_code;
     out_status->protocol_last_failed_command = protocol.last_failed_command;
+    out_status->protocol_task_stack_free_bytes = protocol.task_stack_free_bytes;
     out_status->protocol_last_failed_response_error_code =
         protocol.last_failed_response_error_code;
     out_status->protocol_last_text_type = protocol.last_text_type;

@@ -28,7 +28,9 @@
 #include "platform/time_service.h"
 #include "storage/storage_status.h"
 
-#define D1L_BLE_PROTOCOL_TASK_STACK_BYTES 6144U
+/* Contact telemetry performs identity validation and packet encryption here.
+ * Match the radio owner's stack budget; 6 KiB overflows on the real S3. */
+#define D1L_BLE_PROTOCOL_TASK_STACK_BYTES 12288U
 #define D1L_BLE_PROTOCOL_TASK_PRIORITY 5U
 #define D1L_BLE_PROTOCOL_POLL_MS 10U
 #define D1L_BLE_PROTOCOL_STOP_TIMEOUT_MS 1000U
@@ -1412,6 +1414,16 @@ static bool build_admin_cli_message(void)
     return true;
 }
 
+static uint8_t received_flood_path_len(uint8_t hash_bytes, uint8_t hops)
+{
+    /* Older retained rows can omit the hash width. Their hop count remains
+     * usable with the original one-byte MeshCore path format. */
+    if (hash_bytes < 1U || hash_bytes > 3U) {
+        hash_bytes = 1U;
+    }
+    return (uint8_t)(((hash_bytes - 1U) << 6U) | (hops & 0x3FU));
+}
+
 static bool build_next_dm_message(void)
 {
     const size_t count = d1l_dm_store_copy_recent(
@@ -1447,7 +1459,8 @@ static bool build_next_dm_message(void)
         }
         memcpy(&s_pending_payload[offset], public_key, 6U);
         offset += 6U;
-        s_pending_payload[offset++] = 0xFFU;
+        s_pending_payload[offset++] = entry->path_hops == 0U ? 0xFFU :
+            received_flood_path_len(entry->path_hash_bytes, entry->path_hops);
         s_pending_payload[offset++] = 0U;
         write_u32_le(&s_pending_payload[offset],
                      message_epoch(entry->uptime_ms));
@@ -1495,7 +1508,8 @@ static bool build_next_channel_message(void)
             s_pending_payload[offset++] = RESP_CODE_CHANNEL_MSG_RECV;
         }
         s_pending_payload[offset++] = channel_index;
-        s_pending_payload[offset++] = 0xFFU;
+        s_pending_payload[offset++] =
+            received_flood_path_len(entry->path_hash_bytes, entry->path_hops);
         s_pending_payload[offset++] = 0U;
         uint32_t timestamp = d1l_message_entry_display_timestamp(entry);
         if (timestamp == 0U) {
@@ -2898,8 +2912,11 @@ static void protocol_task(void *context)
         d1l_ble_companion_poll();
         d1l_ble_companion_status_t transport = {0};
         d1l_ble_companion_status(&transport);
+        const uint32_t stack_free_bytes =
+            (uint32_t)uxTaskGetStackHighWaterMark(NULL);
         portENTER_CRITICAL(&s_status_lock);
         s_status.transport_ready = transport.transport_ready;
+        s_status.task_stack_free_bytes = stack_free_bytes;
         portEXIT_CRITICAL(&s_status_lock);
 
         if (!transport.transport_ready) {

@@ -8938,6 +8938,7 @@ static void print_ble_status_result(const char *command)
            "\"protocol_last_failed_command\":%u,"
            "\"protocol_last_failed_response_error_code\":%u,"
            "\"protocol_response_errors\":%lu,"
+           "\"protocol_task_stack_free_bytes\":%lu,"
            "\"protocol_last_text_type\":%u,"
            "\"protocol_last_text_length\":%u,"
            "\"protocol_last_admin_cli_stage\":%u}\n",
@@ -8975,6 +8976,7 @@ static void print_ble_status_result(const char *command)
            ble.protocol_last_failed_command,
            ble.protocol_last_failed_response_error_code,
            (unsigned long)ble.protocol_response_error_count,
+           (unsigned long)ble.protocol_task_stack_free_bytes,
            ble.protocol_last_text_type,
            ble.protocol_last_text_length,
            ble.protocol_last_admin_cli_stage);
