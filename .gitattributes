@@ -7,3 +7,4 @@ docs/completion/SHA256SUMS.txt text eol=lf
 .github/d1l-build-inputs.json text eol=lf
 requirements/ci-host-windows.txt text eol=lf
 cmake/d1l_source_provenance.cmake text eol=lf export-subst
+patches/*.patch text eol=lf

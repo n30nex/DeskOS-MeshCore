@@ -389,8 +389,12 @@ def write_meshcore_signed_advert_runtime(
 
 @pytest.mark.parametrize("local_build", [False, True])
 def test_full_feature_package_requires_signing_key_at_callable_boundary(
-    tmp_path, local_build,
+    tmp_path, local_build, monkeypatch,
 ) -> None:
+    if local_build:
+        for name in ("GITHUB_ACTIONS", "GITHUB_SHA", "GITHUB_RUN_ID",
+                     "GITHUB_RUN_ATTEMPT", "GITHUB_REPOSITORY", "GITHUB_REF"):
+            monkeypatch.delenv(name, raising=False)
     with pytest.raises(ValueError, match="requires an update signing key"):
         package_release_d1l.create_release_package(
             root=tmp_path,

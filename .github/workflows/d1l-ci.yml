@@ -211,6 +211,22 @@ jobs:
             --cxx "$(command -v clang++-18)" \
             --out artifacts/meshcore-conformance/toolchain-inputs.json
 
+      - name: Run draft and composer memory checks
+        shell: bash
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from runpy import run_path
+          from tempfile import TemporaryDirectory
+          with TemporaryDirectory() as directory:
+              run_path("tests/test_draft_store_native.py")[
+                  "test_drafts_and_composer_text_on_production_code"
+              ](Path(directory))
+          PY
+
       - name: Validate Ed25519 defined-arithmetic overlay
         shell: bash
         env:
