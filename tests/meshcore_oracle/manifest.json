@@ -116,7 +116,9 @@
     "overlays/meshcore_ed25519_defined/fe.c": "1d5040487ff44538e9a03164e8bbe3a9d3446d0efc9669578f20ba4a8751bdfc",
     "overlays/meshcore_ed25519_defined/ge.c": "b17611fd0b5d8bb3bae2dca3926150a6a2f9f579a7357dcf7feb296779d9d653",
     "overlays/meshcore_ed25519_defined/license.txt": "f68d76b9c1c2271422e55134ea94cf71f2ac3fc3ed6a7ec6b83a1a0538753214",
-    "overlays/meshcore_ed25519_defined/sc.c": "4a955511f222bf501b16220ad077b4fc5c668bb8c66c82bc51deff1f850754ae"
+    "overlays/meshcore_ed25519_defined/sc.c": "4a955511f222bf501b16220ad077b4fc5c668bb8c66c82bc51deff1f850754ae",
+    "main/mesh/route_store_worker.h": "db248e59cb1d445a1384f388f71f37716a8123c17d640d1a544074eaf9171f09",
+    "main/storage/retained_store_scheduler.h": "b489dc2390efd254e8f834ebfd794394495059ef02e8219ed9a90172176c81c2"
   },
   "vendored_crypto_sources": {
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
@@ -129,7 +131,7 @@
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "e3d603bab3addde97dbbeaaaf335bf60c4965d83cd83278e47428ee11aaa81ba",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "fd688d7a6b1596cceb61eba67b22e6a1f807e2d05517de6a0b86c17fa9e52272",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",

@@ -165,6 +165,7 @@ typedef int esp_err_t;
 #define ESP_ERR_INVALID_ARG 5
 #define ESP_ERR_INVALID_SIZE 6
 #define ESP_ERR_NOT_SUPPORTED 7
+#define ESP_ERR_NOT_FINISHED 8
 #define ERR_CODE_UNSUPPORTED_CMD 1
 #define ERR_CODE_NOT_FOUND 2
 #define ERR_CODE_TABLE_FULL 3
@@ -190,6 +191,7 @@ static int d1l_app_model_send_channel_text_confirmed(uint64_t id,const char *tex
     code += r'''
 int main(void) {
     uint8_t frame[]={3,0,2,1,2,3,4,'t','e','s','t'};
+    assert(protocol_error(ESP_ERR_NOT_FINISHED)==ERR_CODE_BAD_STATE);
     result=ESP_ERR_INVALID_STATE;
     send_channel_command(frame,sizeof(frame));
     assert(reply==104 && confirmed_calls==1 && used_index==2 && last_length==4);

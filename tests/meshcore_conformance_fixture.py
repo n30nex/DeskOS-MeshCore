@@ -60,6 +60,8 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
     advert_admission = {
         "main/mesh/contact_store.c",
         "main/mesh/contact_store.h",
+        "main/mesh/route_store_worker.h",
+        "main/storage/retained_store_scheduler.h",
         "main/mesh/contact_uri.c",
         "main/mesh/contact_uri.h",
         "main/mesh/meshcore_advert_admission.c",

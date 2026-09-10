@@ -79,8 +79,11 @@ def test_path_probe_is_a_real_correlated_flood_request():
         "static esp_err_t build_path_discovery_request", 1
     )[1].split("static esp_err_t build_dm_ack_response", 1)[0]
     trace = service.split(
+        "static esp_err_t request_contact_telemetry", 1
+    )[1].split("esp_err_t d1l_meshcore_service_request_path_discovery_probe", 1)[0]
+    probe = service.split(
         "esp_err_t d1l_meshcore_service_request_path_discovery_probe", 1
-    )[1].split("esp_err_t d1l_meshcore_service_send_trace_contact", 1)[0]
+    )[1].split("esp_err_t d1l_meshcore_service_request_contact_telemetry", 1)[0]
     dm_command = service.split(
         "static esp_err_t meshcore_service_send_dm_command", 1
     )[1].split("esp_err_t d1l_meshcore_service_send_dm", 1)[0]
@@ -95,6 +98,8 @@ def test_path_probe_is_a_real_correlated_flood_request():
     assert "d1l_contact_store_can_path_probe(&contact)" in trace
     assert "d1l_contact_store_can_dm(&contact)" not in trace
     assert "build_path_discovery_request(" in trace
+    assert "plain[5] = inverse_mask;" in builder
+    assert "fingerprint, (uint8_t)~0x01U, NULL, out_token, out_token_size" in probe
     assert "s_path_response_expectation.tag = tag" in trace
     assert "s_path_response_fingerprint" in trace
     assert "meshcore_service_send_raw(" in trace

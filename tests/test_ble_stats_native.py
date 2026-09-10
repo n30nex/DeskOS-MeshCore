@@ -112,8 +112,8 @@ static void set_error_response(uint8_t error) {last_error=error;}
 static bool set_pending(const uint8_t *bytes, size_t length) {
     assert(length<=sizeof(reply)); memcpy(reply,bytes,length); reply_length=length; return true;
 }
-static void begin_admin_query_command(const uint8_t *key, unsigned query, unsigned offset, unsigned kind) {
-    assert(query==3 && offset==0 && kind==4); memcpy(remote_key,key,32); ++remote_requests;
+static void send_contact_telemetry_request(const uint8_t *key, uint8_t mask, bool binary) {
+    assert(mask==0 && !binary); memcpy(remote_key,key,32); ++remote_requests;
 }
 ''' + function + r'''
 int main(void) {

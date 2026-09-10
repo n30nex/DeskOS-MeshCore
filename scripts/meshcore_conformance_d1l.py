@@ -361,6 +361,8 @@ EXPECTED_WP05_COMPANION_UPSTREAM_SUITES = {
     },
 }
 EXPECTED_WP05_SOURCE_PATHS = {
+    "main/mesh/route_store_worker.h",
+    "main/storage/retained_store_scheduler.h",
     "main/app/identity_state.h",
     "main/app/qualification_hooks.h",
     "main/app/settings_envelope.c",
@@ -1410,6 +1412,8 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/meshcore_wire.h",
     "main/mesh/node_store.c",
     "main/mesh/node_store.h",
+    "main/mesh/route_store_worker.h",
+    "main/storage/retained_store_scheduler.h",
     "main/mesh/user_text.c",
     "main/mesh/user_text.h",
     "overlays/meshcore_ed25519_defined/fe.c",

@@ -218,7 +218,8 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         dependency_verification,
     )
     assert source_verification["verified"] is True
-    assert dependency_verification["dependency_count"] == 75
+    # Foreground contact writes add the worker and scheduler headers.
+    assert dependency_verification["dependency_count"] == 77
     assert dependency_verification["translation_unit_count"] == 40
     assert dependency_verification["dependencies"] == sorted(
         conformance.EXPECTED_WP05_SOURCE_PATHS
