@@ -30,6 +30,9 @@ esp_err_t d1l_route_store_worker_start(void);
 esp_err_t d1l_route_store_worker_force_flush(uint32_t timeout_ms);
 /* Preempt and hold retained persistence for an urgent storage transition. */
 esp_err_t d1l_route_store_worker_quiesce_begin(uint32_t timeout_ms);
+/* Wait for another foreground owner, then preempt background persistence.
+ * Call before taking a store lock; release with quiesce_end after the edit. */
+esp_err_t d1l_route_store_worker_quiesce_for_edit(uint32_t timeout_ms);
 /* Wait for the current retained persistence sequence without cancelling it. */
 esp_err_t d1l_route_store_worker_quiesce_wait_begin(uint32_t timeout_ms);
 void d1l_route_store_worker_quiesce_end(void);

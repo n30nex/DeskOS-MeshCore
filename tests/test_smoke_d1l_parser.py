@@ -82,6 +82,17 @@ def test_parse_jsonl_ignores_logs():
     assert [item["cmd"] for item in parsed] == ["version", "radiohw"]
 
 
+@pytest.mark.parametrize("command,reply_name", [
+    ("contacts set 024999dedfd26763 favorite 1", "contacts set"),
+    ("settings set location 43.0 -79.0", "settings set location"),
+])
+def test_contact_and_location_edits_accept_their_actual_console_reply(command, reply_name):
+    port = FakeSerial([json.dumps({"schema": 1, "ok": True, "cmd": reply_name}) + "\n"])
+    result = send_console_command(port, command, 0.01)
+    assert result["ok"] and result["cmd"] == reply_name
+    assert port.writes == [command + "\n"]
+
+
 def test_command_result_preserves_ignored_json_before_expected_reply():
     ser = FakeSerial(
         [

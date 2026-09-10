@@ -22,8 +22,18 @@ typedef struct {
     uint8_t node_type;
     int8_t remote_snr_quarter_db;
     uint32_t tag;
+    uint8_t public_key_bytes;
     uint8_t public_key[D1L_MESHCORE_DISCOVERY_PUBLIC_KEY_BYTES];
 } d1l_meshcore_discovery_wire_result_t;
+
+static inline bool d1l_meshcore_discovery_request_valid(
+    const uint8_t *payload, size_t length)
+{
+    return payload && (length == 6U || length == 10U) &&
+        (payload[0] == 0x80U || payload[0] == 0x81U) &&
+        payload[1] != 0U && (payload[1] & ~0x1eU) == 0U &&
+        (payload[2] | payload[3] | payload[4] | payload[5]) != 0U;
+}
 
 static inline uint32_t d1l_meshcore_discovery_read_le32(
     const uint8_t *source)
@@ -82,15 +92,19 @@ static inline bool d1l_meshcore_discovery_parse_response(
     d1l_meshcore_discovery_wire_result_t *out_result)
 {
     if (!payload || !out_result ||
-        payload_len != D1L_MESHCORE_DISCOVERY_RESPONSE_BYTES ||
+        (payload_len != D1L_MESHCORE_DISCOVERY_RESPONSE_BYTES &&
+         payload_len != 14U) ||
         (payload[0] & 0xf0U) != D1L_MESHCORE_DISCOVERY_RESPONSE_TYPE) {
         return false;
     }
     const uint8_t node_type = payload[0] & 0x0fU;
     const uint32_t tag = d1l_meshcore_discovery_read_le32(&payload[2]);
+    const size_t key_bytes = payload_len - 6U;
+    uint8_t public_key[D1L_MESHCORE_DISCOVERY_PUBLIC_KEY_BYTES] = {0};
+    memcpy(public_key, &payload[6], key_bytes);
     if (!d1l_meshcore_discovery_node_type_valid(node_type) ||
         tag == 0U || tag != expected_tag ||
-        !d1l_meshcore_discovery_public_key_nonzero(&payload[6])) {
+        !d1l_meshcore_discovery_public_key_nonzero(public_key)) {
         return false;
     }
 
@@ -98,8 +112,9 @@ static inline bool d1l_meshcore_discovery_parse_response(
         .node_type = node_type,
         .remote_snr_quarter_db = (int8_t)payload[1],
         .tag = tag,
+        .public_key_bytes = (uint8_t)key_bytes,
     };
-    memcpy(result.public_key, &payload[6], sizeof(result.public_key));
+    memcpy(result.public_key, public_key, key_bytes);
     *out_result = result;
     return true;
 }

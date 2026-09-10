@@ -353,11 +353,13 @@ typedef struct {
     int last_snr_tenths;
     uint8_t path_hops;
     d1l_meshcore_admin_query_result_t result;
+    uint16_t wire_len;
+    uint8_t wire[D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES];
 } d1l_contact_telemetry_record_t;
 
 static d1l_contact_telemetry_record_t
     s_contact_telemetry_history[
-        D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY];
+        D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY] EXT_RAM_BSS_ATTR;
 static uint8_t s_contact_telemetry_next;
 static uint32_t s_contact_telemetry_next_sequence;
 static uint32_t s_contact_telemetry_generation;
@@ -3063,7 +3065,8 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
 
 static esp_err_t build_path_discovery_request(
     const d1l_settings_t *settings, const d1l_contact_entry_t *contact,
-    uint32_t tag, uint8_t *raw, size_t raw_size, uint8_t *out_len)
+    uint32_t tag, uint8_t inverse_mask,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len)
 {
     if (!settings || !settings->identity_ready || !contact || !raw ||
         !out_len || !d1l_contact_store_can_path_probe(contact) ||
@@ -3095,13 +3098,13 @@ static esp_err_t build_path_discovery_request(
     raw[index++] = dest_pub[0];
     raw[index++] = settings->identity_public_key[0];
 
-    /* Pinned companion-radio Path Discovery request: correlation tag,
-     * telemetry request, inverse BASE-only permission mask, three reserved
+    /* Pinned companion-radio telemetry request: correlation tag,
+     * request type, inverse permission mask, three reserved
      * bytes, and one random packet-identity word. */
     uint8_t plain[13] = {0};
     write_le32(plain, tag);
     plain[4] = 0x03U;
-    plain[5] = (uint8_t)~0x01U;
+    plain[5] = inverse_mask;
     write_le32(&plain[9], esp_random());
     size_t cipher_len = 0U;
     ret = meshcore_encrypt_then_mac(
@@ -4301,7 +4304,9 @@ static d1l_meshcore_path_response_result_t dispatch_path_response(
         result == D1L_MESHCORE_PATH_RESPONSE_EXPIRED) {
         if (result == D1L_MESHCORE_PATH_RESPONSE_MATCHED) {
             d1l_meshcore_admin_query_result_t decoded = {0};
-            if (d1l_meshcore_telemetry_decode(
+            if (data_len >= 4U &&
+                data_len - 4U <= D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES &&
+                d1l_meshcore_telemetry_decode(
                     data, data_len, &decoded)) {
                 d1l_contact_telemetry_record_t *record =
                     &s_contact_telemetry_history[
@@ -4319,6 +4324,8 @@ static d1l_meshcore_path_response_result_t dispatch_path_response(
                 record->last_snr_tenths = snr_tenths;
                 record->path_hops = path_hops;
                 record->result = decoded;
+                record->wire_len = (uint16_t)(data_len - 4U);
+                memcpy(record->wire, &data[4], record->wire_len);
                 s_contact_telemetry_next = (uint8_t)(
                     (s_contact_telemetry_next + 1U) %
                     D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY);
@@ -4660,7 +4667,7 @@ static void parse_rx_discovery_packet(const uint8_t *payload, uint16_t size,
     char public_key_hex[65] = {0};
     char fingerprint[17] = {0};
     hex_prefix(public_key_hex, sizeof(public_key_hex), wire.public_key,
-               sizeof(wire.public_key));
+               wire.public_key_bytes);
     hex_prefix(fingerprint, sizeof(fingerprint), wire.public_key, 8U);
 
     size_t index = s_discovery_result_count;
@@ -6583,7 +6590,8 @@ static esp_err_t meshcore_service_resolve_trace_contact(
     return ESP_OK;
 }
 
-static esp_err_t meshcore_service_handle_discover_nearby(void)
+static esp_err_t meshcore_service_handle_discover_nearby(
+    const d1l_meshcore_service_cmd_t *cmd)
 {
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     d1l_store_lock_take(&s_discovery_lock);
@@ -6598,7 +6606,15 @@ static esp_err_t meshcore_service_handle_discover_nearby(void)
         tag = 1U;
     }
     uint8_t request[D1L_MESHCORE_DISCOVERY_REQUEST_BYTES] = {0};
-    if (!d1l_meshcore_discovery_build_request(tag, request)) {
+    size_t request_len = sizeof(request);
+    if (cmd->raw_len != 0U) {
+        if (!d1l_meshcore_discovery_request_valid(cmd->raw, cmd->raw_len)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        request_len = cmd->raw_len;
+        memcpy(request, cmd->raw, request_len);
+        tag = d1l_meshcore_discovery_read_le32(&request[2]);
+    } else if (!d1l_meshcore_discovery_build_request(tag, request)) {
         return ESP_FAIL;
     }
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
@@ -6608,11 +6624,11 @@ static esp_err_t meshcore_service_handle_discover_nearby(void)
         D1L_MESHCORE_ROUTE_DIRECT);
     if (!d1l_meshcore_wire_write_prefix(
             header, 0U, 0U, 0U, NULL, raw, sizeof(raw), &raw_len) ||
-        sizeof(raw) - raw_len < sizeof(request)) {
+        sizeof(raw) - raw_len < request_len) {
         return ESP_ERR_INVALID_SIZE;
     }
-    memcpy(&raw[raw_len], request, sizeof(request));
-    raw_len += sizeof(request);
+    memcpy(&raw[raw_len], request, request_len);
+    raw_len += request_len;
     if (raw_len > UINT8_MAX) {
         return ESP_ERR_INVALID_SIZE;
     }
@@ -7712,7 +7728,7 @@ static void meshcore_service_task(void *arg)
             }
             break;
         case D1L_MESHCORE_SERVICE_CMD_DISCOVER_NEARBY:
-            ret = meshcore_service_handle_discover_nearby();
+            ret = meshcore_service_handle_discover_nearby(&cmd);
             if (ret != ESP_OK) {
                 s_status.rejected_commands++;
             }
@@ -9021,8 +9037,9 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     return meshcore_service_send_dm_command(fingerprint, text, false);
 }
 
-esp_err_t d1l_meshcore_service_request_path_discovery_probe(
+static esp_err_t request_contact_telemetry(
     const char *fingerprint,
+    uint8_t inverse_mask, uint32_t *out_tag,
     char *out_token,
     size_t out_token_size)
 {
@@ -9054,7 +9071,7 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
     uint8_t raw_len = 0U;
     ret = build_path_discovery_request(
-        settings, &contact, tag, raw, sizeof(raw), &raw_len);
+        settings, &contact, tag, inverse_mask, raw, sizeof(raw), &raw_len);
     if (ret != ESP_OK) {
         return ret;
     }
@@ -9110,6 +9127,9 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
         return ret;
     }
 
+    if (out_tag) {
+        *out_tag = tag;
+    }
     if (out_token && out_token_size > 0) {
         snprintf(out_token, out_token_size, "path_%08lX",
                  (unsigned long)tag);
@@ -9126,6 +9146,23 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
                       settings->path_hash_bytes, 0U, raw_len,
                       raw, raw_len, "correlated_path_request");
     return ESP_OK;
+}
+
+esp_err_t d1l_meshcore_service_request_path_discovery_probe(
+    const char *fingerprint, char *out_token, size_t out_token_size)
+{
+    return request_contact_telemetry(
+        fingerprint, (uint8_t)~0x01U, NULL, out_token, out_token_size);
+}
+
+esp_err_t d1l_meshcore_service_request_contact_telemetry(
+    const char *fingerprint, uint8_t inverse_mask, uint32_t *out_tag)
+{
+    if (!out_tag) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_tag = 0U;
+    return request_contact_telemetry(fingerprint, inverse_mask, out_tag, NULL, 0U);
 }
 
 const char *d1l_meshcore_contact_telemetry_state_name(
@@ -9224,6 +9261,8 @@ void d1l_meshcore_service_contact_telemetry_snapshot(
             entry->last_snr_tenths = record->last_snr_tenths;
             entry->path_hops = record->path_hops;
             entry->result = record->result;
+            entry->wire_len = record->wire_len;
+            memcpy(entry->wire, record->wire, record->wire_len);
         }
     }
     d1l_store_lock_give(&s_path_response_lock);
@@ -9273,6 +9312,21 @@ esp_err_t d1l_meshcore_service_discover_nearby(void)
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_DISCOVER_NEARBY,
     };
+    return meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+}
+
+esp_err_t d1l_meshcore_service_request_discovery(
+    const uint8_t *request, size_t length)
+{
+    if (!d1l_meshcore_discovery_request_valid(request, length)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_DISCOVER_NEARBY,
+        .raw_len = (uint8_t)length,
+    };
+    memcpy(cmd.raw, request, length);
     return meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
 }

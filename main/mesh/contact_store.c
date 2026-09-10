@@ -8,6 +8,7 @@
 
 #include "mesh/contact_uri.h"
 #include "mesh/meshcore_wire.h"
+#include "mesh/route_store_worker.h"
 #include "mesh/store_lock.h"
 #include "storage/retained_blob_store.h"
 
@@ -23,6 +24,7 @@
 #define D1L_CONTACT_STORE_SCHEMA_V7 7U
 #define D1L_CONTACT_STORE_SCHEMA 8U
 #define D1L_CONTACT_STORE_LEGACY_CAPACITY 16U
+#define D1L_CONTACT_EDIT_TIMEOUT_MS 5000U
 
 typedef struct {
     uint32_t seq;
@@ -1738,6 +1740,25 @@ esp_err_t d1l_contact_store_clear(void)
     return ret;
 }
 
+/* Explicit edits must own foreground persistence before taking the store
+ * lock. Otherwise a concurrent radio/storage quiesce can cancel a healthy
+ * SD write and report a spurious file error to the phone or touchscreen. */
+static esp_err_t contact_edit_lock(void)
+{
+    const esp_err_t ret = d1l_route_store_worker_quiesce_for_edit(
+        D1L_CONTACT_EDIT_TIMEOUT_MS);
+    if (ret == ESP_OK) {
+        d1l_store_lock_take(&s_store_lock);
+    }
+    return ret;
+}
+
+static void contact_edit_unlock(void)
+{
+    d1l_store_lock_give(&s_store_lock);
+    d1l_route_store_worker_quiesce_end();
+}
+
 esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char *alias,
                                              const d1l_node_entry_t *heard_node)
 {
@@ -1752,12 +1773,15 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
         }
     }
 
-    d1l_store_lock_take(&s_store_lock);
+    const esp_err_t edit_ret = contact_edit_lock();
+    if (edit_ret != ESP_OK) {
+        return edit_ret;
+    }
     bool fingerprint_ambiguous = false;
     int existing = find_unique_index_by_fingerprint_hex(
         fingerprint, &fingerprint_ambiguous);
     if (fingerprint_ambiguous) {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ESP_ERR_INVALID_STATE;
     }
     size_t index;
@@ -1772,7 +1796,7 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     } else {
         const int evictable = oldest_evictable_placeholder_index();
         if (evictable < 0) {
-            d1l_store_lock_give(&s_store_lock);
+            contact_edit_unlock();
             return ESP_ERR_NO_MEM;
         }
         index = (size_t)evictable;
@@ -1781,7 +1805,7 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     capture_rollback_state();
     esp_err_t ret = reserve_sequenced_mutation_locked();
     if (ret != ESP_OK) {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ret;
     }
     if (evict_placeholder) {
@@ -1840,7 +1864,7 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     }
 
     ret = persist_store_or_rollback(&s_rollback_scratch);
-    d1l_store_lock_give(&s_store_lock);
+    contact_edit_unlock();
     return ret;
 }
 
@@ -2015,7 +2039,10 @@ esp_err_t d1l_contact_store_import_uri(
         }
     }
 
-    d1l_store_lock_take(&s_store_lock);
+    const esp_err_t edit_ret = contact_edit_lock();
+    if (edit_ret != ESP_OK) {
+        return edit_ret;
+    }
     bool fingerprint_ambiguous = false;
     bool public_key_ambiguous = false;
     const int fingerprint_index = find_unique_index_by_fingerprint_hex(
@@ -2025,7 +2052,7 @@ esp_err_t d1l_contact_store_import_uri(
     if (fingerprint_ambiguous || public_key_ambiguous ||
         (public_key_index >= 0 && fingerprint_index != public_key_index)) {
         *out_result = D1L_CONTACT_IMPORT_COLLISION;
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -2043,7 +2070,7 @@ esp_err_t d1l_contact_store_import_uri(
         if ((retained_type != 0U && retained_type != imported.type_id) ||
             (signed_role_authoritative && retained_type == 0U)) {
             *out_result = D1L_CONTACT_IMPORT_ROLE_CONFLICT;
-            d1l_store_lock_give(&s_store_lock);
+            contact_edit_unlock();
             return ESP_ERR_INVALID_STATE;
         }
         result = D1L_CONTACT_IMPORT_UPDATED;
@@ -2051,13 +2078,13 @@ esp_err_t d1l_contact_store_import_uri(
         index = (size_t)fingerprint_index;
         if (s_entries[index].public_key_hex[0] != '\0') {
             *out_result = D1L_CONTACT_IMPORT_COLLISION;
-            d1l_store_lock_give(&s_store_lock);
+            contact_edit_unlock();
             return ESP_ERR_INVALID_STATE;
         }
         result = D1L_CONTACT_IMPORT_PROMOTED_PLACEHOLDER;
     } else if (s_count >= D1L_CONTACT_STORE_CAPACITY) {
         *out_result = D1L_CONTACT_IMPORT_FULL;
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ESP_ERR_NO_MEM;
     } else {
         index = s_count;
@@ -2078,7 +2105,7 @@ esp_err_t d1l_contact_store_import_uri(
             if (out_entry) {
                 *out_entry = *retained;
             }
-            d1l_store_lock_give(&s_store_lock);
+            contact_edit_unlock();
             return ESP_OK;
         }
     }
@@ -2086,7 +2113,7 @@ esp_err_t d1l_contact_store_import_uri(
     capture_rollback_state();
     const esp_err_t revision_ret = reserve_sequenced_mutation_locked();
     if (revision_ret != ESP_OK) {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return revision_ret;
     }
     remember_touched_fingerprint_locked(fingerprint);
@@ -2127,7 +2154,7 @@ esp_err_t d1l_contact_store_import_uri(
             *out_entry = s_entries[index];
         }
     }
-    d1l_store_lock_give(&s_store_lock);
+    contact_edit_unlock();
     return ret;
 }
 
@@ -2373,10 +2400,13 @@ esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bo
         }
     }
 
-    d1l_store_lock_take(&s_store_lock);
+    const esp_err_t edit_ret = contact_edit_lock();
+    if (edit_ret != ESP_OK) {
+        return edit_ret;
+    }
     int existing = find_index_by_fingerprint(fingerprint);
     if (existing < 0) {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -2385,7 +2415,7 @@ esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bo
         capture_rollback_state();
         const esp_err_t revision_ret = reserve_sequenced_mutation_locked();
         if (revision_ret != ESP_OK) {
-            d1l_store_lock_give(&s_store_lock);
+            contact_edit_unlock();
             return revision_ret;
         }
         remember_touched_fingerprint_locked(entry->fingerprint);
@@ -2396,14 +2426,14 @@ esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bo
         entry->muted = muted;
         esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
         if (ret != ESP_OK) {
-            d1l_store_lock_give(&s_store_lock);
+            contact_edit_unlock();
             return ret;
         }
     }
     if (out_entry) {
         *out_entry = *entry;
     }
-    d1l_store_lock_give(&s_store_lock);
+    contact_edit_unlock();
     return ESP_OK;
 }
 
@@ -2420,10 +2450,13 @@ esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
         }
     }
 
-    d1l_store_lock_take(&s_store_lock);
+    const esp_err_t edit_ret = contact_edit_lock();
+    if (edit_ret != ESP_OK) {
+        return edit_ret;
+    }
     int existing = find_index_by_fingerprint(fingerprint);
     if (existing < 0) {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -2431,14 +2464,14 @@ esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
     char sanitized[D1L_CONTACT_ALIAS_LEN] = {0};
     sanitize_ascii(sanitized, sizeof(sanitized), alias);
     if (sanitized[0] == '\0') {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ESP_ERR_INVALID_ARG;
     }
     if (strncmp(entry->alias, sanitized, sizeof(entry->alias)) != 0) {
         capture_rollback_state();
         const esp_err_t revision_ret = reserve_sequenced_mutation_locked();
         if (revision_ret != ESP_OK) {
-            d1l_store_lock_give(&s_store_lock);
+            contact_edit_unlock();
             return revision_ret;
         }
         remember_touched_fingerprint_locked(entry->fingerprint);
@@ -2448,14 +2481,14 @@ esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
         snprintf(entry->alias, sizeof(entry->alias), "%s", sanitized);
         esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
         if (ret != ESP_OK) {
-            d1l_store_lock_give(&s_store_lock);
+            contact_edit_unlock();
             return ret;
         }
     }
     if (out_entry) {
         *out_entry = *entry;
     }
-    d1l_store_lock_give(&s_store_lock);
+    contact_edit_unlock();
     return ESP_OK;
 }
 
@@ -2471,10 +2504,13 @@ esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t 
         }
     }
 
-    d1l_store_lock_take(&s_store_lock);
+    const esp_err_t edit_ret = contact_edit_lock();
+    if (edit_ret != ESP_OK) {
+        return edit_ret;
+    }
     int existing = find_index_by_fingerprint(fingerprint);
     if (existing < 0) {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -2483,7 +2519,7 @@ esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t 
     capture_rollback_state();
     const esp_err_t revision_ret = reserve_persistence_revision_locked(true);
     if (revision_ret != ESP_OK) {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return revision_ret;
     }
     remember_deleted_fingerprint_locked(removed.fingerprint);
@@ -2495,13 +2531,13 @@ esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t 
     memset(&s_entries[s_count], 0, sizeof(s_entries[s_count]));
     esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
     if (ret != ESP_OK) {
-        d1l_store_lock_give(&s_store_lock);
+        contact_edit_unlock();
         return ret;
     }
     if (out_entry) {
         *out_entry = removed;
     }
-    d1l_store_lock_give(&s_store_lock);
+    contact_edit_unlock();
     return ESP_OK;
 }
 

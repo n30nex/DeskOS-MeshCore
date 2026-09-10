@@ -136,6 +136,7 @@ enum {
     PUSH_CODE_NEW_ADVERT = 0x8A,
     PUSH_CODE_TELEMETRY_RESPONSE = 0x8B,
     PUSH_CODE_BINARY_RESPONSE = 0x8C,
+    PUSH_CODE_CONTROL_DATA = 0x8E,
     PUSH_CODE_CONTACT_DELETED = 0x8F,
 };
 
@@ -223,6 +224,16 @@ static uint32_t s_seen_message_revision;
 static bool s_force_message_notification_check;
 static uint32_t s_seen_connect_count;
 static uint64_t s_phone_dm_session;
+static uint32_t s_phone_discovery_tag;
+static uint32_t s_phone_discovery_sent;
+static d1l_meshcore_discovery_snapshot_t
+    s_phone_discovery_snapshot EXT_RAM_BSS_ATTR;
+static uint32_t s_phone_telemetry_tag;
+static bool s_phone_telemetry_binary;
+static uint8_t s_phone_telemetry_public_key[6];
+static char s_phone_telemetry_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static d1l_meshcore_contact_telemetry_snapshot_t
+    s_phone_telemetry_snapshot EXT_RAM_BSS_ATTR;
 static uint32_t s_phone_dm_ack;
 static uint32_t s_phone_dm_started_ms;
 static d1l_meshcore_admin_snapshot_t s_admin_snapshot EXT_RAM_BSS_ATTR;
@@ -441,6 +452,7 @@ static uint8_t protocol_error(esp_err_t error)
     case ESP_ERR_TIMEOUT:
         return ERR_CODE_TABLE_FULL;
     case ESP_ERR_INVALID_STATE:
+    case ESP_ERR_NOT_FINISHED:
         return ERR_CODE_BAD_STATE;
     case ESP_ERR_INVALID_ARG:
     case ESP_ERR_INVALID_SIZE:
@@ -1779,6 +1791,79 @@ static void begin_admin_query_command(
     set_admin_sent_response(true, s_admin_request_tag);
 }
 
+static void send_contact_telemetry_request(
+    const uint8_t public_key[32], uint8_t inverse_mask, bool binary)
+{
+    d1l_contact_entry_t contact = {0};
+    if (!contact_for_public_key(public_key, &contact) ||
+        !d1l_contact_store_can_path_probe(&contact)) {
+        set_error_response(ERR_CODE_NOT_FOUND);
+        return;
+    }
+    if (d1l_contact_store_can_admin(&contact)) {
+        /* Keep repeater/room queries in the existing authenticated session;
+         * its pending response must not compete with a second query owner. */
+        begin_admin_query_command(public_key, D1L_MESHCORE_ADMIN_QUERY_TELEMETRY,
+            0U, binary ? D1L_BLE_ADMIN_REQUEST_BINARY_QUERY :
+                         D1L_BLE_ADMIN_REQUEST_TELEMETRY);
+        return;
+    }
+    uint32_t tag = 0U;
+    const esp_err_t ret = d1l_meshcore_service_request_contact_telemetry(
+        contact.fingerprint, inverse_mask, &tag);
+    if (ret != ESP_OK) {
+        set_result_response(ret);
+        return;
+    }
+    s_phone_telemetry_tag = tag;
+    s_phone_telemetry_binary = binary;
+    memcpy(s_phone_telemetry_public_key, public_key,
+           sizeof(s_phone_telemetry_public_key));
+    snprintf(s_phone_telemetry_fingerprint,
+             sizeof(s_phone_telemetry_fingerprint), "%s", contact.fingerprint);
+    set_admin_sent_response(true, tag);
+}
+
+static void maybe_queue_contact_telemetry(void)
+{
+    if (s_pending_len != 0U || s_phone_telemetry_tag == 0U) {
+        return;
+    }
+    d1l_meshcore_service_contact_telemetry_snapshot(
+        s_phone_telemetry_fingerprint, &s_phone_telemetry_snapshot);
+    for (size_t i = 0U; i < s_phone_telemetry_snapshot.history_count &&
+         i < D1L_MESHCORE_CONTACT_TELEMETRY_HISTORY_CAPACITY; ++i) {
+        const d1l_meshcore_contact_telemetry_entry_t *entry =
+            &s_phone_telemetry_snapshot.history[i];
+        if (entry->tag != s_phone_telemetry_tag) {
+            continue;
+        }
+        size_t offset = 2U;
+        s_pending_payload[0] = s_phone_telemetry_binary ?
+            PUSH_CODE_BINARY_RESPONSE : PUSH_CODE_TELEMETRY_RESPONSE;
+        s_pending_payload[1] = 0U;
+        if (s_phone_telemetry_binary) {
+            write_u32_le(&s_pending_payload[offset], s_phone_telemetry_tag);
+            offset += 4U;
+        } else {
+            memcpy(&s_pending_payload[offset], s_phone_telemetry_public_key, 6U);
+            offset += 6U;
+        }
+        s_phone_telemetry_tag = 0U;
+        if (entry->wire_len > sizeof(entry->wire) ||
+            offset + entry->wire_len > sizeof(s_pending_payload)) {
+            return;
+        }
+        memcpy(&s_pending_payload[offset], entry->wire, entry->wire_len);
+        s_pending_len = offset + entry->wire_len;
+        return;
+    }
+    if (!s_phone_telemetry_snapshot.pending ||
+        s_phone_telemetry_snapshot.pending_tag != s_phone_telemetry_tag) {
+        s_phone_telemetry_tag = 0U;
+    }
+}
+
 static void send_telemetry_command(const uint8_t *payload, size_t length)
 {
     if (length == 4U) {
@@ -1800,13 +1885,12 @@ static void send_telemetry_command(const uint8_t *payload, size_t length)
         (void)set_pending(response, sizeof(response));
         return;
     }
-    if (length < 36U) {
+    if (length != 36U || payload[1] != 0U ||
+        payload[2] != 0U || payload[3] != 0U) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
     }
-    begin_admin_query_command(
-        &payload[4], D1L_MESHCORE_ADMIN_QUERY_TELEMETRY, 0U,
-        D1L_BLE_ADMIN_REQUEST_TELEMETRY);
+    send_contact_telemetry_request(&payload[4], 0U, false);
 }
 
 static void send_binary_command(const uint8_t *payload, size_t length)
@@ -1822,9 +1906,15 @@ static void send_binary_command(const uint8_t *payload, size_t length)
             public_key, D1L_BLE_ADMIN_REQUEST_BINARY_STATUS);
         return;
     case BINARY_REQ_TELEMETRY:
-        begin_admin_query_command(
-            public_key, D1L_MESHCORE_ADMIN_QUERY_TELEMETRY, 0U,
-            D1L_BLE_ADMIN_REQUEST_BINARY_QUERY);
+        if (length > 42U ||
+            (length > 35U && payload[35] != 0U) ||
+            (length > 36U && payload[36] != 0U) ||
+            (length > 37U && payload[37] != 0U)) {
+            set_error_response(ERR_CODE_ILLEGAL_ARG);
+            return;
+        }
+        send_contact_telemetry_request(
+            public_key, length >= 35U ? payload[34] : 0U, true);
         return;
     case BINARY_REQ_ACCESS_LIST:
         {
@@ -2332,8 +2422,14 @@ static void set_location_command(const uint8_t *payload, size_t length)
 
 static void set_radio_command(const uint8_t *payload, size_t length)
 {
-    if (length < 11U) {
+    if (length < 11U || length > 12U) {
         set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    if (length == 12U && payload[11] != 0U) {
+        /* DeskOS is a companion. Never claim that the optional repeat-mode
+         * flag was enabled while silently retaining companion operation. */
+        set_error_response(ERR_CODE_UNSUPPORTED_CMD);
         return;
     }
     const uint32_t frequency_khz = read_u32_le(&payload[1]);
@@ -2464,6 +2560,66 @@ static void queue_self_advert_command(const uint8_t *payload, size_t length)
     uint32_t request_id = 0U;
     set_result_response(d1l_app_model_queue_advert(
         length == 2U && payload[1] == 1U, &request_id));
+}
+
+static void send_control_command(const uint8_t *payload, size_t length)
+{
+    if (length < 2U ||
+        !d1l_meshcore_discovery_request_valid(&payload[1], length - 1U)) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
+    }
+    const esp_err_t ret = d1l_meshcore_service_request_discovery(
+        &payload[1], length - 1U);
+    if (ret == ESP_OK) {
+        s_phone_discovery_tag = read_u32_le(&payload[3]);
+        s_phone_discovery_sent = 0U;
+    }
+    set_result_response(ret);
+}
+
+static void maybe_queue_discovery_results(void)
+{
+    if (s_pending_len != 0U || s_phone_discovery_tag == 0U) {
+        return;
+    }
+    d1l_meshcore_service_discovery_snapshot(&s_phone_discovery_snapshot);
+    if (s_phone_discovery_snapshot.tag != s_phone_discovery_tag) {
+        s_phone_discovery_tag = 0U;
+        return;
+    }
+    for (size_t i = 0U; i < s_phone_discovery_snapshot.result_count &&
+         i < D1L_MESHCORE_DISCOVERY_MAX_RESULTS && i < 32U; ++i) {
+        const uint32_t bit = UINT32_C(1) << i;
+        if ((s_phone_discovery_sent & bit) != 0U) {
+            continue;
+        }
+        const d1l_meshcore_discovery_result_t *result =
+            &s_phone_discovery_snapshot.results[i];
+        const size_t key_bytes = strnlen(result->public_key_hex,
+                                         sizeof(result->public_key_hex)) / 2U;
+        uint8_t public_key[32] = {0};
+        s_phone_discovery_sent |= bit;
+        if ((key_bytes != 8U && key_bytes != 32U) ||
+            !decode_hex(result->public_key_hex, key_bytes, public_key)) {
+            continue;
+        }
+        s_pending_payload[0] = PUSH_CODE_CONTROL_DATA;
+        s_pending_payload[1] = (uint8_t)(int8_t)result->local_snr_quarter_db;
+        const int rssi = result->last_rssi_dbm;
+        s_pending_payload[2] = (uint8_t)(int8_t)(
+            rssi < INT8_MIN ? INT8_MIN : rssi > INT8_MAX ? INT8_MAX : rssi);
+        s_pending_payload[3] = 0U; /* The discovery exchange is zero-hop. */
+        s_pending_payload[4] = (uint8_t)(0x90U | result->node_type);
+        s_pending_payload[5] = (uint8_t)(int8_t)result->remote_snr_quarter_db;
+        write_u32_le(&s_pending_payload[6], s_phone_discovery_tag);
+        memcpy(&s_pending_payload[10], public_key, key_bytes);
+        s_pending_len = 10U + key_bytes;
+        return;
+    }
+    if (!s_phone_discovery_snapshot.active) {
+        s_phone_discovery_tag = 0U;
+    }
 }
 
 static void build_autoadd_config(void)
@@ -2620,6 +2776,9 @@ static void dispatch_command(const uint8_t *payload, size_t length)
     case CMD_GET_ALLOWED_REPEAT_FREQ:
         set_simple_response(RESP_CODE_ALLOWED_REPEAT_FREQ);
         return;
+    case CMD_SEND_CONTROL_DATA:
+        send_control_command(payload, length);
+        return;
     case CMD_SET_DEVICE_PIN:
     case CMD_REBOOT:
     case CMD_FACTORY_RESET:
@@ -2634,7 +2793,6 @@ static void dispatch_command(const uint8_t *payload, size_t length)
     case CMD_SIGN_FINISH:
     case CMD_SEND_TRACE_PATH:
     case CMD_SEND_PATH_DISCOVERY_REQ:
-    case CMD_SEND_CONTROL_DATA:
     case CMD_SEND_ANON_REQ:
         note_unsupported();
         set_simple_response(RESP_CODE_DISABLED);
@@ -2650,6 +2808,9 @@ static void reset_session_state(void)
 {
     s_pending_len = 0U;
     s_phone_dm_session = 0U;
+    s_phone_discovery_tag = 0U;
+    s_phone_discovery_sent = 0U;
+    s_phone_telemetry_tag = 0U;
     s_contact_count = 0U;
     s_contact_index = 0U;
     s_contact_iterator_active = false;
@@ -2767,6 +2928,14 @@ static void protocol_task(void *context)
             continue;
         }
         maybe_queue_dm_confirmation();
+        if (s_pending_len != 0U) {
+            continue;
+        }
+        maybe_queue_discovery_results();
+        if (s_pending_len != 0U) {
+            continue;
+        }
+        maybe_queue_contact_telemetry();
         if (s_pending_len != 0U) {
             continue;
         }

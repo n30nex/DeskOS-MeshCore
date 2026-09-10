@@ -14,6 +14,26 @@
 #include "freertos/semphr.h"
 #include "nvs.h"
 
+static esp_err_t s_next_edit_error;
+static unsigned s_edit_depth;
+
+void mock_retained_edit_fail_next(esp_err_t error) { s_next_edit_error = error; }
+unsigned mock_retained_edit_depth(void) { return s_edit_depth; }
+
+esp_err_t d1l_route_store_worker_quiesce_for_edit(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U) return ESP_ERR_INVALID_ARG;
+    const esp_err_t error = s_next_edit_error;
+    s_next_edit_error = ESP_OK;
+    if (error == ESP_OK) s_edit_depth++;
+    return error;
+}
+
+void d1l_route_store_worker_quiesce_end(void)
+{
+    if (s_edit_depth > 0U) s_edit_depth--;
+}
+
 #define MOCK_NVS_SLOT_COUNT 4U
 #define MOCK_NVS_ENTRY_COUNT 8U
 #define MOCK_NVS_NAMESPACE_LEN 24U
@@ -133,6 +153,8 @@ static mock_nvs_entry_t *entry_for_key(mock_nvs_slot_t *slot,
 
 void mock_nvs_reset(void)
 {
+    s_next_edit_error = ESP_OK;
+    s_edit_depth = 0U;
     memset(s_slots, 0, sizeof(s_slots));
     s_fail_next_set = ESP_OK;
     s_fail_next_get = ESP_OK;

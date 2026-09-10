@@ -1,6 +1,6 @@
 # BLE and 3-Byte Companion Compatibility
 
-Updated: 2026-08-13 for DeskOS 1.5
+Updated for DeskOS 1.8.0-rc.5
 
 MeshCore DeskOS D1L must be compatible with MeshCore companion clients in both meanings used by current MeshCore references.
 
@@ -22,7 +22,7 @@ Reference evidence:
 - `third_party/MeshCore/src/helpers/ArduinoSerialInterface.cpp` writes `>` plus length LSB/MSB and reads `<` plus length LSB/MSB.
 - `third_party/MeshCore/src/helpers/esp32/SerialWifiInterface.cpp` uses the same framing for Wi-Fi and documents the 3-byte frame header.
 
-DeskOS 1.5 status:
+Transport implementation:
 
 - `main/comms/companion_3byte.*` implements the ESP-IDF C codec.
 - `tools/d1l/companion3.py` mirrors the codec for host tests and future tooling.
@@ -32,6 +32,33 @@ DeskOS 1.5 status:
   three-byte frames.
 - `main/comms/ble_companion_protocol.*` connects those queues to the normal
   single-owner MeshCore stores and commands.
+
+## Current phone compatibility
+
+The normal phone path supports secure connection and reconnect, contact/channel
+sync and edits, Public and other channel messages, acknowledged DMs, incoming
+message sync, self adverts, name/location/radio/path-size settings, time sync,
+radio statistics, and repeater/room login, status and permitted management.
+RC5 also connects zero-hop node discovery and ordinary-contact/sensor telemetry
+to the existing radio operations. Telemetry from repeaters and rooms uses the
+authenticated management session; the remote peer controls which fields it
+allows. A missing response or permission is not proof that a sensor exists.
+
+Public contact links and QR codes can be created by the app from synced contact
+data. Raw advert-packet import/export and retransmission over BLE are separate
+commands and remain unavailable. Other unavailable phone commands include
+manual TRACE, path-discovery requests, raw packet sending, signing arbitrary
+data, anonymous requests and region discovery. These should not be confused
+with similarly named tools on the D1L touchscreen.
+
+The advertised contact auto-add policy and radio tuning values are fixed.
+Alternate auto-add policies, telemetry-sharing policies, repeater mode and
+keyed flood scopes are not writable through this adapter. Unsupported changes
+are rejected; they are never reported as applied. Private-key operations,
+remote reset/reboot and changing the pairing PIN remain disabled over BLE.
+
+The tagged release records which operations were physically exercised on its
+exact binary. Native checks alone do not establish phone acceptance.
 
 ## BLE security boundary
 

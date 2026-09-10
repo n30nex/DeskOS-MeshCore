@@ -24,3 +24,5 @@ void mock_nvs_run_during_next_set(void (*hook)(void));
 void mock_semaphore_fail_next_create(void);
 void mock_semaphore_run_after_takes(size_t take_count, void (*hook)(void));
 void mock_timer_set_us(int64_t now_us);
+void mock_retained_edit_fail_next(esp_err_t error);
+unsigned mock_retained_edit_depth(void);

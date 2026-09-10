@@ -2742,8 +2742,34 @@ static void test_contact_clear_then_add_persists(void)
     assert(strcmp(contact.alias, "New contact") == 0);
 }
 
+static void test_foreground_contact_edit_waits_before_mutating(void)
+{
+    mock_nvs_reset();
+    assert(d1l_node_store_init() == ESP_OK);
+    assert(d1l_contact_store_init() == ESP_OK);
+    const char *fingerprint = "aaaaaaaaaaaaaaaa";
+    assert(d1l_contact_store_upsert_from_node(fingerprint, "Before", NULL) == ESP_OK);
+    d1l_contact_entry_t before = {0}, after = {0};
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &before));
+    const size_t commits = d1l_test_retained_blob_store_sd_write_commit_count(
+        D1L_RETAINED_BLOB_STORE_CONTACTS);
+    mock_retained_edit_fail_next(ESP_ERR_TIMEOUT);
+    assert(d1l_contact_store_set_flags(fingerprint, true, false, NULL) == ESP_ERR_TIMEOUT);
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &after));
+    assert(memcmp(&before, &after, sizeof(before)) == 0);
+    assert(d1l_test_retained_blob_store_sd_write_commit_count(
+        D1L_RETAINED_BLOB_STORE_CONTACTS) == commits);
+    assert(mock_retained_edit_depth() == 0U);
+    assert(d1l_contact_store_set_flags(fingerprint, true, false, &after) == ESP_OK);
+    assert(after.favorite && mock_retained_edit_depth() == 0U);
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &after));
+    assert(after.favorite);
+}
+
 int main(void)
 {
+    test_foreground_contact_edit_waits_before_mutating();
     test_node_v3_to_v4_migration();
     test_contact_v3_to_v8_migration();
     test_contact_v4_to_v8_migration_is_truthful();

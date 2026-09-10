@@ -777,6 +777,30 @@ esp_err_t d1l_route_store_worker_quiesce_begin(uint32_t timeout_ms)
     return route_store_worker_quiesce_begin(timeout_ms, true);
 }
 
+esp_err_t d1l_route_store_worker_quiesce_for_edit(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const int64_t deadline_us = esp_timer_get_time() +
+        (int64_t)timeout_ms * 1000LL;
+    for (;;) {
+        const int64_t remaining_us = deadline_us - esp_timer_get_time();
+        if (remaining_us <= 0) {
+            return ESP_ERR_TIMEOUT;
+        }
+        const esp_err_t ret = d1l_route_store_worker_quiesce_begin(
+            (uint32_t)((remaining_us + 999LL) / 1000LL));
+        if (ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
+        /* Another foreground operation owns the bridge. Do not spin or
+         * take a contact lock while that owner may still need it. */
+        TickType_t delay = pdMS_TO_TICKS(10U);
+        vTaskDelay(delay == 0U ? 1U : delay);
+    }
+}
+
 esp_err_t d1l_route_store_worker_quiesce_wait_begin(uint32_t timeout_ms)
 {
     return route_store_worker_quiesce_begin(timeout_ms, false);

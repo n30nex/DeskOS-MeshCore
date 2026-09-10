@@ -212,11 +212,13 @@ def expected_command_name(command: str) -> str:
     for prefix in [
         "settings set name ",
         "settings set pathhash ",
+        "settings set location ",
         "settings onboarding complete ",
         "contacts add ",
         "contacts export ",
         "contacts import ",
         "contacts rename ",
+        "contacts set ",
         "contacts delete ",
         "messages dm ",
         "mesh send dm ",

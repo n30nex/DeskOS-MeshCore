@@ -22,7 +22,7 @@
 | **1.8.0-rc.2** | Verify the written update image, reliable cancellation, and correct SD installation paths | Previous candidate; exact acceptance in the tagged release |
 | **1.8.0-rc.3** | WadaMesh-guided Chats, paged Contacts and filters, Profile, quick replies, and clearer device controls | Previous candidate |
 | **1.8.0-rc.4** | Conversation drafts, plain-text quoted replies and on-device clipboard | Previous candidate; radio BUSY stall reproduced after release |
-| **1.8.0-rc.5** | Bounded radio recovery and confirmed companion channel admission | Radio repair candidate; exact acceptance recorded in the tagged release |
+| **1.8.0-rc.5** | Bounded radio recovery, confirmed companion sends, phone discovery/telemetry and reliable contact edits | Phone compatibility candidate; exact acceptance recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -238,3 +238,9 @@ through the existing cancellable request path. Diagnostics expose recovery
 and channel-command outcomes. The physical touchscreen retains its
 asynchronous composer, and uncertain transmissions are not automatically
 replayed after a radio reset.
+
+The expanded official-phone check also adds nearby discovery and telemetry for
+ordinary contacts/sensors to the BLE adapter. Contact edits now wait for
+foreground storage ownership, preserving the existing durable-write and media
+generation guarantees. Both new phone response formats have native byte-level
+checks; physical acceptance belongs to the exact candidate release record.

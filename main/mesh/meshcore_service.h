@@ -205,6 +205,8 @@ typedef struct {
     int last_snr_tenths;
     uint8_t path_hops;
     d1l_meshcore_admin_query_result_t result;
+    uint16_t wire_len;
+    uint8_t wire[D1L_MESHCORE_ADMIN_MAX_QUERY_WIRE_BYTES];
 } d1l_meshcore_contact_telemetry_entry_t;
 
 typedef struct {
@@ -269,9 +271,16 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     const char *fingerprint,
     char *out_token,
     size_t out_token_size);
+/* The remote peer enforces its telemetry permissions. An inverse mask of
+ * zero requests all fields that peer allows; no local Admin session is needed. */
+esp_err_t d1l_meshcore_service_request_contact_telemetry(
+    const char *fingerprint, uint8_t inverse_mask, uint32_t *out_tag);
 esp_err_t d1l_meshcore_service_reset_contact_route(
     const char *fingerprint);
 esp_err_t d1l_meshcore_service_discover_nearby(void);
+/* Only the known zero-hop node-discovery request is admitted here. */
+esp_err_t d1l_meshcore_service_request_discovery(
+    const uint8_t *request, size_t length);
 void d1l_meshcore_service_clear_discovery_results(void);
 /* ESP_ERR_NOT_FINISHED means one TRACE is pending; ESP_ERR_NOT_ALLOWED means
  * the bounded post-outcome cooldown is active. */

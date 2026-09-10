@@ -427,6 +427,17 @@ static void *force_call_thread(void *argument)
     return NULL;
 }
 
+static void *edit_call_thread(void *argument)
+{
+    force_call_t *call = argument;
+    call->result = d1l_route_store_worker_quiesce_for_edit(call->timeout_ms);
+    if (call->result == ESP_OK) {
+        assert(!d1l_route_store_persistence_should_yield());
+        d1l_route_store_worker_quiesce_end();
+    }
+    return NULL;
+}
+
 static void wait_for_message_entry(void)
 {
     const int64_t deadline_us = native_now_us() + 1000000LL;
@@ -545,7 +556,17 @@ int main(void)
     assert(pthread_join(held_thread, NULL) == 0);
     assert(held.result == ESP_ERR_TIMEOUT);
     assert(!d1l_route_store_persistence_should_yield());
+    force_call_t edit_timeout = {.timeout_ms = 20U, .result = ESP_OK};
+    pthread_t edit_thread;
+    assert(pthread_create(&edit_thread, NULL, edit_call_thread, &edit_timeout) == 0);
+    assert(pthread_join(edit_thread, NULL) == 0);
+    assert(edit_timeout.result == ESP_ERR_TIMEOUT);
+    force_call_t edit_wait = {.timeout_ms = 1000U, .result = ESP_FAIL};
+    assert(pthread_create(&edit_thread, NULL, edit_call_thread, &edit_wait) == 0);
+    native_sleep_ms(20U);
     d1l_route_store_worker_quiesce_end();
+    assert(pthread_join(edit_thread, NULL) == 0);
+    assert(edit_wait.result == ESP_OK);
 
     mark_all_stores_dirty();
     assert(d1l_route_store_worker_force_flush(1000U) == ESP_OK);
