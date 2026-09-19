@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
 #include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -9909,6 +9911,24 @@ static void handle_line(const d1l_usb_command_view_t *command)
     } else {
         err_result("unknown", "UNKNOWN_COMMAND", "send help for supported commands");
     }
+}
+
+esp_err_t d1l_usb_console_init(void)
+{
+#if CONFIG_ESP_CONSOLE_UART
+    const uart_port_t port = (uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM;
+    if (!uart_is_driver_installed(port)) {
+        /* The polling VFS only has the hardware FIFO. A complete contact URI
+         * can exceed it while the console is emitting the preceding reply. */
+        const esp_err_t ret = uart_driver_install(port, 1024, 0, 0, NULL, 0);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    uart_vfs_dev_use_driver(port);
+#endif
+    setvbuf(stdin, NULL, _IONBF, 0);
+    return ESP_OK;
 }
 
 void d1l_usb_console_run(void)

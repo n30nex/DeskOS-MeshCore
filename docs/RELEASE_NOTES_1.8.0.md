@@ -10,6 +10,8 @@ SD storage for retained history and explicit live-only operation without SD.
   editable quick replies make the touch interface easier to navigate.
 - Conversation drafts save to prepared SD and return after restart.
   Plain-text quote replies and the local clipboard preserve the current draft.
+- Buffered USB input keeps complete contact imports and longer console
+  commands intact while startup, storage or a preceding response is busy.
 - Bluetooth channel sends wait for radio acceptance. A stuck radio has a
   bounded recovery path and cannot silently leave later sends blocked.
 - Received phone messages report their stored hop count. Nearby channel

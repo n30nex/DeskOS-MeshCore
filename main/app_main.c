@@ -50,6 +50,9 @@ void app_main(void)
         ESP_LOGE(TAG, "secure random unavailable; identity/channel creation disabled: %s",
                  esp_err_to_name(secure_random_ret));
     }
+    /* Buffer UART input before startup/storage work or either console can
+     * delay consuming a complete host command. */
+    ESP_ERROR_CHECK(d1l_usb_console_init());
     esp_err_t nvs_ret = nvs_flash_init();
     d1l_health_monitor_init(nvs_ret);
     d1l_event_log_init();
