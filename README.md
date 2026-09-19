@@ -6,11 +6,11 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.8.0-rc.6** is the release candidate for the SenseCAP Indicator D1L.
+DeskOS **1.8.0** is the stable release for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Release candidate](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0-rc.6)
+[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
@@ -18,7 +18,7 @@ It uses the production `full_feature` profile with conditional SD-primary retain
 The previous stable release is
 [1.7.12](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
 
-## What the candidate improves
+## What is new in 1.8.0
 
 - **Received hop counts** use the saved packet path. A nearby Public message
   no longer appears as 63 hops because of a fixed companion placeholder.
@@ -70,7 +70,7 @@ The previous stable release is
 - An ordinary update can finish without optional SD storage. Fresh clean
   installations retain the complete three-stage verification.
 
-See the [candidate release notes](docs/RELEASE_NOTES_1.8.0-rc.6.md) for the full
+See the [release notes](docs/RELEASE_NOTES_1.8.0.md) for the full
 change and validation record. Earlier releases remain documented in the
 [roadmap](docs/ROADMAP.md) and their release notes.
 

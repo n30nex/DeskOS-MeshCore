@@ -23,7 +23,8 @@
 | **1.8.0-rc.3** | WadaMesh-guided Chats, paged Contacts and filters, Profile, quick replies, and clearer device controls | Previous candidate |
 | **1.8.0-rc.4** | Conversation drafts, plain-text quoted replies and on-device clipboard | Previous candidate; radio BUSY stall reproduced after release |
 | **1.8.0-rc.5** | Bounded radio recovery, confirmed companion sends, phone discovery/telemetry and reliable contact edits | Previous candidate; received-path label and phone telemetry restart reproduced |
-| **1.8.0-rc.6** | Correct received hop counts and sufficient companion telemetry stack | Corrective candidate; exact acceptance recorded in the tagged release |
+| **1.8.0-rc.6** | Correct received hop counts and sufficient companion telemetry stack | Published corrective candidate |
+| **1.8.0** | Production release of the 1.8 messaging, companion and update improvements | Production acceptance and exact artifacts recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -255,3 +256,19 @@ fixed marker, including multi-hop DMs, and gives the companion worker the same
 stack budget as the radio owner. USB diagnostics expose its minimum free
 stack so the physical test can verify the remaining margin. It preserves
 existing message stores and does not erase already-cached phone history.
+
+## 1.8.0: production release
+
+The stable release collects the 1.8 candidate improvements: conversation
+drafts, quotes and clipboard; paged Chats/Contacts and editable Profile/quick
+replies; bounded radio recovery; confirmed phone sends and correct receive
+paths; and signed local-SD updates with flash verification and rollback.
+The final release record identifies the exact Actions package and physical
+device observations. Missing remote responses must remain explicit.
+
+Subsequent feature work remains separate: mentions, adjustable text size,
+language/keyboard improvements, automatic daylight-saving handling,
+selectable contact admission policies, and additional phone commands.
+Optional sensors and the WadaMesh Lua/web/remote application suite are future
+scope decisions. UI modularization (#6) and developer-check consolidation
+(#17) remain maintenance work rather than stable-release requirements.

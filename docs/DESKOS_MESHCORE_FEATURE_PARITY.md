@@ -1,6 +1,6 @@
 # DeskOS interface and MeshCore parity
 
-This is the current product capability ledger for DeskOS 1.8.0-rc.6 on the
+This is the current product capability ledger for DeskOS 1.8.0 on the
 SenseCAP Indicator D1L. The original mobile baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).
@@ -30,7 +30,7 @@ the board/app documentation. DeskOS uses its own implementation and artwork;
 no WadaMesh source, fonts or assets were copied into the firmware.
 
 The target is a useful touch workflow on the 480×480 D1L. Existing phone
-interoperability remains required. **This candidate does not claim complete
+interoperability remains required. **This release does not claim complete
 WadaMesh feature parity.** The older mobile-completion states below do not
 close the additional differences in this table.
 

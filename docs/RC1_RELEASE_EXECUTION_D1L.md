@@ -1,9 +1,9 @@
 # DeskOS D1L release execution
 
-## Current release procedure: 1.8.0-rc.6
+## Current release procedure: 1.8.0
 
-The maintainer re-enabled GitHub Actions for RC6. Dispatch the existing
-`d1l-ci` workflow on the exact candidate ref with the SD bridge included.
+The maintainer re-enabled GitHub Actions for the 1.8 production release. Dispatch the existing
+`d1l-ci` workflow on the exact release ref with the SD bridge included.
 Require successful host checks, MeshCore conformance, RP2040 build and ESP32
 build/packaging jobs. Download that run's `d1l-release-package` artifact and
 verify its source commit, manifest, signed update and checksums. Use that
@@ -40,7 +40,7 @@ requests it. The 1.0 procedure below is historical.
 5. Verify the exact running version/commit, identity, display, radio and
    retained storage. Exercise the changed behavior using production firmware.
    Record any physical update/phone paths that were not exercised explicitly.
-6. Merge the tested source, tag `v1.8.0-rc.6`, and publish it as a prerelease.
+6. Merge the tested source, tag `v1.8.0`, and publish it as the latest stable release after acceptance.
    Freshly download every asset and compare its bytes with staging. Update the
    existing flasher catalog and Canadaverse DeskOS page, then verify their
    public content and downloads. Remove obsolete build outputs only after

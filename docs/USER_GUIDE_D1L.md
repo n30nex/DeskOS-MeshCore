@@ -1,6 +1,6 @@
-# MeshCore DeskOS D1L 1.8.0-rc.6 User Guide
+# MeshCore DeskOS D1L 1.8.0 User Guide
 
-## Phone receive paths and telemetry in 1.8.0-rc.6
+## Phone receive paths and telemetry in 1.8.0
 
 Incoming channel messages report the received packet's hop count, including
 zero hops when no repeater forwarded it. The radio path can differ from the

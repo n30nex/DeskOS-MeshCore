@@ -1,6 +1,6 @@
 # BLE and 3-Byte Companion Compatibility
 
-Updated for DeskOS 1.8.0-rc.6
+Updated for DeskOS 1.8.0
 
 MeshCore DeskOS D1L must be compatible with MeshCore companion clients in both meanings used by current MeshCore references.
 
