@@ -462,29 +462,55 @@ static esp_err_t save_pending(const d1l_update_manifest_t *manifest)
     return ret;
 }
 
-static void clear_pending(bool confirmed)
+static esp_err_t clear_pending(bool confirmed)
 {
     nvs_handle_t handle = 0U;
-    if (nvs_open(D1L_UPDATE_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
-        return;
+    esp_err_t ret = nvs_open(D1L_UPDATE_NAMESPACE, NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        return ret;
     }
     uint32_t pending_sequence = 0U;
-    (void)nvs_get_u32(handle, "pending_seq", &pending_sequence);
-    if (confirmed && pending_sequence > 0U) {
-        uint32_t highest = 0U;
-        (void)nvs_get_u32(handle, "highest_seq", &highest);
-        if (pending_sequence > highest) {
-            (void)nvs_set_u32(handle, "highest_seq", pending_sequence);
-        }
-        (void)nvs_set_str(handle, "last_result", "confirmed");
-    } else if (pending_sequence > 0U) {
-        (void)nvs_set_str(handle, "last_result", "rolled_back");
+    ret = nvs_get_u32(handle, "pending_seq", &pending_sequence);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(handle);
+        return ESP_OK;
     }
-    (void)nvs_erase_key(handle, "pending_seq");
-    (void)nvs_erase_key(handle, "pending_sha");
-    (void)nvs_erase_key(handle, "pending_ver");
-    (void)nvs_commit(handle);
+    if (ret == ESP_OK && confirmed && pending_sequence > 0U) {
+        uint32_t highest = 0U;
+        ret = nvs_get_u32(handle, "highest_seq", &highest);
+        if (ret == ESP_ERR_NVS_NOT_FOUND) {
+            ret = ESP_OK;
+        }
+        if (ret == ESP_OK && pending_sequence > highest) {
+            ret = nvs_set_u32(handle, "highest_seq", pending_sequence);
+        }
+        if (ret == ESP_OK) {
+            ret = nvs_set_str(handle, "last_result", "confirmed");
+        }
+    } else if (ret == ESP_OK && pending_sequence > 0U) {
+        ret = nvs_set_str(handle, "last_result", "rolled_back");
+    }
+    const char *const pending_keys[] = {"pending_seq", "pending_sha", "pending_ver"};
+    for (size_t i = 0U; ret == ESP_OK && i < sizeof(pending_keys) / sizeof(pending_keys[0]); ++i) {
+        ret = nvs_erase_key(handle, pending_keys[i]);
+        if (ret == ESP_ERR_NVS_NOT_FOUND) {
+            ret = ESP_OK;
+        }
+    }
+    if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
     nvs_close(handle);
+    if (ret == ESP_OK) {
+        const uint32_t highest = load_highest_sequence();
+        portENTER_CRITICAL(&s_lock);
+        s_status.highest_security_sequence = highest;
+        if (!confirmed && pending_sequence > 0U) {
+            s_status.state = D1L_UPDATE_STATE_ROLLED_BACK;
+        }
+        portEXIT_CRITICAL(&s_lock);
+    }
+    return ret;
 }
 
 static esp_err_t run_install(void)
@@ -631,7 +657,7 @@ static esp_err_t run_install(void)
         ret = esp_ota_set_boot_partition(target);
     }
     if (ret != ESP_OK) {
-        clear_pending(false);
+        (void)clear_pending(false);
         goto digest_cleanup;
     }
     d1l_event_log_append(D1L_EVENT_LOG_LEVEL_INFO, "update", "installed",
@@ -696,7 +722,11 @@ esp_err_t d1l_update_boot_confirm(esp_err_t nvs_status)
     portEXIT_CRITICAL(&s_lock);
     if (state_ret != ESP_OK ||
         image_state != ESP_OTA_IMG_PENDING_VERIFY) {
-        clear_pending(false);
+        const esp_err_t pending_ret = clear_pending(false);
+        if (pending_ret != ESP_OK) {
+            set_state(D1L_UPDATE_STATE_ERROR, pending_ret, 0U);
+            return pending_ret;
+        }
         return state_ret == ESP_ERR_NOT_SUPPORTED ||
                        state_ret == ESP_ERR_NOT_FOUND ?
                    ESP_OK : state_ret;
@@ -720,15 +750,19 @@ esp_err_t d1l_update_boot_confirm(esp_err_t nvs_status)
         esp_restart();
         return ESP_FAIL;
     }
-    const esp_err_t ret = esp_ota_mark_app_valid_cancel_rollback();
+    esp_err_t ret = esp_ota_mark_app_valid_cancel_rollback();
     if (ret == ESP_OK) {
-        clear_pending(true);
+        ret = clear_pending(true);
+    }
+    if (ret == ESP_OK) {
         portENTER_CRITICAL(&s_lock);
         s_status.running_image_confirmed = true;
         portEXIT_CRITICAL(&s_lock);
         d1l_event_log_append(D1L_EVENT_LOG_LEVEL_INFO, "update",
                              "boot_confirmed",
                              "new image accepted; rollback cancelled");
+    } else {
+        set_state(D1L_UPDATE_STATE_ERROR, ret, 0U);
     }
     return ret;
 }

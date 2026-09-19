@@ -22,7 +22,9 @@ SD storage for retained history and explicit live-only operation without SD.
   their explicit success, timeout and permission boundaries.
 - Signed local-SD updates verify the image before and after writing the
   inactive slot. The bootloader can return to the preceding image when a new
-  image fails boot acceptance. USB remains the recovery path.
+  image fails boot acceptance. The update screen reports that rollback and
+  refreshes the security counter after a confirmed boot. Receipt-write failures
+  report an error instead of confirmation. USB remains the recovery path.
 
 ## Installation
 

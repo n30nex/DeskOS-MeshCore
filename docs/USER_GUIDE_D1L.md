@@ -307,7 +307,9 @@ restart before attempting another install. Updates cannot be triggered over RF.
 
 When the write completes, choose **Reboot to Update** and confirm it. The new
 image starts in pending-verification state. A successful normal boot confirms
-it; a failed boot rolls back to the previous working slot. The published USB
+it; a failed boot rolls back to the previous working slot. The update screen
+reports that rollback. SD updates can take tens of minutes; keep D1L powered
+until the reboot prompt appears. The published USB
 app BIN and full-clean 8 MB BIN remain the recovery paths if local update is
 unavailable.
 

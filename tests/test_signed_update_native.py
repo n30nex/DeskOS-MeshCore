@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def function(source, name):
-    start = re.search(r"(?:static\s+)?(?:esp_err_t|void|bool)\s+" + name + r"\([^)]*\)\s*\{", source)
+    start = re.search(r"(?:static\s+)?(?:esp_err_t|void|bool|uint32_t)\s+" + name + r"\([^)]*\)\s*\{", source)
     assert start, name
     end, depth = start.end(), 1
     while depth:
@@ -170,6 +170,148 @@ int main(int argc, char **argv) {
                                     "cancel_queued", "cancel_at_write_boundary", "install_after_ready"])
 def test_update_selects_only_verified_flash_and_honours_cancellation(updater, scenario):
     subprocess.run([str(updater), scenario], check=True)
+
+
+@pytest.fixture(scope="module")
+def boot_result(tmp_path_factory):
+    source = (ROOT / "main/update/update_manager.c").read_text()
+    code = r'''
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include "update/update_manager.h"
+#define ESP_ERR_NVS_NOT_FOUND 0x1102
+#define NVS_READONLY 0
+#define NVS_READWRITE 1
+#define D1L_UPDATE_NAMESPACE "update"
+#define D1L_UPDATE_PROJECT_NAME "meshcore_deskos_d1l"
+#define D1L_UPDATE_MIN_INTERNAL_HEAP_BYTES 16384
+#define ESP_PARTITION_TYPE_APP 0
+#define ESP_PARTITION_SUBTYPE_APP_OTA_0 0x10
+#define ESP_PARTITION_SUBTYPE_APP_OTA_1 0x11
+#define MALLOC_CAP_INTERNAL 1
+#define MALLOC_CAP_8BIT 2
+#define D1L_EVENT_LOG_LEVEL_INFO 1
+#define D1L_EVENT_LOG_LEVEL_ERROR 2
+#define portENTER_CRITICAL(lock) ((void)(lock))
+#define portEXIT_CRITICAL(lock) ((void)(lock))
+typedef unsigned nvs_handle_t;
+typedef enum { ESP_OTA_IMG_UNDEFINED, ESP_OTA_IMG_VALID, ESP_OTA_IMG_PENDING_VERIFY } esp_ota_img_states_t;
+typedef struct { unsigned type, subtype; char label[17]; } esp_partition_t;
+typedef struct { char project_name[32]; } esp_app_desc_t;
+typedef struct { bool pending; uint32_t sequence, highest; char result[16]; } receipt_t;
+static receipt_t durable = {true, 123, 41, ""}, staged;
+static d1l_update_status_t s_status = {.highest_security_sequence = 41};
+static esp_partition_t partition = {0, 0x10, "ota_0"};
+static esp_ota_img_states_t image_state = ESP_OTA_IMG_VALID;
+static int s_lock, failure;
+static unsigned commits;
+static esp_err_t nvs_open(const char *name, int mode, nvs_handle_t *handle) {
+    (void)name; (void)mode;
+    if (failure == 1) return ESP_FAIL;
+    staged = durable; *handle = 1; return ESP_OK;
+}
+static void nvs_close(nvs_handle_t handle) { (void)handle; }
+static esp_err_t nvs_get_u32(nvs_handle_t handle, const char *key, uint32_t *value) {
+    (void)handle;
+    if (failure == 2) return ESP_FAIL;
+    if (!strcmp(key, "pending_seq")) {
+        if (!staged.pending) return ESP_ERR_NVS_NOT_FOUND;
+        *value = staged.sequence;
+    } else { assert(!strcmp(key, "highest_seq")); *value = staged.highest; }
+    return ESP_OK;
+}
+static esp_err_t nvs_set_u32(nvs_handle_t handle, const char *key, uint32_t value) {
+    (void)handle; assert(!strcmp(key, "highest_seq"));
+    if (failure == 3) return ESP_FAIL;
+    staged.highest = value; return ESP_OK;
+}
+static esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value) {
+    (void)handle; assert(!strcmp(key, "last_result"));
+    strcpy(staged.result, value); return ESP_OK;
+}
+static esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key) {
+    (void)handle;
+    if (failure == 4) return ESP_FAIL;
+    if (!strcmp(key, "pending_seq")) staged.pending = false;
+    return ESP_OK;
+}
+static esp_err_t nvs_commit(nvs_handle_t handle) {
+    (void)handle; ++commits;
+    if (failure == 5) return ESP_FAIL;
+    durable = staged; return ESP_OK;
+}
+static const esp_partition_t *esp_ota_get_running_partition(void) { return &partition; }
+static esp_err_t esp_ota_get_state_partition(const esp_partition_t *p, esp_ota_img_states_t *state) {
+    assert(p == &partition); *state = image_state; return ESP_OK;
+}
+static esp_err_t esp_ota_get_partition_description(const esp_partition_t *p, esp_app_desc_t *out) {
+    assert(p == &partition); strcpy(out->project_name, D1L_UPDATE_PROJECT_NAME); return ESP_OK;
+}
+static unsigned heap_caps_get_free_size(unsigned flags) { (void)flags; return 49152; }
+static esp_err_t esp_ota_mark_app_valid_cancel_rollback(void) { image_state = ESP_OTA_IMG_VALID; return ESP_OK; }
+static esp_err_t esp_ota_mark_app_invalid_rollback_and_reboot(void) { assert(0); return ESP_FAIL; }
+static void esp_restart(void) { assert(0); }
+static void d1l_event_log_append(int level, const char *area, const char *event, const char *text) {
+    (void)level; (void)area; (void)event; (void)text;
+}
+'''
+    for name in ("set_state", "load_highest_sequence", "clear_pending", "d1l_update_boot_confirm"):
+        code += function(source, name) + "\n"
+    code += r'''
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    bool rollback = !strcmp(argv[1], "rollback");
+    bool no_pending = !strcmp(argv[1], "no_pending");
+    if (no_pending) durable.pending = false;
+    if (!rollback && !no_pending) {
+        image_state = ESP_OTA_IMG_PENDING_VERIFY;
+        partition.subtype = 0x11; strcpy(partition.label, "ota_1");
+    }
+    if (!strcmp(argv[1], "monotonic")) durable.highest = 456;
+    if (!strcmp(argv[1], "open_failure")) failure = 1;
+    if (!strcmp(argv[1], "read_failure")) failure = 2;
+    if (!strcmp(argv[1], "write_failure")) failure = 3;
+    if (!strcmp(argv[1], "erase_failure")) failure = 4;
+    if (!strcmp(argv[1], "commit_failure")) failure = 5;
+    esp_err_t ret = d1l_update_boot_confirm(ESP_OK);
+    if (failure) {
+        assert(ret == ESP_FAIL && s_status.state == D1L_UPDATE_STATE_ERROR);
+        assert(s_status.last_error == ESP_FAIL && !s_status.running_image_confirmed);
+        assert(durable.pending && durable.highest == 41);
+        assert(s_status.highest_security_sequence == 41);
+    } else if (no_pending) {
+        assert(ret == ESP_OK && s_status.state == D1L_UPDATE_STATE_IDLE && commits == 0);
+    } else if (rollback) {
+        assert(ret == ESP_OK && s_status.state == D1L_UPDATE_STATE_ROLLED_BACK);
+        assert(!durable.pending && !strcmp(durable.result, "rolled_back"));
+        assert(s_status.highest_security_sequence == 41 && !s_status.running_image_confirmed);
+    } else {
+        assert(ret == ESP_OK && s_status.running_image_confirmed);
+        assert(!durable.pending && !strcmp(durable.result, "confirmed"));
+        assert(s_status.highest_security_sequence == durable.highest);
+        assert(durable.highest == (!strcmp(argv[1], "monotonic") ? 456 : 123));
+    }
+    return 0;
+}
+'''
+    directory = tmp_path_factory.mktemp("update-boot-result")
+    program = directory / "boot.c"
+    program.write_text(code)
+    compiler = shutil.which("gcc") or shutil.which("clang")
+    assert compiler
+    binary = directory / "boot-result"
+    subprocess.run([compiler, "-std=c11", "-O2", "-I", str(ROOT / "main"),
+                    "-I", str(ROOT / "tests/native/stubs"), str(program), "-o", str(binary)], check=True)
+    return binary
+
+
+@pytest.mark.parametrize("scenario", ["rollback", "confirmed", "monotonic", "no_pending",
+                                     "open_failure", "read_failure", "write_failure",
+                                     "erase_failure", "commit_failure"])
+def test_update_boot_result_matches_durable_receipt(boot_result, scenario):
+    subprocess.run([str(boot_result), scenario], check=True)
 
 
 def test_signed_package_destinations_match_the_bridge_root(tmp_path, monkeypatch):
