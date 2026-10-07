@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 
 #include "mesh/contact_uri.h"
+#include "mesh/contact_policy.h"
 #include "mesh/meshcore_wire.h"
 #include "mesh/route_store_worker.h"
 #include "mesh/store_lock.h"
@@ -1923,6 +1924,12 @@ esp_err_t d1l_contact_store_upsert_verified_advert(
             return ESP_ERR_INVALID_STATE;
         }
         result = D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER;
+    } else if (!d1l_contact_policy_allows(
+            d1l_contact_store_meshcore_type_id(verified_node->type), verified_node->path_hops)) {
+        /* Heard/discovered state remains available; only new saved contacts
+         * are filtered. Existing contacts continue to receive signed updates. */
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_OK;
     } else if (s_count >= D1L_CONTACT_STORE_CAPACITY) {
         *out_result = D1L_CONTACT_VERIFIED_ADVERT_FULL;
         d1l_store_lock_give(&s_store_lock);

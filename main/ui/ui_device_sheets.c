@@ -1,3 +1,4 @@
+#include "ui_typography.h"
 #include "ui_device_sheets.h"
 
 #include <stddef.h>
@@ -14,6 +15,8 @@ enum {
     BINDING_NIGHT_MODE,
     BINDING_HIGH_CONTRAST,
     BINDING_TIMEOUT,
+    BINDING_TEXT_SIZE,
+    BINDING_DAYLIGHT_SAVING,
     BINDING_TIMEZONE_MINUS,
     BINDING_TIMEZONE_PLUS,
     BINDING_CLOSE_DIAGNOSTICS,
@@ -90,7 +93,7 @@ static lv_obj_t *create_label(lv_obj_t *parent, const char *text,
     if (!parent || !text) {
         return NULL;
     }
-    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_t *label = d1l_ui_label_create(parent);
     if (!label) {
         return NULL;
     }
@@ -217,7 +220,7 @@ bool d1l_ui_device_sheets_create(
     if (!parent || !lv_obj_is_valid(parent)) {
         return false;
     }
-    controller->display_sheet = create_sheet(parent, false);
+    controller->display_sheet = create_sheet(parent, true);
     if (!controller->display_sheet) {
         destroy_sheets(controller);
         return false;
@@ -274,7 +277,7 @@ bool d1l_ui_device_sheets_render_display(
         return false;
     }
     bool complete = true;
-    lv_obj_t *title = create_label(sheet, "Display", 0xF4F7FB);
+    lv_obj_t *title = create_label(sheet, "Display & clock", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
         lv_obj_set_pos(title, 8, 4);
@@ -346,12 +349,28 @@ bool d1l_ui_device_sheets_render_display(
         BINDING_TIMEZONE_PLUS,
         D1L_UI_DEVICE_SHEETS_ACTION_TIMEZONE_PLUS) != NULL && complete;
 
+    complete = create_button(controller, sheet,
+        snapshot->display_text_size ? "Text: Large" : "Text: Standard",
+        8, 248, 190, 44, BINDING_TEXT_SIZE,
+        D1L_UI_DEVICE_SHEETS_ACTION_TEXT_SIZE) != NULL && complete;
+    char daylight_text[32];
+    snprintf(daylight_text, sizeof(daylight_text), "DST: %s",
+        d1l_daylight_saving_name((d1l_daylight_saving_t)snapshot->daylight_saving));
+    complete = create_button(controller, sheet, daylight_text,
+        208, 248, 208, 44, BINDING_DAYLIGHT_SAVING,
+        D1L_UI_DEVICE_SHEETS_ACTION_DAYLIGHT_SAVING) != NULL && complete;
+    char standard_label[D1L_TIMEZONE_LABEL_LEN];
+    d1l_time_display_timezone_label(snapshot->timezone_standard_offset_minutes,
+        standard_label, sizeof(standard_label));
+    char note_text[224];
+    snprintf(note_text, sizeof(note_text),
+        "Standard time: %s. Adjust with -15m / +15m. Enable DST only if your "
+        "area follows the selected rule. Radio timestamps stay UTC.", standard_label);
     lv_obj_t *note = create_label(
         sheet,
-        "Adjust local time in 15-minute steps. Daylight saving changes are "
-        "manual; radio and security timestamps stay UTC.",
+        note_text,
         0xFBBF24);
-    configure_wrapped_label(note, 8, 252);
+    configure_wrapped_label(note, 8, 306);
     complete = note != NULL && complete;
     if (!complete) {
         invalidate_sheet(controller, sheet);

@@ -33,6 +33,8 @@
 #include "diagnostics/event_log.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/backlight.h"
+#include "hal/display_preferences.h"
+#include "mesh/contact_policy.h"
 #include "hal/indicator_board.h"
 #include "hal/rp2040_bridge.h"
 #include "hal/sx1262_indicator.h"
@@ -1338,8 +1340,9 @@ static void cmd_version(void)
            "\"source\":\"%s\",\"display_time_valid\":%s,"
            "\"display_time\":\"%s\",\"display_approximate\":%s,"
            "\"timezone\":{\"settings_ready\":%s,\"schema_version\":%u,"
-           "\"model\":\"fixed_utc_offset\",\"offset_minutes\":%d,"
-           "\"label\":\"%s\",\"auto_dst\":false,"
+           "\"model\":\"%s\",\"offset_minutes\":%d,"
+           "\"label\":\"%s\",\"auto_dst\":%s,"
+           "\"standard_offset_minutes\":%d,\"dst_rule\":%u,"
            "\"settings_error\":\"%s\"},"
            "\"protocol_wall_admission\":\"%s\","
            "\"protocol_persistence_state\":\"%s\","
@@ -1387,8 +1390,12 @@ static void cmd_version(void)
            bool_json(time_status.display_time_approximate),
            bool_json(time_status.timezone_settings_ready),
            (unsigned)time_status.timezone_schema_version,
+           time_status.daylight_saving ? "standard_offset_with_dst" : "fixed_utc_offset",
            (int)time_status.timezone_offset_minutes,
            time_status.timezone_label,
+           bool_json(time_status.daylight_saving != D1L_DAYLIGHT_SAVING_OFF),
+           (int)time_status.timezone_standard_offset_minutes,
+           (unsigned)time_status.daylight_saving,
            esp_err_to_name(time_status.timezone_settings_error),
            d1l_time_protocol_wall_admission_name(
                time_status.clock.protocol_wall_admission),
@@ -1519,6 +1526,8 @@ static void cmd_board(void)
 
 static void cmd_settings_get(void)
 {
+    d1l_display_preferences_t preferences;
+    d1l_display_preferences_get(&preferences);
     d1l_settings_t settings_snapshot = {0};
     const esp_err_t settings_snapshot_error =
         d1l_settings_public_snapshot(&settings_snapshot);
@@ -1549,8 +1558,9 @@ static void cmd_settings_get(void)
            "\"ble_companion_enabled\":%s,\"observer_enabled\":%s,"
            "\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,"
            "\"timezone\":{\"settings_ready\":%s,\"settings_error\":\"%s\","
-           "\"schema_version\":%u,\"model\":\"fixed_utc_offset\","
-           "\"offset_minutes\":%d,\"label\":\"%s\",\"auto_dst\":false},"
+           "\"schema_version\":%u,\"model\":\"%s\","
+           "\"offset_minutes\":%d,\"label\":\"%s\",\"auto_dst\":%s,\"dst_rule\":%u},"
+           "\"text_size\":%u,"
            "\"map_location\":{\"available\":%s,\"set\":%s,\"lat\":",
            bool_json(wifi_available), bool_json(ble_available),
            bool_json(observer_available), bool_json(map_available),
@@ -1565,7 +1575,10 @@ static void cmd_settings_get(void)
            bool_json(settings_snapshot_error == ESP_OK),
            esp_err_to_name(settings_snapshot_error),
            (unsigned)settings->timezone_schema_version,
+           preferences.daylight_saving ? "standard_offset_with_dst" : "fixed_utc_offset",
            (int)settings->timezone_offset_minutes, timezone_label,
+           bool_json(preferences.daylight_saving != D1L_DAYLIGHT_SAVING_OFF),
+           (unsigned)preferences.daylight_saving, (unsigned)preferences.text_size,
            bool_json(location_available), bool_json(location_set));
     print_e7_json(location_set ? settings->map_lat_e7 : 0);
     printf(",\"lon\":");
@@ -1737,6 +1750,8 @@ static void cmd_settings_set_pathhash(const char *line)
 
 static void cmd_settings_set_timezone(const char *line)
 {
+    d1l_display_preferences_t preferences;
+    d1l_display_preferences_get(&preferences);
     const char *arg = line + strlen("settings set timezone ");
     while (*arg == ' ') {
         arg++;
@@ -1751,17 +1766,58 @@ static void cmd_settings_set_timezone(const char *line)
         d1l_app_model_set_timezone_offset_minutes(offset_minutes);
     if (ret != ESP_OK) {
         err_result("settings set timezone", esp_err_to_name(ret),
-                   "could not persist fixed UTC display offset");
+                   "could not persist standard UTC display offset");
         return;
     }
     char label[D1L_TIMEZONE_LABEL_LEN] = {0};
     (void)d1l_time_display_timezone_label(
         offset_minutes, label, sizeof(label));
     ok_begin("settings set timezone");
-    printf(",\"persisted\":true,\"model\":\"fixed_utc_offset\","
+    printf(",\"persisted\":true,\"model\":\"%s\","
            "\"offset_minutes\":%d,\"label\":\"%s\","
-           "\"auto_dst\":false}\n",
-           (int)offset_minutes, label);
+           "\"auto_dst\":%s}\n",
+           preferences.daylight_saving ? "standard_offset_with_dst" : "fixed_utc_offset",
+           (int)offset_minutes, label,
+           bool_json(preferences.daylight_saving != D1L_DAYLIGHT_SAVING_OFF));
+}
+
+static void cmd_settings_set_display_option(const char *line, bool text_size)
+{
+    const char *command = text_size ? "settings set textsize" : "settings set dst";
+    const char *value = line + strlen(command) + 1U;
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    if (text_size) {
+        if (strcmp(value, "standard") == 0) ret = d1l_display_preferences_set_text_size(0U);
+        else if (strcmp(value, "large") == 0) ret = d1l_display_preferences_set_text_size(1U);
+    } else {
+        if (strcmp(value, "off") == 0) ret = d1l_display_preferences_set_daylight_saving(D1L_DAYLIGHT_SAVING_OFF);
+        else if (strcmp(value, "north-america") == 0) ret = d1l_display_preferences_set_daylight_saving(D1L_DAYLIGHT_SAVING_NORTH_AMERICA);
+        else if (strcmp(value, "europe") == 0) ret = d1l_display_preferences_set_daylight_saving(D1L_DAYLIGHT_SAVING_EUROPE);
+    }
+    if (ret != ESP_OK) { err_result(command, esp_err_to_name(ret), "setting was not saved"); return; }
+    ok_begin(command);
+    printf(",\"persisted\":true}\n");
+}
+
+static void cmd_settings_autoadd(const char *line)
+{
+    if (strcmp(line, "settings autoadd") != 0) {
+        const char *args = line + strlen("settings set autoadd ");
+        uint32_t manual, roles, hops;
+        if (!parse_next_u32_arg(&args, &manual) || manual > 1U ||
+            !parse_next_u32_arg(&args, &roles) || roles > D1L_CONTACT_AUTOADD_ALL ||
+            !parse_next_u32_arg(&args, &hops) || hops > 64U || *args) {
+            err_result("settings set autoadd", "INVALID_ARG", "use manual 0|1, roles mask 0..30, max_hops 0..64");
+            return;
+        }
+        const esp_err_t ret = d1l_contact_policy_save((d1l_contact_policy_t){
+            .roles = (uint8_t)roles, .max_hops = (uint8_t)hops, .manual = manual != 0U});
+        if (ret != ESP_OK) { err_result("settings set autoadd", esp_err_to_name(ret), "policy was not saved"); return; }
+    }
+    const d1l_contact_policy_t policy = d1l_contact_policy_get();
+    ok_begin(strcmp(line, "settings autoadd") == 0 ? "settings autoadd" : "settings set autoadd");
+    printf(",\"manual\":%s,\"roles\":%u,\"max_hops\":%u,\"overwrite_oldest\":false}\n",
+        bool_json(policy.manual), (unsigned)policy.roles, (unsigned)policy.max_hops);
 }
 
 static void print_map_location_result(const char *cmd, const d1l_settings_t *settings,
@@ -9036,6 +9092,10 @@ static void cmd_help(void)
                D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION "\","
                "\"settings set name <name>\","
                "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
+               "\"settings set textsize <standard|large>\","
+               "\"settings set dst <off|north-america|europe>\","
+               "\"settings autoadd\","
+               "\"settings set autoadd <manual 0|1> <roles mask> <max_hops>\","
                "\"settings onboarding status\","
                "\"settings onboarding complete <name>\","
                "\"settings onboarding reset\",\"identity status\",\"i2c\","
@@ -9119,6 +9179,10 @@ static void cmd_help(void)
             D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION "\","
            "\"settings set name <name>\",\"settings set pathhash <1|2|3>\","
            "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
+           "\"settings set textsize <standard|large>\","
+           "\"settings set dst <off|north-america|europe>\","
+           "\"settings autoadd\","
+           "\"settings set autoadd <manual 0|1> <roles mask> <max_hops>\","
            "\"settings set location <lat> <lon>\",\"settings clear location\","
            "\"settings onboarding status\",\"settings onboarding complete <name>\","
            "\"settings onboarding reset\",\"identity status\",\"i2c\","
@@ -9495,6 +9559,13 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_settings_set_name(line);
     } else if (strncmp(line, "settings set pathhash ", 22) == 0) {
         cmd_settings_set_pathhash(line);
+    } else if (strncmp(line, "settings set textsize ", strlen("settings set textsize ")) == 0) {
+        cmd_settings_set_display_option(line, true);
+    } else if (strncmp(line, "settings set dst ", strlen("settings set dst ")) == 0) {
+        cmd_settings_set_display_option(line, false);
+    } else if (strcmp(line, "settings autoadd") == 0 ||
+               strncmp(line, "settings set autoadd ", strlen("settings set autoadd ")) == 0) {
+        cmd_settings_autoadd(line);
     } else if (strncmp(line, "settings set timezone ",
                        strlen("settings set timezone ")) == 0) {
         cmd_settings_set_timezone(line);

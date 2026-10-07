@@ -1,3 +1,4 @@
+#include "ui_typography.h"
 #include "ui_settings.h"
 
 #include <string.h>
@@ -53,6 +54,7 @@ bool d1l_ui_settings_action_available(d1l_ui_settings_action_t action)
                    D1L_RELEASE_FEATURE_USER_TRACE);
     case D1L_UI_SETTINGS_ACTION_PROFILE:
     case D1L_UI_SETTINGS_ACTION_QUICK_REPLIES:
+    case D1L_UI_SETTINGS_ACTION_CONTACT_POLICY:
         return d1l_release_feature_available(D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI);
     case D1L_UI_SETTINGS_ACTION_DISPLAY:
         return true;
@@ -84,7 +86,7 @@ static lv_obj_t *settings_create_label(lv_obj_t *parent, const char *text, uint3
     if (!parent || !text) {
         return NULL;
     }
-    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_t *label = d1l_ui_label_create(parent);
     if (!label) {
         return NULL;
     }

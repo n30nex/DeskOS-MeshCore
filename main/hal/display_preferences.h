@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "platform/time_display.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,12 +23,16 @@ typedef struct {
     uint8_t brightness_percent;
     uint16_t timeout_seconds;
     d1l_notification_mode_t notification_mode;
+    uint8_t text_size; /* 0: standard (14 px), 1: large (18 px). */
+    d1l_daylight_saving_t daylight_saving;
 } d1l_display_preferences_t;
 
 esp_err_t d1l_display_preferences_init(void);
 void d1l_display_preferences_get(d1l_display_preferences_t *out_preferences);
 esp_err_t d1l_display_preferences_set_brightness(uint8_t percent);
 esp_err_t d1l_display_preferences_set_timeout(uint16_t seconds);
+esp_err_t d1l_display_preferences_set_text_size(uint8_t size);
+esp_err_t d1l_display_preferences_set_daylight_saving(d1l_daylight_saving_t rule);
 esp_err_t d1l_display_preferences_set_notification_mode(
     d1l_notification_mode_t mode);
 const char *d1l_notification_mode_name(d1l_notification_mode_t mode);

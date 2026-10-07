@@ -61,3 +61,14 @@ bool d1l_compose_quote(char *out, size_t capacity, const char *author, const cha
     }
     return true;
 }
+
+bool d1l_compose_mention(char *out, size_t capacity, const char *name)
+{
+    if (!out || capacity == 0U) return false;
+    out[0] = '\0';
+    const d1l_user_text_info_t info = d1l_user_text_validate(name);
+    if (info.result != D1L_USER_TEXT_OK || info.byte_count > 31U ||
+        strchr(name, '[') || strchr(name, ']') || capacity < info.byte_count + 5U) return false;
+    snprintf(out, capacity, "@[%s] ", name);
+    return true;
+}

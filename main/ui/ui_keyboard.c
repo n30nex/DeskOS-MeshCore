@@ -1,3 +1,4 @@
+#include "ui_typography.h"
 #include "ui_keyboard.h"
 
 #include <ctype.h>
@@ -95,8 +96,7 @@ void d1l_ui_keyboard_configure_compose(lv_obj_t *keyboard)
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_2,
                         d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
     lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
-    lv_obj_set_style_text_font(
-        keyboard, &d1l_ui_font_symbols_14, LV_PART_ITEMS);
+    d1l_ui_typography_apply(keyboard, LV_PART_ITEMS);
     lv_obj_set_style_pad_all(keyboard, 4, 0);
     lv_obj_set_style_pad_row(keyboard, 6, 0);
     lv_obj_set_style_pad_column(keyboard, 4, 0);
@@ -120,7 +120,7 @@ void d1l_ui_keyboard_configure_input(lv_obj_t *keyboard,
         lv_obj_set_style_bg_color(textarea, lv_color_hex(0x17191A), 0);
         lv_obj_set_style_text_color(textarea, lv_color_hex(0xF4F7FB), 0);
         lv_obj_set_style_border_color(textarea, lv_color_hex(0x33404A), 0);
-        lv_obj_set_style_text_font(textarea, &d1l_ui_font_symbols_14, 0);
+        d1l_ui_typography_apply(textarea, 0);
         lv_keyboard_set_textarea(keyboard, textarea);
     }
 }

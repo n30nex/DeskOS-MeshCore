@@ -417,21 +417,21 @@ def test_phone_startup_uses_protocol_owned_storage_and_official_contact_count():
         "static void build_device_info", 1
     )[0]
     assert "D1L_BLE_PROTOCOL_SELF_ADV_TYPE 1U" in protocol
-    assert "D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS 0U" in protocol
+    assert "d1l_contact_policy_get().manual" in protocol
     assert (
         self_info.index("D1L_BLE_PROTOCOL_SELF_ADV_TYPE")
         < self_info.index("settings.identity_public_key")
-        < self_info.index("D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS")
+        < self_info.index("d1l_contact_policy_get().manual")
         < self_info.index("settings.frequency_hz")
     )
-    assert "Every verified signed advert is retained as a contact" in self_info
+    assert "d1l_contact_policy_get().manual ? 1U : 0U" in self_info
 
 
 def test_v10_phone_settings_are_truthful_and_bounded():
     protocol = read("main/comms/ble_companion_protocol.c")
 
-    assert "D1L_BLE_PROTOCOL_AUTOADD_CONFIG 0x1EU" in protocol
-    assert "D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS 0U" in protocol
+    assert "d1l_contact_policy_save(policy)" in protocol
+    assert "max_hops > 64U" in protocol
     assert "static void set_other_params_command" in protocol
     assert "static void set_tuning_params_command" in protocol
     assert "static void build_tuning_params" in protocol

@@ -1,3 +1,4 @@
+#include "ui_typography.h"
 #include "ui_map.h"
 
 #include <stdbool.h>
@@ -123,7 +124,7 @@ static lv_obj_t *map_label(lv_obj_t *parent, const char *text, uint32_t color)
     if (!parent || !text) {
         return NULL;
     }
-    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_t *label = d1l_ui_label_create(parent);
     if (!label) {
         return NULL;
     }

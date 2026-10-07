@@ -6,19 +6,36 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.8.0** is the stable release for the SenseCAP Indicator D1L.
+DeskOS **1.9.0** is the stable release for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0)
+[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.0)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
 
 The previous stable release is
-[1.7.12](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.7.12).
+[1.8.0](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0).
 
-## What is new in 1.8.0
+## What is new in 1.9.0
+
+- **Larger text:** choose Standard or Large under Display & clock. Body text,
+  inputs and keyboard characters update without clearing an open draft.
+- **Mentions:** the composer's **@** button inserts a saved chat contact's
+  advertised name at the cursor. Paging reaches the whole saved list; nothing
+  is sent until you press Send.
+- **Auto-add contacts:** choose which roles and hop distances may enter Saved.
+  Other verified nodes remain in Discovered, and existing contacts still update.
+  Compatible phone clients can read and change the same policy.
+- **Automatic daylight saving:** optional US/Canada or Europe/UK rules adjust
+  the display clock and message times while radio/security clocks remain UTC.
+  The configured offset is standard time; fixed-offset operation stays default.
+
+The [1.9 release notes](docs/RELEASE_NOTES_1.9.0.md) and tagged release describe
+acceptance and remaining limits.
+
+## Included from 1.8.0
 
 - **Received hop counts** use the saved packet path. A nearby Public message
   no longer appears as 63 hops because of a fixed companion placeholder.

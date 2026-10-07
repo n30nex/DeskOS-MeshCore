@@ -133,6 +133,8 @@ typedef struct {
     bool high_contrast;
     bool night_mode;
     uint8_t display_brightness_percent;
+    uint8_t display_text_size;
+    uint8_t daylight_saving;
     uint16_t display_timeout_seconds;
     uint8_t notification_mode;
     bool protocol_tx_ready;
@@ -184,6 +186,7 @@ typedef struct {
     char time_label[8];
     char timezone_label[D1L_TIMEZONE_LABEL_LEN];
     int16_t timezone_offset_minutes;
+    int16_t timezone_standard_offset_minutes;
     char node_name[32];
     char wifi_ssid[D1L_WIFI_SSID_LEN];
     char wifi_ip[16];

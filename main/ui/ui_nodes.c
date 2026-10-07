@@ -1,3 +1,4 @@
+#include "ui_typography.h"
 #include "ui_nodes.h"
 #include "ui_nodes_model.h"
 
@@ -23,7 +24,7 @@ static lv_obj_t *nodes_create_label(lv_obj_t *parent,
     if (!parent || !text) {
         return NULL;
     }
-    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_t *label = d1l_ui_label_create(parent);
     if (!label) {
         return NULL;
     }

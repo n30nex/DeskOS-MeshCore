@@ -9,7 +9,7 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
-## 1.8.0 production release
+## 1.9.0 production release
 
 The maintainer re-enabled GitHub Actions for this production release. Use the existing
 workflow's exact-source signed package; the attached D1L remains the physical
@@ -38,7 +38,7 @@ acceptance target on the Pi 5.
   are not new-candidate phone acceptance.
 - Exercise the actual flasher console against the D1L and verify its normal
   update, clean-install, failure and storage readiness paths locally.
-- Publish `v1.8.0` as the latest stable release tied to the tested source. Freshly
+- Publish `v1.9.0` as the latest stable release tied to the tested source. Freshly
   download and compare every public asset, update the product page and flasher,
   and verify public downloads and desktop/mobile layouts.
 - Retain the signed release, a device recovery copy and deployment rollback;

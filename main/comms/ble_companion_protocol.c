@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "mesh/channel_store.h"
 #include "mesh/contact_store.h"
+#include "mesh/contact_policy.h"
 #include "mesh/contact_uri.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
@@ -41,9 +42,6 @@
 #define D1L_BLE_PROTOCOL_ADMIN_TIMEOUT_MS 60000U
 #define D1L_BLE_PROTOCOL_WIRED_MILLIVOLTS 4200U
 #define D1L_BLE_PROTOCOL_SELF_ADV_TYPE 1U
-#define D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS 0U
-#define D1L_BLE_PROTOCOL_AUTOADD_CONFIG 0x1EU
-#define D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS 0U
 #define D1L_BLE_PROTOCOL_RX_DELAY_MILLIS 0U
 #define D1L_BLE_PROTOCOL_AIRTIME_FACTOR_MILLIS 1000U
 
@@ -984,10 +982,7 @@ static void build_self_info(void)
     s_pending_payload[offset++] = 0U;
     s_pending_payload[offset++] = settings.map_location_set ? 1U : 0U;
     s_pending_payload[offset++] = 0U;
-    /* Every verified signed advert is retained as a contact. Keep this flag
-     * in sync with PUSH_CODE_ADVERT so phone clients update Contacts/Recent
-     * instead of treating the same node as an unsaved discovery. */
-    s_pending_payload[offset++] = D1L_BLE_PROTOCOL_MANUAL_ADD_CONTACTS;
+    s_pending_payload[offset++] = d1l_contact_policy_get().manual ? 1U : 0U;
     write_u32_le(&s_pending_payload[offset],
                  settings.frequency_hz / 1000U);
     offset += 4U;
@@ -2520,9 +2515,11 @@ static void set_other_params_command(const uint8_t *payload, size_t length)
     (void)d1l_settings_public_snapshot(&settings);
     const uint8_t current_location_policy = settings.map_location_set ? 1U : 0U;
 
-    if (manual_add_contacts == 0U && telemetry_mode == 0U &&
+    if (manual_add_contacts <= 1U && telemetry_mode == 0U &&
         advert_location_policy == current_location_policy && multi_acks == 0U) {
-        set_simple_response(RESP_CODE_OK);
+        d1l_contact_policy_t policy = d1l_contact_policy_get();
+        policy.manual = manual_add_contacts != 0U;
+        set_result_response(d1l_contact_policy_save(policy));
     } else {
         set_simple_response(RESP_CODE_DISABLED);
     }
@@ -2556,13 +2553,15 @@ static void set_autoadd_config_command(const uint8_t *payload, size_t length)
         set_error_response(ERR_CODE_ILLEGAL_ARG);
         return;
     }
-    const uint8_t max_hops = length >= 3U ? payload[2] : 0U;
-    if (payload[1] == D1L_BLE_PROTOCOL_AUTOADD_CONFIG &&
-        max_hops == D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS) {
-        set_simple_response(RESP_CODE_OK);
-    } else {
-        set_simple_response(RESP_CODE_DISABLED);
+    d1l_contact_policy_t policy = d1l_contact_policy_get();
+    const uint8_t max_hops = length >= 3U ? payload[2] : policy.max_hops;
+    if (length > 3U || (payload[1] & ~D1L_CONTACT_AUTOADD_ALL) != 0U || max_hops > 64U) {
+        set_error_response(ERR_CODE_ILLEGAL_ARG);
+        return;
     }
+    policy.roles = payload[1];
+    policy.max_hops = max_hops;
+    set_result_response(d1l_contact_policy_save(policy));
 }
 
 static void queue_self_advert_command(const uint8_t *payload, size_t length)
@@ -2638,10 +2637,11 @@ static void maybe_queue_discovery_results(void)
 
 static void build_autoadd_config(void)
 {
+    const d1l_contact_policy_t policy = d1l_contact_policy_get();
     const uint8_t response[] = {
         RESP_CODE_AUTOADD_CONFIG,
-        D1L_BLE_PROTOCOL_AUTOADD_CONFIG,
-        D1L_BLE_PROTOCOL_AUTOADD_MAX_HOPS,
+        policy.roles,
+        policy.max_hops,
     };
     (void)set_pending(response, sizeof(response));
 }

@@ -371,3 +371,7 @@ int main(int argc, char **argv)
     puts("native truthful-time checkpoint integration: ok");
     return 0;
 }
+#include "hal/display_preferences.h"
+void d1l_display_preferences_get(d1l_display_preferences_t *out) {
+    *out = (d1l_display_preferences_t){0};
+}

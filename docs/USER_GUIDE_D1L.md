@@ -1,4 +1,35 @@
-# MeshCore DeskOS D1L 1.8.0 User Guide
+# MeshCore DeskOS D1L 1.9.0 User Guide
+
+## Text, mentions, contacts and clock in 1.9.0
+
+- **Settings / Display & clock / Text** switches body text and typing between
+  Standard (14 px) and Large (18 px). Headings and map attribution retain their
+  dedicated sizes. The setting persists; changing it does not clear drafts.
+- In the composer, tap **@**, page through saved chat contacts and choose a name.
+  DeskOS inserts `@[Advertised name] ` at the cursor. This is ordinary message
+  text; names are not unique identities and recipient notifications depend on
+  their client. Local aliases are not substituted for an advertised name.
+  Names containing brackets cannot be represented and are omitted. Review the
+  message and press Send. An over-limit mention leaves the draft unchanged.
+- **Settings / Messaging / Auto-add contacts** controls roles (Chat, Repeaters,
+  Rooms, Sensors) and hop distance. With role filters off, all roles are allowed;
+  with filters on and every role off, new contacts require manual saving.
+  Existing saved contacts continue to update. Filtering never deletes contacts,
+  evicts a full contact book or hides verified nodes from Discovered. The policy
+  is tied to this identity, so a factory reset starts with default admission.
+- **Display & clock / DST** cycles Off, US / Canada, and Europe / UK. Set the
+  standard (winter) UTC offset with **Time -15m / +15m**. The active offset and
+  local clock appear above. Only select a rule if your location follows it;
+  places without seasonal changes should keep Off. Other regional rules and
+  historic pre-2007 changes are not supplied. The rule applies to each message's
+  timestamp, so winter history stays correct when viewed in summer. Radio,
+  certificate and security timestamps remain UTC.
+
+USB console equivalents: `settings set textsize standard|large`,
+`settings set dst off|north-america|europe`, and `settings autoadd`.
+`settings set autoadd <manual 0|1> <roles mask> <max_hops>` uses MeshCore role bits
+2/4/8/16 and max_hops 0 for unlimited, 1 for direct, or N for up to N-1 hops.
+Overwriting saved contacts is deliberately unsupported.
 
 ## Phone receive paths and telemetry in 1.8.0
 
@@ -75,7 +106,7 @@ bytes, even if a phone client shows a larger allowance for a short node name.
   update and are cleared by an explicit factory reset.
 - **Display & clock** offers 30 seconds, 1, 2, 5 or 10 minutes, or Off for the
   display timeout. Time controls adjust the fixed UTC offset by 15 minutes;
-  daylight-saving changes remain manual.
+  optional automatic daylight-saving rules are available in 1.9.0.
 
 Settings starts with Profile, Radio and Display & clock. Scroll to Connections,
 Storage & maps, Messaging, Tools and Support for the other controls. **About**
@@ -89,7 +120,7 @@ history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.8.0-rc.4 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.9.0 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -258,7 +289,7 @@ displayed local clock in 15-minute steps. The selected fixed UTC offset is saved
 across restarts. Mountain Time uses UTC-7 in standard time and UTC-6 in
 daylight time.
 
-DeskOS does not currently apply daylight-saving changes automatically. Adjust
+Keep DST Off for manual adjustment, or choose a supported rule above. Adjust
 the offset when the clock changes. This setting changes only human-readable
 display time; radio, security, ordering, and retained protocol timestamps stay
 in UTC.
@@ -447,7 +478,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.8.0-rc.4 download and
+Use the guided browser flasher or the published DeskOS D1L 1.9.0 download and
 follow its `START_HERE.md`.
 
 The browser waits for DeskOS to finish startup and verifies its exact build,

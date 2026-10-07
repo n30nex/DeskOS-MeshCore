@@ -30,6 +30,8 @@ typedef struct {
     esp_err_t timezone_settings_error;
     uint16_t timezone_schema_version;
     int16_t timezone_offset_minutes;
+    int16_t timezone_standard_offset_minutes;
+    d1l_daylight_saving_t daylight_saving;
     bool initialized;
     bool protocol_persistence_ready;
     bool protocol_tx_ready;

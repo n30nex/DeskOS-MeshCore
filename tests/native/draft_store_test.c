@@ -180,6 +180,14 @@ int main(void) {
     expect_text(&channel_key, "keep every draft");
 
     char quote[139];
+    assert(d1l_compose_mention(quote, sizeof(quote), "Alice Smith"));
+    assert(strcmp(quote, "@[Alice Smith] ") == 0);
+    assert(d1l_compose_mention(quote, sizeof(quote), "Andr\xc3\xa9"));
+    assert(strcmp(quote, "@[Andr\xc3\xa9] ") == 0);
+    assert(!d1l_compose_mention(quote, sizeof(quote), "bad] name"));
+    assert(!d1l_compose_mention(quote, sizeof(quote), "\xff"));
+    assert(!d1l_compose_mention(quote, sizeof(quote), ""));
+    assert(!d1l_compose_mention(quote, 5U, "Alice") && quote[0] == '\0');
     assert(d1l_compose_quote(quote, sizeof(quote), "Alice", "message"));
     assert(strcmp(quote, "> Alice: message | ") == 0);
     assert(d1l_compose_text_fits("My reply", quote));

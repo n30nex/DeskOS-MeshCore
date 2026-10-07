@@ -312,8 +312,8 @@ def test_console_exposes_phase2_foundation_commands():
     assert "d1l_app_model_clear_map_location()" in console
     assert "d1l_time_display_parse_timezone" in console
     assert "d1l_app_model_set_timezone_offset_minutes" in console
-    assert '\\"model\\":\\"fixed_utc_offset\\"' in console
-    assert '\\"auto_dst\\":false' in console
+    assert '"standard_offset_with_dst" : "fixed_utc_offset"' in console
+    assert "D1L_DAYLIGHT_SAVING_OFF" in console
 
 
 def test_v5_and_v6_migrations_preserve_wifi_location_and_identity():

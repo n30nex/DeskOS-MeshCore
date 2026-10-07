@@ -1,4 +1,4 @@
-# DeskOS D1L 1.8.0 limitations
+# DeskOS D1L 1.9.0 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -37,14 +37,18 @@ SD-primary storage.
 - New messages use a plausible sender timestamp or the trusted local arrival
   time. Older retained rows without either remain labelled `time unknown`.
 - Optional Indicator temperature, humidity, and CO2 sensor integration remains
-  future work and is not represented as live data in 1.8.0.
+  future work and is not represented as live data in 1.9.0.
 
 See [`DESKOS_MESHCORE_FEATURE_PARITY.md`](DESKOS_MESHCORE_FEATURE_PARITY.md)
 for the complete mobile-to-D1L outcome matrix.
 
 WadaMesh is the current interface comparison target, not a claim of complete
-feature parity. The mention picker, extra languages, global UI scaling, selectable auto-add
-policies and the Lua/web/remote app suite are not implemented. Quotes are
+feature parity. Extra languages, full UI scaling and the Lua/web/remote app suite are not implemented.
+Text sizing changes body text and inputs, with fixed heading/map-label sizes.
+Mentions use name-based plain text; they do not promise a recipient notification.
+Auto-add policies never overwrite saved contacts. Automatic daylight saving
+supports the contemporary US/Canada and Europe/UK rules; other locations use
+manual offsets. Quotes are
 editable plain-text excerpts, without structured cross-client quote identifiers.
 Drafts use prepared SD and remain session-only without it; the 72-entry limit
 never silently evicts another draft. Clipboard text stays on this D1L and

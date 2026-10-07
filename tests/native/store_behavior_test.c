@@ -6,6 +6,9 @@
 #include <string.h>
 
 #include "mesh/contact_store.h"
+#include "mesh/contact_policy.h"
+static d1l_contact_policy_t test_contact_policy = {.roles = D1L_CONTACT_AUTOADD_ALL};
+d1l_contact_policy_t d1l_contact_policy_get(void) { return test_contact_policy; }
 #include "mesh/meshcore_advert_admission.h"
 #include "mesh/meshcore_lifetime.h"
 #include "mesh/meshcore_packet_hash.h"
@@ -2767,8 +2770,35 @@ static void test_foreground_contact_edit_waits_before_mutating(void)
     assert(after.favorite);
 }
 
+static void test_autoadd_filters_preserve_discovery_and_existing_contacts(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x31U);
+    fingerprint_from_key(fingerprint, key);
+    test_contact_policy = (d1l_contact_policy_t){.manual = true, .roles = 4U};
+    d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, key, "Filtered", 100U, false, 0, 0);
+    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
+    assert(d1l_node_store_find_by_fingerprint(fingerprint, NULL));
+    assert(!d1l_contact_store_find_by_public_key(key, NULL));
+    test_contact_policy = (d1l_contact_policy_t){.manual = true, .roles = 2U, .max_hops = 2U};
+    receipt = admit_verified_advert(fingerprint, key, "Too far", 101U, false, 0, 0);
+    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
+    test_contact_policy.max_hops = 3U;
+    receipt = admit_verified_advert(fingerprint, key, "Allowed", 102U, false, 0, 0);
+    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
+    test_contact_policy.roles = 0U;
+    test_contact_policy.max_hops = 1U;
+    receipt = admit_verified_advert(fingerprint, key, "Still updated", 103U, false, 0, 0);
+    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_UPDATED);
+    test_contact_policy = (d1l_contact_policy_t){.roles = D1L_CONTACT_AUTOADD_ALL};
+}
+
 int main(void)
 {
+    test_autoadd_filters_preserve_discovery_and_existing_contacts();
     test_foreground_contact_edit_waits_before_mutating();
     test_node_v3_to_v4_migration();
     test_contact_v3_to_v8_migration();

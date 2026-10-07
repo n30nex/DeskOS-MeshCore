@@ -27,17 +27,17 @@ def test_timezone_setting_is_fixed_offset_and_display_only():
     assert "d1l_time_display" not in core
 
 
-def test_usb_and_ui_disclose_fixed_offset_and_no_automatic_dst():
+def test_usb_and_ui_disclose_standard_offset_and_optional_daylight_rules():
     console = read("main/comms/usb_console.c")
     display_sheet = read("main/ui/ui_device_sheets.c")
     more = read("main/ui/ui_more_view.c")
 
     assert "settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>" in console
-    assert '\\"model\\":\\"fixed_utc_offset\\"' in console
-    assert '\\"auto_dst\\":false' in console
+    assert '"standard_offset_with_dst" : "fixed_utc_offset"' in console
+    assert "D1L_DAYLIGHT_SAVING_OFF" in console
     assert "d1l_app_model_set_timezone_offset_minutes" in console
-    assert "Adjust local time in 15-minute steps." in display_sheet
-    assert "Daylight saving changes are" in display_sheet
-    assert "manual; radio and security timestamps stay UTC." in display_sheet
+    assert "Standard time: %s" in display_sheet
+    assert "d1l_daylight_saving_name" in display_sheet
+    assert "Radio timestamps stay UTC." in display_sheet
     assert "timezone_settings_ready" in more
     assert '"Time setting unavailable"' in more

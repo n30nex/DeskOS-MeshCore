@@ -1,3 +1,4 @@
+#include "ui_typography.h"
 #include "ui_messages.h"
 
 #include <stdio.h>
@@ -179,13 +180,13 @@ static lv_obj_t *messages_create_label(lv_obj_t *parent, const char *text, uint3
     if (!parent || !text) {
         return NULL;
     }
-    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_t *label = d1l_ui_label_create(parent);
     if (!label) {
         return NULL;
     }
     lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
-    lv_obj_set_style_text_font(label, &d1l_ui_font_symbols_14, 0);
+    d1l_ui_typography_apply(label, 0);
     return label;
 }
 
@@ -428,6 +429,7 @@ static void messages_make_clickable(
 
 static void messages_public_time_label(const d1l_message_entry_t *entry,
                                        int16_t timezone_offset_minutes,
+                                       uint8_t daylight_saving,
                                        char *out, size_t out_size)
 {
     if (!out || out_size == 0U) {
@@ -436,7 +438,8 @@ static void messages_public_time_label(const d1l_message_entry_t *entry,
     const uint32_t timestamp =
         d1l_message_entry_display_timestamp(entry);
     if (timestamp != 0U && d1l_time_display_format_clock(
-            timestamp, timezone_offset_minutes, false, out, out_size)) {
+            timestamp, d1l_time_display_offset_at(timestamp, timezone_offset_minutes,
+                (d1l_daylight_saving_t)daylight_saving), false, out, out_size)) {
         return;
     }
     snprintf(out, out_size, "time unknown");
@@ -488,6 +491,7 @@ static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
     char time_label[16] = {0};
     messages_public_time_label(
         entry, controller->rendered.timezone_offset_minutes,
+        controller->rendered.daylight_saving,
         time_label, sizeof(time_label));
     char state_and_time[64];
     snprintf(state_and_time, sizeof(state_and_time), "%s | %s",

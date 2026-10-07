@@ -285,6 +285,10 @@ static const d1l_factory_reset_inventory_entry_t s_inventory[] = {
      D1L_FACTORY_RESET_DISPOSITION_INTERNAL_JOURNAL, false,
      "durable post-reset private-draft removable-SD lineage fence",
      D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
+    {"contact_policy", D1L_FACTORY_RESET_PARTITION_DEFAULT, "nvs",
+     "d1l_ui", "contact_policy", D1L_FACTORY_RESET_DISPOSITION_PRESERVE_OWNERSHIP_EVIDENCE,
+     false, "identity-bound auto-add preference is ignored after identity reset",
+     D1L_FACTORY_RESET_RAW_SLOT_NONE, 0U},
 };
 
 _Static_assert(sizeof(s_inventory) / sizeof(s_inventory[0]) ==

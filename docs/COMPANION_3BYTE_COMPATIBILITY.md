@@ -1,6 +1,6 @@
 # BLE and 3-Byte Companion Compatibility
 
-Updated for DeskOS 1.8.0
+Updated for DeskOS 1.9.0
 
 MeshCore DeskOS D1L must be compatible with MeshCore companion clients in both meanings used by current MeshCore references.
 
@@ -57,9 +57,12 @@ manual TRACE, path-discovery requests, raw packet sending, signing arbitrary
 data, anonymous requests and region discovery. These should not be confused
 with similarly named tools on the D1L touchscreen.
 
-The advertised contact auto-add policy and radio tuning values are fixed.
-Alternate auto-add policies, telemetry-sharing policies, repeater mode and
-keyed flood scopes are not writable through this adapter. Unsupported changes
+Contact auto-add role masks, manual/filter mode and hop limits are writable
+and read back through the companion adapter. Existing contacts remain saved;
+the overwrite-oldest flag is rejected. Filtered discoveries remain on the D1L;
+raw advert export for the phone unsaved-discovery view is still unavailable.
+Radio tuning values, telemetry-sharing policies, repeater mode and keyed flood
+scopes are not writable through this adapter. Unsupported changes
 are rejected; they are never reported as applied. Private-key operations,
 remote reset/reboot and changing the pairing PIN remain disabled over BLE.
 

@@ -111,6 +111,10 @@ esp_err_t d1l_display_preferences_init(void)
         const esp_err_t timeout_ret =
             nvs_get_u16(handle, "timeout", &loaded.timeout_seconds);
         const esp_err_t mode_ret = nvs_get_u8(handle, "notify", &mode);
+        uint8_t daylight_saving = 0U;
+        const esp_err_t text_ret = nvs_get_u8(handle, "text_size", &loaded.text_size);
+        const esp_err_t dst_ret = nvs_get_u8(handle, "dst", &daylight_saving);
+        loaded.daylight_saving = (d1l_daylight_saving_t)daylight_saving;
         nvs_close(handle);
         if (brightness_ret != ESP_OK &&
             brightness_ret != ESP_ERR_NVS_NOT_FOUND) {
@@ -121,6 +125,10 @@ esp_err_t d1l_display_preferences_init(void)
         } else if (mode_ret != ESP_OK &&
                    mode_ret != ESP_ERR_NVS_NOT_FOUND) {
             ret = mode_ret;
+        } else if (text_ret != ESP_OK && text_ret != ESP_ERR_NVS_NOT_FOUND) {
+            ret = text_ret;
+        } else if (dst_ret != ESP_OK && dst_ret != ESP_ERR_NVS_NOT_FOUND) {
+            ret = dst_ret;
         } else {
             loaded.notification_mode = (d1l_notification_mode_t)mode;
             ret = ESP_OK;
@@ -129,6 +137,12 @@ esp_err_t d1l_display_preferences_init(void)
         ret = ESP_OK;
     }
 
+    /* New keys are independent of the identity/settings envelope, so an
+     * older recovery image can still read all of its original preferences. */
+    if (loaded.text_size > 1U) loaded.text_size = 0U;
+    if (loaded.daylight_saving > D1L_DAYLIGHT_SAVING_EUROPE) {
+        loaded.daylight_saving = D1L_DAYLIGHT_SAVING_OFF;
+    }
     if (ret == ESP_OK &&
         (!brightness_valid(loaded.brightness_percent) ||
          !d1l_display_timeout_valid(loaded.timeout_seconds) ||
@@ -220,6 +234,40 @@ esp_err_t d1l_display_preferences_set_notification_mode(
     if (ret != ESP_OK) {
         s_preferences.notification_mode = previous;
     }
+    xSemaphoreGive(s_lock);
+    return ret;
+}
+
+static esp_err_t save_display_byte(const char *key, uint8_t value)
+{
+    nvs_handle_t handle = 0U;
+    esp_err_t ret = nvs_open(D1L_DISPLAY_PREFERENCES_NAMESPACE, NVS_READWRITE, &handle);
+    if (ret == ESP_OK) ret = nvs_set_u8(handle, key, value);
+    if (ret == ESP_OK) ret = nvs_commit(handle);
+    if (handle) nvs_close(handle);
+    return ret;
+}
+
+esp_err_t d1l_display_preferences_set_text_size(uint8_t size)
+{
+    if (size > 1U) return ESP_ERR_INVALID_ARG;
+    if (!s_initialized || !s_lock) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000U)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    const esp_err_t ret = save_display_byte("text_size", size);
+    if (ret == ESP_OK) s_preferences.text_size = size;
+    xSemaphoreGive(s_lock);
+    return ret;
+}
+
+esp_err_t d1l_display_preferences_set_daylight_saving(d1l_daylight_saving_t rule)
+{
+    if (rule < D1L_DAYLIGHT_SAVING_OFF || rule > D1L_DAYLIGHT_SAVING_EUROPE) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_initialized || !s_lock) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000U)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    const esp_err_t ret = save_display_byte("dst", (uint8_t)rule);
+    if (ret == ESP_OK) s_preferences.daylight_saving = rule;
     xSemaphoreGive(s_lock);
     return ret;
 }

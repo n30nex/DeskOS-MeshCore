@@ -315,8 +315,8 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
              D1L_UI_SETTINGS_ACTION_DIAGNOSTICS, false);
 
     category = set_category(out_view, D1L_UI_MORE_CATEGORY_ADVANCED,
-                            "Messaging", "Quick replies, servers and notifications",
-                            COLOR_WARNING_TEXT, false, 3U);
+                            "Messaging", "Replies, contacts, servers and alerts",
+                            COLOR_WARNING_TEXT, false, 4U);
     set_item(&category->items[0], "Quick replies", "Six editable messages",
              COLOR_GREEN, D1L_UI_SETTINGS_ACTION_QUICK_REPLIES, false);
     set_item(&category->items[1], "Server admin",
@@ -328,6 +328,8 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
     set_item(&category->items[2], "Notifications", notification_status,
              input->notification_unread_count ? COLOR_AMBER : COLOR_GREEN,
              D1L_UI_SETTINGS_ACTION_NOTIFICATIONS, false);
+    set_item(&category->items[3], "Auto-add contacts", "Roles and distance",
+             COLOR_GREEN, D1L_UI_SETTINGS_ACTION_CONTACT_POLICY, false);
 
     return d1l_ui_more_view_model_is_valid(out_view);
 }

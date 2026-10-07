@@ -514,8 +514,8 @@ def test_usb_version_exposes_truthful_protocol_admission_and_recovery():
     assert '\\"retry_not_before_us\\"' in console
     assert '\\"display_time_valid\\"' in console
     assert '\\"display_approximate\\"' in console
-    assert '\\"model\\":\\"fixed_utc_offset\\"' in console
-    assert '\\"auto_dst\\":false' in console
+    assert '"standard_offset_with_dst" : "fixed_utc_offset"' in console
+    assert "D1L_DAYLIGHT_SAVING_OFF" in console
     assert '"authenticated_companion_or_newer_firmware"' in console
     assert '"protocol_persistence_migration_or_repair"' in console
     assert '"protocol_upgrade_required"' in console

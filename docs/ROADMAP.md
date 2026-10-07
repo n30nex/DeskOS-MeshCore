@@ -272,3 +272,16 @@ selectable contact admission policies, and additional phone commands.
 Optional sensors and the WadaMesh Lua/web/remote application suite are future
 scope decisions. UI modularization (#6) and developer-check consolidation
 (#17) remain maintenance work rather than stable-release requirements.
+
+## 1.9.0: everyday controls and standalone parity
+
+Standard/Large body text, a paged mention picker, role/distance auto-add controls,
+and optional US/Canada or Europe/UK daylight-saving rules are implemented.
+Settings keep the 1.8 identity envelope unchanged for preserving updates and
+rollback. New contact preferences are tied to the current identity. Phone
+clients share the same role/manual/hop policy, without contact eviction.
+
+Remaining work: localization and keyboard layouts, structured cross-client
+replies, other regional time rules, advanced phone commands, storage throughput,
+and the optional sensors/application suite. Complete WadaMesh parity is not
+claimed. Physical acceptance and exact artifacts belong in the tagged release.

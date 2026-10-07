@@ -450,8 +450,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_keyboard_set_textarea(keyboard, NULL)" in keyboard
     assert "d1l_compose_kb_map_lc" in keyboard
     assert "lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER" in keyboard
-    assert "lv_obj_set_style_text_font(" in keyboard
-    assert "keyboard, &d1l_ui_font_symbols_14, LV_PART_ITEMS" in keyboard
+    assert "d1l_ui_typography_apply(" in keyboard
+    assert "d1l_ui_typography_apply(keyboard, LV_PART_ITEMS)" in keyboard
     assert "lv_obj_set_size(keyboard, (lv_coord_t)width, (lv_coord_t)height)" in keyboard
     assert "lv_obj_set_align(keyboard, LV_ALIGN_TOP_LEFT)" in keyboard
     assert "lv_keyboard_set_textarea(keyboard, textarea)" in keyboard
@@ -1778,7 +1778,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "open_diagnostics_sheet_event_cb" in source
     assert '"Wi-Fi"' in wifi_module
     assert '"Bluetooth"' in ble_module
-    assert '"Display"' in device_sheets
+    assert '"Display & clock"' in device_sheets
     assert '"Diagnostics"' in device_sheets
     assert "lv_obj_t *ssid_textarea;" in wifi_header
     assert "lv_obj_t *password_textarea;" in wifi_header
@@ -1813,7 +1813,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
-    assert '"Adjust local time in 15-minute steps.' in device_sheets
+    assert '"Standard time: %s. Adjust with -15m / +15m.' in device_sheets
     assert '"Terminal shows recent events and the current log level."' in device_sheets
     assert '"reset %s  uptime %lus  mesh %s"' in device_sheets
 

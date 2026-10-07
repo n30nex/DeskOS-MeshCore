@@ -243,3 +243,5 @@ void lv_test_click(lv_obj_t *button)
     };
     button->event_cb(&event);
 }
+
+lv_obj_t *d1l_ui_label_create(lv_obj_t *parent) { return lv_label_create(parent); }

@@ -8,7 +8,7 @@
 
 typedef struct _lv_obj_t lv_obj_t;
 
-#define D1L_UI_SETTINGS_CONTROLLER_MAX_BYTES 4096U
+#define D1L_UI_SETTINGS_CONTROLLER_MAX_BYTES 5120U
 
 typedef void (*d1l_ui_settings_action_handler_t)(d1l_ui_settings_action_t action,
                                                  void *context);
