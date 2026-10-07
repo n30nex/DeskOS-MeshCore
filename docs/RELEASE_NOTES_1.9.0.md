@@ -11,6 +11,9 @@ DeskOS 1.9 adds everyday controls to the full-feature D1L interface:
 - Optional automatic daylight saving for the contemporary US/Canada and
   Europe/UK rules. Historical messages use their own timestamp; the protocol
   and security clocks remain UTC. Fixed offsets remain the default.
+- Incoming DM acknowledgements wait for an active transmission to finish
+  instead of being rejected as busy. A direct DM's flood retry retains its
+  original timestamp so receivers can recognize the same logical message.
 
 The settings/identity envelope is unchanged from 1.8. Contact policy is stored
 separately and bound to the identity, so an identity reset ignores old policy.

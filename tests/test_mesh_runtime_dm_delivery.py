@@ -240,6 +240,13 @@ def test_direct_dm_flood_retry_bounds_retained_worker_handoff_before_radio():
         "static esp_err_t meshcore_service_validate_room_post_session",
     )
 
+    # The existing canonical receive identity masks attempt bits but retains
+    # the timestamp. A transport retry must therefore keep the original time.
+    assert "d1l_settings_next_mesh_timestamp" not in retry
+    assert "retry_attempt, s_pending_dm_tx.tx_timestamp" in retry
+    assert "s_pending_dm_tx.tx_timestamp = tx_timestamp;" in source
+    assert "tx_timestamp, ack_hash, raw, raw_len, cmd->dm_path_probe" in source
+
     quiesce_at = retry.index("meshcore_service_begin_dm_retained_quiesce()")
     retry_wait_at = retry.index("D1L_DM_DELIVERY_RETRY_WAIT", quiesce_at)
     retry_transition_at = retry.index(
