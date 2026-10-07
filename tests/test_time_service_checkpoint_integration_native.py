@@ -51,6 +51,7 @@ def test_truthful_time_checkpoint_integration_native(tmp_path):
         "legacy-migration",
         "legacy-quarantine",
         "legacy-preinit-failure",
+        "daylight-saving",
     ):
         completed = subprocess.run(
             [str(executable), scenario],

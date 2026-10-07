@@ -18,6 +18,7 @@
 #include "esp_netif_sntp.h"
 #include "mock_esp_nvs.h"
 #include "platform/time_service.h"
+#include "hal/display_preferences.h"
 
 #define TEST_BUILD_EPOCH INT64_C(1784068276)
 #define CHECKPOINT_NAMESPACE "d1l_time"
@@ -26,6 +27,8 @@
 static esp_err_t s_sntp_init_result = ESP_OK;
 static esp_err_t s_sntp_wait_result = ESP_OK;
 static bool s_sntp_wait_enabled;
+static int16_t s_timezone_offset;
+static d1l_daylight_saving_t s_daylight_saving;
 
 esp_err_t d1l_settings_public_snapshot(d1l_settings_t *settings)
 {
@@ -34,6 +37,7 @@ esp_err_t d1l_settings_public_snapshot(d1l_settings_t *settings)
     }
     memset(settings, 0, sizeof(*settings));
     settings->timezone_schema_version = D1L_TIMEZONE_SETTING_SCHEMA_VERSION;
+    settings->timezone_offset_minutes = s_timezone_offset;
     return ESP_OK;
 }
 
@@ -350,6 +354,36 @@ static void run_legacy_preinit_failure(void)
     assert(mock_nvs_commit_call_count() == 0U);
 }
 
+static void run_daylight_saving_display(void)
+{
+    mock_nvs_reset();
+    mock_timer_set_us(0);
+    assert(d1l_time_service_init() == ESP_OK);
+    assert(d1l_time_service_set_companion_time(TEST_BUILD_EPOCH + 60, true) == ESP_OK);
+    s_timezone_offset = -360;
+    d1l_time_service_status_t before, after;
+    d1l_time_service_status(&before);
+    const unsigned writes = mock_nvs_set_call_count();
+    s_daylight_saving = D1L_DAYLIGHT_SAVING_NORTH_AMERICA;
+    d1l_time_service_status(&after);
+    assert(after.timezone_standard_offset_minutes == -360);
+    assert(after.timezone_offset_minutes == -300);
+    assert(strcmp(after.timezone_label, "UTC-05:00") == 0);
+    assert(after.display_time_valid);
+    assert(strcmp(after.display_time, before.display_time) != 0);
+    assert(after.clock.wall_epoch_sec == before.clock.wall_epoch_sec);
+    assert(after.clock.protocol_trust_anchor == before.clock.protocol_trust_anchor);
+    assert(mock_nvs_set_call_count() == writes);
+    s_daylight_saving = D1L_DAYLIGHT_SAVING_OFF;
+    d1l_time_service_status(&after);
+    assert(after.timezone_offset_minutes == -360);
+    assert(strcmp(after.display_time, before.display_time) == 0);
+    s_timezone_offset = 60;
+    s_daylight_saving = D1L_DAYLIGHT_SAVING_EUROPE;
+    d1l_time_service_status(&after);
+    assert(after.timezone_offset_minutes == 120);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -365,13 +399,14 @@ int main(int argc, char **argv)
         run_legacy_quarantine();
     } else if (strcmp(argv[1], "legacy-preinit-failure") == 0) {
         run_legacy_preinit_failure();
+    } else if (strcmp(argv[1], "daylight-saving") == 0) {
+        run_daylight_saving_display();
     } else {
         assert(!"unknown scenario");
     }
     puts("native truthful-time checkpoint integration: ok");
     return 0;
 }
-#include "hal/display_preferences.h"
 void d1l_display_preferences_get(d1l_display_preferences_t *out) {
-    *out = (d1l_display_preferences_t){0};
+    *out = (d1l_display_preferences_t){.daylight_saving = s_daylight_saving};
 }
