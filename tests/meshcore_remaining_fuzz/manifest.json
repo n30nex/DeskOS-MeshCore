@@ -88,7 +88,7 @@
     "tests/native/meshcore_crypto_test.c": "a397b7a7d28053984993cc146fea05849544af5f315c9644eca2214c16db769e",
     "tests/native/meshcore_route_selection_test.c": "c68a3db67e1b65c020a070b668a8806b1ca6c1b174384ac12d802637009e2d24",
     "tests/native/settings_envelope_test.c": "158353ab42c51142e05bb3b0f180aafdc12167ece20372a4a50cc2ae6924cd7a",
-    "tests/test_meshcore_conformance_contract.py": "90f67afef3cfb490a32cd16f321a4cad2a14a53fd40fc56b3f4fd2aa3d44c7f3",
+    "tests/test_meshcore_conformance_contract.py": "38bd5def66bdbb3bb2a60048634cb344f5d73df28199aeddf0ca46217da9f9ef",
     "tests/test_meshcore_public_rf_contract.py": "1c0d15eef833337bbbe03c4c5631811ec79ba990954691442ece1d16d03f22cb",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
