@@ -25,6 +25,7 @@
 | **1.8.0-rc.5** | Bounded radio recovery, confirmed companion sends, phone discovery/telemetry and reliable contact edits | Previous candidate; received-path label and phone telemetry restart reproduced |
 | **1.8.0-rc.6** | Correct received hop counts and sufficient companion telemetry stack | Published corrective candidate |
 | **1.8.0** | Production release of the 1.8 messaging, companion and update improvements | Production acceptance and exact artifacts recorded in the tagged release |
+| **1.9.0** | Larger text, mentions, contact auto-add rules and optional automatic daylight saving | Acceptance and exact artifacts recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation

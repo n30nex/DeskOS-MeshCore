@@ -17,6 +17,16 @@ acceptance target on the Pi 5.
 
 - Check actual legacy/current companion message frames for zero, one and
   multiple hops, including two/three-byte path hashes and retained rows.
+- Check Standard/Large text and list paging with the production LVGL renderers;
+  verify the changed settings and normal screen on the physical D1L.
+- Exercise mention paging, cursor insertion and over-limit rejection without
+  replacing an existing draft or sending automatically.
+- Verify auto-add role/hop filtering, existing-contact updates, failed preference
+  writes and identity-reset isolation. Check the supported policy commands in
+  the official phone app and restore the original device configuration.
+- Test the supported daylight-saving transition boundaries, confirm local
+  display changes leave protocol time unchanged, and verify saved preferences
+  across a normal device restart.
 - Repeat the official-phone telemetry request that overflowed RC5's worker;
   require the same boot identity, a live radio and measured stack headroom.
 - Verify a newly received channel message in the official app, then release

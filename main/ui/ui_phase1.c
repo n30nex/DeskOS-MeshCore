@@ -10968,7 +10968,9 @@ static void open_mentions_event_cb(lv_event_t *event)
         for (size_t j = 0U; j < s_mention_count; ++j) {
             if (strcmp(s_mention_names[j], name) == 0) duplicate = true;
         }
-        if (!duplicate) copy_cstr(s_mention_names[s_mention_count++], D1L_CONTACT_ALIAS_LEN, name);
+        if (!duplicate) {
+            snprintf(s_mention_names[s_mention_count++], D1L_CONTACT_ALIAS_LEN, "%s", name);
+        }
     }
     render_mentions();
 }

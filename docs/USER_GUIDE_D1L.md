@@ -20,8 +20,8 @@
 - **Display & clock / DST** cycles Off, US / Canada, and Europe / UK. Set the
   standard (winter) UTC offset with **Time -15m / +15m**. The active offset and
   local clock appear above. Only select a rule if your location follows it;
-  places without seasonal changes should keep Off. Other regional rules and
-  historic pre-2007 changes are not supplied. The rule applies to each message's
+  places without seasonal changes should keep Off. Other regional rules and a
+  database of historical/local exceptions are not supplied. The rule applies to each message's
   timestamp, so winter history stays correct when viewed in summer. Radio,
   certificate and security timestamps remain UTC.
 
