@@ -102,6 +102,9 @@ static void settings_set_dot_width(lv_obj_t *label, lv_coord_t width)
     }
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(label, width);
+    /* DOT needs a bounded height; auto-height would wrap into the next row
+     * after changing to Large text. Leave room for the 24 px heading font. */
+    lv_obj_set_height(label, 28);
 }
 
 static lv_obj_t *settings_create_container(lv_obj_t *parent, int width)

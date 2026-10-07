@@ -40,6 +40,7 @@ static void nodes_set_dot_width(lv_obj_t *label, lv_coord_t width)
     }
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(label, width);
+    lv_obj_set_height(label, 24);
 }
 
 static lv_obj_t *nodes_create_panel(lv_obj_t *parent,
@@ -99,6 +100,9 @@ static lv_obj_t *nodes_create_button(lv_obj_t *parent,
         button, text, enabled ? accent : 0x667787);
     if (label) {
         nodes_set_dot_width(label, width - 12);
+        /* Compact two-line controls such as Clear heard keep their natural
+         * height; list metadata above is deliberately one line. */
+        lv_obj_set_height(label, LV_SIZE_CONTENT);
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(label);
     }
@@ -396,14 +400,14 @@ static void nodes_render_page_controls(d1l_ui_nodes_controller_t *controller,
              (unsigned)view->total_matches);
     lv_obj_t *range = nodes_create_label(parent, summary, 0xA6B0B7);
     if (range) {
-        lv_obj_set_size(range, 252, 24);
+        lv_obj_set_size(range, 216, 24);
         lv_obj_set_style_text_align(range, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(range, 112, y + 12);
+        lv_obj_set_pos(range, 132, y + 12);
     }
-    nodes_create_button(parent, "Previous", 16, y, 88, 44, 0x20D9ED,
+    nodes_create_button(parent, "Previous", 16, y, 112, 44, 0x20D9ED,
                         view->page_offset > 0U,
                         nodes_dispatch_global_event_cb, &controller->previous_page);
-    nodes_create_button(parent, "Next", 376, y, 88, 44, 0x20D9ED,
+    nodes_create_button(parent, "Next", 352, y, 112, 44, 0x20D9ED,
                         end < view->total_matches,
                         nodes_dispatch_global_event_cb, &controller->next_page);
 }
