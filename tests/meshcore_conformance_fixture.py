@@ -127,6 +127,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/platform/time_display.h",
         "main/platform/time_service.c",
         "main/platform/time_service.h",
+        "main/hal/display_preferences.h",
         "main/platform/time_service_core.c",
         "main/platform/time_service_core.h",
         "main/storage/map_tile_store.h",

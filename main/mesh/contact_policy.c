@@ -84,4 +84,3 @@ esp_err_t d1l_contact_policy_save(d1l_contact_policy_t policy)
     xSemaphoreGive(lock);
     return ret;
 }
-

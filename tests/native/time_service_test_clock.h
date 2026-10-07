@@ -1,6 +1,9 @@
 #ifndef D1L_TIME_SERVICE_TEST_CLOCK_H
 #define D1L_TIME_SERVICE_TEST_CLOCK_H
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include <sys/time.h>
 #include <time.h>
 

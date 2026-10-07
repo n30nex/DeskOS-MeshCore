@@ -117,8 +117,8 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "c81d49ab33c9d3bd7ad0caf39016fdf8025555ec6d0badb6133fd979d91aaa7a",
-    "main/app/app_model.h": "24e0a6c1cc444630f25ed0d2e610f8400715fdee865af32e6a2fb309f35d5e97",
+    "main/app/app_model.c": "260f07144c0135224c7ecaeaf6a35c4a029391cb6bc827d8c741f03183e70af6",
+    "main/app/app_model.h": "e01fbf93542a3205dfce550a749defd797f43088f78e4f9fd3fb2109c7d023db",
     "main/app/settings_model.c": "fbf75f92086ad231832ae98669a6cb4800bb3368fa78d04f87bc0122a45eeba3",
     "main/app/settings_model.h": "f7fc9e0b5cb9b52e1c6c597f95cf8d48c2ae266d092031034d76b059372e83b6",
     "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
@@ -138,17 +138,17 @@
     "main/mesh/meshcore_service.c": "08b8aed17a913a331e05bfae5c5e9477369b8c2f5f6749652d7a2e623dc6f174",
     "main/mesh/node_store.c": "ac60049b2bd7a627febffd606a35e5305b2a750c762615fb11f93badff9cb161",
     "main/mesh/node_store.h": "5513cfbd602168c5d4f178ab625c9f82175627e5e7ad392ec93c13cd3cc06677",
-    "main/platform/time_service.c": "54ed3f4a6441bfb9dea2c71b55538a381f8f246f3ef557a20af865dbd564297b",
-    "main/platform/time_service.h": "aceb879ef808f9b5df7d97da0ee04c52aeb3204a7612266bf26b85d365c3a679",
+    "main/platform/time_service.c": "92991ae6c71d2c985906929d2f3971b0172e39c7931fd45e4ffdd84f53effa53",
+    "main/platform/time_service.h": "71e5486b59242b6cce1d589d776d154a1ffdf5a562fa1db161ceb223d754ede1",
     "main/platform/time_service_core.c": "005c5b75126104f410584e81396e573ee48553564bc94d4b45628192a26c94e3",
     "main/platform/time_service_core.h": "f3af332807f433d49344eaf45cee29473940a988c47e3c02c44fd44cd0306d75",
     "main/storage/map_tile_store.c": "dd382feb8ac4a36eab0ba9514bdbab611cd39b9a82831f20aa1a50c0c6f9922a",
     "main/storage/map_tile_store.h": "6be24bbf0af09711f7fd877b51518fb267c4007ea82f9067bc60e2cceea2d992",
-    "main/ui/ui_map.c": "d462e7e1347b802c50ef4b0e667d81bab91f89c5f79ff0900546f78df43a1616",
+    "main/ui/ui_map.c": "1f2187fa1c32cf2837f0fc2a4fbea19bcac10653bcde7ef1a0c189025db8b672",
     "main/ui/ui_map.h": "1e18d81b50dd1c4a22e73afb8d295b96c57171fbb601adebf931f1c8e75e7949",
-    "main/ui/ui_node_detail.c": "0f0fcc740e647f2667ec8bf0d1321626287ee64eed7391f388f76a3e7d101b69",
+    "main/ui/ui_node_detail.c": "bb4aba57e06693c3b745fb991bd98aa108b1de724b9a4bf9143b2c0bda82d522",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "c0732726ac154075561b32a52a8e5cb258e9e4387e21223d9c93cf53b6333593",
+    "main/ui/ui_phase1.c": "feeb0445a8639cce70c3ea666b730a88ed7db06bf8c323336eb832c6d7fb6180",
     "tools/ui_simulator.py": "9e69a2d16fb1bdb29f404e4613295f22d4c9efc5384e071f1ce552058c7dce84"
   }
 }
