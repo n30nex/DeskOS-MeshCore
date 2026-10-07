@@ -597,3 +597,13 @@ def test_new_crash_like_entries_only_returns_post_baseline_crashes():
 )
 def test_crashlog_total_written_rejects_unusable_values(result):
     assert smoke_d1l.crashlog_total_written(result) is None
+
+
+@pytest.mark.parametrize("command,expected", [
+    ("settings set timezone UTC-06:00", "settings set timezone"),
+    ("settings set textsize large", "settings set textsize"),
+    ("settings set dst north-america", "settings set dst"),
+    ("settings set autoadd 1 2 1", "settings set autoadd"),
+])
+def test_display_and_contact_preference_reply_names(command, expected):
+    assert expected_command_name(command) == expected
