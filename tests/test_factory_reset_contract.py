@@ -371,13 +371,14 @@ def test_factory_reset_sd_lineage_gates_all_primaries_aliases_and_segments():
 
     for function in (
         "probe_sd_history_slot",
-        "read_sd_history_entry",
+        "read_sd_history_entry_checked",
         "append_sd_history_for_generation",
     ):
-        body = packet.split(f"static {'bool' if function == 'read_sd_history_entry' else 'esp_err_t'} {function}", 1)[1]
+        body = packet.split(f"static esp_err_t {function}", 1)[1]
         assert "d1l_retained_blob_store_sd_media_lineage_ready" in body.split(
             "static ", 1
         )[0]
+    assert "return read_sd_history_entry_checked(seq, out_entry) == ESP_OK;" in packet
     reconcile = packet.split("static esp_err_t reconcile_sd_primary", 1)[1].split(
         "static esp_err_t", 1
     )[0]
