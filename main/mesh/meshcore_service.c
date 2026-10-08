@@ -1720,9 +1720,20 @@ static esp_err_t transition_pending_dm_tx(
     const d1l_dm_delivery_state_t expected_state =
         s_pending_dm_tx.delivery.state;
     d1l_dm_delivery_transition_outcome_t outcome = {0};
-    esp_err_t ret = d1l_dm_store_transition_delivery(
-        session_id, expected_state, expected_revision, next_state,
-        reason, error, &outcome);
+    /* After TX, stay available for the peer's immediate ACK. A slow SD flush
+     * here can fill the RX queue before the owner gets back to receiving. */
+    const bool after_radio = next_state == D1L_DM_DELIVERY_TX_DONE ||
+                             next_state == D1L_DM_DELIVERY_AWAITING_ACK;
+    esp_err_t ret;
+    if (after_radio) {
+        ret = d1l_dm_store_transition_delivery_deferred(
+            session_id, expected_state, expected_revision, next_state,
+            reason, error, &outcome);
+    } else {
+        ret = d1l_dm_store_transition_delivery(
+            session_id, expected_state, expected_revision, next_state,
+            reason, error, &outcome);
+    }
     /*
      * An inbound ACK can leave the retained worker finishing the preceding
      * revision just as a reply DM advances QUEUED -> WAITING_RADIO. The row
@@ -1731,7 +1742,7 @@ static esp_err_t transition_pending_dm_tx(
      * that radio admission failed. This keeps an immediate reply from being
      * stranded as a durable FAILED_QUEUE row without ever reaching RF.
      */
-    if (ret == ESP_ERR_NOT_FINISHED && outcome.changed) {
+    if (ret == ESP_ERR_NOT_FINISHED && outcome.changed && !after_radio) {
         ret = meshcore_service_retry_dm_transition_persistence();
         outcome.durable = ret == ESP_OK;
         outcome.error = ret;

@@ -194,9 +194,10 @@ esp_err_t d1l_dm_store_transition_delivery(
     d1l_dm_delivery_state_t next_state,
     d1l_dm_delivery_reason_t reason, esp_err_t error,
     d1l_dm_delivery_transition_outcome_t *outcome);
-/* Admits only the exact AWAITING_ACK -> ACKNOWLEDGED CAS in loaded RAM.
- * The retained worker owns persistence; public delivery truth remains masked
- * until that exact next revision is durable. */
+/* Admits exact TX_ACTIVE -> TX_DONE -> AWAITING_ACK progress and the received
+ * ACK CAS in loaded RAM. Pre-radio admission still requires a durable write.
+ * The retained worker owns persistence; public ACKNOWLEDGED truth remains
+ * masked until that exact next revision is durable. */
 esp_err_t d1l_dm_store_transition_delivery_deferred(
     uint64_t delivery_session_id,
     d1l_dm_delivery_state_t expected_state,

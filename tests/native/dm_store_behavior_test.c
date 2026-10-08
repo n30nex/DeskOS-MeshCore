@@ -2397,6 +2397,62 @@ static void test_ack_persistence_failure_recovers_same_revision_durably(void)
     assert(row.acked && row.delivered);
 }
 
+static void test_post_tx_progress_does_not_wait_for_storage(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    d1l_dm_store_append_outcome_t append = {0};
+    assert(d1l_dm_store_append_tx(
+        "0123456789abcdef", "Node", "post-tx-ack", -50, 40,
+        1U, 0U, 0U, 0xAFAFU, &append) == ESP_OK);
+    assert(append.durable);
+    assert(d1l_dm_store_transition_delivery(
+        append.delivery_session_id, D1L_DM_DELIVERY_QUEUED, 1U,
+        D1L_DM_DELIVERY_WAITING_RADIO, D1L_DM_DELIVERY_REASON_RADIO_RESERVED,
+        ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+        append.delivery_session_id, D1L_DM_DELIVERY_WAITING_RADIO, 2U,
+        D1L_DM_DELIVERY_TX_ACTIVE, D1L_DM_DELIVERY_REASON_RADIO_STARTED,
+        ESP_OK, NULL) == ESP_OK);
+    const uint32_t writes = s_nvs_write_count;
+    const uint32_t sd_writes = s_sd_write_count;
+    const size_t operations = s_operation_count;
+    s_nvs_write_error = ESP_FAIL;
+    d1l_dm_delivery_transition_outcome_t progress = {0};
+    assert(d1l_dm_store_transition_delivery_deferred(
+        append.delivery_session_id, D1L_DM_DELIVERY_TX_ACTIVE, 3U,
+        D1L_DM_DELIVERY_TX_DONE, D1L_DM_DELIVERY_REASON_RADIO_COMPLETED,
+        ESP_OK, &progress) == ESP_OK);
+    assert(progress.changed && !progress.durable && progress.delivery_revision == 4U);
+    assert(d1l_dm_store_transition_delivery_deferred(
+        append.delivery_session_id, D1L_DM_DELIVERY_TX_DONE, 4U,
+        D1L_DM_DELIVERY_AWAITING_ACK, D1L_DM_DELIVERY_REASON_ACK_EXPECTED,
+        ESP_OK, &progress) == ESP_OK);
+    assert(progress.changed && !progress.durable && progress.delivery_revision == 5U);
+    /* Do not extend this exception to pre-radio admission. */
+    assert(d1l_dm_store_transition_delivery_deferred(
+        append.delivery_session_id, D1L_DM_DELIVERY_QUEUED, 1U,
+        D1L_DM_DELIVERY_WAITING_RADIO, D1L_DM_DELIVERY_REASON_RADIO_RESERVED,
+        ESP_OK, NULL) == ESP_ERR_INVALID_ARG);
+    assert(d1l_dm_store_transition_delivery_deferred(
+        append.delivery_session_id, D1L_DM_DELIVERY_AWAITING_ACK, 5U,
+        D1L_DM_DELIVERY_ACKNOWLEDGED, D1L_DM_DELIVERY_REASON_ACK_RECEIVED,
+        ESP_OK, &progress) == ESP_OK);
+    assert(s_nvs_write_count == writes && s_sd_write_count == sd_writes);
+    assert(s_operation_count == operations);
+    d1l_dm_entry_t row = {0};
+    assert(d1l_dm_store_find_delivery_session(append.delivery_session_id, &row));
+    assert(row.delivery_state == D1L_DM_DELIVERY_AWAITING_ACK && !row.acked);
+    assert(d1l_dm_store_flush() == ESP_FAIL);
+    assert(d1l_dm_store_find_delivery_session(append.delivery_session_id, &row));
+    assert(!row.delivered);
+    s_nvs_write_error = ESP_OK;
+    s_now_us += (int64_t)D1L_DM_STORE_PERSIST_RETRY_INTERVAL_MS * 1000LL;
+    assert(d1l_dm_store_flush() == ESP_OK);
+    assert(d1l_dm_store_find_delivery_session(append.delivery_session_id, &row));
+    assert(row.delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED && row.acked);
+}
+
 static void test_deferred_delivery_ack_waits_for_retained_flush(void)
 {
     reset_backend();
@@ -3105,6 +3161,7 @@ int main(int argc, char **argv)
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "deferred-delivery-ack") == 0) {
+        test_post_tx_progress_does_not_wait_for_storage();
         test_deferred_delivery_ack_waits_for_retained_flush();
         puts("native DM deferred delivery ACK persistence: ok");
         return 0;
@@ -3159,6 +3216,7 @@ int main(int argc, char **argv)
     test_full_ring_preserves_nonterminal_tx_until_exact_terminal();
     test_full_ring_terminal_head_still_evicts_normally();
     test_ack_persistence_failure_recovers_same_revision_durably();
+    test_post_tx_progress_does_not_wait_for_storage();
     test_deferred_delivery_ack_waits_for_retained_flush();
     test_failed_ack_reboot_never_invents_delivery();
     test_delivery_transition_cas_survives_reboot_truthfully();

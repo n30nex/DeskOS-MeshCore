@@ -362,7 +362,7 @@ static void render_device_status(lv_obj_t *parent,
                        view_model->sd_value_color, D1L_UI_HOME_ACTION_STORAGE,
                        &bindings[D1L_UI_HOME_STATUS_SD], controller);
     render_status_item(card, D1L_UI_HOME_STATUS_ATTENTION, LV_SYMBOL_WARNING,
-                       "Attention", view_model->attention_value,
+                       "Alerts", view_model->attention_value,
                        view_model->attention_value_color,
                        D1L_UI_HOME_ACTION_ATTENTION,
                        &bindings[D1L_UI_HOME_STATUS_ATTENTION], controller);

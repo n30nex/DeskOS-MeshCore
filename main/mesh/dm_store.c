@@ -3100,6 +3100,13 @@ static esp_err_t transition_delivery_internal(
     bool rebind_retry_ack, uint32_t retry_ack_hash, bool flush_now,
     d1l_dm_delivery_transition_outcome_t *outcome)
 {
+    const bool deferred_radio_progress = error == ESP_OK && !rebind_retry_ack &&
+        ((expected_state == D1L_DM_DELIVERY_TX_ACTIVE &&
+          next_state == D1L_DM_DELIVERY_TX_DONE &&
+          reason == D1L_DM_DELIVERY_REASON_RADIO_COMPLETED) ||
+         (expected_state == D1L_DM_DELIVERY_TX_DONE &&
+          next_state == D1L_DM_DELIVERY_AWAITING_ACK &&
+          reason == D1L_DM_DELIVERY_REASON_ACK_EXPECTED));
     if (outcome) {
         memset(outcome, 0, sizeof(*outcome));
         outcome->delivery_session_id = delivery_session_id;
@@ -3111,7 +3118,7 @@ static esp_err_t transition_delivery_internal(
         !d1l_dm_delivery_state_valid(expected_state) ||
         !d1l_dm_delivery_state_valid(next_state) ||
         !d1l_dm_delivery_reason_valid(reason) ||
-        (!flush_now &&
+        (!flush_now && !deferred_radio_progress &&
          (expected_state != D1L_DM_DELIVERY_AWAITING_ACK ||
           next_state != D1L_DM_DELIVERY_ACKNOWLEDGED ||
           reason != D1L_DM_DELIVERY_REASON_ACK_RECEIVED ||
