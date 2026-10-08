@@ -718,9 +718,9 @@ def test_ui_data_canary_uses_volatile_store_paths():
 def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():
     source = read("main/ui/ui_phase1.c")
     expected_deferred_paths = [
-        "d1l_ui_packets_clear_search(&s_packets_controller);\n    if (s_packet_search_textarea)",
+        "d1l_ui_packets_clear_search(&s_packets_controller);\n    cancel_packet_query(true);\n    if (s_packet_search_textarea)",
         "hide_packet_search_sheet();\n    request_content_refresh();",
-        "d1l_ui_packets_set_search(&s_packets_controller, text);\n    hide_packet_search_sheet();\n    request_content_refresh();",
+        "d1l_ui_packets_set_search(&s_packets_controller, text);\n    cancel_packet_query(true);\n    hide_packet_search_sheet();\n    request_content_refresh();",
     ]
     for snippet in expected_deferred_paths:
         assert snippet in source
@@ -1607,8 +1607,8 @@ def test_packet_detail_sheet_opens_from_packet_rows():
     assert "static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR" in source
     assert "static bool s_packet_detail_advanced" in source
     assert "d1l_packet_log_entry_t rows[D1L_PACKET_LOG_CAPACITY]" in packets_header
-    assert "#define D1L_UI_PACKETS_INITIAL_ROWS 100U" in packets_header
-    assert "#define D1L_UI_PACKETS_LOAD_NEWER_STEP 100U" in packets_header
+    assert "#define D1L_UI_PACKETS_INITIAL_ROWS 12U" in packets_header
+    assert "#define D1L_UI_PACKETS_LOAD_NEWER_STEP 12U" in packets_header
     assert "render_packet_detail_sheet" in source
     assert "open_packet_detail_event_cb" in source
     assert "open_packet_search_event_cb" in source
@@ -1621,7 +1621,8 @@ def test_packet_detail_sheet_opens_from_packet_rows():
     assert "create_packet_search_sheet" in source
     assert "lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED" in source
     assert "d1l_packet_log_query_page" not in packets
-    assert "d1l_packet_log_query_page" in source
+    assert "d1l_packet_log_query_page" not in source
+    assert "d1l_ui_packet_query_submit" in source
     assert "refresh_packet_terminal_rows" in source
     assert "d1l_ui_packets_query_request" in source
     assert "d1l_ui_packets_accept_query" in source
@@ -1637,7 +1638,7 @@ def test_packet_detail_sheet_opens_from_packet_rows():
     assert '"Load Older"' in source
     assert '"Newer"' in source
     assert '"Packet Feed"' in source
-    assert '"page %u-%u/%u%s"' in source
+    assert '"page %u-%u%s%s"' in source
     assert '"live %s  rssi %d  snr %s  avg %d"' in source
     assert '"Packet Search"' in source
     assert '"Search kind, note, raw hex"' in source

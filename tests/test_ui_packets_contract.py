@@ -21,7 +21,7 @@ def test_packet_feed_state_has_one_owned_bounded_controller():
     assert "char search_text[D1L_PACKET_LOG_QUERY_TEXT_LEN]" in header
     assert "static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR;" in phase1
     assert (
-        "static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] "
+        "static d1l_ui_packet_query_result_t s_packet_query_result "
         "EXT_RAM_BSS_ATTR;"
     ) in phase1
     assert "d1l_ui_packets_init(&s_packets_controller);" in phase1

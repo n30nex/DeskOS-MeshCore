@@ -6,17 +6,27 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.9.1** is the stable release for the SenseCAP Indicator D1L.
+DeskOS **1.9.2** is the stable release for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.1)
+[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.2)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
 
 The previous stable release is
-[1.9.0](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.0).
+[1.9.1](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.1).
+
+## What is new in 1.9.2
+
+Packet filters and searches load in the background so the touchscreen can
+keep responding. Pages show 12 rows; a `+` beside the page range means older
+matches are available. Changing filters, pausing or leaving Packets cancels
+the pending search. Card errors are shown explicitly with a retry action.
+
+See the [1.9.2 release notes](docs/RELEASE_NOTES_1.9.2.md) and tagged release
+for the exact build and hardware checks.
 
 ## What is new in 1.9.1
 

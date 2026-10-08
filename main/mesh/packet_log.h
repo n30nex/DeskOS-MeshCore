@@ -60,6 +60,7 @@ typedef struct {
     uint32_t journal_fail_count;
     esp_err_t journal_last_error;
     uint64_t persistence_revision;
+    uint32_t query_generation;
     size_t count;
     size_t capacity;
     size_t sd_capacity;
@@ -97,6 +98,14 @@ size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max
                                  size_t skip_newest, const char *direction,
                                  const char *kind, const char *search_text,
                                  size_t *out_total_matches, bool *out_sd_used);
+/* Read-only scans can yield between archive records. Callers discard partial
+ * rows when their callback cancels or the query generation changes. */
+typedef bool (*d1l_packet_query_continue_fn_t)(void *context);
+size_t d1l_packet_log_query_page_cancellable(
+    d1l_packet_log_entry_t *out_entries, size_t max_entries, size_t skip_newest,
+    const char *direction, const char *kind, const char *search_text,
+    size_t *out_total_matches, bool *out_sd_used, esp_err_t *out_error,
+    d1l_packet_query_continue_fn_t should_continue, void *context);
 size_t d1l_packet_log_query(d1l_packet_log_entry_t *out_entries, size_t max_entries,
                             const char *direction, const char *kind, const char *search_text);
 esp_err_t d1l_packet_log_find_by_seq(uint32_t seq, d1l_packet_log_entry_t *out_entry);

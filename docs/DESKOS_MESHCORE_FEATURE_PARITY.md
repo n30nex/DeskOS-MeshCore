@@ -1,6 +1,6 @@
 # DeskOS interface and MeshCore parity
 
-This is the current product capability ledger for DeskOS 1.9.0 on the
+This is the current product capability ledger for DeskOS 1.9.2 on the
 SenseCAP Indicator D1L. The original mobile baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).

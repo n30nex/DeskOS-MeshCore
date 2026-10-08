@@ -1470,6 +1470,46 @@ static void test_force_flush_rejects_snapshot_staled_by_concurrent_append(void)
     assert(!fallback_stats.nvs_fallback_dirty);
 }
 
+static bool scan_three_records(void *context)
+{
+    unsigned *calls = context;
+    return ++*calls <= 4U; /* Admission plus three archive scan iterations. */
+}
+
+static void test_bounded_packet_queries_cancel_without_mutation(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 1U;
+    seed_primary(&s_sd_primary, 273U, 128U, 400U, "saved");
+    seed_history(1U, 400U, "saved");
+    assert(d1l_packet_log_init() == ESP_OK);
+    d1l_packet_log_entry_t rows[13] = {0};
+    const uint32_t reads = s_history_reads;
+    const uint32_t writes = s_sd_primary_writes;
+    /* A page with lookahead needs thirteen archive rows, not a full count. */
+    assert(d1l_packet_log_query_page(rows, 13U, 128U, "rx", "any", "",
+        NULL, NULL) == 13U);
+    assert(s_history_reads == reads + 13U);
+    assert(rows[0].seq == 260U && rows[12].seq == 272U);
+    unsigned calls = 0U;
+    const uint32_t before_cancel = s_history_reads;
+    assert(d1l_packet_log_query_page_cancellable(rows, 13U, 0U,
+        "rx", "any", "no-such-packet", NULL, NULL, NULL,
+        scan_three_records, &calls) == 0U);
+    assert(calls == 5U && s_history_reads == before_cancel);
+    assert(s_sd_primary_writes == writes);
+    s_history_read_error = ESP_ERR_TIMEOUT;
+    esp_err_t error = ESP_OK;
+    assert(d1l_packet_log_query_page_cancellable(rows, 13U, 128U,
+        "rx", "any", "", NULL, NULL, &error, NULL, NULL) == 0U);
+    assert(error == ESP_ERR_TIMEOUT); /* A busy card is not an empty search. */
+    s_history_read_error = ESP_OK;
+    const uint32_t generation = d1l_packet_log_stats().query_generation;
+    assert(d1l_packet_log_clear() == ESP_OK);
+    assert(d1l_packet_log_stats().query_generation != generation);
+}
+
 int main(void)
 {
     test_unloaded_deferred_append_fails_without_storage_work();
@@ -1500,6 +1540,7 @@ int main(void)
     test_clear_resamples_card_inserted_while_waiting_for_ownership();
     test_clear_rejects_card_inserted_during_nvs_commit();
     test_force_flush_rejects_snapshot_staled_by_concurrent_append();
+    test_bounded_packet_queries_cancel_without_mutation();
     puts("native packet retained durability: ok");
     return 0;
 }

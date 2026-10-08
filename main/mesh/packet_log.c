@@ -85,6 +85,7 @@ static uint32_t s_journal_commit_count;
 static uint32_t s_journal_fail_count;
 static esp_err_t s_journal_last_error = ESP_OK;
 static uint64_t s_revision;
+static uint32_t s_query_generation;
 static bool s_sd_primary_dirty;
 static bool s_sd_reconcile_pending;
 static bool s_nvs_fallback_dirty;
@@ -395,49 +396,43 @@ static esp_err_t probe_sd_history_slot(
     return ESP_OK;
 }
 
-static bool read_sd_history_entry(uint32_t seq, d1l_packet_log_entry_t *out_entry)
+static esp_err_t read_sd_history_entry_checked(uint32_t seq, d1l_packet_log_entry_t *out_entry)
 {
-    if (seq == 0 || !out_entry ||
-        !d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)) {
-        return false;
-    }
+    if (seq == 0 || !out_entry) return ESP_ERR_INVALID_ARG;
     d1l_retained_blob_store_backend_state_t backend = {0};
-    if (!d1l_retained_blob_store_backend_state(
-            D1L_RETAINED_BLOB_STORE_PACKET_LOG, &backend) ||
-        !backend.enabled) {
-        return false;
-    }
+    if (!packet_backend_state(&backend) || !backend.enabled) return ESP_ERR_INVALID_STATE;
     bool lineage_ready = false;
-    if (d1l_retained_blob_store_sd_media_lineage_ready(
-            D1L_RETAINED_BLOB_STORE_PACKET_LOG, backend.generation,
-            &lineage_ready) != ESP_OK || !lineage_ready) {
-        return false;
+    const esp_err_t lineage_ret = d1l_retained_blob_store_sd_media_lineage_ready(
+        D1L_RETAINED_BLOB_STORE_PACKET_LOG, backend.generation, &lineage_ready);
+    if (lineage_ret != ESP_OK || !lineage_ready) {
+        return lineage_ret == ESP_OK ? ESP_ERR_INVALID_STATE : lineage_ret;
     }
-
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
-    if (!history_segment_path(seq, path, sizeof(path))) {
-        return false;
-    }
-    const uint32_t offset =
-        ((seq - 1U) % D1L_PACKET_LOG_SD_SEGMENT_CAPACITY) *
+    if (!history_segment_path(seq, path, sizeof(path))) return ESP_ERR_INVALID_ARG;
+    const uint32_t offset = ((seq - 1U) % D1L_PACKET_LOG_SD_SEGMENT_CAPACITY) *
         (uint32_t)sizeof(d1l_packet_log_history_record_t);
     d1l_packet_log_history_record_t record = {0};
     d1l_rp2040_file_result_t result = {0};
     const esp_err_t ret = d1l_rp2040_bridge_file_read(path, offset,
-                                                       (uint8_t *)&record,
-                                                       sizeof(record), &result,
-                                                       D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
-    d1l_retained_blob_store_backend_state_t final_backend = {0};
-    if (!d1l_retained_blob_store_backend_state(
-            D1L_RETAINED_BLOB_STORE_PACKET_LOG, &final_backend) ||
-        !final_backend.enabled ||
-        final_backend.generation != backend.generation || ret != ESP_OK ||
-        result.length != sizeof(record) ||
-        !history_record_is_valid(&record, seq)) {
-        return false;
+        (uint8_t *)&record, sizeof(record), &result, D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+    if (!packet_backend_generation_matches(backend.generation)) return ESP_ERR_INVALID_STATE;
+    if (ret != ESP_OK) {
+        if (strcmp(result.err, "no_card") == 0) return ESP_ERR_INVALID_STATE;
+        return ret;
+    }
+    if (result.length == 0U && result.eof) return ESP_ERR_NOT_FOUND;
+    if (result.length != sizeof(record)) return ESP_ERR_INVALID_STATE;
+    if (!history_record_is_valid(&record, seq)) {
+        return history_record_is_valid(&record, record.entry.seq) ?
+            ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_STATE;
     }
     *out_entry = record.entry;
-    return true;
+    return ESP_OK;
+}
+
+static bool read_sd_history_entry(uint32_t seq, d1l_packet_log_entry_t *out_entry)
+{
+    return read_sd_history_entry_checked(seq, out_entry) == ESP_OK;
 }
 
 static void restore_sd_history_count_from_total(void)
@@ -585,8 +580,16 @@ static esp_err_t clear_sd_history_for_generation(uint32_t expected_generation)
     return ESP_OK;
 }
 
+static void invalidate_queries_locked(void)
+{
+    if (++s_query_generation == 0U) {
+        s_query_generation = 1U;
+    }
+}
+
 static void clear_ram(void)
 {
+    invalidate_queries_locked();
     memset(s_entries, 0, sizeof(s_entries));
     s_head = 0;
     s_count = 0;
@@ -802,6 +805,7 @@ static void promote_v2_compact_primary(
 static void load_fallback_blob_into_ram(
     const d1l_packet_log_fallback_blob_t *blob)
 {
+    invalidate_queries_locked();
     memset(s_entries, 0, sizeof(s_entries));
     memcpy(s_entries, blob->entries,
            blob->count * sizeof(blob->entries[0]));
@@ -818,6 +822,7 @@ static void load_fallback_blob_into_ram(
 static void load_primary_blob_into_ram(
     const d1l_packet_log_primary_blob_t *blob)
 {
+    invalidate_queries_locked();
     memset(s_entries, 0, sizeof(s_entries));
     memcpy(s_entries, blob->entries,
            blob->count * sizeof(blob->entries[0]));
@@ -1953,6 +1958,7 @@ d1l_packet_log_stats_t d1l_packet_log_stats(void)
         .journal_fail_count = s_journal_fail_count,
         .journal_last_error = s_journal_last_error,
         .persistence_revision = s_revision,
+        .query_generation = s_query_generation,
         .count = s_count,
         .capacity = D1L_PACKET_LOG_CAPACITY,
         .sd_capacity = D1L_PACKET_LOG_SD_CAPACITY,
@@ -2107,7 +2113,10 @@ static size_t query_sd_history(d1l_packet_log_entry_t *out_entries, size_t max_e
                                const char *kind, const char *search_text,
                                uint32_t newest_seq, uint32_t history_records,
                                uint32_t ram_oldest_seq, uint32_t ram_newest_seq,
-                               size_t *out_total_matches, size_t *out_valid_records)
+                                size_t *out_total_matches, size_t *out_valid_records,
+                                esp_err_t *out_error,
+                                d1l_packet_query_continue_fn_t should_continue,
+                                void *context)
 {
     if (out_total_matches) {
         *out_total_matches = 0;
@@ -2129,6 +2138,10 @@ static size_t query_sd_history(d1l_packet_log_entry_t *out_entries, size_t max_e
     }
 
     for (uint32_t scanned = 0; scanned < history_records; ++scanned) {
+        if (should_continue && !should_continue(context)) {
+            if (out_error) *out_error = ESP_ERR_NOT_FINISHED;
+            break;
+        }
         if (newest_seq <= scanned) {
             break;
         }
@@ -2136,10 +2149,13 @@ static size_t query_sd_history(d1l_packet_log_entry_t *out_entries, size_t max_e
         d1l_packet_log_entry_t entry = {0};
         const bool in_ram_window = ram_oldest_seq > 0U &&
             seq >= ram_oldest_seq && seq <= ram_newest_seq;
-        const bool read_ok = (in_ram_window &&
-                              copy_durable_ram_entry_by_seq(seq, &entry)) ||
-            read_sd_history_entry(seq, &entry);
-        if (!read_ok) {
+        const esp_err_t read_ret = in_ram_window && copy_durable_ram_entry_by_seq(seq, &entry) ?
+            ESP_OK : read_sd_history_entry_checked(seq, &entry);
+        if (out_error && read_ret != ESP_OK && read_ret != ESP_ERR_NOT_FOUND) {
+            *out_error = read_ret;
+            break;
+        }
+        if (read_ret != ESP_OK) {
             consecutive_misses++;
             if (consecutive_misses >= D1L_PACKET_LOG_HISTORY_MAX_CONSECUTIVE_MISSES) {
                 break;
@@ -2163,7 +2179,7 @@ static size_t query_sd_history(d1l_packet_log_entry_t *out_entries, size_t max_e
         } else if (!out_total_matches) {
             break;
         }
-        if (unfiltered && copied >= max_entries) {
+        if ((unfiltered || !out_total_matches) && copied >= max_entries) {
             break;
         }
     }
@@ -2178,11 +2194,15 @@ static size_t query_sd_history(d1l_packet_log_entry_t *out_entries, size_t max_e
     return copied;
 }
 
-size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max_entries,
+size_t d1l_packet_log_query_page_cancellable(d1l_packet_log_entry_t *out_entries, size_t max_entries,
                                  size_t skip_newest, const char *direction,
                                  const char *kind, const char *search_text,
-                                 size_t *out_total_matches, bool *out_sd_used)
+                                  size_t *out_total_matches, bool *out_sd_used,
+                                  esp_err_t *out_error,
+                                  d1l_packet_query_continue_fn_t should_continue,
+                                  void *context)
 {
+    if (out_error) *out_error = ESP_OK;
     if (out_total_matches) {
         *out_total_matches = 0;
     }
@@ -2190,9 +2210,16 @@ size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max
         *out_sd_used = false;
     }
     if (out_entries == NULL || max_entries == 0) {
+        if (out_error) *out_error = ESP_ERR_INVALID_ARG;
         return 0;
     }
-    if (ensure_packet_log_initialized() != ESP_OK) {
+    if (should_continue && !should_continue(context)) {
+        if (out_error) *out_error = ESP_ERR_NOT_FINISHED;
+        return 0;
+    }
+    const esp_err_t init_ret = ensure_packet_log_initialized();
+    if (init_ret != ESP_OK) {
+        if (out_error) *out_error = init_ret;
         return 0;
     }
 
@@ -2235,7 +2262,9 @@ size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max
                                      direction, kind, search_text,
                                      newest_seq, history_records,
                                      ram_oldest_seq, ram_newest_seq,
-                                     history_matches_out, &valid_records);
+                                      history_matches_out, &valid_records,
+                                      out_error, should_continue, context);
+    if (out_error && *out_error != ESP_OK) return 0U;
     if (include_volatile) {
         out_entries[copied++] = volatile_entry;
     }
@@ -2255,6 +2284,16 @@ size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max
                                             out_total_matches);
     d1l_store_lock_give(&s_store_lock);
     return fallback;
+}
+
+size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max_entries,
+                                 size_t skip_newest, const char *direction,
+                                 const char *kind, const char *search_text,
+                                 size_t *out_total_matches, bool *out_sd_used)
+{
+    return d1l_packet_log_query_page_cancellable(
+        out_entries, max_entries, skip_newest, direction, kind, search_text,
+        out_total_matches, out_sd_used, NULL, NULL, NULL);
 }
 
 size_t d1l_packet_log_query(d1l_packet_log_entry_t *out_entries, size_t max_entries,

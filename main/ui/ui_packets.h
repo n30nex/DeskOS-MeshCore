@@ -6,8 +6,8 @@
 
 #include "mesh/packet_log.h"
 
-#define D1L_UI_PACKETS_INITIAL_ROWS 100U
-#define D1L_UI_PACKETS_LOAD_NEWER_STEP 100U
+#define D1L_UI_PACKETS_INITIAL_ROWS 12U
+#define D1L_UI_PACKETS_LOAD_NEWER_STEP 12U
 
 typedef enum {
     D1L_UI_PACKET_FILTER_ALL = 0,

@@ -60,6 +60,7 @@
 #include "ui_nodes.h"
 #include "ui_nodes_model.h"
 #include "ui_packets.h"
+#include "ui_packet_query.h"
 #include "ui_radio_settings.h"
 #include "ui_screen.h"
 #include "ui_service_sheets.h"
@@ -250,7 +251,8 @@ static uint32_t s_button_flood_cooldown_until;
 static bool s_button_flood_result_pending;
 static uint32_t s_button_flood_request_id;
 static uint32_t s_last_notification_unread;
-static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
+static d1l_ui_packet_query_result_t s_packet_query_result EXT_RAM_BSS_ATTR;
+static esp_err_t s_packet_query_error;
 static d1l_packet_log_entry_t
     s_packet_row_payloads[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_packet_row_payload_count;
@@ -2667,22 +2669,41 @@ static void render_settings(lv_obj_t *content, const d1l_app_snapshot_t *snapsho
                                  handle_settings_action, NULL);
 }
 
+static void cancel_packet_query(bool clear_rows)
+{
+    d1l_ui_packet_query_cancel();
+    s_packet_query_error = ESP_OK;
+    if (clear_rows) {
+        s_packets_controller.row_count = 0U;
+        s_packets_controller.total_matches = 0U;
+        s_packets_controller.sd_history_page = false;
+        s_packet_row_payload_count = 0U;
+    }
+}
+
 static size_t refresh_packet_terminal_rows(void)
 {
     d1l_ui_packets_query_request_t query;
     for (size_t attempt = 0U; attempt < 2U; ++attempt) {
-        if (!d1l_ui_packets_query_request(&s_packets_controller, &query)) {
+        if (!d1l_ui_packets_query_request(&s_packets_controller, &query)) break;
+        const d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+        const esp_err_t ret = d1l_ui_packet_query_submit(&query, stats.persistence_revision);
+        if (ret != ESP_OK) {
+            s_packet_query_error = ret;
             break;
         }
-        size_t total_matches = 0U;
-        bool sd_used = false;
-        const size_t row_count = d1l_packet_log_query_page(
-            s_packet_query_rows, query.row_limit, query.skip_newest, query.direction,
-            query.kind, query.search_text, &total_matches, &sd_used);
-        if (!d1l_ui_packets_accept_query(&s_packets_controller, s_packet_query_rows, row_count,
-                                         total_matches, sd_used)) {
+        if (d1l_ui_packet_query_pending()) s_packet_query_error = ESP_OK;
+        if (!d1l_ui_packet_query_take(&s_packet_query_result)) break;
+        s_packet_query_error = s_packet_query_result.error;
+        if (s_packet_query_error != ESP_OK) {
+            s_packets_controller.row_count = 0U;
+            s_packets_controller.total_matches = 0U;
             break;
         }
+        const size_t match_lower_bound = query.skip_newest +
+            s_packet_query_result.count + (s_packet_query_result.has_more ? 1U : 0U);
+        if (!d1l_ui_packets_accept_query(&s_packets_controller, s_packet_query_result.rows,
+                s_packet_query_result.count, match_lower_bound, s_packet_query_result.sd_used)) break;
     }
     return s_packets_controller.row_count;
 }
@@ -4559,6 +4580,7 @@ static void packet_filter_event_cb(lv_event_t *event)
     d1l_ui_packets_select_filter(
         &s_packets_controller,
         (d1l_ui_packet_filter_t)(uintptr_t)lv_event_get_user_data(event));
+    cancel_packet_query(true);
     request_content_refresh();
 }
 
@@ -4569,6 +4591,7 @@ static void packet_pause_event_cb(lv_event_t *event)
         refresh_packet_terminal_rows();
     }
     d1l_ui_packets_toggle_pause(&s_packets_controller);
+    cancel_packet_query(false);
     request_content_refresh();
 }
 
@@ -4576,6 +4599,7 @@ static void packet_load_older_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_ui_packets_load_older(&s_packets_controller);
+    cancel_packet_query(true);
     request_content_refresh();
 }
 
@@ -4583,6 +4607,7 @@ static void packet_load_newer_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_ui_packets_load_newer(&s_packets_controller);
+    cancel_packet_query(true);
     request_content_refresh();
 }
 
@@ -4596,6 +4621,7 @@ static void clear_packet_search_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_ui_packets_clear_search(&s_packets_controller);
+    cancel_packet_query(true);
     if (s_packet_search_textarea) {
         lv_textarea_set_text(s_packet_search_textarea, "");
     }
@@ -4612,6 +4638,7 @@ static void apply_packet_search_event_cb(lv_event_t *event)
         text = textarea_text ? textarea_text : "";
     }
     d1l_ui_packets_set_search(&s_packets_controller, text);
+    cancel_packet_query(true);
     hide_packet_search_sheet();
     request_content_refresh();
 }
@@ -6925,9 +6952,9 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
     lv_obj_t *feed_count = create_label(content, "", 0xA6B0B7);
     const size_t page_first = packet_rows > 0 ? s_packets_controller.skip_newest + 1U : 0;
     const size_t page_last = s_packets_controller.skip_newest + packet_rows;
-    label_set_fmt(feed_count, "page %u-%u/%u%s",
+    label_set_fmt(feed_count, "page %u-%u%s%s",
                   (unsigned)page_first, (unsigned)page_last,
-                  (unsigned)s_packets_controller.total_matches,
+                  d1l_ui_packets_can_load_older(&s_packets_controller) ? "+" : "",
                   s_packets_controller.sd_history_page ? " SD" : "");
     lv_label_set_long_mode(feed_count, LV_LABEL_LONG_DOT);
     lv_obj_set_width(feed_count, 210);
@@ -6941,7 +6968,16 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         render_packet_row(content, y, &s_packet_row_payloads[i], i);
         y += 52;
     }
-    if (packet_rows == 0 && snapshot->recent_packet_count > 0) {
+    if (s_packet_query_error != ESP_OK || d1l_ui_packet_query_pending()) {
+        lv_obj_t *loading = create_label(content,
+            s_packet_query_error != ESP_OK ? "Search unavailable; tap a filter to retry" :
+                (packet_rows ? "Updating packet history..." : "Loading packet history..."),
+            s_packet_query_error != ESP_OK ? 0xFBBF24 : 0xA6B0B7);
+        lv_label_set_long_mode(loading, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(loading, 392);
+        lv_obj_set_pos(loading, 26, y + 8);
+        y += 54;
+    } else if (packet_rows == 0 && snapshot->recent_packet_count > 0) {
         lv_obj_t *empty = create_label(content, "No packets match filter", 0xA6B0B7);
         lv_obj_set_pos(empty, 26, y + 8);
         y += 34;
@@ -9290,6 +9326,7 @@ static void process_pending_tab_switch(void)
     if (!begin_pending_tab_switch(&rendered_tab)) {
         return;
     }
+    if (rendered_tab != D1L_UI_TAB_PACKETS) cancel_packet_query(true);
     if (begin_product_navigation_wake()) {
         lv_disp_trig_activity(NULL);
         unlock_event_cb(NULL);
@@ -11575,6 +11612,10 @@ static void ui_task(void *arg)
         uint32_t wait_ms = lv_timer_handler();
         d1l_health_monitor_sample_lvgl();
         process_pending_tab_switch();
+        if (d1l_ui_navigation_active() == D1L_UI_TAB_PACKETS &&
+            !s_packets_controller.paused && d1l_ui_packet_query_ready()) {
+            request_content_refresh();
+        }
         process_pending_content_refresh();
 #if D1L_ENABLE_QUALIFICATION_HOOKS
         process_pending_scroll_probe();
@@ -11608,6 +11649,7 @@ static void touch_poll_task(void *arg)
 
 esp_err_t d1l_ui_phase1_show_home(void)
 {
+    cancel_packet_query(true);
     if (s_mention_sheet && lv_obj_is_valid(s_mention_sheet)) lv_obj_del(s_mention_sheet);
     if (s_contact_policy_sheet && lv_obj_is_valid(s_contact_policy_sheet)) lv_obj_del(s_contact_policy_sheet);
     s_mention_sheet = s_contact_policy_sheet = NULL;

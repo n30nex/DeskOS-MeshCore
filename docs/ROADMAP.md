@@ -27,6 +27,7 @@
 | **1.8.0** | Production release of the 1.8 messaging, companion and update improvements | Production acceptance and exact artifacts recorded in the tagged release |
 | **1.9.0** | Larger text, mentions, contact auto-add rules and optional automatic daylight saving | Acceptance and exact artifacts recorded in the tagged release |
 | **1.9.1** | Verified streaming SD saves for retained history and preferences | Acceptance and measurements recorded in the tagged release |
+| **1.9.2** | Background packet filtering/search and bounded 12-row pages | Exact build and device checks recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -296,3 +297,12 @@ the existing temporary-file rename, card-generation checks and reset lineage
 remain the commit boundary. Failed readback keeps the previous primary;
 foreground cancellation remains bounded between transfer chunks. This closes
 the repeated-flush issue, not every possible slow-card or remote-response case.
+
+## 1.9.2: packet browser responsiveness
+
+Packet filtering/search runs in a storage worker and never reads SD from the
+touchscreen task. Twelve-row pages stop after one lookahead match instead of
+counting the whole archive. Navigation, Pause and changed searches cancel the
+old scan; card changes and history clears invalidate its results. Loading and
+read failures remain visible. Localization, keyboard layouts, structured
+replies, optional sensors and the wider WadaMesh app suite remain future work.

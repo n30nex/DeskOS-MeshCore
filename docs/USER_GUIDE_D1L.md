@@ -1,4 +1,13 @@
-# MeshCore DeskOS D1L 1.9.0 User Guide
+# MeshCore DeskOS D1L 1.9.2 User Guide
+
+## Packet history in 1.9.2
+
+Packets loads filters and searches in the background. Pages contain up to
+12 rows; `+` after the range means **Older** has more matches. **Newer** moves
+toward recent packets. Loading may take time on SD. You can return Home,
+change the filter or press **Pause** while a search is running; that cancels
+the old search. A card/read error displays a retry message instead of an
+empty result. Tap a filter to try again.
 
 ## Text, mentions, contacts and clock in 1.9.0
 
@@ -120,7 +129,7 @@ history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.9.0 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.9.2 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -478,7 +487,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.9.0 download and
+Use the guided browser flasher or the published DeskOS D1L 1.9.2 download and
 follow its `START_HERE.md`.
 
 The browser waits for DeskOS to finish startup and verifies its exact build,

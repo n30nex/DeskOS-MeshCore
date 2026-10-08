@@ -116,6 +116,7 @@ idf_component_register(
         "ui/ui_nodes_model.c"
         "ui/ui_nodes_summary.c"
         "ui/ui_packets.c"
+        "ui/ui_packet_query.c"
         "ui/ui_phase1.c"
         "ui/quick_replies.c"
         "ui/compose_text.c"

@@ -9,6 +9,18 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
+## 1.9.2 maintenance release
+
+- Verify packet queries leave the UI task, bound page reads and cancel old
+  requests. Cover failed reads, clear/card changes and task allocation failure.
+- Build/test the exact candidate on the Pi; verify its signed Actions package
+  and preserving installation on the authorized D1L.
+- Check physical Packets filtering and return Home, retained identity/contact
+  data, healthy radio/storage, and Windows Bluetooth Public/DM transmission.
+- Publish exact assets and update documentation, website and flasher. Verify
+  public bytes and keep recovery files before removing obsolete build outputs.
+- Explicitly identify official phone and signed-SD hardware paths not repeated.
+
 ## 1.9.1 maintenance release
 
 - Verify failed card readback, cancellation, abort failure and media-generation

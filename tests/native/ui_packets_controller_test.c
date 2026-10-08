@@ -5,7 +5,7 @@
 #include "ui/ui_packets.h"
 
 static size_t s_query_calls;
-static size_t s_total_rows = 250U;
+static size_t s_total_rows = 30U;
 static bool s_use_sd = true;
 static uint32_t s_generation = 1U;
 static char s_direction[8];
@@ -52,19 +52,19 @@ static void test_filter_search_and_page_state(void)
     assert(controller.row_limit == D1L_UI_PACKETS_INITIAL_ROWS);
     assert(!controller.paused);
 
-    assert(perform_query(&controller) == 100U);
+    assert(perform_query(&controller) == 12U);
     assert(strcmp(s_direction, "any") == 0);
     assert(strcmp(s_kind, "any") == 0);
-    assert(controller.total_matches == 250U);
+    assert(controller.total_matches == 30U);
     assert(controller.sd_history_page);
     assert(d1l_ui_packets_can_load_older(&controller));
     assert(!d1l_ui_packets_can_load_newer(&controller));
 
     d1l_ui_packets_select_filter(&controller, D1L_UI_PACKET_FILTER_RX);
-    assert(perform_query(&controller) == 100U);
+    assert(perform_query(&controller) == 12U);
     assert(strcmp(s_direction, "rx") == 0);
     d1l_ui_packets_select_filter(&controller, D1L_UI_PACKET_FILTER_TEXT);
-    assert(perform_query(&controller) == 100U);
+    assert(perform_query(&controller) == 12U);
     assert(strcmp(s_direction, "any") == 0);
     assert(strcmp(s_kind, "text") == 0);
 
@@ -76,15 +76,15 @@ static void test_filter_search_and_page_state(void)
     assert(strcmp(s_search, controller.search_text) == 0);
 
     d1l_ui_packets_load_older(&controller);
-    assert(controller.skip_newest == 100U);
+    assert(controller.skip_newest == 12U);
     assert(d1l_ui_packets_can_load_newer(&controller));
     perform_query(&controller);
     d1l_ui_packets_load_older(&controller);
-    assert(controller.skip_newest == 200U);
-    assert(perform_query(&controller) == 50U);
+    assert(controller.skip_newest == 24U);
+    assert(perform_query(&controller) == 6U);
     assert(!d1l_ui_packets_can_load_older(&controller));
     d1l_ui_packets_load_newer(&controller);
-    assert(controller.skip_newest == 100U);
+    assert(controller.skip_newest == 12U);
     d1l_ui_packets_load_newer(&controller);
     assert(controller.skip_newest == 0U);
 
@@ -116,7 +116,7 @@ static void test_pause_is_a_stable_snapshot_and_empty_pages_recover(void)
 
     controller.skip_newest = 999U;
     const size_t before_fallback = s_query_calls;
-    assert(perform_query(&controller) == 100U);
+    assert(perform_query(&controller) == 12U);
     assert(controller.skip_newest == 0U);
     assert(s_query_calls == before_fallback + 2U);
 }
