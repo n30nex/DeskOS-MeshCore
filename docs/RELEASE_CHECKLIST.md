@@ -9,6 +9,19 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
+## 1.9.1 maintenance release
+
+- Verify failed card readback, cancellation, abort failure and media-generation
+  changes cannot publish a new retained primary.
+- Measure the same contact preference save on 1.9.0 and the exact 1.9.1 image;
+  restore the original values and verify the complete contact book.
+- Build/test the candidate on the Pi, then verify the signed Actions package
+  and preserving install on the exact D1L.
+- Exercise Bluetooth Public/DM transmission and retention using the available
+  Windows adapter. Identify phone-app and signed-SD paths not repeated.
+- Publish exact assets, update the website/flasher, verify public downloads and
+  preserve release/recovery files before removing obsolete test builds.
+
 ## 1.9.0 production release
 
 The maintainer re-enabled GitHub Actions for this production release. Use the existing

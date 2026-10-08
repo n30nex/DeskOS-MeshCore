@@ -6,17 +6,27 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.9.0** is the stable release for the SenseCAP Indicator D1L.
+DeskOS **1.9.1** is the stable release for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.0)
+[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.1)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
 
 The previous stable release is
-[1.8.0](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.8.0).
+[1.9.0](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.0).
+
+## What is new in 1.9.1
+
+SD history saves use the bridge's existing verified transfer instead of
+reopening and flushing the card for every small chunk. The complete temporary
+file is read back and checked before it replaces the saved copy. Cancellation,
+card-change checks and recovery of the previous copy remain in place.
+
+See the [1.9.1 release notes](docs/RELEASE_NOTES_1.9.1.md) and tagged release
+for measurements and the exact device checks.
 
 ## What is new in 1.9.0
 

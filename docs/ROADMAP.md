@@ -26,6 +26,7 @@
 | **1.8.0-rc.6** | Correct received hop counts and sufficient companion telemetry stack | Published corrective candidate |
 | **1.8.0** | Production release of the 1.8 messaging, companion and update improvements | Production acceptance and exact artifacts recorded in the tagged release |
 | **1.9.0** | Larger text, mentions, contact auto-add rules and optional automatic daylight saving | Acceptance and exact artifacts recorded in the tagged release |
+| **1.9.1** | Verified streaming SD saves for retained history and preferences | Acceptance and measurements recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -286,3 +287,12 @@ Remaining work: localization and keyboard layouts, structured cross-client
 replies, other regional time rules, advanced phone commands, storage throughput,
 and the optional sensors/application suite. Complete WadaMesh parity is not
 claimed. Physical acceptance and exact artifacts belong in the tagged release.
+
+## 1.9.1: storage responsiveness
+
+Retained stores reuse the production bridge's verified file stream. One flush
+and complete readback replace repeated 192-byte open/flush/close cycles, while
+the existing temporary-file rename, card-generation checks and reset lineage
+remain the commit boundary. Failed readback keeps the previous primary;
+foreground cancellation remains bounded between transfer chunks. This closes
+the repeated-flush issue, not every possible slow-card or remote-response case.

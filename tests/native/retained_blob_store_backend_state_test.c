@@ -15,6 +15,7 @@
 #include "nvs_flash.h"
 #include "storage/factory_reset.h"
 #include "storage/retained_blob_store.h"
+#include "esp_rom_crc.h"
 
 #define TEST_RETAINED_PARTITION "d1l_retained"
 #define TEST_RETAINED_META_PARTITION "d1l_ret_meta"
@@ -110,6 +111,8 @@ typedef struct {
 static bool s_toggle_backend_during_write;
 static bool s_toggle_backend_during_rename;
 static esp_err_t s_sd_write_error;
+static bool s_corrupt_sd_write;
+static bool s_put_abort_fails;
 static bool s_toggle_backend_during_delete;
 static bool s_worker_should_yield;
 static bool s_chunked_read_case;
@@ -921,6 +924,9 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path, uint32_t offset,
         }
         if (len > 0U) {
             memcpy(file->data + offset, data, len);
+            if (s_corrupt_sd_write && offset == 0U) {
+                file->data[0] ^= 1U;
+            }
         }
         if (file->length < offset + len) {
             file->length = offset + len;
@@ -947,6 +953,50 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path, uint32_t offset,
             D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
     }
     return ESP_OK;
+}
+
+esp_err_t d1l_rp2040_bridge_file_write_verified(
+    const char *path, const uint8_t *data, size_t len, uint32_t expected_crc32,
+    d1l_rp2040_file_continue_cb_t should_continue, void *context,
+    d1l_rp2040_file_result_t *out_result, uint32_t timeout_ms)
+{
+    assert(esp_rom_crc32_le(0U, data, (uint32_t)len) == expected_crc32);
+    esp_err_t ret = ESP_OK;
+    for (size_t offset = 0U; offset < len;) {
+        if (should_continue && !should_continue(context)) {
+            ret = ESP_ERR_INVALID_STATE;
+            break;
+        }
+        const size_t chunk = len - offset < D1L_RP2040_FILE_CHUNK_MAX ?
+            len - offset : D1L_RP2040_FILE_CHUNK_MAX;
+        ret = d1l_rp2040_bridge_file_write(path, (uint32_t)offset, data + offset,
+            chunk, offset == 0U, out_result, timeout_ms);
+        if (ret != ESP_OK) {
+            break;
+        }
+        offset += chunk;
+    }
+    if (ret == ESP_OK && should_continue && !should_continue(context)) {
+        ret = ESP_ERR_INVALID_STATE;
+    }
+    test_sd_file_t *file = s_sd_file_mode ? find_sd_file(path) : NULL;
+    if (ret == ESP_OK && file &&
+        (file->length != len || esp_rom_crc32_le(0U, file->data,
+            (uint32_t)file->length) != expected_crc32)) {
+        ret = ESP_ERR_INVALID_ARG;
+    }
+    if (ret != ESP_OK) {
+        if (s_put_abort_fails) {
+            strcpy(out_result->note, "abort_failed");
+        } else if (file) {
+            memset(file, 0, sizeof(*file)); /* The bridge aborts its temporary session. */
+        }
+    }
+    out_result->cancelled = ret == ESP_ERR_INVALID_STATE;
+    out_result->size = (uint32_t)len;
+    out_result->crc32 = expected_crc32;
+    out_result->last_error = ret;
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_file_delete(const char *path,
@@ -2711,6 +2761,49 @@ static void test_completed_lineage_reads_exact_marker_and_data_backups(void)
     assert(s_delete_count == deletes_before);
 }
 
+static void test_retained_save_verifies_card_bytes_before_replacing_primary(void)
+{
+    const uint8_t original[] = "previous committed contacts";
+    uint8_t replacement[D1L_RP2040_FILE_CHUNK_MAX * 3U + 1U] = {0};
+    assert(esp_rom_crc32_le(0U, (const uint8_t *)"123456789", 9U) == 0xcbf43926U);
+    clear_nvs_case();
+    reset_sd_files();
+    d1l_retained_blob_store_note_sd_backend(true, true, true,
+        D1L_RP2040_FILE_LINE_MAX, D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    const d1l_retained_blob_store_id_t store = D1L_RETAINED_BLOB_STORE_CONTACTS;
+    const d1l_retained_blob_store_backend_state_t backend = state_for(store);
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        store, "contacts", original, sizeof(original), backend.generation) == ESP_OK);
+    const uint32_t renames = s_rename_count;
+    s_corrupt_sd_write = true;
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        store, "contacts", replacement, sizeof(replacement), backend.generation) == ESP_ERR_INVALID_ARG);
+    s_corrupt_sd_write = false;
+    assert(s_rename_count == renames);
+    test_sd_file_t *file = find_sd_file("stores/contacts/contacts.bin");
+    assert(file && file->length == sizeof(original));
+    assert(memcmp(file->data, original, sizeof(original)) == 0);
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        store, "contacts", replacement, sizeof(replacement), backend.generation) == ESP_OK);
+    file = find_sd_file("stores/contacts/contacts.bin");
+    assert(file && file->length == sizeof(replacement));
+    assert(memcmp(file->data, replacement, sizeof(replacement)) == 0);
+    assert(s_rename_count == renames + 1U);
+
+    /* A failed abort is an actual storage failure, not a successful yield. */
+    s_chunked_write_yield_case = true;
+    s_put_abort_fails = true;
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+        store, "contacts", replacement, sizeof(replacement), backend.generation) == ESP_FAIL);
+    s_chunked_write_yield_case = false;
+    s_put_abort_fails = false;
+    s_worker_should_yield = false;
+    assert(s_rename_count == renames + 1U);
+    d1l_retained_blob_store_sd_stats_t stats = {0};
+    assert(d1l_retained_blob_store_sd_stats(store, &stats));
+    assert(stats.sd_degraded_latched && stats.sd_last_error == ESP_FAIL);
+}
+
 static void test_sd_write_warning_requires_a_successful_same_media_commit(void)
 {
     static const uint8_t payload[] = "retained contacts";
@@ -2854,6 +2947,7 @@ int main(int argc, char **argv)
     test_factory_reset_sd_recovery_end_to_end();
     test_completed_lineage_reads_exact_marker_and_data_backups();
     test_sd_write_warning_requires_a_successful_same_media_commit();
+    test_retained_save_verifies_card_bytes_before_replacing_primary();
 
     puts("native retained backend generation and NVS partition: ok");
     return 0;

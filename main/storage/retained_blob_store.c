@@ -7,6 +7,7 @@
 #include "app/release_profile.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_partition.h"
+#include "esp_rom_crc.h"
 #include "hal/rp2040_bridge.h"
 #include "mesh/route_store_worker.h"
 #include "nvs.h"
@@ -1620,6 +1621,12 @@ static esp_err_t sd_read_file_path(
     return ESP_OK;
 }
 
+static bool sd_write_continue(void *context)
+{
+    (void)context;
+    return !d1l_route_store_persistence_should_yield();
+}
+
 static esp_err_t sd_write_blob_for_generation(
     const d1l_retained_blob_store_config_t *config,
     const char *key,
@@ -1631,41 +1638,29 @@ static esp_err_t sd_write_blob_for_generation(
     char temp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     if (!build_sd_path(config, key, ".bin", path, sizeof(path)) ||
         !build_sd_path(config, key, ".tmp", temp_path, sizeof(temp_path)) ||
-        !src || len == 0) {
+        !src || len == 0 || len > UINT32_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!store_backend_generation_matches(config, expected_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    const uint8_t *data = (const uint8_t *)src;
-    size_t offset = 0;
-    while (offset < len) {
-        /* Temp-file chunks are non-destructive until the final rename. A
-         * pending foreground quiesce may leave a partial temp file, which a
-         * later offset-zero retry safely truncates. */
-        if (d1l_route_store_persistence_should_yield()) {
+    /* Keep one bridge-owned file session instead of reopening and flushing
+     * every 192 bytes. The bridge flushes and reads back the complete temporary
+     * file before success; the existing rename remains the commit point. */
+    d1l_rp2040_file_result_t write_result = {0};
+    esp_err_t write_ret = d1l_rp2040_bridge_file_write_verified(
+        temp_path, src, len, esp_rom_crc32_le(0U, src, (uint32_t)len),
+        sd_write_continue, NULL, &write_result,
+        D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
+    if (write_ret != ESP_OK) {
+        if (strcmp(write_result.note, "abort_failed") == 0) {
+            write_ret = ESP_FAIL;
+        } else if (write_result.cancelled || write_ret == ESP_ERR_NOT_FINISHED) {
             return ESP_ERR_NOT_FINISHED;
         }
-        const size_t remaining = len - offset;
-        const size_t chunk = remaining > D1L_RP2040_FILE_CHUNK_MAX ?
-                             D1L_RP2040_FILE_CHUNK_MAX : remaining;
-        d1l_rp2040_file_result_t write_result = {0};
-        esp_err_t ret = d1l_rp2040_bridge_file_write(temp_path, (uint32_t)offset,
-                                                     data + offset, chunk,
-                                                     offset == 0, &write_result,
-                                                     D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
-        if (ret != ESP_OK || write_result.length != chunk) {
-            const esp_err_t failure = ret == ESP_OK ? ESP_FAIL : ret;
-            note_sd_failure(config, D1L_RETAINED_SD_OP_WRITE, failure);
-            if (store_backend_generation_matches(config, expected_generation)) {
-                d1l_rp2040_file_result_t ignored = {0};
-                (void)d1l_rp2040_bridge_file_delete(
-                    temp_path, &ignored, D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
-            }
-            return failure;
-        }
-        offset += chunk;
+        note_sd_failure(config, D1L_RETAINED_SD_OP_WRITE, write_ret);
+        return write_ret;
     }
 
     /* The replace-rename is the destructive commit point. If media changed

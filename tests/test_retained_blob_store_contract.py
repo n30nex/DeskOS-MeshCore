@@ -135,7 +135,7 @@ def test_retained_blob_store_keeps_history_sd_first_and_retires_legacy_nvs():
     assert "s_store_sd_enabled[config->id]" in source
     assert "s_store_sd_stats[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "note_sd_failure(config, D1L_RETAINED_SD_OP_READ, sd_ret)" in source
-    assert "note_sd_failure(config, D1L_RETAINED_SD_OP_WRITE, failure)" in source
+    assert "note_sd_failure(config, D1L_RETAINED_SD_OP_WRITE, write_ret)" in source
     assert "note_sd_failure(config, D1L_RETAINED_SD_OP_RENAME, ret)" in source
     assert "sd_error_latches_degraded" in source
     assert "stats->sd_degraded_latched = true" in source
@@ -219,8 +219,11 @@ def test_retained_blob_store_keeps_history_sd_first_and_retires_legacy_nvs():
     assert "d1l_rp2040_bridge_file_delete" in source
     assert "D1L_RP2040_FILE_CHUNK_MAX" in source
     assert '#include "mesh/route_store_worker.h"' in source
+    read_blob = read_blob.split("static bool sd_write_continue", 1)[0]
     assert read_blob.count("d1l_route_store_persistence_should_yield()") == 2
-    assert guarded_write.count("d1l_route_store_persistence_should_yield()") == 2
+    assert "d1l_rp2040_bridge_file_write_verified(" in guarded_write
+    assert "sd_write_continue, NULL, &write_result" in guarded_write
+    assert guarded_write.count("d1l_route_store_persistence_should_yield()") == 1
     assert read_blob.count("return ESP_ERR_NOT_FINISHED;") == 2
     assert guarded_write.count("return ESP_ERR_NOT_FINISHED;") == 2
     assert "ret != ESP_ERR_NOT_FINISHED" in source
