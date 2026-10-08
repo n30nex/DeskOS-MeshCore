@@ -53,14 +53,21 @@ int main(void) {
     set_dm_sent_response(&stored, true, 5000);
     assert(s_pending_len==10 && s_pending_payload[0]==6 && s_pending_payload[1]==1);
     assert(read_u32(s_pending_payload+2)==0x11223344);
-    assert(read_u32(s_pending_payload+6)==55000);
+    const uint32_t offered_timeout = read_u32(s_pending_payload+6);
+    assert(offered_timeout==175000);
     s_pending_len=0;
     maybe_queue_dm_confirmation();
     assert(s_pending_len==0 && s_phone_dm_session==7);
+    /* The physical slow-SD case took 100 seconds to commit an accepted ACK.
+     * Keep its session alive without claiming delivery or expiring the phone. */
+    now_us=101000000;
+    maybe_queue_dm_confirmation();
+    assert(s_pending_len==0 && s_phone_dm_session==7);
+    assert(offered_timeout > (uint32_t)(now_us/1000)-s_phone_dm_started_ms);
     stored.ack_hash=0x55667788; /* A retry has its own on-air ACK hash. */
     stored.acked=true;
     stored.delivery_state=D1L_DM_DELIVERY_ACKNOWLEDGED;
-    now_us=3500000;
+    now_us=101500000;
     s_pending_len=1; /* Keep the confirmation while another reply is staged. */
     maybe_queue_dm_confirmation();
     assert(s_phone_dm_session==7);
@@ -68,13 +75,13 @@ int main(void) {
     maybe_queue_dm_confirmation();
     assert(s_pending_len==9 && s_pending_payload[0]==0x82);
     assert(read_u32(s_pending_payload+1)==0x11223344);
-    assert(read_u32(s_pending_payload+5)==2500);
+    assert(read_u32(s_pending_payload+5)==100500);
     s_pending_len=0;
     maybe_queue_dm_confirmation();
     assert(s_pending_len==0);
     set_dm_sent_response(&stored, false, 11000);
     assert(s_pending_payload[1]==0);
-    assert(read_u32(s_pending_payload+6)==67000);
+    assert(read_u32(s_pending_payload+6)==187000);
     s_pending_len=0;
     stored.acked=false;
     stored.delivery_state=D1L_DM_DELIVERY_FAILED_RADIO;
@@ -87,6 +94,9 @@ int main(void) {
     stored.delivery_state=D1L_DM_DELIVERY_ACKNOWLEDGED;
     maybe_queue_dm_confirmation();
     assert(s_pending_len==0 && s_phone_dm_session==0);
+    set_dm_sent_response(&stored, true, UINT32_MAX);
+    assert(read_u32(s_pending_payload+6)==UINT32_MAX);
+    s_pending_len=0;
     puts("phone delivery confirmation: ok");
 }
 ''')

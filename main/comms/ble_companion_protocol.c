@@ -2040,12 +2040,15 @@ static void set_dm_sent_response(const d1l_dm_entry_t *entry, bool flood,
     s_phone_dm_started_ms = (uint32_t)(esp_timer_get_time() / 1000LL);
     uint8_t response[10] = {RESP_CODE_SENT, flood ? 1U : 0U};
     write_u32_le(&response[2], s_phone_dm_ack);
-    /* The radio owner may retry a direct attempt by flood. Give that one
-     * delivery session time to finish before the phone offers another send. */
+    /* Cover the direct/flood attempts and the retained ACK commit. A slow SD
+     * pass can keep an already received ACK waiting beyond the RF deadline;
+     * the phone must not retry that same delivered message during the save. */
     const uint64_t tx_budget_ms = radio_timeout_ms > 5000U ?
         radio_timeout_ms : 5000U;
+    const uint64_t retained_commit_budget_ms = 120000U;
     const uint64_t timeout_ms = D1L_MESHCORE_DIRECT_ACK_TIMEOUT_MS +
-        D1L_MESHCORE_FLOOD_ACK_TIMEOUT_MS + 2U * tx_budget_ms;
+        D1L_MESHCORE_FLOOD_ACK_TIMEOUT_MS + 2U * tx_budget_ms +
+        retained_commit_budget_ms;
     write_u32_le(&response[6], timeout_ms > UINT32_MAX ? UINT32_MAX :
                  (uint32_t)timeout_ms);
     (void)set_pending(response, sizeof(response));
