@@ -18,6 +18,10 @@ DeskOS 1.9 adds everyday controls to the full-feature D1L interface:
   worker so slow SD saves do not block the next acknowledgement.
   The companion's confirmation timeout also includes time for the retained
   acknowledgement to be saved, avoiding premature phone retries on slow SD.
+- Bluetooth connection tracking accepts a verified live connection when
+  security or subscription arrives before the connection callback. Desktop
+  clients no longer queue commands behind a false disconnected state; a late
+  callback preserves the session and queued replies.
 
 The settings/identity envelope is unchanged from 1.8. Contact policy is stored
 separately and bound to the identity, so an identity reset ignores old policy.

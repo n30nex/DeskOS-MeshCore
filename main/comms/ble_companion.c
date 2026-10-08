@@ -437,12 +437,32 @@ void d1l_ble_companion_poll(void)
 static void update_security(uint16_t connection_handle)
 {
     struct ble_gap_conn_desc desc = {0};
-    const bool authorized =
-        connection_authorized(connection_handle, &desc);
+    if (ble_gap_conn_find(connection_handle, &desc) != 0) {
+        return;
+    }
+    const bool authorized = desc.sec_state.encrypted &&
+        desc.sec_state.authenticated && desc.sec_state.bonded;
+    const uint16_t mtu = ble_att_mtu(connection_handle);
     bool should_terminate = false;
     bool should_pump = false;
     portENTER_CRITICAL(&s_lock);
-    if (s_connected && s_connection_handle == connection_handle) {
+    if (s_start_requested &&
+        (!s_connected || s_connection_handle == connection_handle)) {
+        /* IDF can defer CONNECT until remote feature exchange completes.
+         * Security and authenticated GATT subscription may arrive first;
+         * bind that live SDK connection once instead of leaving the worker
+         * disconnected while RX writes are already being accepted. */
+        if (!s_connected) {
+            reset_connection_locked();
+            s_connected = true;
+            s_connection_handle = connection_handle;
+            s_pairing_passkey = D1L_BLE_COMPANION_STATIC_PASSKEY;
+            s_peer_id_addr = desc.peer_id_addr;
+            s_peer_known = true;
+            s_connect_count++;
+        }
+        s_advertising = false;
+        s_att_mtu = mtu;
         s_encrypted = desc.sec_state.encrypted;
         s_authenticated = desc.sec_state.authenticated;
         s_bonded = desc.sec_state.bonded;
@@ -453,9 +473,11 @@ static void update_security(uint16_t connection_handle)
                 D1L_BLE_STATE_READY : D1L_BLE_STATE_CONNECTED;
             should_pump = s_notification_enabled;
         } else {
-            s_security_reject_count++;
             s_state = D1L_BLE_STATE_PAIRING;
             should_terminate = desc.sec_state.encrypted;
+            if (should_terminate) {
+                s_security_reject_count++;
+            }
         }
     }
     portEXIT_CRITICAL(&s_lock);
@@ -480,28 +502,11 @@ static int gap_event(struct ble_gap_event *event, void *arg)
             (void)start_advertising();
             return 0;
         }
-        portENTER_CRITICAL(&s_lock);
-        s_advertising = false;
-        reset_connection_locked();
-        s_connected = true;
-        s_connection_handle = event->connect.conn_handle;
-        s_pairing_passkey = D1L_BLE_COMPANION_STATIC_PASSKEY;
-        s_connect_count++;
-        s_state = D1L_BLE_STATE_PAIRING;
-        portEXIT_CRITICAL(&s_lock);
-        {
-            struct ble_gap_conn_desc desc = {0};
-            if (ble_gap_conn_find(event->connect.conn_handle, &desc) == 0) {
-                portENTER_CRITICAL(&s_lock);
-                s_peer_id_addr = desc.peer_id_addr;
-                s_peer_known = true;
-                portEXIT_CRITICAL(&s_lock);
-            }
-        }
-        {
+        update_security(event->connect.conn_handle);
+        if (!connection_authorized(event->connect.conn_handle, NULL)) {
             const int rc =
                 ble_gap_security_initiate(event->connect.conn_handle);
-            if (rc != 0) {
+            if (rc != 0 && rc != BLE_HS_EALREADY) {
                 note_nimble_error(rc);
                 (void)ble_gap_terminate(event->connect.conn_handle,
                                         BLE_ERR_REM_USER_CONN_TERM);
@@ -529,8 +534,14 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         return 0;
     case BLE_GAP_EVENT_SUBSCRIBE:
         if (event->subscribe.attr_handle == s_tx_value_handle) {
+            update_security(event->subscribe.conn_handle);
             bool secure;
             portENTER_CRITICAL(&s_lock);
+            if (!s_connected ||
+                s_connection_handle != event->subscribe.conn_handle) {
+                portEXIT_CRITICAL(&s_lock);
+                return 0;
+            }
             s_notification_requested = event->subscribe.cur_notify != 0;
             secure = s_encrypted && s_authenticated && s_bonded;
             s_notification_enabled =
