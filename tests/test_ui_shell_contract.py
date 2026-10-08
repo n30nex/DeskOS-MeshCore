@@ -254,7 +254,7 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert '"Wi-Fi"' in home_module
     assert '"BLE"' in home_module
     assert '"SD"' in home_module
-    assert '"Attention"' in home_module
+    assert '"Alerts"' in home_module
     assert "input->public_unread_count" in home_view
     assert "input->dm_unread_count" in home_view
     assert "input->contact_count" in home_view
