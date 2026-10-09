@@ -28,6 +28,7 @@
 | **1.9.0** | Larger text, mentions, contact auto-add rules and optional automatic daylight saving | Acceptance and exact artifacts recorded in the tagged release |
 | **1.9.1** | Verified streaming SD saves for retained history and preferences | Acceptance and measurements recorded in the tagged release |
 | **1.9.2** | Background packet filtering/search and bounded 12-row pages | Exact build and device checks recorded in the tagged release |
+| **1.10.0** | Saved keyboard layouts and accented Latin entry at both text sizes | Exact build and device checks recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation
@@ -306,3 +307,12 @@ counting the whole archive. Navigation, Pause and changed searches cancel the
 old scan; card changes and history clears invalidate its results. Loading and
 read failures remain visible. Localization, keyboard layouts, structured
 replies, optional sensors and the wider WadaMesh app suite remain future work.
+
+## 1.10.0: keyboard layouts and Latin entry
+
+QWERTY, AZERTY and QWERTZ letter layouts are selectable and saved. A dedicated
+accent page supports lower/uppercase Latin characters with bundled Standard
+and Large glyphs. Changing layouts preserves existing inputs, cursors and
+drafts. Radio messages keep the 138-byte UTF-8 limit. This closes the initial
+keyboard-layout gap; interface translations, additional scripts/input methods
+and complete national desktop layouts remain future scope.

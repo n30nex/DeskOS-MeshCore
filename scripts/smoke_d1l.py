@@ -215,6 +215,7 @@ def expected_command_name(command: str) -> str:
         "settings set location ",
         "settings set timezone ",
         "settings set textsize ",
+        "settings set keyboard ",
         "settings set dst ",
         "settings set autoadd ",
         "settings onboarding complete ",

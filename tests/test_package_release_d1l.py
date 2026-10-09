@@ -115,6 +115,7 @@ def write_fake_notices(root: Path) -> None:
     (root / "docs").mkdir(exist_ok=True)
     (root / "LICENSE").write_text("project license\n", encoding="ascii")
     (root / "THIRD_PARTY_NOTICES.md").write_text("third party notices\n", encoding="ascii")
+    (root / "docs" / "DEJAVU_FONT_LICENSE.txt").write_text("DejaVu font license\n", encoding="ascii")
     (root / "docs" / "ATTRIBUTIONS.md").write_text("attributions\n", encoding="ascii")
     (root / "docs" / "SOURCE_AUDIT_AND_ATTRIBUTION.md").write_text("source audit\n", encoding="ascii")
     (root / "docs" / "USER_GUIDE_D1L.md").write_text(
@@ -560,6 +561,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert [item["path"] for item in manifest["notice_files"]] == [
         "notices/LICENSE",
         "notices/THIRD_PARTY_NOTICES.md",
+        "notices/DEJAVU_FONT_LICENSE.txt",
         "notices/ATTRIBUTIONS.md",
         "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
         "notices/ORLP_ED25519_ZLIB_LICENSE.txt",

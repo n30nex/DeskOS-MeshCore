@@ -117,8 +117,8 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "260f07144c0135224c7ecaeaf6a35c4a029391cb6bc827d8c741f03183e70af6",
-    "main/app/app_model.h": "e01fbf93542a3205dfce550a749defd797f43088f78e4f9fd3fb2109c7d023db",
+    "main/app/app_model.c": "39521cdaa71c4c2bd93431f3b7f4fce588083a0cd9ccfaa7954237e075cf3a08",
+    "main/app/app_model.h": "525b41fc311f3559f644faecdf94ba699bed54878e7830829d3ee93432833fb7",
     "main/app/settings_model.c": "fbf75f92086ad231832ae98669a6cb4800bb3368fa78d04f87bc0122a45eeba3",
     "main/app/settings_model.h": "f7fc9e0b5cb9b52e1c6c597f95cf8d48c2ae266d092031034d76b059372e83b6",
     "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
@@ -148,7 +148,7 @@
     "main/ui/ui_map.h": "1e18d81b50dd1c4a22e73afb8d295b96c57171fbb601adebf931f1c8e75e7949",
     "main/ui/ui_node_detail.c": "bb4aba57e06693c3b745fb991bd98aa108b1de724b9a4bf9143b2c0bda82d522",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "f105ae934c73534339de641679873da431a88550b138522ef51ac48ebc40670f",
+    "main/ui/ui_phase1.c": "bd9e84271337f91e0da06ec51dc87a8a1bcfb637419b293fe1e501c100a5968e",
     "tools/ui_simulator.py": "9e69a2d16fb1bdb29f404e4613295f22d4c9efc5384e071f1ce552058c7dce84"
   }
 }

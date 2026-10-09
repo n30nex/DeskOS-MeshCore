@@ -103,6 +103,7 @@ idf_component_register(
         "ui/ui_home.c"
         "ui/ui_home_view.c"
         "ui/ui_font_symbols_14.c"
+          "ui/ui_font_latin_18.c"
         "ui/ui_typography.c"
         "ui/ui_first_start.c"
         "ui/ui_keyboard.c"

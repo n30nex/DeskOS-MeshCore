@@ -9,6 +9,19 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
+## 1.10.0 keyboard release
+
+- Exercise all three layouts, accent/case pages, multibyte backspace, font
+  bitmaps and cursor/draft preservation in actual LVGL native tests.
+- Verify legacy preference loading, saved choices and failed-write behavior.
+- Build the exact source on the Pi; verify its signed Actions package and
+  preserving install. Confirm the user's keyboard choice survives restart.
+- Check touchscreen accented entry without sending, radio/storage health,
+  retained identity/contact data and Windows Bluetooth Unicode messaging.
+- Publish exact assets and update the guide, website, flasher and existing
+  parity record. Verify public bytes and keep release/recovery files.
+- Record official phone and physical signed-SD paths not repeated.
+
 ## 1.9.2 maintenance release
 
 - Verify packet queries leave the UI task, bound page reads and cancel old

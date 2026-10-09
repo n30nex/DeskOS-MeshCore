@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "app/release_profile.h"
+#include "hal/display_preferences.h"
 #include "lvgl.h"
 #include "ui_modal.h"
 
@@ -16,6 +17,7 @@ enum {
     BINDING_HIGH_CONTRAST,
     BINDING_TIMEOUT,
     BINDING_TEXT_SIZE,
+    BINDING_KEYBOARD_LAYOUT,
     BINDING_DAYLIGHT_SAVING,
     BINDING_TIMEZONE_MINUS,
     BINDING_TIMEZONE_PLUS,
@@ -360,17 +362,23 @@ bool d1l_ui_device_sheets_render_display(
         208, 248, 208, 44, BINDING_DAYLIGHT_SAVING,
         D1L_UI_DEVICE_SHEETS_ACTION_DAYLIGHT_SAVING) != NULL && complete;
     char standard_label[D1L_TIMEZONE_LABEL_LEN];
+    char keyboard_text[32];
+    snprintf(keyboard_text, sizeof(keyboard_text), "Keyboard: %s",
+        d1l_keyboard_layout_name(snapshot->keyboard_layout));
+    complete = create_button(controller, sheet, keyboard_text,
+        8, 300, 408, 44, BINDING_KEYBOARD_LAYOUT,
+        D1L_UI_DEVICE_SHEETS_ACTION_KEYBOARD_LAYOUT) != NULL && complete;
     d1l_time_display_timezone_label(snapshot->timezone_standard_offset_minutes,
         standard_label, sizeof(standard_label));
     char note_text[224];
     snprintf(note_text, sizeof(note_text),
-        "Standard time: %s. Adjust with -15m / +15m. Enable DST only if your "
-        "area follows the selected rule. Radio timestamps stay UTC.", standard_label);
+        "Standard time: %s. DST follows the selected region. "
+        "Radio timestamps stay UTC.", standard_label);
     lv_obj_t *note = create_label(
         sheet,
         note_text,
         0xFBBF24);
-    configure_wrapped_label(note, 8, 306);
+    configure_wrapped_label(note, 8, 354);
     complete = note != NULL && complete;
     if (!complete) {
         invalidate_sheet(controller, sheet);

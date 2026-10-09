@@ -494,6 +494,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->display_brightness_percent =
         display_preferences.brightness_percent;
     snapshot->display_text_size = display_preferences.text_size;
+    snapshot->keyboard_layout = display_preferences.keyboard_layout;
     snapshot->daylight_saving = (uint8_t)time_status.daylight_saving;
     snapshot->timezone_standard_offset_minutes = time_status.timezone_standard_offset_minutes;
     snapshot->display_timeout_seconds =

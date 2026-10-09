@@ -2,6 +2,19 @@
 
 Keep this notice with source archives and public firmware release artifacts.
 
+## DejaVu keyboard and text glyphs
+
+The bundled DejaVuSans font supplies accented Latin letters and symbols at
+14 and 18 pixels. Copyright (c) 2003 Bitstream, Inc.; DejaVu changes are in
+the public domain, with imported Arev glyphs copyright (c) 2006 Tavmjong Bah.
+The full applicable notices are in `docs/DEJAVU_FONT_LICENSE.txt` in source
+and `notices/DEJAVU_FONT_LICENSE.txt` in release packages.
+
+The input is the DejaVuSans.ttf in the pinned Seeed/LVGL submodule. Bitmap
+sources are generated with `lv_font_conv` 1.5.3, 4 bpp, no compression and no
+kerning; each generated source records the exact character subset and command.
+Converter source: https://github.com/lvgl/lv_font_conv (MIT).
+
 ## SigurdOS-TDeck
 
 Portions of this project's architecture, touch-input behavior, and validation approach are informed by SigurdOS-TDeck.

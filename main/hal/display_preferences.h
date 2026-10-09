@@ -12,6 +12,7 @@ extern "C" {
 
 #define D1L_DISPLAY_BRIGHTNESS_DEFAULT 70U
 #define D1L_DISPLAY_TIMEOUT_DEFAULT_SECONDS 600U
+#define D1L_KEYBOARD_LAYOUT_COUNT 3U
 
 typedef enum {
     D1L_NOTIFICATION_MODE_OFF = 0,
@@ -25,6 +26,7 @@ typedef struct {
     d1l_notification_mode_t notification_mode;
     uint8_t text_size; /* 0: standard (14 px), 1: large (18 px). */
     d1l_daylight_saving_t daylight_saving;
+    uint8_t keyboard_layout; /* 0: QWERTY, 1: AZERTY, 2: QWERTZ. */
 } d1l_display_preferences_t;
 
 esp_err_t d1l_display_preferences_init(void);
@@ -32,6 +34,8 @@ void d1l_display_preferences_get(d1l_display_preferences_t *out_preferences);
 esp_err_t d1l_display_preferences_set_brightness(uint8_t percent);
 esp_err_t d1l_display_preferences_set_timeout(uint16_t seconds);
 esp_err_t d1l_display_preferences_set_text_size(uint8_t size);
+esp_err_t d1l_display_preferences_set_keyboard_layout(uint8_t layout);
+const char *d1l_keyboard_layout_name(uint8_t layout);
 esp_err_t d1l_display_preferences_set_daylight_saving(d1l_daylight_saving_t rule);
 esp_err_t d1l_display_preferences_set_notification_mode(
     d1l_notification_mode_t mode);

@@ -1,6 +1,6 @@
 # DeskOS interface and MeshCore parity
 
-This is the current product capability ledger for DeskOS 1.9.2 on the
+This is the current product capability ledger for DeskOS 1.10.0 on the
 SenseCAP Indicator D1L. The original mobile baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).
@@ -52,7 +52,7 @@ close the additional differences in this table.
 | Notifications and lock | Existing unread state, display pulse/quiet hours, touch lock and top-button wake | D1L adaptation; no audio playback or battery chart is claimed |
 | Backups and updates | Preserving USB installer, explicit full-clean recovery image, signed local-SD inactive-slot update and rollback | D1L adaptation; signed-SD installation/rollback observed in 1.8.0; candidate-specific acceptance remains in its release record |
 | Clipboard, inline quote, mention picker, per-thread drafts | On-device Copy/Paste, bounded plain-text Quote reply and exact-conversation SD drafts; clipboard clears on lock/restart | Drafts/clipboard in 1.8.0-rc.4 and paged mention picker in 1.9.0; no structured quote identifiers |
-| Language, emoji and keyboard options | English UI, bounded UTF-8 text and current bundled symbol coverage | Partial; no WadaMesh language/layout collection or full emoji artwork |
+| Language, emoji and keyboard options | English UI, saved QWERTY/AZERTY/QWERTZ letter layouts, lower/uppercase Latin accent page, bundled Standard/Large glyphs and bounded UTF-8 text | Keyboard layouts and accents added in 1.10.0; interface localization, other scripts and full emoji artwork remain future work |
 | GPS, battery, environmental sensors, audio | No onboard GPS or battery sensor; optional Indicator sensors are not integrated | Hardware/implementation differences; never substitute fabricated values |
 | Lua app store/permissions, Reader, games, VNC and web remote UI | Existing USB console, browser installation and physical framebuffer export | Separate application/platform capabilities, not implemented WadaMesh parity |
 | Spectrum/airtime applications | Existing packet log, signal and radio statistics, diagnostics and map | Partial; no continuous spectrum-scanner app |

@@ -17,3 +17,5 @@ def test_production_preferences_preserve_legacy_settings_and_fail_closed(tmp_pat
         str(ROOT / "tests/native/production_preferences_test.c"), "-o", str(exe),
     ], check=True, capture_output=True, text=True)
     subprocess.run([str(exe)], check=True, capture_output=True, text=True)
+    subprocess.run([str(exe), "saved"], check=True, capture_output=True, text=True)
+    subprocess.run([str(exe), "invalid"], check=True, capture_output=True, text=True)

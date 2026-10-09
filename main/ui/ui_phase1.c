@@ -7767,6 +7767,16 @@ static void device_sheets_action_handler(
         request_full_screen_repaint();
         return;
     }
+    case D1L_UI_DEVICE_SHEETS_ACTION_KEYBOARD_LAYOUT: {
+        d1l_display_preferences_get(&preferences);
+        const uint8_t next = (preferences.keyboard_layout + 1U) % D1L_KEYBOARD_LAYOUT_COUNT;
+        const esp_err_t ret = d1l_display_preferences_set_keyboard_layout(next);
+        if (ret == ESP_OK) d1l_ui_keyboard_set_layout(next, s_screen);
+        show_toast("Keyboard", ret);
+        d1l_app_model_snapshot(&s_snapshot);
+        (void)render_display_sheet();
+        return;
+    }
     case D1L_UI_DEVICE_SHEETS_ACTION_DAYLIGHT_SAVING: {
         d1l_display_preferences_get(&preferences);
         const d1l_daylight_saving_t next = (d1l_daylight_saving_t)(
@@ -10354,6 +10364,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
     (void)timer;
     d1l_app_model_snapshot(&s_snapshot);
     d1l_ui_typography_set_size(s_snapshot.display_text_size);
+    d1l_ui_keyboard_set_layout(s_snapshot.keyboard_layout, s_screen);
     update_chrome(&s_snapshot);
     update_startup_overlay(&s_snapshot);
     const bool ble_pairing_active =
@@ -11789,6 +11800,7 @@ static esp_err_t initialize_ui_runtime(void)
     d1l_display_preferences_t preferences;
     d1l_display_preferences_get(&preferences);
     d1l_ui_typography_set_size(preferences.text_size);
+    d1l_ui_keyboard_set_layout(preferences.keyboard_layout, NULL);
     d1l_ui_packets_init(&s_packets_controller);
 #if D1L_ENABLE_UI_CAPTURE
     ESP_RETURN_ON_ERROR(init_capture_buffers(), TAG,

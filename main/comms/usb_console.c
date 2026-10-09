@@ -1560,7 +1560,7 @@ static void cmd_settings_get(void)
            "\"timezone\":{\"settings_ready\":%s,\"settings_error\":\"%s\","
            "\"schema_version\":%u,\"model\":\"%s\","
            "\"offset_minutes\":%d,\"label\":\"%s\",\"auto_dst\":%s,\"dst_rule\":%u},"
-           "\"text_size\":%u,"
+           "\"text_size\":%u,\"keyboard_layout\":\"%s\","
            "\"map_location\":{\"available\":%s,\"set\":%s,\"lat\":",
            bool_json(wifi_available), bool_json(ble_available),
            bool_json(observer_available), bool_json(map_available),
@@ -1579,6 +1579,7 @@ static void cmd_settings_get(void)
            (int)settings->timezone_offset_minutes, timezone_label,
            bool_json(preferences.daylight_saving != D1L_DAYLIGHT_SAVING_OFF),
            (unsigned)preferences.daylight_saving, (unsigned)preferences.text_size,
+           d1l_keyboard_layout_name(preferences.keyboard_layout),
            bool_json(location_available), bool_json(location_set));
     print_e7_json(location_set ? settings->map_lat_e7 : 0);
     printf(",\"lon\":");
@@ -1793,6 +1794,23 @@ static void cmd_settings_set_display_option(const char *line, bool text_size)
         if (strcmp(value, "off") == 0) ret = d1l_display_preferences_set_daylight_saving(D1L_DAYLIGHT_SAVING_OFF);
         else if (strcmp(value, "north-america") == 0) ret = d1l_display_preferences_set_daylight_saving(D1L_DAYLIGHT_SAVING_NORTH_AMERICA);
         else if (strcmp(value, "europe") == 0) ret = d1l_display_preferences_set_daylight_saving(D1L_DAYLIGHT_SAVING_EUROPE);
+    }
+    if (ret != ESP_OK) { err_result(command, esp_err_to_name(ret), "setting was not saved"); return; }
+    ok_begin(command);
+    printf(",\"persisted\":true}\n");
+}
+
+static void cmd_settings_set_keyboard(const char *line)
+{
+    const char *command = "settings set keyboard";
+    const char *value = line + strlen(command) + 1U;
+    const char *names[] = {"qwerty", "azerty", "qwertz"};
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    for (uint8_t layout = 0; layout < D1L_KEYBOARD_LAYOUT_COUNT; ++layout) {
+        if (strcmp(value, names[layout]) == 0) {
+            ret = d1l_display_preferences_set_keyboard_layout(layout);
+            break;
+        }
     }
     if (ret != ESP_OK) { err_result(command, esp_err_to_name(ret), "setting was not saved"); return; }
     ok_begin(command);
@@ -9093,6 +9111,7 @@ static void cmd_help(void)
                "\"settings set name <name>\","
                "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
                "\"settings set textsize <standard|large>\","
+           "\"settings set keyboard <qwerty|azerty|qwertz>\","
                "\"settings set dst <off|north-america|europe>\","
                "\"settings autoadd\","
                "\"settings set autoadd <manual 0|1> <roles mask> <max_hops>\","
@@ -9180,6 +9199,7 @@ static void cmd_help(void)
            "\"settings set name <name>\",\"settings set pathhash <1|2|3>\","
            "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
            "\"settings set textsize <standard|large>\","
+           "\"settings set keyboard <qwerty|azerty|qwertz>\","
            "\"settings set dst <off|north-america|europe>\","
            "\"settings autoadd\","
            "\"settings set autoadd <manual 0|1> <roles mask> <max_hops>\","
@@ -9559,6 +9579,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_settings_set_name(line);
     } else if (strncmp(line, "settings set pathhash ", 22) == 0) {
         cmd_settings_set_pathhash(line);
+    } else if (strncmp(line, "settings set keyboard ", strlen("settings set keyboard ")) == 0) {
+        cmd_settings_set_keyboard(line);
     } else if (strncmp(line, "settings set textsize ", strlen("settings set textsize ")) == 0) {
         cmd_settings_set_display_option(line, true);
     } else if (strncmp(line, "settings set dst ", strlen("settings set dst ")) == 0) {

@@ -1814,7 +1814,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
-    assert '"Standard time: %s. Adjust with -15m / +15m.' in device_sheets
+    assert '"Standard time: %s. DST follows the selected region.' in device_sheets
     assert '"Terminal shows recent events and the current log level."' in device_sheets
     assert '"reset %s  uptime %lus  mesh %s"' in device_sheets
 

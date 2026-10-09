@@ -22,7 +22,7 @@ def test_device_sheets_have_one_small_persistent_owner():
 
     assert '"ui/ui_device_sheets.c"' in cmake
     assert '#include "ui_device_sheets.h"' in phase1
-    assert "D1L_UI_DEVICE_SHEETS_CONTROLLER_MAX_BYTES 224U" in header
+    assert "D1L_UI_DEVICE_SHEETS_CONTROLLER_MAX_BYTES 240U" in header
     assert "_Static_assert(sizeof(d1l_ui_device_sheets_controller_t)" in source
     assert "s_device_sheets_controller EXT_RAM_BSS_ATTR" in phase1
     assert "static lv_obj_t *s_display_sheet" not in phase1
@@ -97,7 +97,7 @@ def test_display_render_is_truthful_disabled_and_fails_closed():
         assert f"D1L_UI_DEVICE_SHEETS_ACTION_{action}" in render
     assert "const d1l_app_snapshot_t *snapshot" in render
     assert '"Local display time"' in render
-    assert '"Standard time: %s. Adjust with -15m / +15m. Enable DST only if your "' in render
+    assert '"Standard time: %s. DST follows the selected region. "' in render
     assert "D1L_UI_DEVICE_SHEETS_ACTION_TEXT_SIZE" in render
     assert "D1L_UI_DEVICE_SHEETS_ACTION_DAYLIGHT_SAVING" in render
     assert '"Time -15m"' in render

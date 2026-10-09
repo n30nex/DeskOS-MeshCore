@@ -134,6 +134,7 @@ typedef struct {
     bool night_mode;
     uint8_t display_brightness_percent;
     uint8_t display_text_size;
+    uint8_t keyboard_layout;
     uint8_t daylight_saving;
     uint16_t display_timeout_seconds;
     uint8_t notification_mode;

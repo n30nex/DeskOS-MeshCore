@@ -5,6 +5,7 @@
 
 static lv_style_t s_text_style;
 static lv_font_t s_large_font;
+static lv_font_t s_large_base_font;
 static bool s_initialized;
 static uint8_t s_size;
 
@@ -13,8 +14,10 @@ void d1l_ui_typography_set_size(uint8_t size)
     if (size > 1U) size = 0U;
     if (!s_initialized) {
         lv_style_init(&s_text_style);
-        s_large_font = lv_font_montserrat_18;
-        s_large_font.fallback = &d1l_ui_font_symbols_14;
+        s_large_base_font = lv_font_montserrat_18;
+        s_large_base_font.fallback = &d1l_ui_font_symbols_14;
+        s_large_font = d1l_ui_font_latin_18;
+        s_large_font.fallback = &s_large_base_font;
         s_initialized = true;
     } else if (s_size == size) {
         return;

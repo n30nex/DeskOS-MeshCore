@@ -9,6 +9,9 @@
 typedef struct _lv_obj_t lv_obj_t;
 typedef struct _lv_event_t lv_event_t;
 
+/* UI-owner only. Refreshes existing keyboards without changing their textareas. */
+void d1l_ui_keyboard_set_layout(uint8_t layout, lv_obj_t *root);
+
 void d1l_ui_keyboard_configure_compose(lv_obj_t *keyboard);
 void d1l_ui_keyboard_configure_input(lv_obj_t *keyboard,
                                      lv_obj_t *textarea,

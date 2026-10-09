@@ -1,4 +1,20 @@
-# MeshCore DeskOS D1L 1.9.2 User Guide
+# MeshCore DeskOS D1L 1.10.0 User Guide
+
+## Keyboard layouts and accents in 1.10.0
+
+Open **Settings / Display & clock**, scroll to **Keyboard**, and tap to cycle
+QWERTY, AZERTY and QWERTZ. The saved layout applies to text inputs and survives
+restart. Switching it preserves open text, cursor position and letter case.
+
+Tap **áé** or **ÁÉ** for accented Latin letters, **ABC/abc** for case,
+**Back** for the alphabet, and **1#** for numbers/symbols. Backspace removes a
+whole accented character. Standard and Large text both include these glyphs.
+The interface remains English. These are compact letter layouts, not full
+national desktop keyboards or input methods for every script.
+
+The composer still counts UTF-8 bytes: accented letters can use two or more.
+Keep messages within 138 bytes. The existing too-long warning prevents sending
+an over-limit message; layout/page changes never send a message.
 
 ## Packet history in 1.9.2
 
@@ -129,7 +145,7 @@ history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.9.2 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.10.0 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -487,7 +503,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.9.2 download and
+Use the guided browser flasher or the published DeskOS D1L 1.10.0 download and
 follow its `START_HERE.md`.
 
 The browser waits for DeskOS to finish startup and verifies its exact build,

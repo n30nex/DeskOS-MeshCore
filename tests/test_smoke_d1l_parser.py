@@ -602,6 +602,7 @@ def test_crashlog_total_written_rejects_unusable_values(result):
 @pytest.mark.parametrize("command,expected", [
     ("settings set timezone UTC-06:00", "settings set timezone"),
     ("settings set textsize large", "settings set textsize"),
+    ("settings set keyboard azerty", "settings set keyboard"),
     ("settings set dst north-america", "settings set dst"),
     ("settings set autoadd 1 2 1", "settings set autoadd"),
 ])

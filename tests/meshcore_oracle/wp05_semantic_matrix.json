@@ -558,7 +558,7 @@
     "tests/native/store_behavior_test.c": "ced20ead59e90c3d77de5f18a5408d16f13984991790b6a2adc9913a58b7e03c",
     "main/mesh/route_store_worker.h": "db248e59cb1d445a1384f388f71f37716a8123c17d640d1a544074eaf9171f09",
     "main/storage/retained_store_scheduler.h": "b489dc2390efd254e8f834ebfd794394495059ef02e8219ed9a90172176c81c2",
-    "main/hal/display_preferences.h": "387ccc89010f5786911a7eaecdcf54ceb7db75dd59a8aebcaee9895610fcb309",
+    "main/hal/display_preferences.h": "93342af3c8d6634b9e678c203017dac29ccb8f13d8635e9e34d61dbfbd87edb7",
     "main/mesh/contact_policy.h": "404675857862c34683a42f4e06643d80d107645c9d4c540fff87a101388dda30"
   }
 }
