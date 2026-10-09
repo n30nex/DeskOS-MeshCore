@@ -82,7 +82,7 @@ static const char *d1l_compose_kb_map_spec[] = {
     "0", "+", "-", "/", "*", "=", "%", "!", "?", "#", "\n",
     "@", "&", "(", ")", ":", ";", "\"", "'", ".", ",", "\n",
     "☺", "☹", "♥", "★", "✓", "☕", "⚠", "✈", "\n",
-    "ABC", "áé", "_", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+    "2#", "ABC", "áé", "_", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
 };
 
 static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_spec[] = {
@@ -92,10 +92,25 @@ static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_spec[] = {
     1, 1, 1, 1, 1, 1, 1, 1,
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
     1,
     7,
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static const char *d1l_compose_kb_map_extra[] = {
+    "1#", "$", "[", "]", "{", "}", "<", ">", "\n",
+    "\\", "|", "~", "`", "^", "=", "/", "*", "\n",
+    "abc", "ABC", "áé", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_extra[] = {
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2, LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2, 6,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2, LV_KEYBOARD_CTRL_BTN_FLAGS | 2
 };
 
 static const char *d1l_compose_kb_map_accents_lc[] = {
@@ -156,7 +171,7 @@ static void apply_keyboard_maps(lv_obj_t *keyboard)
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, lower[s_layout], d1l_compose_kb_ctrl_lc);
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, upper[s_layout], d1l_compose_kb_ctrl_uc);
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_1, d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
-    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_2, d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_2, d1l_compose_kb_map_extra, d1l_compose_kb_ctrl_extra);
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_USER_1, d1l_compose_kb_map_accents_lc, d1l_compose_kb_ctrl_accents);
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_USER_2, d1l_compose_kb_map_accents_uc, d1l_compose_kb_ctrl_accents);
     lv_keyboard_set_mode(keyboard, mode);

@@ -8,7 +8,9 @@ or changing upper/lowercase mode.
 
 Tap **áé** (or **ÁÉ**) for accented Latin characters. **ABC/abc** changes case
 on that page and **Back** returns to the alphabet. **1#** opens numbers and
-symbols. The glyphs are included at both Standard and Large text sizes.
+symbols; **2#** opens additional punctuation such as dollar signs, brackets
+and backslash. All printable ASCII characters are reachable, including those
+needed by some passwords. The glyphs are included at both text sizes.
 This is Latin character entry, not interface translation, an input method for
 all languages, or a complete national desktop keyboard. The UI stays English.
 

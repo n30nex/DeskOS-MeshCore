@@ -686,6 +686,7 @@ def test_core_conditional_package_is_production_only(
     assert [row["path"] for row in manifest["notice_files"]] == [
         "notices/LICENSE",
         "notices/THIRD_PARTY_NOTICES.md",
+        "notices/DEJAVU_FONT_LICENSE.txt",
         "notices/ORLP_ED25519_ZLIB_LICENSE.txt",
     ]
     assert not (package / "notices" / "ATTRIBUTIONS.md").exists()

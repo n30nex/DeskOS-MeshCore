@@ -25,6 +25,8 @@ layout is saved and applies across text inputs without clearing their text or
 moving the cursor. Tap **áé** for accented Latin letters, use **ABC/abc** for
 case, and **Back** to return to letters. Accents render in Standard and Large
 text. The interface remains English and messages retain their 138-byte limit.
+The **1# / 2#** pages include all printable ASCII punctuation for messages,
+passwords and other text inputs.
 
 See the [1.10.0 release notes](docs/RELEASE_NOTES_1.10.0.md) for scope and the
 tagged release for exact build and device acceptance.

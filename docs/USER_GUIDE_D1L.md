@@ -9,6 +9,8 @@ restart. Switching it preserves open text, cursor position and letter case.
 Tap **áé** or **ÁÉ** for accented Latin letters, **ABC/abc** for case,
 **Back** for the alphabet, and **1#** for numbers/symbols. Backspace removes a
 whole accented character. Standard and Large text both include these glyphs.
+On the symbols page, **2#** opens the remaining punctuation, including dollar
+signs, brackets and backslash. All printable ASCII characters are available.
 The interface remains English. These are compact letter layouts, not full
 national desktop keyboards or input methods for every script.
 

@@ -313,6 +313,7 @@ replies, optional sensors and the wider WadaMesh app suite remain future work.
 QWERTY, AZERTY and QWERTZ letter layouts are selectable and saved. A dedicated
 accent page supports lower/uppercase Latin characters with bundled Standard
 and Large glyphs. Changing layouts preserves existing inputs, cursors and
-drafts. Radio messages keep the 138-byte UTF-8 limit. This closes the initial
+drafts. Two symbols pages make all printable ASCII reachable, including
+password punctuation. Radio messages keep the 138-byte UTF-8 limit. This closes the initial
 keyboard-layout gap; interface translations, additional scripts/input methods
 and complete national desktop layouts remain future scope.

@@ -128,6 +128,9 @@ int main(int argc, char **argv)
     press(keyboard, LV_SYMBOL_BACKSPACE); press(keyboard, "Back");
     assert(lv_keyboard_get_mode(keyboard) == LV_KEYBOARD_MODE_TEXT_UPPER);
     press(keyboard, "ÁÉ"); assert(lv_keyboard_get_mode(keyboard) == LV_KEYBOARD_MODE_USER_2);
+    press(keyboard, "1#"); press(keyboard, "2#");
+    press(keyboard, "$"); press(keyboard, LV_SYMBOL_BACKSPACE);
+    press(keyboard, "\\"); press(keyboard, LV_SYMBOL_BACKSPACE);
     press(keyboard, "1#"); press(keyboard, "_"); press(keyboard, LV_SYMBOL_BACKSPACE);
     press(keyboard, "áé");
     lv_textarea_set_text(text, "Déjà vu: café, Straße, cœur, niño");
@@ -147,6 +150,20 @@ int main(int argc, char **argv)
     assert(d1l_user_text_validate(lv_textarea_get_text(text)).result == D1L_USER_TEXT_TOO_LONG);
     press(keyboard, LV_SYMBOL_BACKSPACE);
     assert(strlen(lv_textarea_get_text(text)) == 138);
+
+    bool reachable[127] = {0};
+    const lv_keyboard_mode_t modes[] = {LV_KEYBOARD_MODE_TEXT_LOWER, LV_KEYBOARD_MODE_TEXT_UPPER,
+        LV_KEYBOARD_MODE_SPECIAL_1, LV_KEYBOARD_MODE_SPECIAL_2};
+    for (size_t mode = 0; mode < sizeof(modes) / sizeof(modes[0]); ++mode) {
+        lv_keyboard_set_mode(keyboard, modes[mode]);
+        for (uint16_t i = 0; i < ((lv_btnmatrix_t *)keyboard)->btn_cnt; ++i) {
+            const char *key = lv_btnmatrix_get_btn_text(keyboard, i);
+            if (strlen(key) == 1 && (unsigned char)key[0] < 127) reachable[(unsigned char)key[0]] = true;
+        }
+    }
+    for (unsigned ch = 32; ch < 127; ++ch) assert(reachable[ch]);
+    lv_textarea_set_text(text, "Symbols: $ [ ] { } < > \\ | ~ ` ^");
+    capture("symbols-extra");
 
     lv_obj_add_flag(text, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     d1l_ui_device_sheets_controller_t sheets = {0};
