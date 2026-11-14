@@ -1101,11 +1101,31 @@ static void status_unlock(void)
     }
 }
 
-static void note_received_message(bool direct)
+static void note_received_message(bool direct, const char *conversation,
+                                  const char *sender, const char *text)
 {
     status_lock();
+    s_status.latest_received.direct = direct;
+    snprintf(s_status.latest_received.conversation, sizeof(s_status.latest_received.conversation),
+             "%s", conversation ? conversation : "Channel");
+    snprintf(s_status.latest_received.sender, sizeof(s_status.latest_received.sender),
+             "%s", sender && sender[0] ? sender : "Unknown sender");
+    s_status.latest_received.text[0] = '\0';
+    (void)d1l_user_text_copy(s_status.latest_received.text,
+                           sizeof(s_status.latest_received.text), text);
     if (direct) s_status.rx_dm_notifications++;
     else s_status.rx_group_notifications++;
+    status_unlock();
+}
+
+void d1l_meshcore_service_receive_snapshot(uint32_t *groups, uint32_t *dms,
+    d1l_meshcore_received_message_t *message)
+{
+    if (!groups || !dms || !message) return;
+    status_lock();
+    *groups = s_status.rx_group_notifications;
+    *dms = s_status.rx_dm_notifications;
+    *message = s_status.latest_received;
     status_unlock();
 }
 
@@ -1500,6 +1520,9 @@ static d1l_channel_rx_store_result_t append_channel_message_store_rx(
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "channel message append rx failed: %s",
                  esp_err_to_name(ret));
+    }
+    if (message_seq != 0U) {
+        note_received_message(false, channel_name, author, body);
     }
     return (d1l_channel_rx_store_result_t) {
         .error = ret,
@@ -3697,7 +3720,6 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
         secure_zero_bytes(plain, sizeof(plain));
         return;
     }
-    note_received_message(false);
     if (packet_hash_ready) {
         (void)d1l_meshcore_packet_hash_cache_remember(
             &s_rx_packet_hash_cache, packet_hash);
@@ -4128,7 +4150,10 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
             secure_zero_bytes(plain, sizeof(plain));
             return false;
         }
-        if (!contact->muted) note_received_message(!room_post);
+        if (!contact->muted) {
+            note_received_message(!room_post, room_post ? contact->alias : "Direct message",
+                                  contact->alias, stored_message);
+        }
         if (!d1l_dm_store_find_rx_identity_loaded(
                 identity_digest, &retained_identity) ||
             !remember_ack_identity_state(&retained_identity,

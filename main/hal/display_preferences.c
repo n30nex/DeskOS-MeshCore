@@ -115,6 +115,9 @@ esp_err_t d1l_display_preferences_init(void)
         const esp_err_t text_ret = nvs_get_u8(handle, "text_size", &loaded.text_size);
         const esp_err_t dst_ret = nvs_get_u8(handle, "dst", &daylight_saving);
         const esp_err_t keyboard_ret = nvs_get_u8(handle, "keyboard", &loaded.keyboard_layout);
+        uint8_t presentation = 0U;
+        const esp_err_t presentation_ret = nvs_get_u8(handle, "present", &presentation);
+        loaded.presentation_mode = presentation == 1U;
         loaded.daylight_saving = (d1l_daylight_saving_t)daylight_saving;
         nvs_close(handle);
         if (brightness_ret != ESP_OK &&
@@ -132,6 +135,8 @@ esp_err_t d1l_display_preferences_init(void)
             ret = dst_ret;
         } else if (keyboard_ret != ESP_OK && keyboard_ret != ESP_ERR_NVS_NOT_FOUND) {
             ret = keyboard_ret;
+        } else if (presentation_ret != ESP_OK && presentation_ret != ESP_ERR_NVS_NOT_FOUND) {
+            ret = presentation_ret;
         } else {
             loaded.notification_mode = (d1l_notification_mode_t)mode;
             ret = ESP_OK;
@@ -249,6 +254,16 @@ static esp_err_t save_display_byte(const char *key, uint8_t value)
     if (ret == ESP_OK) ret = nvs_set_u8(handle, key, value);
     if (ret == ESP_OK) ret = nvs_commit(handle);
     if (handle) nvs_close(handle);
+    return ret;
+}
+
+esp_err_t d1l_display_preferences_set_presentation_mode(bool enabled)
+{
+    if (!s_initialized || !s_lock) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000U)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    const esp_err_t ret = save_display_byte("present", enabled ? 1U : 0U);
+    if (ret == ESP_OK) s_preferences.presentation_mode = enabled;
+    xSemaphoreGive(s_lock);
     return ret;
 }
 

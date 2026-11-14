@@ -1560,7 +1560,7 @@ static void cmd_settings_get(void)
            "\"timezone\":{\"settings_ready\":%s,\"settings_error\":\"%s\","
            "\"schema_version\":%u,\"model\":\"%s\","
            "\"offset_minutes\":%d,\"label\":\"%s\",\"auto_dst\":%s,\"dst_rule\":%u},"
-           "\"text_size\":%u,\"keyboard_layout\":\"%s\","
+           "\"text_size\":%u,\"keyboard_layout\":\"%s\",\"presentation_mode\":%s,"
            "\"map_location\":{\"available\":%s,\"set\":%s,\"lat\":",
            bool_json(wifi_available), bool_json(ble_available),
            bool_json(observer_available), bool_json(map_available),
@@ -1580,6 +1580,7 @@ static void cmd_settings_get(void)
            bool_json(preferences.daylight_saving != D1L_DAYLIGHT_SAVING_OFF),
            (unsigned)preferences.daylight_saving, (unsigned)preferences.text_size,
            d1l_keyboard_layout_name(preferences.keyboard_layout),
+           bool_json(preferences.presentation_mode),
            bool_json(location_available), bool_json(location_set));
     print_e7_json(location_set ? settings->map_lat_e7 : 0);
     printf(",\"lon\":");
@@ -1815,6 +1816,22 @@ static void cmd_settings_set_keyboard(const char *line)
     if (ret != ESP_OK) { err_result(command, esp_err_to_name(ret), "setting was not saved"); return; }
     ok_begin(command);
     printf(",\"persisted\":true}\n");
+}
+
+static void cmd_settings_set_presentation(const char *line)
+{
+    const char *command = "settings set presentation";
+    const char *value = line + strlen(command) + 1U;
+    if (strcmp(value, "on") != 0 && strcmp(value, "off") != 0) {
+        err_result(command, "INVALID_ARG", "use on or off; on shows sender and text, including DMs");
+        return;
+    }
+    const bool enabled = strcmp(value, "on") == 0;
+    const esp_err_t ret = d1l_display_preferences_set_presentation_mode(enabled);
+    if (ret != ESP_OK) { err_result(command, esp_err_to_name(ret), "setting was not saved"); return; }
+    ok_begin(command);
+    printf(",\"persisted\":true,\"presentation_mode\":%s,\"message_previews\":%s}\n",
+           bool_json(enabled), bool_json(enabled));
 }
 
 static void cmd_settings_autoadd(const char *line)
@@ -9115,6 +9132,7 @@ static void cmd_help(void)
                "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
                "\"settings set textsize <standard|large>\","
            "\"settings set keyboard <qwerty|azerty|qwertz>\","
+           "\"settings set presentation <on|off>\","
                "\"settings set dst <off|north-america|europe>\","
                "\"settings autoadd\","
                "\"settings set autoadd <manual 0|1> <roles mask> <max_hops>\","
@@ -9203,6 +9221,7 @@ static void cmd_help(void)
            "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
            "\"settings set textsize <standard|large>\","
            "\"settings set keyboard <qwerty|azerty|qwertz>\","
+           "\"settings set presentation <on|off>\","
            "\"settings set dst <off|north-america|europe>\","
            "\"settings autoadd\","
            "\"settings set autoadd <manual 0|1> <roles mask> <max_hops>\","
@@ -9584,6 +9603,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_settings_set_pathhash(line);
     } else if (strncmp(line, "settings set keyboard ", strlen("settings set keyboard ")) == 0) {
         cmd_settings_set_keyboard(line);
+    } else if (strncmp(line, "settings set presentation ", strlen("settings set presentation ")) == 0) {
+        cmd_settings_set_presentation(line);
     } else if (strncmp(line, "settings set textsize ", strlen("settings set textsize ")) == 0) {
         cmd_settings_set_display_option(line, true);
     } else if (strncmp(line, "settings set dst ", strlen("settings set dst ")) == 0) {

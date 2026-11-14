@@ -236,6 +236,10 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
              (unsigned long long)input->packet_count,
              input->packet_count == 1U ? "" : "s");
     out_view->more_status_color = input->packet_count ? 0x7D93FFU : 0xA6B0B7U;
+    if (input->presentation_mode) {
+        snprintf(out_view->more_status, sizeof(out_view->more_status), "Presentation mode on");
+        out_view->more_status_color = 0x84FF2EU;
+    }
 
     out_view->mesh_needs_attention = mesh_needs_attention(input);
     const char *mesh_value = "Starting";

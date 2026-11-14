@@ -295,6 +295,10 @@ static void test_release_profile_strips_hidden_sd_failures(void)
 
 int main(void)
 {
+    d1l_ui_home_view_input_t presentation = {.presentation_mode = true};
+    d1l_ui_home_view_model_t presentation_view;
+    d1l_ui_home_view(&presentation, &presentation_view);
+    assert(strcmp(presentation_view.more_status, "Presentation mode on") == 0);
     test_default_view_is_bounded_and_truthful();
     test_ready_view_owns_all_rendered_strings();
     test_storage_and_map_fail_closed_states();

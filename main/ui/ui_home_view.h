@@ -14,6 +14,7 @@ typedef struct {
     size_t contact_count;
     size_t node_count;
     size_t packet_count;
+    bool presentation_mode;
     bool map_location_set;
     bool map_tile_cache_ready;
     const char *mesh_state;

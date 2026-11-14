@@ -2131,7 +2131,10 @@ static void home_view_input_from_snapshot(
     if (!snapshot || !out_input) {
         return;
     }
+    d1l_display_preferences_t preferences = {0};
+    d1l_display_preferences_get(&preferences);
     *out_input = (d1l_ui_home_view_input_t) {
+        .presentation_mode = preferences.presentation_mode,
         .public_unread_count = snapshot->public_unread_count,
         .dm_unread_count = snapshot->dm_unread_count,
         .muted_dm_unread_count = snapshot->muted_dm_unread_count,
@@ -7879,6 +7882,7 @@ static bool render_notifications_service_sheet(void)
         .dm_unread = s_snapshot.dm_unread_count,
         .muted_unread = s_snapshot.muted_dm_unread_count,
         .mode = preferences.notification_mode,
+        .presentation = preferences.presentation_mode,
     };
     return d1l_ui_service_sheets_render_notifications(
         &s_service_sheets_controller, &input,
@@ -8236,6 +8240,14 @@ static void service_sheets_action_handler(
         d1l_app_model_snapshot(&s_snapshot);
         (void)render_notifications_service_sheet();
         request_content_refresh();
+        return;
+    }
+    case D1L_UI_SERVICE_ACTION_NOTIFICATIONS_PRESENTATION: {
+        d1l_display_preferences_t preferences = {0};
+        d1l_display_preferences_get(&preferences);
+        show_toast("Presentation mode",
+                   d1l_display_preferences_set_presentation_mode(!preferences.presentation_mode));
+        (void)render_notifications_service_sheet();
         return;
     }
     case D1L_UI_SERVICE_ACTION_OPEN_MESSAGES:
@@ -10311,8 +10323,16 @@ static void display_runtime_timer_cb(lv_timer_t *timer)
          !notification_quiet_now()) &&
         !s_backlight_dimmed && !s_lock_visible && !s_onboarding_visible &&
         !d1l_ui_boot_scene_visible(&s_boot_scene);
-    if (d1l_ui_receive_animation_update(&s_receive_animation,
-            s_snapshot.rx_group_notifications, s_snapshot.rx_dm_notifications, notify)) {
+    /* The full UI model refresh is paced for storage and complex views. A
+     * small coherent receive snapshot makes alerts independent of that pace. */
+    uint32_t groups = 0U, dms = 0U;
+    d1l_meshcore_received_message_t received = {0};
+    d1l_meshcore_service_receive_snapshot(&groups, &dms, &received);
+    d1l_ui_receive_animation_set_presentation(&s_receive_animation,
+        preferences.presentation_mode && !d1l_ui_modal_has_active());
+    if (d1l_ui_receive_animation_update(&s_receive_animation, groups, dms, notify)) {
+        d1l_ui_receive_animation_set_message(&s_receive_animation, received.direct,
+            received.conversation, received.sender, received.text);
         if (d1l_backlight_set_percent(100) == ESP_OK) {
             s_backlight_pulse_active = true;
             s_backlight_pulse_until = now + 450U;
@@ -10333,7 +10353,7 @@ static void display_runtime_timer_cb(lv_timer_t *timer)
         }
         return;
     }
-    if (preferences.timeout_seconds > 0U &&
+    if (!preferences.presentation_mode && preferences.timeout_seconds > 0U &&
         inactive_ms >= (uint32_t)preferences.timeout_seconds * 1000U &&
         !s_lock_visible && !s_onboarding_visible) {
         lock_event_cb(NULL);

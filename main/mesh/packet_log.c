@@ -19,7 +19,8 @@
 #define D1L_PACKET_LOG_HISTORY_MAGIC 0x314B5044UL
 #define D1L_PACKET_LOG_HISTORY_SCHEMA 1U
 #define D1L_PACKET_LOG_HISTORY_PATH_FMT "stores/packet_log/segments/s%02lu.bin"
-#define D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS 750U
+#define D1L_PACKET_LOG_HISTORY_READ_TIMEOUT_MS 750U
+#define D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS D1L_RP2040_FILE_WRITE_TIMEOUT_MS
 #define D1L_PACKET_LOG_HISTORY_MAX_CONSECUTIVE_MISSES 4U
 
 _Static_assert((D1L_PACKET_LOG_SD_CAPACITY % D1L_PACKET_LOG_SD_SEGMENT_COUNT) == 0,
@@ -354,7 +355,7 @@ static esp_err_t probe_sd_history_slot(
     d1l_rp2040_file_result_t result = {0};
     const esp_err_t ret = d1l_rp2040_bridge_file_read(
         path, offset, (uint8_t *)&record, sizeof(record), &result,
-        D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+        D1L_PACKET_LOG_HISTORY_READ_TIMEOUT_MS);
     if (!packet_backend_generation_matches(expected_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -414,7 +415,7 @@ static esp_err_t read_sd_history_entry_checked(uint32_t seq, d1l_packet_log_entr
     d1l_packet_log_history_record_t record = {0};
     d1l_rp2040_file_result_t result = {0};
     const esp_err_t ret = d1l_rp2040_bridge_file_read(path, offset,
-        (uint8_t *)&record, sizeof(record), &result, D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+        (uint8_t *)&record, sizeof(record), &result, D1L_PACKET_LOG_HISTORY_READ_TIMEOUT_MS);
     if (!packet_backend_generation_matches(backend.generation)) return ESP_ERR_INVALID_STATE;
     if (ret != ESP_OK) {
         if (strcmp(result.err, "no_card") == 0) return ESP_ERR_INVALID_STATE;
@@ -486,7 +487,7 @@ static esp_err_t append_sd_history_for_generation(
     d1l_rp2040_file_result_t read_result = {0};
     const esp_err_t read_ret = d1l_rp2040_bridge_file_read(
         path, offset, (uint8_t *)&existing, sizeof(existing), &read_result,
-        D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+        D1L_PACKET_LOG_HISTORY_READ_TIMEOUT_MS);
     bool truncate = segment_start;
     if (read_ret == ESP_OK) {
         const bool unwritten_eof = read_result.length == 0U &&

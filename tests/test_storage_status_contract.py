@@ -650,7 +650,8 @@ def test_rp2040_bridge_serializes_uart_transactions():
     file_command_body = source.split("static esp_err_t send_file_command", 1)[1].split(
         "esp_err_t d1l_rp2040_bridge_init", 1
     )[0]
-    assert "exchange_prefixed_line(command, command_len" in file_command_body
+    assert "exchange_prefixed_line_internal(" in file_command_body
+    assert "false, caller_holds_lock, &truncated, NULL, NULL, 0U, request_id" in file_command_body
 
     serialized_functions = [
         ("esp_err_t d1l_rp2040_bridge_set_baud", "esp_err_t d1l_rp2040_bridge_reset"),

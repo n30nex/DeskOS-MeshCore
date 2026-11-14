@@ -135,7 +135,7 @@
     "main/map/map_viewport_truth_transition.h": "4de9fd54634d0f3481a5069895e72357bee55593ead88d44db526c98f37bc66e",
     "main/mesh/advert_data.c": "e62c97af20f7e1b127fad0208825135da140feb6efbbf25cc246ebd87d630973",
     "main/mesh/meshcore_lifetime.h": "b480f554ac3979e3caefdd1d815a334e0de47bddc8f21c7ac8305d4643fba535",
-    "main/mesh/meshcore_service.c": "80de740a0a72f288c83aa96f3c95ff710804d98de5b5df7741407be5801daa23",
+    "main/mesh/meshcore_service.c": "93d9dad5c736681378d180cb444e08f6b3caec4ed37914006530dd9932949793",
     "main/mesh/node_store.c": "ac60049b2bd7a627febffd606a35e5305b2a750c762615fb11f93badff9cb161",
     "main/mesh/node_store.h": "5513cfbd602168c5d4f178ab625c9f82175627e5e7ad392ec93c13cd3cc06677",
     "main/platform/time_service.c": "5a99b88df50340a1822a5fc94af17db83c266e8fe3442c6895bf307b6292b6c5",
@@ -148,7 +148,7 @@
     "main/ui/ui_map.h": "1e18d81b50dd1c4a22e73afb8d295b96c57171fbb601adebf931f1c8e75e7949",
     "main/ui/ui_node_detail.c": "bb4aba57e06693c3b745fb991bd98aa108b1de724b9a4bf9143b2c0bda82d522",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "e60db9c1aa4f2f65ee4c3550967a09a7048776f298f7ba411181b00ea6cbbdea",
+    "main/ui/ui_phase1.c": "27aded706402cc927683bfc9a2156085d38ae74f3035b55543ddc2683a4ff2f3",
     "tools/ui_simulator.py": "9e69a2d16fb1bdb29f404e4613295f22d4c9efc5384e071f1ce552058c7dce84"
   }
 }

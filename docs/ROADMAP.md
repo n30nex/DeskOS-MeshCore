@@ -30,6 +30,7 @@
 | **1.9.2** | Background packet filtering/search and bounded 12-row pages | Exact build and device checks recorded in the tagged release |
 | **1.10.0** | Saved keyboard layouts and accented Latin entry at both text sizes | Exact build and device checks recorded in the tagged release |
 | **1.11.0** | Animated receive alerts for every enabled channel and DMs | Exact build and device checks recorded in the tagged release |
+| **1.12.0** | Reliable startup SD writes and large opt-in presentation previews | Exact restart, radio and display checks recorded in the tagged release |
 
 The release firmware is the ordinary public product. A controlled peer, Wi-Fi
 credentials, admin password, soak run, qualification firmware, or validation

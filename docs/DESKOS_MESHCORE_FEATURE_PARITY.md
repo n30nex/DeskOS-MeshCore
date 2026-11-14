@@ -1,6 +1,6 @@
 # DeskOS interface and MeshCore parity
 
-This is the current product capability ledger for DeskOS 1.11.0 on the
+This is the current product capability ledger for DeskOS 1.12.0 on the
 SenseCAP Indicator D1L. The original mobile baseline was reviewed on 2026-08-08 against the official
 [MeshCore Android listing](https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android)
 and [MeshCore iOS 1.47.0 listing](https://apps.apple.com/gb/app/meshcore/id6742354151).
@@ -49,7 +49,7 @@ close the additional differences in this table.
 | Settings navigation | Profile, Radio and Display & clock first; Connections, Storage & maps, Messaging, Tools and Support follow; About opens diagnostics | Updated in 1.8.0-rc.3; flat touch sections instead of WadaMesh's category grid |
 | Map and offline cache | Existing pan/zoom/center, signed node locations, tile cache and attribution | Implemented; location is manual or authenticated companion data, not onboard GPS |
 | Repeater/room management | Existing authenticated dashboard, status, telemetry, neighbours, ACL, room posts and console with explicit mutation confirmation | Implemented; radio reply/timeout limitations remain in the release record |
-| Notifications and lock | Existing unread state, animated group/DM receive banners, display pulse/quiet hours, touch lock and top-button wake | D1L adaptation; no audio playback or battery chart is claimed |
+| Notifications and lock | Existing unread state, animated group/DM receive banners, opt-in large sender/text presentation cards, display pulse/quiet hours, touch lock and top-button wake | D1L adaptation; no audio playback or battery chart is claimed |
 | Backups and updates | Preserving USB installer, explicit full-clean recovery image, signed local-SD inactive-slot update and rollback | D1L adaptation; signed-SD installation/rollback observed in 1.8.0; candidate-specific acceptance remains in its release record |
 | Clipboard, inline quote, mention picker, per-thread drafts | On-device Copy/Paste, bounded plain-text Quote reply and exact-conversation SD drafts; clipboard clears on lock/restart | Drafts/clipboard in 1.8.0-rc.4 and paged mention picker in 1.9.0; no structured quote identifiers |
 | Language, emoji and keyboard options | English UI, saved QWERTY/AZERTY/QWERTZ letter layouts, lower/uppercase Latin accent page, bundled Standard/Large glyphs and bounded UTF-8 text | Keyboard layouts and accents added in 1.10.0; interface localization, other scripts and full emoji artwork remain future work |

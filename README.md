@@ -6,17 +6,31 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.11.0** is the stable release for the SenseCAP Indicator D1L.
+DeskOS **1.12.0** is the stable release for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.11.0)
+[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.12.0)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
 
 The previous stable release is
-[1.10.0](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.10.0).
+[1.11.0](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.11.0).
+
+## What is new in 1.12.0
+
+Startup SD writes now use a realistic bounded deadline and match late replies
+by request ID. Verified writes, recovery and error reporting remain intact.
+
+For a club demonstration, turn on **Messaging / Notifications / Presentation**.
+Incoming channel messages and DMs show a large sender/message card with a
+colour pulse, and the screen stays awake. Tap to dismiss; the next message
+gets a fresh reading interval. This mode shows private message text, so turn
+it off afterward. Normal mode keeps private header alerts.
+
+See the [1.12.0 release notes](docs/RELEASE_NOTES_1.12.0.md) for scope and the
+tagged release for exact startup, radio and display checks.
 
 ## What is new in 1.11.0
 

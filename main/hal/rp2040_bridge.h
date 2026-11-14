@@ -6,6 +6,11 @@
 
 #include "esp_err.h"
 
+/* Cold card writes can exceed the old 750 ms budget (observed on the D1L).
+ * This remains a per-operation limit; reads and urgent quiesce keep their
+ * caller-selected deadlines. */
+#define D1L_RP2040_FILE_WRITE_TIMEOUT_MS 3000U
+
 #define D1L_RP2040_FILE_PROTOCOL_VERSION 1U
 #define D1L_RP2040_FILE_LINE_MAX 512U
 #define D1L_RP2040_SD_DIAG_LINE_MAX 4096U

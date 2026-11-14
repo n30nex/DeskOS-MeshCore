@@ -12,12 +12,12 @@ def test_receive_animation_real_lvgl(tmp_path):
     config = (lvgl / "lv_conf_template.h").read_text(encoding="utf-8")
     config = config.replace('#if 0 /*Set it to "1" to enable content*/', '#if 1 /*Native animation test*/')
     config = re.sub(r'(#define LV_MEM_SIZE).*', r'\1 (4U * 1024U * 1024U)', config)
-    for size in (14, 18):
+    for size in (14, 18, 24):
         config = re.sub(rf'(#define LV_FONT_MONTSERRAT_{size})\s+\d', r'\1 1', config)
     (tmp_path / "lv_conf.h").write_text(config, encoding="utf-8")
     sources = list(lvgl.glob("src/**/*.c")) + [ROOT / name for name in (
         "main/ui/ui_receive_animation.c", "main/ui/ui_typography.c",
-        "main/ui/ui_font_symbols_14.c", "main/ui/ui_font_latin_18.c",
+        "main/ui/ui_font_symbols_14.c", "main/ui/ui_font_latin_18.c", "main/ui/ui_font_latin_24.c",
         "tests/native/ui_receive_animation_test.c",
     )]
     args = ["-std=c11", "-O0", "-DLV_CONF_INCLUDE_SIMPLE"]

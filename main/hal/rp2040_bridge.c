@@ -555,7 +555,8 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
                                                  bool *response_truncated,
                                                  const char *progress_prefix,
                                                  char *last_progress,
-                                                 size_t last_progress_size)
+                                                 size_t last_progress_size,
+                                                 uint16_t file_request_id)
 {
     if (!s_status.uart_ready) {
         return s_status.init_result;
@@ -610,6 +611,15 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
                 line[used] = '\0';
                 for (size_t i = 0; i < prefix_count; ++i) {
                     if (line_has_prefix(line, prefixes[i])) {
+                        /* A timed-out SD operation can finish after the next
+                         * request starts. Drain its late reply without sending
+                         * again or extending this request's deadline. */
+                        uint32_t received_id = 0U;
+                        if (file_request_id != 0U &&
+                            (!parse_u32_token(line, "id", &received_id) ||
+                             received_id != file_request_id)) {
+                            break;
+                        }
                         ret = ESP_OK;
                         goto done;
                     }
@@ -660,19 +670,7 @@ static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
 {
     return exchange_prefixed_line_internal(command, command_len, prefixes, prefix_count,
                                            line, line_size, timeout_ms, false, false,
-                                           response_truncated, NULL, NULL, 0);
-}
-
-static esp_err_t exchange_prefixed_line_while_locked(
-    const char *command, size_t command_len,
-    const char *const *prefixes, size_t prefix_count,
-    char *line, size_t line_size, uint32_t timeout_ms,
-    bool *response_truncated)
-{
-    return exchange_prefixed_line_internal(
-        command, command_len, prefixes, prefix_count,
-        line, line_size, timeout_ms, false, true,
-        response_truncated, NULL, NULL, 0);
+                                           response_truncated, NULL, NULL, 0, 0U);
 }
 
 static esp_err_t parse_sd_line_with_prefix(const char *line,
@@ -850,13 +848,9 @@ static esp_err_t send_file_command_internal(
     bool truncated = false;
     init_file_result(out_result, ESP_ERR_TIMEOUT);
     const int64_t started_us = esp_timer_get_time();
-    esp_err_t ret = caller_holds_lock ?
-        exchange_prefixed_line_while_locked(
-            command, command_len, prefixes, 1, line,
-            sizeof(line), timeout_ms, &truncated) :
-        exchange_prefixed_line(command, command_len, prefixes, 1,
-                               line, sizeof(line), timeout_ms,
-                               &truncated);
+    esp_err_t ret = exchange_prefixed_line_internal(
+        command, command_len, prefixes, 1, line, sizeof(line), timeout_ms,
+        false, caller_holds_lock, &truncated, NULL, NULL, 0U, request_id);
     if (ret != ESP_OK) {
         size_t buffered = 0;
         (void)uart_get_buffered_data_len((uart_port_t)s_status.uart_port, &buffered);

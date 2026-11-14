@@ -25,6 +25,7 @@ enum {
     BINDING_UPDATE_REBOOT,
     BINDING_CLOSE_NOTIFICATIONS,
     BINDING_NOTIFICATIONS_MODE,
+    BINDING_NOTIFICATIONS_PRESENTATION,
     BINDING_OPEN_MESSAGES,
     BINDING_CLOSE_ADMIN,
     BINDING_ADMIN_REFRESH,
@@ -830,7 +831,9 @@ bool d1l_ui_service_sheets_render_notifications(
     complete = mode && complete;
     lv_obj_t *privacy = create_label(
         sheet,
-        "No message text or names are shown. Off, quiet hours (22:00-07:00), muted contacts and screen lock suppress alerts.",
+        input->presentation ?
+        "Presentation shows sender and text, including DMs. The screen stays awake. Off, quiet hours, mute and Lock still apply." :
+        "Normal alerts hide names and text. Presentation shows all message previews, including DMs, and keeps the screen awake.",
         0x4D7FFF);
     position_wrap(privacy, 8, 132, 408);
     complete = privacy && complete;
@@ -842,6 +845,10 @@ bool d1l_ui_service_sheets_render_notifications(
         controller, sheet, "Open Messages", 186, 238, 158, 44,
         BINDING_OPEN_MESSAGES,
         D1L_UI_SERVICE_ACTION_OPEN_MESSAGES) != NULL && complete;
+    complete = create_button(
+        controller, sheet, input->presentation ? "Presentation: On" : "Presentation: Off",
+        8, 298, 336, 44, BINDING_NOTIFICATIONS_PRESENTATION,
+        D1L_UI_SERVICE_ACTION_NOTIFICATIONS_PRESENTATION) != NULL && complete;
     return complete;
 }
 

@@ -1,4 +1,4 @@
-# DeskOS D1L 1.11.0 limitations
+# DeskOS D1L 1.12.0 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -28,6 +28,10 @@ SD-primary storage.
   truncation. Public/channel transmission does not acknowledge receipt at
   every recipient. Check the conversation before manually resending an
   uncertain transmission.
+- Presentation mode is opt-in and displays sender/message text, including DMs
+  and private channels. It keeps only the newest preview on screen; use the
+  conversation for earlier messages. Dialogs use compact alerts. Turn the mode
+  off after a public demonstration. Manual Lock still hides previews.
 - The current UI is English-only. Additional localization remains future work.
 - The D1L is externally powered and has no battery sensor. The phone protocol
   uses a full-battery equivalent because it has no wired-power indicator.
@@ -37,7 +41,7 @@ SD-primary storage.
 - New messages use a plausible sender timestamp or the trusted local arrival
   time. Older retained rows without either remain labelled `time unknown`.
 - Optional Indicator temperature, humidity, and CO2 sensor integration remains
-  future work and is not represented as live data in 1.11.0.
+  future work and is not represented as live data in 1.12.0.
 - Packet searches load in the background. Rare/no-match searches can still
   take time on SD; pages show a lower-bound range rather than an exact total.
 

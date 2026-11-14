@@ -9,6 +9,16 @@
 #include "mesh/meshcore_discovery.h"
 #include "mesh/meshcore_trace.h"
 #include "mesh/meshcore_wire.h"
+#include "mesh/user_text.h"
+
+/* Latest admitted receive only, never restored from history or sent over BLE.
+ * The UI exposes these strings only in explicitly enabled Presentation mode. */
+typedef struct {
+    bool direct;
+    char sender[48];
+    char conversation[48];
+    char text[D1L_USER_TEXT_MAX_BYTES + 1U];
+} d1l_meshcore_received_message_t;
 
 typedef enum {
     D1L_MESHCORE_SERVICE_INITIALIZING = 0,
@@ -25,6 +35,7 @@ typedef struct {
     /* Live, deduplicated message admissions; never restored from history. */
     uint32_t rx_group_notifications;
     uint32_t rx_dm_notifications;
+    d1l_meshcore_received_message_t latest_received;
     uint32_t tx_packets;
     uint32_t radio_tx_timeout_ms;
     uint32_t radio_bus_fault;
@@ -228,6 +239,8 @@ void d1l_meshcore_service_init(void);
 esp_err_t d1l_meshcore_service_start_rx_async(void);
 esp_err_t d1l_meshcore_service_ensure_identity(void);
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
+void d1l_meshcore_service_receive_snapshot(uint32_t *groups, uint32_t *dms,
+    d1l_meshcore_received_message_t *message);
 void d1l_meshcore_service_trace_snapshot(d1l_meshcore_trace_snapshot_t *out_snapshot);
 void d1l_meshcore_service_discovery_snapshot(
     d1l_meshcore_discovery_snapshot_t *out_snapshot);

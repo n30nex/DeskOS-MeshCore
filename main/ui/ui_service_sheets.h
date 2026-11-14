@@ -30,6 +30,7 @@ typedef enum {
     D1L_UI_SERVICE_ACTION_UPDATE_REBOOT,
     D1L_UI_SERVICE_ACTION_CLOSE_NOTIFICATIONS,
     D1L_UI_SERVICE_ACTION_NOTIFICATIONS_MODE,
+    D1L_UI_SERVICE_ACTION_NOTIFICATIONS_PRESENTATION,
     D1L_UI_SERVICE_ACTION_OPEN_MESSAGES,
     D1L_UI_SERVICE_ACTION_CLOSE_ADMIN,
     D1L_UI_SERVICE_ACTION_ADMIN_GUEST_LOGIN,
@@ -98,6 +99,7 @@ typedef struct {
     uint32_t dm_unread;
     uint32_t muted_unread;
     d1l_notification_mode_t mode;
+    bool presentation;
 } d1l_ui_notifications_sheet_input_t;
 
 typedef struct d1l_ui_service_sheets_controller {

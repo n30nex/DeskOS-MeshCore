@@ -9,6 +9,19 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
+## 1.12.0 startup storage and presentation release
+
+- Reproduce a slow card write and late-response sequence in the native UART
+  reader; require correct request matching without resends or extended read deadlines.
+- Restart the exact production candidate repeatedly on the D1L and require
+  zero new startup SD write failures, healthy stores and preserved identity/data.
+- Exercise presentation preferences, accented 24-pixel text, message replacement,
+  tap dismissal, private normal mode, lock/quiet suppression and dialog fallback.
+- Receive real Public, another enabled channel and DM messages; verify previews,
+  the backlight pulse and retained conversations on the physical D1L.
+- Publish exact signed assets and update the guide, website, flasher and
+  operations records. Preserve recovery copies and remove temporary build files.
+
 ## 1.11.0 receive animation release
 
 - Verify real LVGL timing, group/DM/mixed colours, burst coalescing, touch-through

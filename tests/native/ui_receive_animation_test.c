@@ -8,6 +8,7 @@
 static uint16_t pixels[480 * 480];
 static unsigned clicks;
 static bool pressed;
+static int pointer_y = 20;
 static const char *output_dir;
 
 static void flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *colors)
@@ -36,7 +37,7 @@ static void capture(const char *name, unsigned frame)
 
 static void pointer_read(lv_indev_drv_t *driver, lv_indev_data_t *data)
 {
-    (void)driver; data->point.x = 240; data->point.y = 20;
+    (void)driver; data->point.x = 240; data->point.y = pointer_y;
     data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 static void clicked(lv_event_t *event) { (void)event; ++clicks; }
@@ -57,11 +58,15 @@ int main(int argc, char **argv)
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x17191A), 0);
     lv_obj_t *title = d1l_ui_label_create(screen); lv_label_set_text(title, "DeskOS");
     lv_obj_set_style_text_color(title, lv_color_hex(0xF4F7FB), 0); lv_obj_set_pos(title, 12, 12);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_t *button = lv_btn_create(screen); lv_obj_set_pos(button, 126, 4); lv_obj_set_size(button, 240, 38);
+    lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0); lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_add_event_cb(button, clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_t *clock = d1l_ui_label_create(screen); lv_label_set_text(clock, "12:34");
     lv_obj_set_style_text_color(clock, lv_color_hex(0x20D9ED), 0); lv_obj_set_pos(clock, 336, 16);
+    lv_obj_set_style_text_font(clock, &lv_font_montserrat_14, 0);
     lv_obj_t *lock = lv_btn_create(screen); lv_obj_set_pos(lock, 382, 0); lv_obj_set_size(lock, 86, 44);
+    lv_obj_set_style_bg_color(lock, lv_color_hex(0x27323A), 0); lv_obj_set_style_shadow_width(lock, 0, 0);
     lv_obj_t *lock_text = d1l_ui_label_create(lock); lv_label_set_text(lock_text, "Lock"); lv_obj_center(lock_text);
     lv_obj_t *text = lv_textarea_create(screen); lv_obj_set_pos(text, 16, 100); lv_obj_set_size(text, 448, 100);
     lv_textarea_set_text(text, "Keep my draft"); lv_textarea_set_cursor_pos(text, 5);
@@ -114,6 +119,45 @@ int main(int argc, char **argv)
     assert(d1l_ui_receive_animation_update(&view, 5, 6, true));
     d1l_ui_receive_animation_destroy(&view); tick(2400);
     assert(!view.panel && !view.active);
+    assert(d1l_ui_receive_animation_create(&view, lv_layer_top(), 30, 40));
+    d1l_ui_receive_animation_set_presentation(&view, true);
+    assert(!d1l_ui_receive_animation_update(&view, 30, 40, true));
+    assert(d1l_ui_receive_animation_update(&view, 31, 40, true));
+    const char *public_text = "Hello radio club! This message arrived from another radio.\nCaf\xc3\xa9 after the presentation?";
+    d1l_ui_receive_animation_set_message(&view, false, "Public", "VE3ABC", public_text);
+    tick(400); capture("presentation-group", 0);
+    assert(lv_obj_get_y(view.panel) == 60 && lv_obj_get_width(view.panel) == 456);
+    assert(strcmp(lv_label_get_text(view.message), public_text) == 0);
+    assert(lv_obj_get_style_text_font(view.message, 0)->line_height >= 24);
+    tick(4000); assert(view.active);
+    assert(d1l_ui_receive_animation_update(&view, 31, 41, true));
+    d1l_ui_receive_animation_set_message(&view, true, "Direct message", "VE3XYZ", "Your large-format display looks great from here!");
+    tick(400); capture("presentation-dm", 0);
+    assert(strcmp(lv_label_get_text(view.label), "Direct message") == 0);
+    tick(4000); assert(view.active); /* The newest message gets a full read interval. */
+    pointer_y = 200; pressed = true; tick(60); pressed = false; tick(60);
+    assert(!view.active && clicks == 1); /* Tap dismisses; no action underneath. */
+    assert(lv_label_get_text(view.message)[0] == '\0');
+    assert(d1l_ui_receive_animation_update(&view, 32, 41, true));
+    d1l_ui_receive_animation_set_message(&view, false, "#test", "VE3ABC", "A second channel also gets a large alert.");
+    tick(400); capture("presentation-channel", 0);
+    assert(!d1l_ui_receive_animation_update(&view, 32, 42, false));
+    assert(!view.active && lv_label_get_text(view.sender)[0] == '\0');
+    d1l_ui_receive_animation_set_presentation(&view, false);
+    assert(!view.presentation && !lv_obj_has_flag(view.panel, LV_OBJ_FLAG_CLICKABLE));
+    assert(!d1l_ui_receive_animation_update(&view, 32, 42, true));
+    assert(d1l_ui_receive_animation_update(&view, 33, 42, true));
+    d1l_ui_receive_animation_set_message(&view, true, "Direct message", "Private name", "Keep this out of ordinary alerts");
+    assert(lv_label_get_text(view.sender)[0] == '\0' && lv_label_get_text(view.message)[0] == '\0');
+    assert(strcmp(lv_label_get_text(view.label), "Group message") == 0);
+    d1l_ui_receive_animation_set_presentation(&view, true);
+    assert(d1l_ui_receive_animation_update(&view, 34, 42, true));
+    d1l_ui_receive_animation_set_message(&view, false, "Public", "VE3ABC", "This preview clears after its reading interval.");
+    tick(6540);
+    assert(!view.active && lv_label_get_text(view.sender)[0] == '\0' && lv_label_get_text(view.message)[0] == '\0');
+    assert(strcmp(lv_textarea_get_text(text), "Keep my draft") == 0);
+    assert(lv_group_get_focused(group) == text && lv_textarea_get_cursor_pos(text) == 5);
+    d1l_ui_receive_animation_destroy(&view);
     puts("native receive animation: timing, bursts, suppression, touch and lifecycle passed");
     return 0;
 }

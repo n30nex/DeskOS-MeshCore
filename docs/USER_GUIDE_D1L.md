@@ -1,6 +1,25 @@
-# MeshCore DeskOS D1L 1.11.0 User Guide
+# MeshCore DeskOS D1L 1.12.0 User Guide
 
-## Receive animations in 1.11.0
+## Presentation mode for a club demonstration
+
+Open **Settings / Messaging / Notifications**. Set **Visual alerts: On**, then
+turn **Presentation: On** and return Home. Send a message from another radio:
+a large card shows its sender, channel and text, or its DM sender and text.
+The display pulses and stays awake. Each new arrival gets about 6.5 seconds
+on screen; tap the card to dismiss it sooner. A newer arrival replaces the
+preview, while previous messages remain in their conversations.
+
+Presentation mode also exposes private-channel and DM text. Turn it off after
+the demonstration to restore private header alerts and your saved sleep timer.
+Manual Lock, muted contacts and quiet hours still apply. While a dialog or
+keyboard is open, compact alerts keep those controls accessible. The setting
+survives restart, and Home shows **Presentation mode on** while it is enabled.
+
+Accented Latin letters remain readable in the large preview. Long or heavily
+line-broken messages fit the card with an ellipsis; open the conversation to
+read the complete text.
+
+## Receive animations in normal mode
 
 An envelope banner briefly slides into the header when a new message arrives:
 cyan for group messages on any enabled channel (including Public), lime for
@@ -161,7 +180,7 @@ history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.11.0 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.12.0 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -519,7 +538,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.11.0 download and
+Use the guided browser flasher or the published DeskOS D1L 1.12.0 download and
 follow its `START_HERE.md`.
 
 The browser waits for DeskOS to finish startup and verifies its exact build,
