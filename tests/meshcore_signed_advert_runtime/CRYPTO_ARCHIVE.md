@@ -3,7 +3,8 @@
 `Crypto-0.4.0.tar.gz` is the unchanged rweather/Crypto 0.4.0 source archive
 from the PlatformIO registry (version ID 43204), obtained with PlatformIO
 Core. It is used only by the signed-advert host test, not linked into the
-DeskOS firmware. Its sources and licenses remain inside the archive.
+DeskOS firmware. Its original copyright and license notices remain in the source headers
+inside the archive.
 
 - Upstream: https://github.com/rweather/arduinolibs
 - Release commit: `61e84b220fc8dfe83c2e04716d0fa88cfaddadf6`
