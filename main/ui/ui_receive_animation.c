@@ -70,7 +70,7 @@ bool d1l_ui_receive_animation_create(d1l_ui_receive_animation_t *view,
     view->panel = lv_obj_create(parent);
     if (!view->panel) return false;
     lv_obj_add_event_cb(view->panel, panel_deleted, LV_EVENT_DELETE, view);
-    lv_obj_set_size(view->panel, 240, 38);
+    lv_obj_set_size(view->panel, 250, 38);
     lv_obj_set_pos(view->panel, 126, 4);
     lv_obj_clear_flag(view->panel, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(view->panel, 0, 0);

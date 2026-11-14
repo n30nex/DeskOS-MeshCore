@@ -59,6 +59,10 @@ int main(int argc, char **argv)
     lv_obj_set_style_text_color(title, lv_color_hex(0xF4F7FB), 0); lv_obj_set_pos(title, 12, 12);
     lv_obj_t *button = lv_btn_create(screen); lv_obj_set_pos(button, 126, 4); lv_obj_set_size(button, 240, 38);
     lv_obj_add_event_cb(button, clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *clock = d1l_ui_label_create(screen); lv_label_set_text(clock, "12:34");
+    lv_obj_set_style_text_color(clock, lv_color_hex(0x20D9ED), 0); lv_obj_set_pos(clock, 336, 16);
+    lv_obj_t *lock = lv_btn_create(screen); lv_obj_set_pos(lock, 382, 0); lv_obj_set_size(lock, 86, 44);
+    lv_obj_t *lock_text = d1l_ui_label_create(lock); lv_label_set_text(lock_text, "Lock"); lv_obj_center(lock_text);
     lv_obj_t *text = lv_textarea_create(screen); lv_obj_set_pos(text, 16, 100); lv_obj_set_size(text, 448, 100);
     lv_textarea_set_text(text, "Keep my draft"); lv_textarea_set_cursor_pos(text, 5);
     lv_group_t *group = lv_group_create(); lv_group_add_obj(group, text); lv_group_focus_obj(text);
