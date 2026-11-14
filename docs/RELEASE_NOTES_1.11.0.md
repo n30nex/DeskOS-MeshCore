@@ -25,3 +25,7 @@ Message storage formats, identity, channel keys, radio settings and the signed
 updater are unchanged. Use the preserving USB update for an existing DeskOS
 installation. Exact build and device acceptance are recorded in the tagged
 release; the existing parity limits continue to apply.
+
+Build verification now carries the unchanged, checksum-pinned Crypto host-test
+archive locally after its registry retired direct downloads. Firmware
+cryptography is unchanged.

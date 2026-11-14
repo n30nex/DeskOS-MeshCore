@@ -26,6 +26,17 @@ def load_module():
     return module
 
 
+def test_pinned_crypto_archive_is_available_offline_and_rejects_corruption(tmp_path):
+    module = load_module()
+    dependency = module.load_manifest()["external_dependency"]
+    archive, receipt = module.obtain_external_archive(dependency)
+    assert receipt["verified"] and len(archive) == dependency["archive_size"]
+    damaged = tmp_path / "damaged.tar.gz"
+    damaged.write_bytes(bytes([archive[0] ^ 1]) + archive[1:])
+    with pytest.raises(module.GateFailure, match="SHA256 mismatch"):
+        module.obtain_external_archive(dependency, damaged)
+
+
 def test_signed_advert_runtime_manifest_is_bounded_and_pinned():
     module = load_module()
     manifest = module.load_manifest()

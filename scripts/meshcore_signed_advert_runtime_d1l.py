@@ -12,7 +12,6 @@ import re
 import subprocess
 import tarfile
 import tempfile
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Sequence
@@ -255,23 +254,14 @@ def verify_repository_sources(
 def obtain_external_archive(
     dependency: dict[str, Any], archive_path: Path | None = None
 ) -> tuple[bytes, dict[str, Any]]:
-    if archive_path is not None:
-        try:
-            archive = archive_path.read_bytes()
-        except OSError as exc:
-            raise GateFailure(f"cannot read external dependency archive: {exc}") from exc
-        source = str(archive_path.resolve())
-    else:
-        request = urllib.request.Request(
-            dependency["archive_url"],
-            headers={"User-Agent": "SIGUI-WP04-signed-advert-runtime/1"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                archive = response.read(dependency["archive_size"] + 1)
-        except OSError as exc:
-            raise GateFailure(f"cannot download pinned Crypto archive: {exc}") from exc
-        source = dependency["archive_url"]
+    # The registry no longer permits direct downloads. Keep its exact pinned
+    # archive with the host fixture so CI never depends on that download API.
+    archive_path = archive_path or MANIFEST_PATH.parent / "Crypto-0.4.0.tar.gz"
+    try:
+        archive = archive_path.read_bytes()
+    except OSError as exc:
+        raise GateFailure(f"cannot read external dependency archive: {exc}") from exc
+    source = str(archive_path.resolve())
     actual_hash = sha256_bytes(archive)
     if len(archive) != dependency["archive_size"]:
         raise GateFailure("pinned Crypto archive size mismatch")
