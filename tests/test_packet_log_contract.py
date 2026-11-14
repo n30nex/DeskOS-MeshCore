@@ -72,7 +72,9 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert "read_result.offset == offset" in source
     assert "path, offset, (const uint8_t *)&record" in source
     assert "d1l_rp2040_bridge_file_delete" in source
-    assert "D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS 750U" in source
+    assert "D1L_PACKET_LOG_HISTORY_READ_TIMEOUT_MS 750U" in source
+    assert "D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS D1L_RP2040_FILE_WRITE_TIMEOUT_MS" in source
+    assert "D1L_RP2040_FILE_WRITE_TIMEOUT_MS 3000U" in read("main/hal/rp2040_bridge.h")
     assert "D1L_PACKET_LOG_HISTORY_MAX_CONSECUTIVE_MISSES 4U" in source
     assert "_Static_assert(sizeof(d1l_packet_log_history_record_t) <= D1L_RP2040_FILE_CHUNK_MAX" in source
     assert "D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY" in source

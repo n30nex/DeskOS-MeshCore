@@ -1402,4 +1402,3 @@ lv_font_t d1l_ui_font_latin_24 = {
 
 
 #endif /*#if D1L_UI_FONT_LATIN_24*/
-
