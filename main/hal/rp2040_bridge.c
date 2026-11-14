@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "driver/uart.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -109,6 +110,7 @@ static esp_err_t take_bridge_lock(uint32_t timeout_ms)
         ticks = 1;
     }
     if (xSemaphoreTake(s_bridge_mutex, ticks) != pdTRUE) {
+        ESP_LOGW("d1l_sd", "Bridge lock timed out after %lu ms", (unsigned long)wait_ms);
         return ESP_ERR_TIMEOUT;
     }
     if (!bridge_lock_admitted(current)) {
@@ -847,6 +849,7 @@ static esp_err_t send_file_command_internal(
     char line[D1L_RP2040_LINE_BUFFER_SIZE];
     bool truncated = false;
     init_file_result(out_result, ESP_ERR_TIMEOUT);
+    const int64_t started_us = esp_timer_get_time();
     esp_err_t ret = caller_holds_lock ?
         exchange_prefixed_line_while_locked(
             command, command_len, prefixes, 1, line,
@@ -855,6 +858,14 @@ static esp_err_t send_file_command_internal(
                                line, sizeof(line), timeout_ms,
                                &truncated);
     if (ret != ESP_OK) {
+        size_t buffered = 0;
+        (void)uart_get_buffered_data_len((uart_port_t)s_status.uart_port, &buffered);
+        if (ret != ESP_ERR_NOT_FINISHED) {
+            ESP_LOGW("d1l_sd", "%s failed: %s after %lu ms (RX buffered=%u)",
+                     expected_op, esp_err_to_name(ret),
+                     (unsigned long)((esp_timer_get_time() - started_us) / 1000),
+                     (unsigned)buffered);
+        }
         out_result->last_error = ret;
         out_result->response_truncated = truncated;
         snprintf(out_result->note, sizeof(out_result->note),
@@ -863,6 +874,12 @@ static esp_err_t send_file_command_internal(
     }
     ret = d1l_rp2040_file_reply_parse(
         line, request_id, expected_op, out_data, out_data_size, out_result);
+    if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) {
+        ESP_LOGW("d1l_sd", "%s reply failed: %s after %lu ms (%s)",
+                 expected_op, esp_err_to_name(ret),
+                 (unsigned long)((esp_timer_get_time() - started_us) / 1000),
+                 out_result->err);
+    }
     out_result->response_truncated = truncated;
     return ret;
 }
