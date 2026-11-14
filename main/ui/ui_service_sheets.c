@@ -822,19 +822,20 @@ bool d1l_ui_service_sheets_render_notifications(
         input->public_unread || input->dm_unread ? 0xFBBF24 : 0x20D9ED);
     position_dot(counts, 8, 58, 408);
     complete = counts && complete;
-    snprintf(line, sizeof(line), "Backlight: %s",
-             d1l_notification_mode_name(input->mode));
+    snprintf(line, sizeof(line), "Visual alerts: %s",
+             input->mode == D1L_NOTIFICATION_MODE_OFF ? "Off" :
+             input->mode == D1L_NOTIFICATION_MODE_QUIET_HOURS ? "Quiet hours" : "On");
     lv_obj_t *mode = create_label(sheet, line, 0xF4F7FB);
     position_dot(mode, 8, 96, 408);
     complete = mode && complete;
     lv_obj_t *privacy = create_label(
         sheet,
-        "Badges follow retained read cursors. Duplicate packets do not create duplicate counts. Quiet hours suppress only the backlight pulse from 22:00 to 07:00; no audio is claimed.",
+        "No message text or names are shown. Off, quiet hours (22:00-07:00), muted contacts and screen lock suppress alerts.",
         0x4D7FFF);
     position_wrap(privacy, 8, 132, 408);
     complete = privacy && complete;
     complete = create_button(
-        controller, sheet, "Cycle Backlight", 8, 238, 166, 44,
+        controller, sheet, "Cycle Alerts", 8, 238, 166, 44,
         BINDING_NOTIFICATIONS_MODE,
         D1L_UI_SERVICE_ACTION_NOTIFICATIONS_MODE) != NULL && complete;
     complete = create_button(

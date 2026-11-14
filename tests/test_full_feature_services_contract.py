@@ -100,7 +100,9 @@ def test_device_service_sheets_and_notification_glyph_surfaces_are_live():
     assert "d1l_ui_device_sheets_render_display" in device
     assert "d1l_ui_device_sheets_render_diagnostics" in device
     assert "notification_quiet_now()" in phase1
-    assert "s_last_notification_unread" in phase1
+    assert "s_receive_animation" in phase1
+    assert "s_snapshot.rx_group_notifications" in phase1
+    assert "s_snapshot.rx_dm_notifications" in phase1
     assert "d1l_ui_typography_apply" in messages
     assert "d1l_ui_font_symbols_14" in read("main/ui/ui_typography.c")
     assert "const lv_font_t d1l_ui_font_symbols_14" in font

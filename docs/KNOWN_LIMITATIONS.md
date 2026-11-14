@@ -1,4 +1,4 @@
-# DeskOS D1L 1.10.0 limitations
+# DeskOS D1L 1.11.0 limitations
 
 The RC1 channel dead-end (#320) and Contacts navigation gap (#321) are fixed in
 the 1.2 implementation. These are the remaining intentional product limits:
@@ -37,7 +37,7 @@ SD-primary storage.
 - New messages use a plausible sender timestamp or the trusted local arrival
   time. Older retained rows without either remain labelled `time unknown`.
 - Optional Indicator temperature, humidity, and CO2 sensor integration remains
-  future work and is not represented as live data in 1.10.0.
+  future work and is not represented as live data in 1.11.0.
 - Packet searches load in the background. Rare/no-match searches can still
   take time on SD; pages show a lower-bound range rather than an exact total.
 

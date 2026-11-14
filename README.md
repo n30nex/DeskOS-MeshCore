@@ -6,17 +6,28 @@
 
 <p align="center"><strong>A bright, touch-first MeshCore desk for the SenseCAP Indicator D1L.</strong></p>
 
-DeskOS **1.10.0** is the stable release for the SenseCAP Indicator D1L.
+DeskOS **1.11.0** is the stable release for the SenseCAP Indicator D1L.
 It uses the production `full_feature` profile with conditional SD-primary retained history
 (`conditional` storage mode).
 
-[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.10.0)
+[Stable release](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.11.0)
 · [Browser flasher](https://flasher.canadaverse.org/)
 · [User guide](docs/USER_GUIDE_D1L.md)
 · [Product page](https://canadaverse.org/deskos/)
 
 The previous stable release is
-[1.9.2](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.9.2).
+[1.10.0](https://github.com/n30nex/DeskOS-MeshCore/releases/tag/v1.10.0).
+
+## What is new in 1.11.0
+
+Incoming messages now show a brief animated envelope banner in the header:
+cyan for group messages on any enabled channel, lime for DMs, and gold when
+both arrive together. It leaves your current screen, draft and cursor alone.
+
+The animation follows genuine new receives, including a conversation already
+open on screen. Duplicate packets, outgoing messages and restored history do
+not trigger it. Muted contacts, Off and quiet-hours settings remain respected;
+a sleeping screen stays asleep. See the [release notes](docs/RELEASE_NOTES_1.11.0.md).
 
 ## What is new in 1.10.0
 

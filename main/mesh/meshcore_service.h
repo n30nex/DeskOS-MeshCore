@@ -22,6 +22,9 @@ typedef struct {
     d1l_meshcore_service_state_t state;
     uint32_t rx_packets;
     uint32_t rx_adverts;
+    /* Live, deduplicated message admissions; never restored from history. */
+    uint32_t rx_group_notifications;
+    uint32_t rx_dm_notifications;
     uint32_t tx_packets;
     uint32_t radio_tx_timeout_ms;
     uint32_t radio_bus_fault;

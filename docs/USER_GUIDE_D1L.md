@@ -1,4 +1,18 @@
-# MeshCore DeskOS D1L 1.10.0 User Guide
+# MeshCore DeskOS D1L 1.11.0 User Guide
+
+## Receive animations in 1.11.0
+
+An envelope banner briefly slides into the header when a new message arrives:
+cyan for group messages on any enabled channel (including Public), lime for
+DMs, and gold for a mixed burst. Authenticated room posts use the group alert.
+It works while you are reading that conversation and does not interrupt typing
+or navigation. It contains no message text or sender name.
+
+Use **Settings / Messaging / Notifications / Cycle Alerts** for On, Quiet
+hours or Off. Quiet hours are 22:00–07:00 using your display clock; an unavailable
+clock stays quiet. Muted contacts remain silent. A locked or sleeping screen
+stays asleep, and no old notifications play when you unlock it. Bursts share
+one short animation, and duplicate packets and outgoing messages do not alert.
 
 ## Keyboard layouts and accents in 1.10.0
 
@@ -147,7 +161,7 @@ history for the Seeed SenseCAP Indicator D1L. DeskOS is a non-forwarding
 MeshCore client: it sends and receives user-requested traffic but does not
 repeat other devices' traffic.
 
-DeskOS 1.10.0 includes secure BLE companion access, public-data QR sharing,
+DeskOS 1.11.0 includes secure BLE companion access, public-data QR sharing,
 signed local updates with rollback, touch-first repeater management, and the
 guided bridge and SD installation path. The remaining intentional limits and
 D1L adaptations are in
@@ -505,7 +519,7 @@ private-message content, passwords, keys, or admin credentials.
 
 ## Installation
 
-Use the guided browser flasher or the published DeskOS D1L 1.10.0 download and
+Use the guided browser flasher or the published DeskOS D1L 1.11.0 download and
 follow its `START_HERE.md`.
 
 The browser waits for DeskOS to finish startup and verifies its exact build,

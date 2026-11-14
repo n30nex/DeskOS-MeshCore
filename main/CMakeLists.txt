@@ -107,6 +107,7 @@ idf_component_register(
         "ui/ui_typography.c"
         "ui/ui_first_start.c"
         "ui/ui_keyboard.c"
+          "ui/ui_receive_animation.c"
         "ui/ui_map.c"
         "ui/ui_messages.c"
         "ui/ui_more_view.c"

@@ -117,8 +117,8 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "39521cdaa71c4c2bd93431f3b7f4fce588083a0cd9ccfaa7954237e075cf3a08",
-    "main/app/app_model.h": "525b41fc311f3559f644faecdf94ba699bed54878e7830829d3ee93432833fb7",
+    "main/app/app_model.c": "2ad02d37e2f8ce8936e852474e286290ea4ab1d29dae9182e878a3aaf4b37005",
+    "main/app/app_model.h": "1e46eef3a9be6a1382e5a8039d9c6196caf12dae015d2f42bfb01ec8dd1934b4",
     "main/app/settings_model.c": "fbf75f92086ad231832ae98669a6cb4800bb3368fa78d04f87bc0122a45eeba3",
     "main/app/settings_model.h": "f7fc9e0b5cb9b52e1c6c597f95cf8d48c2ae266d092031034d76b059372e83b6",
     "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
@@ -135,7 +135,7 @@
     "main/map/map_viewport_truth_transition.h": "4de9fd54634d0f3481a5069895e72357bee55593ead88d44db526c98f37bc66e",
     "main/mesh/advert_data.c": "e62c97af20f7e1b127fad0208825135da140feb6efbbf25cc246ebd87d630973",
     "main/mesh/meshcore_lifetime.h": "b480f554ac3979e3caefdd1d815a334e0de47bddc8f21c7ac8305d4643fba535",
-    "main/mesh/meshcore_service.c": "e5fa0f2075c4dd546dd085ee5a2c0143179090ca11add5c11c47e5bdbfaf34d1",
+    "main/mesh/meshcore_service.c": "80de740a0a72f288c83aa96f3c95ff710804d98de5b5df7741407be5801daa23",
     "main/mesh/node_store.c": "ac60049b2bd7a627febffd606a35e5305b2a750c762615fb11f93badff9cb161",
     "main/mesh/node_store.h": "5513cfbd602168c5d4f178ab625c9f82175627e5e7ad392ec93c13cd3cc06677",
     "main/platform/time_service.c": "5a99b88df50340a1822a5fc94af17db83c266e8fe3442c6895bf307b6292b6c5",
@@ -148,7 +148,7 @@
     "main/ui/ui_map.h": "1e18d81b50dd1c4a22e73afb8d295b96c57171fbb601adebf931f1c8e75e7949",
     "main/ui/ui_node_detail.c": "bb4aba57e06693c3b745fb991bd98aa108b1de724b9a4bf9143b2c0bda82d522",
     "main/ui/ui_node_detail.h": "96ca4527d6e66e509d6e99bde81d85e35fa735124cbb56849219ac8585f31768",
-    "main/ui/ui_phase1.c": "bd9e84271337f91e0da06ec51dc87a8a1bcfb637419b293fe1e501c100a5968e",
+    "main/ui/ui_phase1.c": "e60db9c1aa4f2f65ee4c3550967a09a7048776f298f7ba411181b00ea6cbbdea",
     "tools/ui_simulator.py": "9e69a2d16fb1bdb29f404e4613295f22d4c9efc5384e071f1ce552058c7dce84"
   }
 }

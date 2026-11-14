@@ -2556,6 +2556,9 @@ static void cmd_mesh_status(void)
         d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE);
     ok_begin("mesh status");
     print_release_profile_fields();
+    printf(",\"receive_events\":{\"group\":%lu,\"dm\":%lu}",
+           (unsigned long)status.rx_group_notifications,
+           (unsigned long)status.rx_dm_notifications);
     printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"ack_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,\"duplicate_rows_suppressed\":%lu,\"last_hash\":%lu,\"last_error\":\"%s\"},\"dm_route\":{\"direct_selected\":%lu,\"flood_selected\":%lu,\"missing_fallback\":%lu,\"preboot_fallback\":%lu,\"stale_fallback\":%lu,\"malformed_fallback\":%lu,\"expired_fallback\":%lu,\"failed_fallback\":%lu,\"direct_retry_fallback\":%lu,\"last_reason\":\"%s\",\"last_path_age_ms\":%lu}",
            d1l_meshcore_service_state_name(status.state), bool_json(status.identity_ready),
            bool_json(status.radio_ready), bool_json(status.companion_framing_ready),

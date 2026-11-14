@@ -224,6 +224,8 @@ typedef struct {
     uint8_t lvgl_used_pct;
     uint32_t rx_packets;
     uint32_t rx_adverts;
+    uint32_t rx_group_notifications;
+    uint32_t rx_dm_notifications;
     uint32_t tx_packets;
     uint32_t rejected_commands;
     uint32_t message_total_written;

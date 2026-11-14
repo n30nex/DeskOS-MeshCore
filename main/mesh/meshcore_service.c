@@ -1101,6 +1101,14 @@ static void status_unlock(void)
     }
 }
 
+static void note_received_message(bool direct)
+{
+    status_lock();
+    if (direct) s_status.rx_dm_notifications++;
+    else s_status.rx_group_notifications++;
+    status_unlock();
+}
+
 static void sanitize_note(char *dest, size_t dest_size, const char *src)
 {
     if (dest_size == 0) {
@@ -3689,6 +3697,7 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
         secure_zero_bytes(plain, sizeof(plain));
         return;
     }
+    note_received_message(false);
     if (packet_hash_ready) {
         (void)d1l_meshcore_packet_hash_cache_remember(
             &s_rx_packet_hash_cache, packet_hash);
@@ -4119,6 +4128,7 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
             secure_zero_bytes(plain, sizeof(plain));
             return false;
         }
+        if (!contact->muted) note_received_message(!room_post);
         if (!d1l_dm_store_find_rx_identity_loaded(
                 identity_digest, &retained_identity) ||
             !remember_ack_identity_state(&retained_identity,

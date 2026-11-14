@@ -9,6 +9,18 @@ SD-primary retained history when prepared storage is ready, visible live-only
 operation otherwise, and without silent default-NVS fallback. Historical RC2
 artifacts remain bound to their original `core_1_0` profile.
 
+## 1.11.0 receive animation release
+
+- Verify real LVGL timing, group/DM/mixed colours, burst coalescing, touch-through
+  behaviour, draft/cursor preservation, cancellation and object deletion.
+- Verify receive events follow new admitted rows, with deduplication and muted
+  contact guards intact. History loading and outgoing sends must not animate.
+- Exercise actual incoming channel and direct messages on the D1L. Confirm the
+  alert respects Off, quiet hours and lock/sleep, and leaves navigation usable.
+- Verify the signed Actions package and preserving update, then update and
+  verify the release, documentation, website and flasher.
+- Keep radio/storage and other services operational during scoped Pi cleanup.
+
 ## 1.10.0 keyboard release
 
 - Exercise all three layouts, accent/case pages, multibyte backspace, font

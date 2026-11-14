@@ -61,6 +61,7 @@
 #include "ui_nodes_model.h"
 #include "ui_packets.h"
 #include "ui_packet_query.h"
+#include "ui_receive_animation.h"
 #include "ui_radio_settings.h"
 #include "ui_screen.h"
 #include "ui_service_sheets.h"
@@ -250,7 +251,7 @@ static bool s_button_flood_cooldown_active;
 static uint32_t s_button_flood_cooldown_until;
 static bool s_button_flood_result_pending;
 static uint32_t s_button_flood_request_id;
-static uint32_t s_last_notification_unread;
+static d1l_ui_receive_animation_t s_receive_animation;
 static d1l_ui_packet_query_result_t s_packet_query_result EXT_RAM_BSS_ATTR;
 static esp_err_t s_packet_query_error;
 static d1l_packet_log_entry_t
@@ -10197,6 +10198,7 @@ static void process_pending_compose_probe(void)
 static void lock_event_cb(lv_event_t *event)
 {
     (void)event;
+    d1l_ui_receive_animation_stop(&s_receive_animation);
     d1l_compose_clipboard_clear();
     if (s_lock_overlay) {
         if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP) {
@@ -10303,24 +10305,19 @@ static void display_runtime_timer_cb(lv_timer_t *timer)
             show_toast_text("Flood advert failed", false);
         }
     }
-    const uint64_t unread_wide =
-        (uint64_t)s_snapshot.public_unread_count +
-        (uint64_t)s_snapshot.dm_unread_count;
-    const uint32_t unread = unread_wide > UINT32_MAX ?
-        UINT32_MAX : (uint32_t)unread_wide;
-
-    if (unread > s_last_notification_unread &&
-        preferences.notification_mode != D1L_NOTIFICATION_MODE_OFF &&
+    const bool notify = preferences.notification_mode != D1L_NOTIFICATION_MODE_OFF &&
         (preferences.notification_mode !=
              D1L_NOTIFICATION_MODE_QUIET_HOURS ||
          !notification_quiet_now()) &&
-        !s_backlight_dimmed && !s_lock_visible) {
+        !s_backlight_dimmed && !s_lock_visible && !s_onboarding_visible &&
+        !d1l_ui_boot_scene_visible(&s_boot_scene);
+    if (d1l_ui_receive_animation_update(&s_receive_animation,
+            s_snapshot.rx_group_notifications, s_snapshot.rx_dm_notifications, notify)) {
         if (d1l_backlight_set_percent(100) == ESP_OK) {
             s_backlight_pulse_active = true;
             s_backlight_pulse_until = now + 450U;
         }
     }
-    s_last_notification_unread = unread;
 
     if (s_backlight_pulse_active &&
         (int32_t)(now - s_backlight_pulse_until) >= 0) {
@@ -11773,11 +11770,10 @@ esp_err_t d1l_ui_phase1_show_home(void)
             ESP_LOGW(TAG, "boot scene unavailable; continuing to Home");
         }
     }
-    const uint64_t initial_unread =
-        (uint64_t)s_snapshot.public_unread_count +
-        (uint64_t)s_snapshot.dm_unread_count;
-    s_last_notification_unread = initial_unread > UINT32_MAX ?
-        UINT32_MAX : (uint32_t)initial_unread;
+    if (!d1l_ui_receive_animation_create(&s_receive_animation, lv_layer_top(),
+            s_snapshot.rx_group_notifications, s_snapshot.rx_dm_notifications)) {
+        ESP_LOGW(TAG, "receive animation unavailable; backlight notifications remain active");
+    }
     if (d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
         lv_timer_create(map_viewport_timer_cb,
                         D1L_UI_MAP_VIEWPORT_REFRESH_MS, NULL);

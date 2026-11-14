@@ -532,6 +532,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->lvgl_used_pct = health.lvgl_used_pct;
     snapshot->rx_packets = mesh.rx_packets;
     snapshot->rx_adverts = mesh.rx_adverts;
+    snapshot->rx_group_notifications = mesh.rx_group_notifications;
+    snapshot->rx_dm_notifications = mesh.rx_dm_notifications;
     snapshot->tx_packets = mesh.tx_packets;
     snapshot->rejected_commands = mesh.rejected_commands;
     snapshot->message_total_written = messages.total_written;
